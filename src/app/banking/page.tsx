@@ -1,0 +1,249 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { PageLayout, PageHeader, Tabs, FilterChips, LoadingSpinner } from '@/components/layout';
+import { BankRecommendationList } from '@/components/bank';
+import { useCreditCards, CreditCard } from '@/hooks/useCreditCards';
+
+const TABS = [
+  { id: 'banks', label: 'Banks' },
+  { id: 'cards', label: 'Cards' },
+  { id: 'guides', label: 'Guides' },
+];
+
+const BANK_FILTERS = [
+  { id: 'no_ssn', label: 'No SSN' },
+  { id: 'traditional', label: 'Traditional' },
+  { id: 'edit', label: 'Edit' },
+];
+
+const CARD_FILTERS = [
+  { id: 'no_ssn', label: 'No SSN' },
+  { id: 'no_history', label: 'No Credit History' },
+  { id: 'no_fee', label: 'No Annual Fee' },
+];
+
+export default function BankingPage() {
+  const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('banks');
+  const [bankFilters, setBankFilters] = useState<string[]>(['no_ssn', 'traditional']);
+  const [cardFilters, setCardFilters] = useState<string[]>([]);
+
+  useEffect(() => {
+    const storedUserId = localStorage.getItem('noor_user_id');
+    if (!storedUserId) {
+      router.push('/survey');
+      return;
+    }
+    setUserId(storedUserId);
+  }, [router]);
+
+  const { cards, isLoading: cardsLoading, error: cardsError, total: cardTotal, refetch: refetchCards } = useCreditCards({
+    f1Only: true,
+    noSsn: cardFilters.includes('no_ssn'),
+  });
+
+  const toggleBankFilter = (filterId: string) => {
+    if (filterId === 'edit') return;
+    setBankFilters((prev) =>
+      prev.includes(filterId)
+        ? prev.filter((id) => id !== filterId)
+        : [...prev, filterId]
+    );
+  };
+
+  const toggleCardFilter = (filterId: string) => {
+    setCardFilters((prev) =>
+      prev.includes(filterId)
+        ? prev.filter((id) => id !== filterId)
+        : [...prev, filterId]
+    );
+  };
+
+  if (!userId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="w-6 h-6 border-[1.5px] border-gray-200 border-t-black rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <PageLayout>
+      <PageHeader
+        title="Banking."
+        subtitle="Matched to your situation."
+      />
+
+      <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />
+
+      {activeTab === 'banks' && (
+        <div className="animate-fade-in">
+          <FilterChips
+            filters={BANK_FILTERS}
+            activeFilters={bankFilters}
+            onChange={toggleBankFilter}
+          />
+          <h2 className="section-title mb-5">Best for you.</h2>
+          <BankRecommendationList userId={userId} limit={10} />
+        </div>
+      )}
+
+      {activeTab === 'cards' && (
+        <div className="animate-fade-in">
+          <FilterChips
+            filters={CARD_FILTERS}
+            activeFilters={cardFilters}
+            onChange={toggleCardFilter}
+          />
+          <p className="text-gray-400 text-sm mb-5">{cardTotal} cards for F-1 students</p>
+          <h2 className="section-title mb-5">Best first cards.</h2>
+
+          {cardsLoading ? (
+            <LoadingSpinner />
+          ) : cardsError ? (
+            <div className="noor-card p-8 text-center">
+              <p className="text-gray-500 mb-5">Failed to load credit cards</p>
+              <button onClick={refetchCards} className="text-black text-sm border-b border-gray-300 hover:border-black transition-colors duration-300">
+                Try again
+              </button>
+            </div>
+          ) : cards.length === 0 ? (
+            <div className="noor-card p-10 text-center">
+              <p className="text-gray-500">No cards match your criteria.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {cards.map((card) => (
+                <CreditCardItem key={card.id} card={card} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'guides' && (
+        <div className="space-y-4 animate-fade-in">
+          <GuideCard
+            title="SSN Guide"
+            description="How to get your Social Security Number as an F-1 student"
+          />
+          <GuideCard
+            title="ITIN Guide"
+            description="Individual Taxpayer Identification Number explained"
+          />
+          <GuideCard
+            title="Building Credit"
+            description="Step-by-step guide to building credit history in the US"
+          />
+          <GuideCard
+            title="Bank Account Comparison"
+            description="Detailed comparison of student-friendly bank accounts"
+          />
+        </div>
+      )}
+    </PageLayout>
+  );
+}
+
+function CreditCardItem({ card }: { card: CreditCard }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="noor-card overflow-hidden transition-all duration-300">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left p-6"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-3">
+              <h3 className="font-medium text-black">{card.card_name}</h3>
+              {!card.ssn_required && (
+                <span className="badge-dark text-xs">No SSN</span>
+              )}
+            </div>
+            <p className="text-gray-500 text-sm mt-1.5">{card.issuer}</p>
+            {card.rewards_rate && (
+              <p className="text-gray-600 text-sm mt-3">{card.rewards_rate}</p>
+            )}
+          </div>
+          <div className="text-right">
+            <p className="font-medium text-black">
+              {card.annual_fee === 0 ? 'No annual fee' : `$${card.annual_fee}/yr`}
+            </p>
+            {card.foreign_transaction_fee === 0 && (
+              <p className="text-gray-400 text-xs mt-1">No FTF</p>
+            )}
+          </div>
+        </div>
+
+        {card.f1_notes && (
+          <p className="text-sm text-gray-400 italic mt-4">{card.f1_notes}</p>
+        )}
+      </button>
+
+      {expanded && (
+        <div className="px-6 pb-6 border-t border-gray-100 pt-5 animate-fade-in">
+          {card.signup_bonus && (
+            <div className="mb-5">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Signup Bonus</p>
+              <p className="text-sm text-black">{card.signup_bonus}</p>
+            </div>
+          )}
+
+          {card.benefits && card.benefits.length > 0 && (
+            <div className="mb-5">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Benefits</p>
+              <ul className="text-sm text-gray-600 space-y-2">
+                {card.benefits.slice(0, 4).map((b, i) => (
+                  <li key={i} className="flex items-start gap-3">
+                    <span className="text-black mt-0.5">+</span>
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {card.drawbacks && card.drawbacks.length > 0 && (
+            <div className="mb-5">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Watch out for</p>
+              <ul className="text-sm text-gray-600 space-y-2">
+                {card.drawbacks.slice(0, 3).map((d, i) => (
+                  <li key={i} className="flex items-start gap-3">
+                    <span className="text-gray-400 mt-0.5">-</span>
+                    <span>{d}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {card.apply_link && (
+            <a
+              href={card.apply_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-primary w-full mt-2"
+            >
+              Apply Now
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GuideCard({ title, description }: { title: string; description: string }) {
+  return (
+    <button className="w-full text-left noor-card p-6 transition-all duration-300 group">
+      <h3 className="font-medium text-black group-hover:opacity-70 transition-opacity duration-300">{title}</h3>
+      <p className="text-gray-500 text-sm mt-2">{description}</p>
+      <span className="text-gray-400 text-sm mt-4 inline-block">Read more →</span>
+    </button>
+  );
+}
