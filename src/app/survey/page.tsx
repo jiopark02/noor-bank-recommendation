@@ -87,6 +87,153 @@ const COUNTRIES = [
   'Other',
 ];
 
+// Input Component - MUST be outside the main component to prevent re-renders
+const Input = ({
+  type = 'text',
+  value,
+  onChange,
+  placeholder,
+}: {
+  type?: string;
+  value: string | number;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) => (
+  <input
+    type={type}
+    value={value}
+    onChange={e => onChange(e.target.value)}
+    placeholder={placeholder}
+    className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400"
+  />
+);
+
+// Select Component
+const Select = ({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+}) => (
+  <select
+    value={value}
+    onChange={e => onChange(e.target.value)}
+    className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black bg-white appearance-none text-gray-700"
+    style={{
+      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239CA3AF'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'right 12px center',
+      backgroundSize: '20px',
+      paddingRight: '44px',
+    }}
+  >
+    <option value="" className="text-gray-400">{placeholder || 'Select...'}</option>
+    {options.map(opt => (
+      <option key={opt} value={opt}>{opt}</option>
+    ))}
+  </select>
+);
+
+// Option Button (wide)
+const OptionButton = ({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) => (
+  <button
+    onClick={onClick}
+    className={`w-full px-5 py-3.5 rounded-xl border-2 font-medium text-left transition-all duration-300 ${
+      selected
+        ? 'border-black bg-black text-white'
+        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+    }`}
+  >
+    {children}
+  </button>
+);
+
+// Toggle Button (Yes/No)
+const ToggleButtons = ({
+  value,
+  onChange,
+}: {
+  value: boolean | null;
+  onChange: (v: boolean) => void;
+}) => (
+  <div className="flex gap-3">
+    <button
+      onClick={() => onChange(true)}
+      className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
+        value === true
+          ? 'border-black bg-black text-white'
+          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+      }`}
+    >
+      Yes
+    </button>
+    <button
+      onClick={() => onChange(false)}
+      className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
+        value === false
+          ? 'border-black bg-black text-white'
+          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+      }`}
+    >
+      No
+    </button>
+  </div>
+);
+
+// Multi-select Chip
+const ChipButton = ({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) => (
+  <button
+    onClick={onClick}
+    className={`px-4 py-2.5 rounded-full border-[1.5px] text-sm font-medium transition-all duration-300 ${
+      selected
+        ? 'border-black bg-black text-white'
+        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
+    }`}
+  >
+    {children}
+  </button>
+);
+
+// Feedback Text
+const Feedback = ({ children }: { children: React.ReactNode }) => (
+  <p className="text-emerald-600 text-sm mt-4 animate-fade-in">{children}</p>
+);
+
+// Progress Dots
+const ProgressDots = ({ step, totalSteps }: { step: number; totalSteps: number }) => (
+  <div className="flex justify-center gap-2 mb-10">
+    {Array.from({ length: totalSteps }).map((_, i) => (
+      <div
+        key={i}
+        className={`h-2 rounded-full transition-all duration-300 ${
+          i + 1 === step ? 'bg-black w-6' : i + 1 < step ? 'bg-black w-2' : 'bg-gray-200 w-2'
+        }`}
+      />
+    ))}
+  </div>
+);
+
 export default function SurveyPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -157,153 +304,6 @@ export default function SurveyPage() {
     }
   };
 
-  // Progress Dots
-  const ProgressDots = () => (
-    <div className="flex justify-center gap-2 mb-10">
-      {Array.from({ length: totalSteps }).map((_, i) => (
-        <div
-          key={i}
-          className={`h-2 rounded-full transition-all duration-300 ${
-            i + 1 === step ? 'bg-black w-6' : i + 1 < step ? 'bg-black w-2' : 'bg-gray-200 w-2'
-          }`}
-        />
-      ))}
-    </div>
-  );
-
-  // Input Component
-  const Input = ({
-    type = 'text',
-    value,
-    onChange,
-    placeholder,
-  }: {
-    type?: string;
-    value: string | number;
-    onChange: (v: string) => void;
-    placeholder?: string;
-  }) => (
-    <input
-      type={type}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400"
-    />
-  );
-
-  // Select Component
-  const Select = ({
-    value,
-    onChange,
-    options,
-    placeholder,
-  }: {
-    value: string;
-    onChange: (v: string) => void;
-    options: string[];
-    placeholder?: string;
-  }) => (
-    <select
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black bg-white appearance-none text-gray-700"
-      style={{
-        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239CA3AF'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
-        backgroundRepeat: 'no-repeat',
-        backgroundPosition: 'right 12px center',
-        backgroundSize: '20px',
-        paddingRight: '44px',
-      }}
-    >
-      <option value="" className="text-gray-400">{placeholder || 'Select...'}</option>
-      {options.map(opt => (
-        <option key={opt} value={opt}>{opt}</option>
-      ))}
-    </select>
-  );
-
-  // Option Button (wide)
-  const OptionButton = ({
-    selected,
-    onClick,
-    children,
-  }: {
-    selected: boolean;
-    onClick: () => void;
-    children: React.ReactNode;
-  }) => (
-    <button
-      onClick={onClick}
-      className={`w-full px-5 py-3.5 rounded-xl border-2 font-medium text-left transition-all duration-300 ${
-        selected
-          ? 'border-black bg-black text-white'
-          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
-      }`}
-    >
-      {children}
-    </button>
-  );
-
-  // Toggle Button (Yes/No)
-  const ToggleButtons = ({
-    value,
-    onChange,
-  }: {
-    value: boolean | null;
-    onChange: (v: boolean) => void;
-  }) => (
-    <div className="flex gap-3">
-      <button
-        onClick={() => onChange(true)}
-        className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
-          value === true
-            ? 'border-black bg-black text-white'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
-        }`}
-      >
-        Yes
-      </button>
-      <button
-        onClick={() => onChange(false)}
-        className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
-          value === false
-            ? 'border-black bg-black text-white'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
-        }`}
-      >
-        No
-      </button>
-    </div>
-  );
-
-  // Multi-select Chip
-  const ChipButton = ({
-    selected,
-    onClick,
-    children,
-  }: {
-    selected: boolean;
-    onClick: () => void;
-    children: React.ReactNode;
-  }) => (
-    <button
-      onClick={onClick}
-      className={`px-4 py-2.5 rounded-full border-[1.5px] text-sm font-medium transition-all duration-300 ${
-        selected
-          ? 'border-black bg-black text-white'
-          : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
-      }`}
-    >
-      {children}
-    </button>
-  );
-
-  // Feedback Text
-  const Feedback = ({ children }: { children: React.ReactNode }) => (
-    <p className="text-emerald-600 text-sm mt-4 animate-fade-in">{children}</p>
-  );
-
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
@@ -312,7 +312,7 @@ export default function SurveyPage() {
       </header>
 
       <div className="max-w-md mx-auto px-6 pb-32">
-        <ProgressDots />
+        <ProgressDots step={step} totalSteps={totalSteps} />
 
         {/* Step 1: First, you. */}
         {step === 1 && (
