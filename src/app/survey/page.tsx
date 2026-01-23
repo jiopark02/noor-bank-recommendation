@@ -30,6 +30,7 @@ interface SurveyData {
   // Step 6
   transferFrequency: string;
   branchPreference: string;
+  campusSide: string;
   // Step 7
   goals: string[];
   creditCardInterest: string;
@@ -56,6 +57,7 @@ const INITIAL_DATA: SurveyData = {
   bankingStyle: '',
   transferFrequency: '',
   branchPreference: '',
+  campusSide: '',
   goals: [],
   creditCardInterest: '',
 };
@@ -340,6 +342,7 @@ export default function SurveyPage() {
           branch_preference: data.branchPreference,
           banking_needs: data.bankingNeeds,
           banking_style: data.bankingStyle,
+          campus_side: data.campusSide !== 'unknown' ? data.campusSide : null,
           goals: data.goals,
           credit_card_interest: data.creditCardInterest,
           needs_zelle: data.bankingNeeds.includes('Bill pay'),
@@ -372,6 +375,7 @@ export default function SurveyPage() {
         bankingStyle: data.bankingStyle,
         transferFrequency: data.transferFrequency,
         branchPreference: data.branchPreference,
+        campusSide: data.campusSide !== 'unknown' ? data.campusSide : null,
         goals: data.goals,
         creditCardInterest: data.creditCardInterest,
       };
@@ -690,6 +694,33 @@ export default function SurveyPage() {
                     </OptionButton>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Side of campus?</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { id: 'north', label: 'North' },
+                    { id: 'south', label: 'South' },
+                    { id: 'east', label: 'East' },
+                    { id: 'west', label: 'West' },
+                    { id: 'center', label: 'Center' },
+                    { id: 'unknown', label: 'Not sure' },
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      onClick={() => updateField('campusSide', opt.id)}
+                      className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
+                        data.campusSide === opt.id
+                          ? 'border-black bg-black text-white'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-gray-400 text-xs mt-2">Helps us find banks and housing nearby</p>
               </div>
             </div>
           </div>

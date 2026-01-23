@@ -48,6 +48,7 @@ export interface User {
   preferred_amenities?: string[];
   onboarding_completed: boolean;
   onboarding_step: number;
+  campus_side?: 'north' | 'south' | 'east' | 'west' | 'center';
 }
 
 export interface BankAccount {
@@ -127,6 +128,7 @@ export interface Apartment {
   contact_website?: string;
   latitude?: number;
   longitude?: number;
+  campus_side?: 'north' | 'south' | 'east' | 'west' | 'center';
   furnished: boolean;
   gym: boolean;
   parking: boolean;

@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BankRecommendation, MatchReason } from '@/hooks/useBankRecommendations';
+import { getBranchesForBank, getNearestBranch, NearestBranchInfo } from '@/lib/universityData';
 
 interface BankCardProps {
   recommendation: BankRecommendation;
@@ -10,9 +11,30 @@ interface BankCardProps {
 
 export function BankCard({ recommendation, onClick }: BankCardProps) {
   const { bank, fitScore, isBestMatch, matchReasons, warnings } = recommendation;
+  const [userUniversity, setUserUniversity] = useState<string>('Stanford');
+
+  useEffect(() => {
+    try {
+      const profile = localStorage.getItem('noor_user_profile');
+      if (profile) {
+        const parsed = JSON.parse(profile);
+        if (parsed.university) {
+          setUserUniversity(parsed.university);
+        }
+      }
+    } catch (e) {
+      // Use default
+    }
+  }, []);
 
   // Get top 3 match reasons to display
   const topReasons = matchReasons.slice(0, 3);
+
+  // Get branch count and nearest branch for this bank
+  const branchCount = getBranchesForBank(userUniversity, bank.bank_name).length;
+  const nearestBranch = useMemo(() => {
+    return getNearestBranch(userUniversity, bank.bank_name);
+  }, [userUniversity, bank.bank_name]);
 
   return (
     <button
@@ -58,6 +80,43 @@ export function BankCard({ recommendation, onClick }: BankCardProps) {
             <div className="mt-2">
               <span className="text-orange-600 text-sm">
                 {warnings[0].icon} {warnings[0].title}
+              </span>
+            </div>
+          )}
+
+          {/* Nearest Branch Info */}
+          {nearestBranch && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1.5">Nearest Branch</p>
+              <div className="flex items-start gap-2">
+                <svg className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-black truncate">{nearestBranch.branch.name}</p>
+                  <p className="text-xs text-gray-500 truncate">{nearestBranch.branch.address}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    ~{nearestBranch.walkingMinutes} min walk from campus
+                  </p>
+                </div>
+              </div>
+              {branchCount > 1 && (
+                <p className="text-xs text-gray-400 mt-2">
+                  +{branchCount - 1} more {branchCount - 1 === 1 ? 'branch' : 'branches'} nearby
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Branch count (when no nearest branch info) */}
+          {!nearestBranch && branchCount > 0 && (
+            <div className="mt-2">
+              <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+                <span>{branchCount} {branchCount === 1 ? 'branch' : 'branches'} nearby</span>
               </span>
             </div>
           )}

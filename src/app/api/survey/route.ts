@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
       needs_zelle: surveyData.needs_zelle,
       prefers_online_banking: surveyData.digital_preference === 'mobile-first',
       needs_nearby_branch: surveyData.campus_proximity === 'very-important',
+      campus_side: surveyData.campus_side || null,
       onboarding_completed: true,
       created_at: new Date().toISOString(),
     };

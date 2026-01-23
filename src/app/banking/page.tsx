@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageLayout, PageHeader, Tabs, FilterChips, LoadingSpinner } from '@/components/layout';
-import { BankRecommendationList } from '@/components/bank';
+import { BankRecommendationList, BranchLocator } from '@/components/bank';
+import { CampusSide } from '@/lib/universityData';
 import { useCreditCards, CreditCard } from '@/hooks/useCreditCards';
 
 const TABS = [
@@ -18,6 +19,14 @@ const BANK_FILTERS = [
   { id: 'edit', label: 'Edit' },
 ];
 
+const CAMPUS_SIDE_FILTERS: { id: CampusSide | 'all'; label: string }[] = [
+  { id: 'all', label: 'All Areas' },
+  { id: 'north', label: 'North' },
+  { id: 'south', label: 'South' },
+  { id: 'east', label: 'East' },
+  { id: 'west', label: 'West' },
+];
+
 const CARD_FILTERS = [
   { id: 'no_ssn', label: 'No SSN' },
   { id: 'no_history', label: 'No Credit History' },
@@ -30,6 +39,9 @@ export default function BankingPage() {
   const [activeTab, setActiveTab] = useState('banks');
   const [bankFilters, setBankFilters] = useState<string[]>(['no_ssn', 'traditional']);
   const [cardFilters, setCardFilters] = useState<string[]>([]);
+  const [userUniversity, setUserUniversity] = useState<string>('Stanford');
+  const [userCampusSide, setUserCampusSide] = useState<CampusSide | undefined>(undefined);
+  const [selectedCampusSide, setSelectedCampusSide] = useState<CampusSide | 'all'>('all');
 
   useEffect(() => {
     const storedUserId = localStorage.getItem('noor_user_id');
@@ -38,6 +50,22 @@ export default function BankingPage() {
       return;
     }
     setUserId(storedUserId);
+
+    // Load user profile for university and campus side
+    try {
+      const profile = localStorage.getItem('noor_user_profile');
+      if (profile) {
+        const parsed = JSON.parse(profile);
+        if (parsed.university) {
+          setUserUniversity(parsed.university);
+        }
+        if (parsed.campusSide && parsed.campusSide !== 'unknown') {
+          setUserCampusSide(parsed.campusSide as CampusSide);
+        }
+      }
+    } catch (e) {
+      // Use defaults
+    }
   }, [router]);
 
   const { cards, isLoading: cardsLoading, error: cardsError, total: cardTotal, refetch: refetchCards } = useCreditCards({
@@ -89,8 +117,39 @@ export default function BankingPage() {
             activeFilters={bankFilters}
             onChange={toggleBankFilter}
           />
+
+          {/* Campus Side Filter */}
+          <div className="mb-6">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Branch Location</p>
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {CAMPUS_SIDE_FILTERS.map((filter) => (
+                <button
+                  key={filter.id}
+                  onClick={() => setSelectedCampusSide(filter.id)}
+                  className={`px-4 py-2 rounded-full border-[1.5px] text-sm font-medium whitespace-nowrap transition-all duration-300 ${
+                    selectedCampusSide === filter.id
+                      ? 'border-black bg-black text-white'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <h2 className="section-title mb-5">Best for you.</h2>
           <BankRecommendationList userId={userId} limit={10} />
+
+          {/* Branch Locations Section */}
+          <div className="mt-10 pt-8 border-t border-gray-100">
+            <h2 className="section-title mb-5">Branches near campus.</h2>
+            <BranchLocator
+              university={userUniversity}
+              userCampusSide={selectedCampusSide !== 'all' ? selectedCampusSide : userCampusSide}
+              recommendedBanks={['Bank of America', 'Chase', 'Wells Fargo']}
+            />
+          </div>
         </div>
       )}
 
