@@ -516,10 +516,11 @@ export default function SurveyPage() {
                   <input
                     type="text"
                     inputMode="numeric"
-                    value={data.monthlyIncome === 0 ? '' : data.monthlyIncome.toLocaleString()}
+                    value={data.monthlyIncome || ''}
                     onChange={e => {
-                      const value = e.target.value.replace(/[^0-9]/g, '');
-                      updateField('monthlyIncome', value ? parseInt(value) : 0);
+                      const raw = e.target.value.replace(/[^0-9]/g, '');
+                      const num = raw ? parseInt(raw, 10) : 0;
+                      updateField('monthlyIncome', num);
                     }}
                     placeholder="0"
                     className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
@@ -535,10 +536,11 @@ export default function SurveyPage() {
                   <input
                     type="text"
                     inputMode="numeric"
-                    value={data.monthlyExpenses === 0 ? '' : data.monthlyExpenses.toLocaleString()}
+                    value={data.monthlyExpenses || ''}
                     onChange={e => {
-                      const value = e.target.value.replace(/[^0-9]/g, '');
-                      updateField('monthlyExpenses', value ? parseInt(value) : 0);
+                      const raw = e.target.value.replace(/[^0-9]/g, '');
+                      const num = raw ? parseInt(raw, 10) : 0;
+                      updateField('monthlyExpenses', num);
                     }}
                     placeholder="0"
                     className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
