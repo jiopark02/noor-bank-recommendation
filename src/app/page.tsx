@@ -72,7 +72,20 @@ export default function HomePage() {
       router.push('/welcome');
       return;
     }
-    setUserName('there');
+
+    // Try to get user's name from local storage
+    const userProfile = localStorage.getItem('noor_user_profile');
+    if (userProfile) {
+      try {
+        const profile = JSON.parse(userProfile);
+        if (profile.firstName) {
+          setUserName(profile.firstName);
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+    }
+
     setIsLoading(false);
   }, [router]);
 

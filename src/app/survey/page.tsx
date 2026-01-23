@@ -302,11 +302,34 @@ export default function SurveyPage() {
         }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        localStorage.setItem('noor_user_id', result.userId);
-        router.push('/banking');
-      }
+      const result = await response.json();
+
+      // Save user ID
+      localStorage.setItem('noor_user_id', result.userId);
+
+      // Save user profile locally as backup
+      const userProfile = {
+        id: result.userId,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        university: data.university,
+        countryOfOrigin: data.countryOfOrigin,
+        hasSSN: data.hasSSN,
+        hasITIN: data.hasITIN,
+        hasUSAddress: data.hasUSAddress,
+        monthlyIncome: data.monthlyIncome,
+        monthlyExpenses: data.monthlyExpenses,
+        bankingNeeds: data.bankingNeeds,
+        bankingStyle: data.bankingStyle,
+        transferFrequency: data.transferFrequency,
+        branchPreference: data.branchPreference,
+        goals: data.goals,
+        creditCardInterest: data.creditCardInterest,
+      };
+      localStorage.setItem('noor_user_profile', JSON.stringify(userProfile));
+
+      router.push('/banking');
     } catch (error) {
       console.error('Survey submission error:', error);
     } finally {
