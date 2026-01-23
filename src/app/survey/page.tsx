@@ -516,11 +516,10 @@ export default function SurveyPage() {
                   <input
                     type="text"
                     inputMode="numeric"
-                    value={data.monthlyIncome || ''}
+                    value={data.monthlyIncome === 0 ? '' : String(data.monthlyIncome)}
                     onChange={e => {
-                      const raw = e.target.value.replace(/[^0-9]/g, '');
-                      const num = raw ? parseInt(raw, 10) : 0;
-                      updateField('monthlyIncome', num);
+                      const raw = e.target.value.replace(/[^0-9]/g, '').replace(/^0+/, '');
+                      updateField('monthlyIncome', raw ? Number(raw) : 0);
                     }}
                     placeholder="0"
                     className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
@@ -536,11 +535,10 @@ export default function SurveyPage() {
                   <input
                     type="text"
                     inputMode="numeric"
-                    value={data.monthlyExpenses || ''}
+                    value={data.monthlyExpenses === 0 ? '' : String(data.monthlyExpenses)}
                     onChange={e => {
-                      const raw = e.target.value.replace(/[^0-9]/g, '');
-                      const num = raw ? parseInt(raw, 10) : 0;
-                      updateField('monthlyExpenses', num);
+                      const raw = e.target.value.replace(/[^0-9]/g, '').replace(/^0+/, '');
+                      updateField('monthlyExpenses', raw ? Number(raw) : 0);
                     }}
                     placeholder="0"
                     className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
