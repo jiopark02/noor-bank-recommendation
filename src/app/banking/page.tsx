@@ -46,7 +46,10 @@ export default function BankingPage() {
   });
 
   const toggleBankFilter = (filterId: string) => {
-    if (filterId === 'edit') return;
+    if (filterId === 'edit') {
+      router.push('/survey');
+      return;
+    }
     setBankFilters((prev) =>
       prev.includes(filterId)
         ? prev.filter((id) => id !== filterId)
@@ -129,18 +132,22 @@ export default function BankingPage() {
           <GuideCard
             title="SSN Guide"
             description="How to get your Social Security Number as an F-1 student"
+            href="https://www.ssa.gov/ssnumber/"
           />
           <GuideCard
             title="ITIN Guide"
             description="Individual Taxpayer Identification Number explained"
+            href="https://www.irs.gov/individuals/individual-taxpayer-identification-number"
           />
           <GuideCard
             title="Building Credit"
             description="Step-by-step guide to building credit history in the US"
+            href="https://www.nerdwallet.com/article/finance/how-to-build-credit"
           />
           <GuideCard
             title="Bank Account Comparison"
             description="Detailed comparison of student-friendly bank accounts"
+            href="https://www.nerdwallet.com/best/banking/student-checking-accounts"
           />
         </div>
       )}
@@ -238,9 +245,18 @@ function CreditCardItem({ card }: { card: CreditCard }) {
   );
 }
 
-function GuideCard({ title, description }: { title: string; description: string }) {
+function GuideCard({ title, description, href }: { title: string; description: string; href?: string }) {
+  const handleClick = () => {
+    if (href) {
+      window.open(href, '_blank');
+    }
+  };
+
   return (
-    <button className="w-full text-left noor-card p-6 transition-all duration-300 group">
+    <button
+      onClick={handleClick}
+      className="w-full text-left noor-card p-6 transition-all duration-300 group"
+    >
       <h3 className="font-medium text-black group-hover:opacity-70 transition-opacity duration-300">{title}</h3>
       <p className="text-gray-500 text-sm mt-2">{description}</p>
       <span className="text-gray-400 text-sm mt-4 inline-block">Read more →</span>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PageLayout, PageHeader, Tabs, OutlineButton, LoadingSpinner } from '@/components/layout';
+import { PageLayout, PageHeader, Tabs, LoadingSpinner } from '@/components/layout';
 import { useJobs, Job } from '@/hooks/useJobs';
 
 const TABS = [
@@ -48,12 +48,6 @@ export default function JobsPage() {
       <PageHeader
         title="Jobs."
         subtitle={`${total} positions. All F-1 eligible.`}
-        rightContent={
-          <div className="flex gap-2">
-            <OutlineButton>Filters</OutlineButton>
-            <OutlineButton>Pay</OutlineButton>
-          </div>
-        }
       />
 
       <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />

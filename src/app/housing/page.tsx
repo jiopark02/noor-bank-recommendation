@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PageLayout, PageHeader, OutlineButton, LoadingSpinner } from '@/components/layout';
+import { PageLayout, PageHeader, LoadingSpinner } from '@/components/layout';
 import { useApartments } from '@/hooks/useApartments';
 import { Apartment } from '@/types/database';
 
@@ -40,12 +40,6 @@ export default function HousingPage() {
       <PageHeader
         title="Housing."
         subtitle={`${total} near campus.`}
-        rightContent={
-          <div className="flex gap-2">
-            <OutlineButton>Filters</OutlineButton>
-            <OutlineButton>Price</OutlineButton>
-          </div>
-        }
       />
 
       {/* Amenity Filters */}
