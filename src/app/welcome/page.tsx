@@ -25,10 +25,7 @@ export default function WelcomePage() {
 
           {/* Hero */}
           <div className="text-center mb-10">
-            <h2
-              className="text-4xl font-light tracking-[0.01em] mb-3"
-              style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}
-            >
+            <h2 className="text-4xl font-semibold tracking-tight mb-3">
               Banking, Tailored.
             </h2>
             <p className="text-gray-500 text-base">
