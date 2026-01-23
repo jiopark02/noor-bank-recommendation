@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 
+export type MarkerColor = 'blue' | 'red' | 'green' | 'orange' | 'purple' | 'default';
+
 export interface MapMarker {
   position: [number, number];
   label: string;
   popupContent?: string;
   onClick?: () => void;
+  color?: MarkerColor;
 }
 
 interface MapViewProps {
@@ -18,6 +21,16 @@ interface MapViewProps {
   className?: string;
   showUserLocation?: boolean;
 }
+
+// Color mapping for markers
+const MARKER_COLORS: Record<MarkerColor, string> = {
+  blue: '#3b82f6',
+  red: '#ef4444',
+  green: '#22c55e',
+  orange: '#f97316',
+  purple: '#a855f7',
+  default: '#374151',
+};
 
 // Leaflet map component that only loads on the client
 function LeafletMap({
@@ -115,7 +128,23 @@ function LeafletMap({
 
     // Add new markers
     markers.forEach((marker) => {
-      const leafletMarker = L.marker(marker.position);
+      const color = marker.color ? MARKER_COLORS[marker.color] : MARKER_COLORS.default;
+
+      // Create colored marker icon
+      const coloredIcon = L.divIcon({
+        html: `
+          <div class="colored-marker" style="background-color: ${color};">
+            <div class="marker-pin"></div>
+            <div class="marker-pulse" style="background-color: ${color};"></div>
+          </div>
+        `,
+        className: 'custom-marker-icon',
+        iconSize: [30, 40],
+        iconAnchor: [15, 40],
+        popupAnchor: [0, -40],
+      });
+
+      const leafletMarker = L.marker(marker.position, { icon: coloredIcon });
 
       if (marker.popupContent || marker.label) {
         leafletMarker.bindPopup(marker.popupContent || marker.label);
@@ -170,6 +199,59 @@ function LeafletMap({
         .leaflet-container {
           font-family: inherit;
         }
+        .custom-marker-icon {
+          background: transparent !important;
+          border: none !important;
+        }
+        .colored-marker {
+          position: relative;
+          width: 30px;
+          height: 40px;
+        }
+        .colored-marker .marker-pin {
+          width: 24px;
+          height: 24px;
+          border-radius: 50% 50% 50% 0;
+          background: inherit;
+          position: absolute;
+          transform: rotate(-45deg);
+          left: 3px;
+          top: 0;
+          border: 3px solid white;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+        .colored-marker .marker-pin::after {
+          content: '';
+          width: 10px;
+          height: 10px;
+          background: white;
+          position: absolute;
+          border-radius: 50%;
+          top: 4px;
+          left: 4px;
+        }
+        .colored-marker .marker-pulse {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          position: absolute;
+          left: 9px;
+          bottom: 0;
+          opacity: 0.4;
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% { transform: scale(1); opacity: 0.4; }
+          50% { transform: scale(1.5); opacity: 0.2; }
+          100% { transform: scale(1); opacity: 0.4; }
+        }
+        .leaflet-popup-content {
+          margin: 12px 16px;
+          line-height: 1.5;
+        }
+        .leaflet-popup-content-wrapper {
+          border-radius: 12px;
+        }
       `}</style>
       <div
         ref={mapContainerRef}
@@ -217,3 +299,15 @@ export const MiniMap = dynamic(() => Promise.resolve(MiniMapComponent), {
     </div>
   ),
 });
+
+// Helper to get marker color from campus side
+export function getCampusSideColor(side: string): MarkerColor {
+  switch (side) {
+    case 'north': return 'blue';
+    case 'south': return 'red';
+    case 'east': return 'green';
+    case 'west': return 'orange';
+    case 'center': return 'purple';
+    default: return 'default';
+  }
+}
