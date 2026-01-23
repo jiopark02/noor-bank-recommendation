@@ -72,7 +72,7 @@ export default function WelcomePage() {
               Sign Up
             </Link>
             <Link
-              href="/survey"
+              href="/login"
               className="block w-full py-4 bg-white text-black text-center font-medium rounded-xl border-[1.5px] border-gray-300 transition-all duration-300 hover:border-black"
             >
               Log In
