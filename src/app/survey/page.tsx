@@ -49,8 +49,8 @@ const INITIAL_DATA: SurveyData = {
   hasSSN: null,
   hasITIN: null,
   hasUSAddress: null,
-  monthlyIncome: 2000,
-  monthlyExpenses: 1500,
+  monthlyIncome: 0,
+  monthlyExpenses: 0,
   feePriority: '',
   bankingNeeds: [],
   bankingStyle: '',
@@ -514,9 +514,14 @@ export default function SurveyPage() {
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
                   <input
-                    type="number"
-                    value={data.monthlyIncome}
-                    onChange={e => updateField('monthlyIncome', parseInt(e.target.value) || 0)}
+                    type="text"
+                    inputMode="numeric"
+                    value={data.monthlyIncome === 0 ? '' : data.monthlyIncome.toLocaleString()}
+                    onChange={e => {
+                      const value = e.target.value.replace(/[^0-9]/g, '');
+                      updateField('monthlyIncome', value ? parseInt(value) : 0);
+                    }}
+                    placeholder="0"
                     className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
                   />
                 </div>
@@ -528,9 +533,14 @@ export default function SurveyPage() {
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
                   <input
-                    type="number"
-                    value={data.monthlyExpenses}
-                    onChange={e => updateField('monthlyExpenses', parseInt(e.target.value) || 0)}
+                    type="text"
+                    inputMode="numeric"
+                    value={data.monthlyExpenses === 0 ? '' : data.monthlyExpenses.toLocaleString()}
+                    onChange={e => {
+                      const value = e.target.value.replace(/[^0-9]/g, '');
+                      updateField('monthlyExpenses', value ? parseInt(value) : 0);
+                    }}
+                    placeholder="0"
                     className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
                   />
                 </div>
