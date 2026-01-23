@@ -222,6 +222,50 @@ const Feedback = ({ children }: { children: React.ReactNode }) => (
   <p className="text-emerald-600 text-sm mt-4 animate-fade-in">{children}</p>
 );
 
+// Money Input - handles leading zeros properly
+const MoneyInput = ({
+  value,
+  onChange,
+  placeholder = '0',
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  placeholder?: string;
+}) => {
+  const [displayValue, setDisplayValue] = React.useState(value > 0 ? String(value) : '');
+
+  // Sync display when value changes externally
+  React.useEffect(() => {
+    setDisplayValue(value > 0 ? String(value) : '');
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target.value;
+    // Only allow digits
+    const digitsOnly = input.replace(/\D/g, '');
+    // Remove leading zeros
+    const noLeadingZeros = digitsOnly.replace(/^0+/, '') || '';
+    // Update display immediately
+    setDisplayValue(noLeadingZeros);
+    // Update parent state
+    onChange(noLeadingZeros ? parseInt(noLeadingZeros, 10) : 0);
+  };
+
+  return (
+    <div className="relative">
+      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={displayValue}
+        onChange={handleChange}
+        placeholder={placeholder}
+        className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
+      />
+    </div>
+  );
+};
+
 // Progress Dots
 const ProgressDots = ({ step, totalSteps }: { step: number; totalSteps: number }) => (
   <div className="flex justify-center gap-2 mb-10">
@@ -511,39 +555,19 @@ export default function SurveyPage() {
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">What comes in</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={data.monthlyIncome === 0 ? '' : String(data.monthlyIncome)}
-                    onChange={e => {
-                      const raw = e.target.value.replace(/[^0-9]/g, '').replace(/^0+/, '');
-                      updateField('monthlyIncome', raw ? Number(raw) : 0);
-                    }}
-                    placeholder="0"
-                    className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
-                  />
-                </div>
+                <MoneyInput
+                  value={data.monthlyIncome}
+                  onChange={v => updateField('monthlyIncome', v)}
+                />
                 <p className="text-gray-400 text-xs mt-1.5">Scholarships, family support, work-study</p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">What goes out</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={data.monthlyExpenses === 0 ? '' : String(data.monthlyExpenses)}
-                    onChange={e => {
-                      const raw = e.target.value.replace(/[^0-9]/g, '').replace(/^0+/, '');
-                      updateField('monthlyExpenses', raw ? Number(raw) : 0);
-                    }}
-                    placeholder="0"
-                    className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
-                  />
-                </div>
+                <MoneyInput
+                  value={data.monthlyExpenses}
+                  onChange={v => updateField('monthlyExpenses', v)}
+                />
                 <p className="text-gray-400 text-xs mt-1.5">Rent, food, transportation, entertainment</p>
               </div>
 
