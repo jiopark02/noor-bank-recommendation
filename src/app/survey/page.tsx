@@ -61,29 +61,31 @@ const INITIAL_DATA: SurveyData = {
 };
 
 const UNIVERSITIES = [
+  'Stanford',
   'UC Berkeley',
-  'Stanford University',
-  'UCLA',
+  'UIUC',
   'USC',
+  'UCLA',
+  'Columbia',
   'NYU',
-  'Columbia University',
-  'MIT',
-  'Harvard University',
-  'University of Michigan',
+  'Cornell',
+  'Northeastern',
+  'UC Irvine',
+  'Boston U',
   'Other',
 ];
 
 const COUNTRIES = [
+  'Japan',
+  'Korea',
   'China',
   'India',
-  'South Korea',
   'Vietnam',
-  'Taiwan',
-  'Japan',
-  'Brazil',
-  'Nigeria',
   'Canada',
-  'Mexico',
+  'Brazil',
+  'Singapore',
+  'Bangladesh',
+  'Nigeria',
   'Other',
 ];
 
