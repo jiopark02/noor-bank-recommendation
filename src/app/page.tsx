@@ -69,7 +69,7 @@ export default function HomePage() {
   useEffect(() => {
     const userId = localStorage.getItem('noor_user_id');
     if (!userId) {
-      router.push('/survey');
+      router.push('/welcome');
       return;
     }
     setUserName('there');
