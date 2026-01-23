@@ -232,24 +232,12 @@ const MoneyInput = ({
   onChange: (v: number) => void;
   placeholder?: string;
 }) => {
-  const [displayValue, setDisplayValue] = React.useState(value > 0 ? String(value) : '');
+  const [text, setText] = React.useState(() => (value > 0 ? String(value) : ''));
 
-  // Sync display when value changes externally
+  // Sync when parent value changes
   React.useEffect(() => {
-    setDisplayValue(value > 0 ? String(value) : '');
+    setText(value > 0 ? String(value) : '');
   }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.target.value;
-    // Only allow digits
-    const digitsOnly = input.replace(/\D/g, '');
-    // Remove leading zeros
-    const noLeadingZeros = digitsOnly.replace(/^0+/, '') || '';
-    // Update display immediately
-    setDisplayValue(noLeadingZeros);
-    // Update parent state
-    onChange(noLeadingZeros ? parseInt(noLeadingZeros, 10) : 0);
-  };
 
   return (
     <div className="relative">
@@ -257,9 +245,25 @@ const MoneyInput = ({
       <input
         type="text"
         inputMode="numeric"
-        value={displayValue}
-        onChange={handleChange}
+        value={text}
         placeholder={placeholder}
+        onKeyDown={e => {
+          // Block "0" key when field is empty (prevents leading zeros)
+          if (e.key === '0' && text === '') {
+            e.preventDefault();
+            return;
+          }
+          // Only allow digits and control keys
+          if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+            e.preventDefault();
+          }
+        }}
+        onChange={e => {
+          // Get raw value and strip any non-digits and leading zeros
+          const raw = e.target.value.replace(/\D/g, '').replace(/^0+/, '');
+          setText(raw);
+          onChange(raw ? parseInt(raw, 10) : 0);
+        }}
         className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
       />
     </div>
