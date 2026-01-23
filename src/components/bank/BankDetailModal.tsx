@@ -6,17 +6,8 @@ import { MapView, getCampusSideColor, DirectionsButton } from '@/components/maps
 import type { MapMarker } from '@/components/maps';
 import { getBranchesForBank, UNIVERSITY_LOCATIONS, BankBranch } from '@/lib/universityData';
 
-// Helper to get hex color for campus side
-function getColorHex(side: string): string {
-  switch (side) {
-    case 'north': return '#3b82f6';
-    case 'south': return '#ef4444';
-    case 'east': return '#22c55e';
-    case 'west': return '#f97316';
-    case 'center': return '#a855f7';
-    default: return '#374151';
-  }
-}
+// All markers use black for Noor branding
+const NOOR_BLACK = '#000000';
 
 interface BankDetailModalProps {
   recommendation: BankRecommendation;
@@ -77,7 +68,6 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
           <strong style="font-size: 14px; display: block; margin-bottom: 4px;">${branch.name}</strong>
           <p style="font-size: 12px; color: #666; margin: 0 0 8px 0;">${branch.address}</p>
           <p style="font-size: 11px; color: #888; margin: 0 0 8px 0;">
-            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${getColorHex(branch.campusSide)}; margin-right: 6px;"></span>
             ${branch.campusSide.charAt(0).toUpperCase() + branch.campusSide.slice(1)} side of campus
           </p>
           <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(branch.address)}"
@@ -244,22 +234,6 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
               <h3 className="font-medium text-black mb-3">
                 Branch Locations ({branches.length} near {userUniversity})
               </h3>
-
-              {/* Color Legend */}
-              <div className="flex flex-wrap gap-3 mb-3 text-xs">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-blue-500"></span> North
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-red-500"></span> South
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-green-500"></span> East
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-orange-500"></span> West
-                </span>
-              </div>
 
               {/* Map */}
               <div className="mb-4">
@@ -455,17 +429,9 @@ function FeatureTag({ label, highlight = false }: { label: string; highlight?: b
 }
 
 function BranchListItem({ branch }: { branch: BankBranch }) {
-  const colorClass = {
-    north: 'bg-blue-500',
-    south: 'bg-red-500',
-    east: 'bg-green-500',
-    west: 'bg-orange-500',
-    center: 'bg-purple-500',
-  }[branch.campusSide] || 'bg-gray-500';
-
   return (
     <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
-      <span className={`w-3 h-3 rounded-full ${colorClass} mt-1 shrink-0`} />
+      <span className="w-2.5 h-2.5 rounded-full bg-black mt-1.5 shrink-0" />
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm text-black">{branch.name}</p>
         <p className="text-xs text-gray-500 mt-0.5 truncate">{branch.address}</p>

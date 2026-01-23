@@ -22,15 +22,8 @@ interface MapViewProps {
   showUserLocation?: boolean;
 }
 
-// Color mapping for markers
-const MARKER_COLORS: Record<MarkerColor, string> = {
-  blue: '#3b82f6',
-  red: '#ef4444',
-  green: '#22c55e',
-  orange: '#f97316',
-  purple: '#a855f7',
-  default: '#374151',
-};
+// All markers use black for Noor branding
+const MARKER_COLOR = '#000000';
 
 // Leaflet map component that only loads on the client
 function LeafletMap({
@@ -128,23 +121,20 @@ function LeafletMap({
 
     // Add new markers
     markers.forEach((marker) => {
-      const color = marker.color ? MARKER_COLORS[marker.color] : MARKER_COLORS.default;
-
-      // Create colored marker icon
-      const coloredIcon = L.divIcon({
+      // Create minimal black marker icon (Noor branding)
+      const blackIcon = L.divIcon({
         html: `
-          <div class="colored-marker" style="background-color: ${color};">
-            <div class="marker-pin"></div>
-            <div class="marker-pulse" style="background-color: ${color};"></div>
+          <div class="noor-marker">
+            <div class="noor-pin"></div>
           </div>
         `,
         className: 'custom-marker-icon',
-        iconSize: [30, 40],
-        iconAnchor: [15, 40],
-        popupAnchor: [0, -40],
+        iconSize: [24, 32],
+        iconAnchor: [12, 32],
+        popupAnchor: [0, -32],
       });
 
-      const leafletMarker = L.marker(marker.position, { icon: coloredIcon });
+      const leafletMarker = L.marker(marker.position, { icon: blackIcon });
 
       if (marker.popupContent || marker.label) {
         leafletMarker.bindPopup(marker.popupContent || marker.label);
@@ -203,47 +193,31 @@ function LeafletMap({
           background: transparent !important;
           border: none !important;
         }
-        .colored-marker {
+        .noor-marker {
           position: relative;
-          width: 30px;
-          height: 40px;
-        }
-        .colored-marker .marker-pin {
           width: 24px;
-          height: 24px;
+          height: 32px;
+        }
+        .noor-marker .noor-pin {
+          width: 20px;
+          height: 20px;
           border-radius: 50% 50% 50% 0;
-          background: inherit;
+          background: #000000;
           position: absolute;
           transform: rotate(-45deg);
-          left: 3px;
+          left: 2px;
           top: 0;
-          border: 3px solid white;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
         }
-        .colored-marker .marker-pin::after {
+        .noor-marker .noor-pin::after {
           content: '';
-          width: 10px;
-          height: 10px;
+          width: 6px;
+          height: 6px;
           background: white;
           position: absolute;
           border-radius: 50%;
-          top: 4px;
-          left: 4px;
-        }
-        .colored-marker .marker-pulse {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          position: absolute;
-          left: 9px;
-          bottom: 0;
-          opacity: 0.4;
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 0.4; }
-          50% { transform: scale(1.5); opacity: 0.2; }
-          100% { transform: scale(1); opacity: 0.4; }
+          top: 5px;
+          left: 5px;
         }
         .leaflet-popup-content {
           margin: 12px 16px;
@@ -300,14 +274,7 @@ export const MiniMap = dynamic(() => Promise.resolve(MiniMapComponent), {
   ),
 });
 
-// Helper to get marker color from campus side
+// Helper to get marker color from campus side (all black for Noor branding)
 export function getCampusSideColor(side: string): MarkerColor {
-  switch (side) {
-    case 'north': return 'blue';
-    case 'south': return 'red';
-    case 'east': return 'green';
-    case 'west': return 'orange';
-    case 'center': return 'purple';
-    default: return 'default';
-  }
+  return 'default';
 }
