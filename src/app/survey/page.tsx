@@ -4,37 +4,60 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface SurveyData {
-  visa_status: string;
+  // Step 1
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  staySignedIn: boolean;
   university: string;
-  arrival_date: string;
-  has_ssn: boolean;
-  has_itin: boolean;
-  monthly_income: number;
-  monthly_budget: number;
-  international_transfers: string;
-  avg_transfer_amount: number;
-  needs_zelle: boolean;
-  credit_goals: string;
-  fee_sensitivity: string;
-  digital_preference: string;
-  campus_proximity: string;
+  countryOfOrigin: string;
+  // Step 2
+  academicLevel: string;
+  year: string;
+  // Step 3
+  hasSSN: boolean | null;
+  hasITIN: boolean | null;
+  hasUSAddress: boolean | null;
+  // Step 4
+  monthlyIncome: number;
+  monthlyExpenses: number;
+  feePriority: string;
+  // Step 5
+  bankingNeeds: string[];
+  bankingStyle: string;
+  // Step 6
+  transferFrequency: string;
+  branchPreference: string;
+  // Step 7
+  goals: string[];
+  creditCardInterest: string;
 }
 
 const INITIAL_DATA: SurveyData = {
-  visa_status: '',
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  staySignedIn: false,
   university: '',
-  arrival_date: '',
-  has_ssn: false,
-  has_itin: false,
-  monthly_income: 0,
-  monthly_budget: 1500,
-  international_transfers: 'monthly',
-  avg_transfer_amount: 500,
-  needs_zelle: false,
-  credit_goals: '',
-  fee_sensitivity: 'medium',
-  digital_preference: 'both',
-  campus_proximity: 'somewhat-important',
+  countryOfOrigin: '',
+  academicLevel: '',
+  year: '',
+  hasSSN: null,
+  hasITIN: null,
+  hasUSAddress: null,
+  monthlyIncome: 2000,
+  monthlyExpenses: 1500,
+  feePriority: '',
+  bankingNeeds: [],
+  bankingStyle: '',
+  transferFrequency: '',
+  branchPreference: '',
+  goals: [],
+  creditCardInterest: '',
 };
 
 const UNIVERSITIES = [
@@ -50,16 +73,39 @@ const UNIVERSITIES = [
   'Other',
 ];
 
+const COUNTRIES = [
+  'China',
+  'India',
+  'South Korea',
+  'Vietnam',
+  'Taiwan',
+  'Japan',
+  'Brazil',
+  'Nigeria',
+  'Canada',
+  'Mexico',
+  'Other',
+];
+
 export default function SurveyPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const totalSteps = 4;
+  const totalSteps = 7;
 
-  const updateData = (field: keyof SurveyData, value: any) => {
+  const updateField = <K extends keyof SurveyData>(field: K, value: SurveyData[K]) => {
     setData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const toggleArrayField = (field: 'bankingNeeds' | 'goals', value: string) => {
+    setData(prev => ({
+      ...prev,
+      [field]: prev[field].includes(value)
+        ? prev[field].filter(v => v !== value)
+        : [...prev[field], value],
+    }));
   };
 
   const handleNext = () => {
@@ -80,279 +126,398 @@ export default function SurveyPage() {
       const response = await fetch('/api/survey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          first_name: data.firstName,
+          last_name: data.lastName,
+          email: data.email,
+          university: data.university,
+          visa_status: 'F-1',
+          has_ssn: data.hasSSN ?? false,
+          has_itin: data.hasITIN ?? false,
+          monthly_income: data.monthlyIncome,
+          monthly_budget: data.monthlyExpenses,
+          international_transfers: data.transferFrequency,
+          needs_zelle: data.bankingNeeds.includes('Bill pay'),
+          credit_goals: data.goals.includes('Credit history') ? 'build-credit' : 'basic',
+          fee_sensitivity: data.feePriority === 'budget' ? 'very-sensitive' : data.feePriority === 'premium' ? 'not-sensitive' : 'medium',
+          digital_preference: data.bankingStyle === 'Digital' ? 'mobile-first' : data.bankingStyle === 'Branches' ? 'branch' : 'both',
+          campus_proximity: data.branchPreference === 'must' ? 'very-important' : data.branchPreference === 'preferred' ? 'somewhat-important' : 'not-important',
+        }),
       });
 
       if (response.ok) {
         const result = await response.json();
         localStorage.setItem('noor_user_id', result.userId);
         router.push('/banking');
-      } else {
-        alert('Failed to save survey. Please try again.');
       }
     } catch (error) {
       console.error('Survey submission error:', error);
-      alert('An error occurred. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // Progress Dots
+  const ProgressDots = () => (
+    <div className="flex justify-center gap-2 mb-10">
+      {Array.from({ length: totalSteps }).map((_, i) => (
+        <div
+          key={i}
+          className={`h-2 rounded-full transition-all duration-300 ${
+            i + 1 === step ? 'bg-black w-6' : i + 1 < step ? 'bg-black w-2' : 'bg-gray-200 w-2'
+          }`}
+        />
+      ))}
+    </div>
+  );
+
+  // Input Component
+  const Input = ({
+    type = 'text',
+    value,
+    onChange,
+    placeholder,
+  }: {
+    type?: string;
+    value: string | number;
+    onChange: (v: string) => void;
+    placeholder?: string;
+  }) => (
+    <input
+      type={type}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400"
+    />
+  );
+
+  // Select Component
+  const Select = ({
+    value,
+    onChange,
+    options,
+    placeholder,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    options: string[];
+    placeholder?: string;
+  }) => (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black bg-white appearance-none text-gray-700"
+      style={{
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239CA3AF'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'right 12px center',
+        backgroundSize: '20px',
+        paddingRight: '44px',
+      }}
+    >
+      <option value="" className="text-gray-400">{placeholder || 'Select...'}</option>
+      {options.map(opt => (
+        <option key={opt} value={opt}>{opt}</option>
+      ))}
+    </select>
+  );
+
+  // Option Button (wide)
   const OptionButton = ({
     selected,
     onClick,
     children,
-    description
   }: {
     selected: boolean;
     onClick: () => void;
     children: React.ReactNode;
-    description?: string;
   }) => (
     <button
       onClick={onClick}
-      className={`w-full p-5 rounded-2xl border-[1.5px] text-left transition-all duration-300 ${
+      className={`w-full px-5 py-3.5 rounded-xl border-2 font-medium text-left transition-all duration-300 ${
         selected
           ? 'border-black bg-black text-white'
-          : 'border-gray-200 hover:border-gray-400 bg-white'
+          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
       }`}
     >
-      <span className={`font-medium ${selected ? 'text-white' : 'text-black'}`}>
-        {children}
-      </span>
-      {description && (
-        <p className={`text-sm mt-1.5 ${selected ? 'text-gray-300' : 'text-gray-500'}`}>
-          {description}
-        </p>
-      )}
+      {children}
     </button>
   );
 
-  const GridOption = ({
+  // Toggle Button (Yes/No)
+  const ToggleButtons = ({
+    value,
+    onChange,
+  }: {
+    value: boolean | null;
+    onChange: (v: boolean) => void;
+  }) => (
+    <div className="flex gap-3">
+      <button
+        onClick={() => onChange(true)}
+        className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
+          value === true
+            ? 'border-black bg-black text-white'
+            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+        }`}
+      >
+        Yes
+      </button>
+      <button
+        onClick={() => onChange(false)}
+        className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
+          value === false
+            ? 'border-black bg-black text-white'
+            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+        }`}
+      >
+        No
+      </button>
+    </div>
+  );
+
+  // Multi-select Chip
+  const ChipButton = ({
     selected,
     onClick,
-    label
+    children,
   }: {
     selected: boolean;
     onClick: () => void;
-    label: string;
+    children: React.ReactNode;
   }) => (
     <button
       onClick={onClick}
-      className={`p-5 rounded-2xl border-[1.5px] text-center transition-all duration-300 ${
+      className={`px-4 py-2.5 rounded-full border-[1.5px] text-sm font-medium transition-all duration-300 ${
         selected
           ? 'border-black bg-black text-white'
-          : 'border-gray-200 hover:border-gray-400 bg-white'
+          : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
       }`}
     >
-      {label}
+      {children}
     </button>
+  );
+
+  // Feedback Text
+  const Feedback = ({ children }: { children: React.ReactNode }) => (
+    <p className="text-emerald-600 text-sm mt-4 animate-fade-in">{children}</p>
   );
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Minimal Progress Bar */}
-      <div className="fixed top-0 left-0 right-0 z-50">
-        <div className="progress-bar">
-          <div
-            className="progress-bar-fill"
-            style={{ width: `${(step / totalSteps) * 100}%` }}
-          />
-        </div>
-      </div>
+      {/* Header */}
+      <header className="pt-8 pb-4 text-center">
+        <span className="text-xs tracking-[0.3em] font-medium text-gray-400">NOOR</span>
+      </header>
 
-      <div className="max-w-md mx-auto px-8 pt-20 pb-36">
-        {/* Step Indicator */}
-        <p className="text-gray-400 text-sm tracking-wide mb-4">
-          {step} of {totalSteps}
-        </p>
+      <div className="max-w-md mx-auto px-6 pb-32">
+        <ProgressDots />
 
-        {/* Step 1: Welcome */}
+        {/* Step 1: First, you. */}
         {step === 1 && (
           <div className="animate-fade-in">
-            <h1 className="page-title mb-3">Welcome to Noor.</h1>
-            <p className="page-subtitle mb-12">Let's find the perfect bank for you.</p>
+            <h1 className="font-serif text-3xl font-semibold mb-2">First, you.</h1>
+            <p className="text-gray-500 mb-8">So we can build this around you.</p>
 
-            <div className="space-y-10">
-              <div>
-                <label className="label">Visa status</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {['F-1', 'J-1', 'H-1B', 'Other'].map((visa) => (
-                    <GridOption
-                      key={visa}
-                      selected={data.visa_status === visa}
-                      onClick={() => updateData('visa_status', visa)}
-                      label={visa}
-                    />
-                  ))}
-                </div>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  placeholder="First name"
+                  value={data.firstName}
+                  onChange={v => updateField('firstName', v)}
+                />
+                <Input
+                  placeholder="Last name"
+                  value={data.lastName}
+                  onChange={v => updateField('lastName', v)}
+                />
               </div>
+              <Input
+                type="email"
+                placeholder="Email"
+                value={data.email}
+                onChange={v => updateField('email', v)}
+              />
+              <Input
+                type="password"
+                placeholder="Password"
+                value={data.password}
+                onChange={v => updateField('password', v)}
+              />
+              <Input
+                type="password"
+                placeholder="Confirm password"
+                value={data.confirmPassword}
+                onChange={v => updateField('confirmPassword', v)}
+              />
 
-              <div>
-                <label className="label">University</label>
-                <select
-                  value={data.university}
-                  onChange={(e) => updateData('university', e.target.value)}
-                  className="select-field"
+              <label className="flex items-center gap-3 py-2 cursor-pointer">
+                <div
+                  onClick={() => updateField('staySignedIn', !data.staySignedIn)}
+                  className={`w-5 h-5 rounded border-[1.5px] flex items-center justify-center transition-all duration-300 ${
+                    data.staySignedIn ? 'bg-black border-black' : 'border-gray-300'
+                  }`}
                 >
-                  <option value="">Select your university</option>
-                  {UNIVERSITIES.map((uni) => (
-                    <option key={uni} value={uni}>{uni}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="label">Time in the US</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { value: 'new', label: 'Just arrived' },
-                    { value: '6months', label: '< 6 months' },
-                    { value: '1year', label: '6-12 months' },
-                    { value: 'over1year', label: '> 1 year' },
-                  ].map((option) => (
-                    <GridOption
-                      key={option.value}
-                      selected={data.arrival_date === option.value}
-                      onClick={() => updateData('arrival_date', option.value)}
-                      label={option.label}
-                    />
-                  ))}
+                  {data.staySignedIn && (
+                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
                 </div>
-              </div>
+                <span className="text-sm text-gray-600">Stay signed in</span>
+              </label>
+
+              <Select
+                placeholder="University"
+                value={data.university}
+                onChange={v => updateField('university', v)}
+                options={UNIVERSITIES}
+              />
+              <Select
+                placeholder="Country of Origin"
+                value={data.countryOfOrigin}
+                onChange={v => updateField('countryOfOrigin', v)}
+                options={COUNTRIES}
+              />
             </div>
           </div>
         )}
 
-        {/* Step 2: Your Situation */}
+        {/* Step 2: Where you are. */}
         {step === 2 && (
           <div className="animate-fade-in">
-            <h1 className="page-title mb-3">Your situation.</h1>
-            <p className="page-subtitle mb-12">This helps us find banks that work for you.</p>
+            <h1 className="font-serif text-3xl font-semibold mb-2">Where you are.</h1>
+            <p className="text-gray-500 mb-8">Each stage has different needs. We'll match them.</p>
 
-            <div className="space-y-10">
-              <div>
-                <label className="label">Do you have an SSN?</label>
-                <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-6">
+              <div className="space-y-2">
+                {["Bachelor's", "Master's", 'PhD', 'Postdoc', 'Exchange/Visiting'].map(level => (
                   <OptionButton
-                    selected={data.has_ssn === true}
-                    onClick={() => updateData('has_ssn', true)}
-                    description="I have one"
+                    key={level}
+                    selected={data.academicLevel === level}
+                    onClick={() => updateField('academicLevel', level)}
                   >
-                    Yes
+                    {level}
                   </OptionButton>
-                  <OptionButton
-                    selected={data.has_ssn === false}
-                    onClick={() => updateData('has_ssn', false)}
-                    description="Not yet"
-                  >
-                    No
-                  </OptionButton>
-                </div>
+                ))}
               </div>
 
-              {!data.has_ssn && (
-                <div className="animate-fade-in">
-                  <label className="label">Do you have an ITIN?</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <GridOption
-                      selected={data.has_itin === true}
-                      onClick={() => updateData('has_itin', true)}
-                      label="Yes"
-                    />
-                    <GridOption
-                      selected={data.has_itin === false}
-                      onClick={() => updateData('has_itin', false)}
-                      label="No"
-                    />
-                  </div>
-                </div>
-              )}
-
               <div>
-                <label className="label">Expected monthly budget</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { value: 500, label: '< $500' },
-                    { value: 1000, label: '$500 - $1K' },
-                    { value: 2000, label: '$1K - $2K' },
-                    { value: 3000, label: '$2K+' },
-                  ].map((option) => (
-                    <GridOption
-                      key={option.value}
-                      selected={data.monthly_budget === option.value}
-                      onClick={() => updateData('monthly_budget', option.value)}
-                      label={option.label}
-                    />
+                <label className="block text-sm font-medium text-gray-700 mb-3">Year</label>
+                <div className="flex gap-2">
+                  {['1', '2', '3', '4', '5+'].map(year => (
+                    <button
+                      key={year}
+                      onClick={() => updateField('year', year)}
+                      className={`flex-1 py-3 rounded-xl border-2 font-medium transition-all duration-300 ${
+                        data.year === year
+                          ? 'border-black bg-black text-white'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      {year}
+                    </button>
                   ))}
                 </div>
               </div>
+
+              {data.academicLevel && data.year && (
+                <Feedback>Got it. We'll tailor your options.</Feedback>
+              )}
             </div>
           </div>
         )}
 
-        {/* Step 3: Your Needs */}
+        {/* Step 3: What We're Working With. */}
         {step === 3 && (
           <div className="animate-fade-in">
-            <h1 className="page-title mb-3">Your needs.</h1>
-            <p className="page-subtitle mb-12">What matters most to you?</p>
+            <h1 className="font-serif text-3xl font-semibold mb-2">What We're Working With.</h1>
+            <p className="text-gray-500 mb-8">We Tailor From Here</p>
 
-            <div className="space-y-10">
+            <div className="space-y-6">
               <div>
-                <label className="label">International transfers</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { value: 'never', label: 'Never' },
-                    { value: 'rarely', label: 'Rarely' },
-                    { value: 'monthly', label: 'Monthly' },
-                    { value: 'weekly', label: 'Weekly' },
-                  ].map((option) => (
-                    <GridOption
-                      key={option.value}
-                      selected={data.international_transfers === option.value}
-                      onClick={() => updateData('international_transfers', option.value)}
-                      label={option.label}
-                    />
-                  ))}
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">SSN?</label>
+                <ToggleButtons
+                  value={data.hasSSN}
+                  onChange={v => updateField('hasSSN', v)}
+                />
+                {data.hasSSN === false && (
+                  <Feedback>No problem. We have options.</Feedback>
+                )}
               </div>
 
               <div>
-                <label className="label">Do you need Zelle?</label>
-                <p className="text-gray-400 text-sm mb-4 -mt-1">
-                  Instant transfers to friends, pay rent, split bills.
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <OptionButton
-                    selected={data.needs_zelle === true}
-                    onClick={() => updateData('needs_zelle', true)}
-                  >
-                    Yes, I need it
-                  </OptionButton>
-                  <OptionButton
-                    selected={data.needs_zelle === false}
-                    onClick={() => updateData('needs_zelle', false)}
-                  >
-                    Not important
-                  </OptionButton>
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">ITIN?</label>
+                <ToggleButtons
+                  value={data.hasITIN}
+                  onChange={v => updateField('hasITIN', v)}
+                />
               </div>
 
               <div>
-                <label className="label">Primary goal</label>
-                <div className="space-y-3">
+                <label className="block text-sm font-medium text-gray-700 mb-3">US address?</label>
+                <ToggleButtons
+                  value={data.hasUSAddress}
+                  onChange={v => updateField('hasUSAddress', v)}
+                />
+                {data.hasUSAddress === true && (
+                  <Feedback>Good. More doors open.</Feedback>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Your Finances. */}
+        {step === 4 && (
+          <div className="animate-fade-in">
+            <h1 className="font-serif text-3xl font-semibold mb-2">Your Finances.</h1>
+            <p className="text-gray-500 mb-8">Walk Us Through</p>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What comes in</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                  <input
+                    type="number"
+                    value={data.monthlyIncome}
+                    onChange={e => updateField('monthlyIncome', parseInt(e.target.value) || 0)}
+                    className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
+                  />
+                </div>
+                <p className="text-gray-400 text-xs mt-1.5">Scholarships, family support, work-study</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What goes out</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                  <input
+                    type="number"
+                    value={data.monthlyExpenses}
+                    onChange={e => updateField('monthlyExpenses', parseInt(e.target.value) || 0)}
+                    className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
+                  />
+                </div>
+                <p className="text-gray-400 text-xs mt-1.5">Rent, food, transportation, entertainment</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Your priority.</label>
+                <div className="space-y-2">
                   {[
-                    { value: 'basic', label: 'Just need a bank account', desc: 'For everyday spending' },
-                    { value: 'build-credit', label: 'Build credit history', desc: 'Want to get credit cards later' },
-                    { value: 'save', label: 'Save money', desc: 'Looking for high APY savings' },
-                  ].map((option) => (
+                    { id: 'budget', label: 'Every dollar counts.' },
+                    { id: 'balance', label: 'Balance value and quality.' },
+                    { id: 'premium', label: 'Pay for premium.' },
+                  ].map(opt => (
                     <OptionButton
-                      key={option.value}
-                      selected={data.credit_goals === option.value}
-                      onClick={() => updateData('credit_goals', option.value)}
-                      description={option.desc}
+                      key={opt.id}
+                      selected={data.feePriority === opt.id}
+                      onClick={() => updateField('feePriority', opt.id)}
                     >
-                      {option.label}
+                      {opt.label}
                     </OptionButton>
                   ))}
                 </div>
@@ -361,67 +526,146 @@ export default function SurveyPage() {
           </div>
         )}
 
-        {/* Step 4: Preferences */}
-        {step === 4 && (
+        {/* Step 5: How you bank. */}
+        {step === 5 && (
           <div className="animate-fade-in">
-            <h1 className="page-title mb-3">Almost done.</h1>
-            <p className="page-subtitle mb-12">A few final preferences.</p>
+            <h1 className="font-serif text-3xl font-semibold mb-2">How you bank.</h1>
+            <p className="text-gray-500 mb-8">Select what matters.</p>
 
-            <div className="space-y-10">
-              <div>
-                <label className="label">Fee sensitivity</label>
-                <div className="space-y-3">
-                  {[
-                    { value: 'very-sensitive', label: 'Very sensitive', desc: 'I want $0 fees only' },
-                    { value: 'medium', label: 'Somewhat', desc: 'Small fees are OK if worth it' },
-                    { value: 'not-sensitive', label: 'Not sensitive', desc: 'Features matter more' },
-                  ].map((option) => (
-                    <OptionButton
-                      key={option.value}
-                      selected={data.fee_sensitivity === option.value}
-                      onClick={() => updateData('fee_sensitivity', option.value)}
-                      description={option.desc}
-                    >
-                      {option.label}
-                    </OptionButton>
-                  ))}
-                </div>
+            <div className="space-y-6">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  'Everyday spending',
+                  'Family transfers',
+                  'Tuition',
+                  'International wires',
+                  'Campus ATM',
+                  'Mobile deposit',
+                  'Bill pay',
+                  'Savings',
+                ].map(need => (
+                  <ChipButton
+                    key={need}
+                    selected={data.bankingNeeds.includes(need)}
+                    onClick={() => toggleArrayField('bankingNeeds', need)}
+                  >
+                    {need}
+                  </ChipButton>
+                ))}
               </div>
 
               <div>
-                <label className="label">Banking preference</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Style.</label>
                 <div className="grid grid-cols-3 gap-3">
+                  {['Branches', 'Digital', 'Either'].map(style => (
+                    <button
+                      key={style}
+                      onClick={() => updateField('bankingStyle', style)}
+                      className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
+                        data.bankingStyle === style
+                          ? 'border-black bg-black text-white'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      {style}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 6: Global. */}
+        {step === 6 && (
+          <div className="animate-fade-in">
+            <h1 className="font-serif text-3xl font-semibold mb-2">Global.</h1>
+            <p className="text-gray-500 mb-8">How you move across borders.</p>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Transfers abroad.</label>
+                <div className="space-y-2">
                   {[
-                    { value: 'mobile-first', label: 'Mobile' },
-                    { value: 'branch', label: 'Branch' },
-                    { value: 'both', label: 'Both' },
-                  ].map((option) => (
-                    <GridOption
-                      key={option.value}
-                      selected={data.digital_preference === option.value}
-                      onClick={() => updateData('digital_preference', option.value)}
-                      label={option.label}
-                    />
+                    { id: 'never', label: 'Never' },
+                    { id: 'few', label: 'A few times a year' },
+                    { id: 'monthly', label: 'Monthly or more' },
+                  ].map(opt => (
+                    <OptionButton
+                      key={opt.id}
+                      selected={data.transferFrequency === opt.id}
+                      onClick={() => updateField('transferFrequency', opt.id)}
+                    >
+                      {opt.label}
+                    </OptionButton>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="label">Branch proximity to campus</label>
-                <div className="space-y-3">
+                <label className="block text-sm font-medium text-gray-700 mb-3">Branch nearby?</label>
+                <div className="space-y-2">
                   {[
-                    { value: 'very-important', label: 'Very important', desc: 'I want to visit in person' },
-                    { value: 'somewhat-important', label: 'Nice to have', desc: 'But not required' },
-                    { value: 'not-important', label: 'Not important', desc: 'I prefer online banking' },
-                  ].map((option) => (
+                    { id: 'must', label: 'Must have' },
+                    { id: 'preferred', label: 'Preferred' },
+                    { id: 'dont', label: "Don't need" },
+                  ].map(opt => (
                     <OptionButton
-                      key={option.value}
-                      selected={data.campus_proximity === option.value}
-                      onClick={() => updateData('campus_proximity', option.value)}
-                      description={option.desc}
+                      key={opt.id}
+                      selected={data.branchPreference === opt.id}
+                      onClick={() => updateField('branchPreference', opt.id)}
                     >
-                      {option.label}
+                      {opt.label}
                     </OptionButton>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 7: Your goals. */}
+        {step === 7 && (
+          <div className="animate-fade-in">
+            <h1 className="font-serif text-3xl font-semibold mb-2">Your goals.</h1>
+            <p className="text-gray-500 mb-8">What matters to you right now.</p>
+
+            <div className="space-y-6">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  'Bank account',
+                  'Credit history',
+                  'Housing',
+                  'Student loans',
+                  'Campus jobs',
+                  'Investing',
+                  'Post-grad planning',
+                ].map(goal => (
+                  <ChipButton
+                    key={goal}
+                    selected={data.goals.includes(goal)}
+                    onClick={() => toggleArrayField('goals', goal)}
+                  >
+                    {goal}
+                  </ChipButton>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Credit cards.</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {['Start now', 'Later', 'Skip'].map(opt => (
+                    <button
+                      key={opt}
+                      onClick={() => updateField('creditCardInterest', opt)}
+                      className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
+                        data.creditCardInterest === opt
+                          ? 'border-black bg-black text-white'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      {opt}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -431,12 +675,12 @@ export default function SurveyPage() {
       </div>
 
       {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-100">
-        <div className="max-w-md mx-auto px-8 py-6 flex gap-4">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100">
+        <div className="max-w-md mx-auto px-6 py-5 flex gap-3">
           {step > 1 && (
             <button
               onClick={handleBack}
-              className="btn-secondary flex-shrink-0"
+              className="px-6 py-3.5 border-[1.5px] border-gray-300 rounded-xl font-medium transition-all duration-300 hover:border-black"
             >
               Back
             </button>
@@ -444,7 +688,7 @@ export default function SurveyPage() {
           {step < totalSteps ? (
             <button
               onClick={handleNext}
-              className="btn-primary flex-1"
+              className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800"
             >
               Continue
             </button>
@@ -452,9 +696,9 @@ export default function SurveyPage() {
             <button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="btn-primary flex-1"
+              className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300"
             >
-              {isSubmitting ? 'Finding your banks...' : 'Get Recommendations'}
+              {isSubmitting ? 'Processing...' : 'Complete Assessment'}
             </button>
           )}
         </div>
