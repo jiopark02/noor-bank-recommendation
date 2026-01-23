@@ -6,19 +6,31 @@ import Link from 'next/link';
 export default function WelcomePage() {
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      {/* Logo */}
-      <header className="pt-12 pb-8 text-center">
-        <span className="text-sm tracking-[0.3em] font-medium">NOOR</span>
-      </header>
-
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-8 pb-12">
         <div className="max-w-sm w-full">
+          {/* Logo */}
+          <div className="text-center mb-8">
+            <h1
+              className="text-3xl tracking-[0.35em] font-semibold"
+              style={{ fontFamily: "'SF Pro Display', 'Helvetica Neue', Inter, sans-serif" }}
+            >NOOR</h1>
+            <p className="text-gray-400 text-sm italic mt-1">Your money atelier</p>
+          </div>
+
+          {/* Separator */}
+          <div className="text-center mb-8">
+            <span className="text-gray-300">·</span>
+          </div>
+
           {/* Hero */}
           <div className="text-center mb-10">
-            <h1 className="font-serif text-4xl font-semibold tracking-tight mb-3">
+            <h2
+              className="text-4xl font-light tracking-[0.01em] mb-3"
+              style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}
+            >
               Banking, Tailored.
-            </h1>
+            </h2>
             <p className="text-gray-500 text-base">
               Tell us about you. We'll handle the rest.
             </p>

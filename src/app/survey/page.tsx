@@ -325,7 +325,7 @@ export default function SurveyPage() {
         {/* Step 1: First, you. */}
         {step === 1 && (
           <div className="animate-fade-in">
-            <h1 className="font-serif text-3xl font-semibold mb-2">First, you.</h1>
+            <h1 className="text-3xl font-light tracking-[0.01em] mb-2" style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}>First, you.</h1>
             <p className="text-gray-500 mb-8">So we can build this around you.</p>
 
             <div className="space-y-4">
@@ -395,7 +395,7 @@ export default function SurveyPage() {
         {/* Step 2: Where you are. */}
         {step === 2 && (
           <div className="animate-fade-in">
-            <h1 className="font-serif text-3xl font-semibold mb-2">Where you are.</h1>
+            <h1 className="text-3xl font-light tracking-[0.01em] mb-2" style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}>Where you are.</h1>
             <p className="text-gray-500 mb-8">Each stage has different needs. We'll match them.</p>
 
             <div className="space-y-6">
@@ -440,7 +440,7 @@ export default function SurveyPage() {
         {/* Step 3: What We're Working With. */}
         {step === 3 && (
           <div className="animate-fade-in">
-            <h1 className="font-serif text-3xl font-semibold mb-2">What We're Working With.</h1>
+            <h1 className="text-3xl font-light tracking-[0.01em] mb-2" style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}>What We're Working With.</h1>
             <p className="text-gray-500 mb-8">We Tailor From Here</p>
 
             <div className="space-y-6">
@@ -480,7 +480,7 @@ export default function SurveyPage() {
         {/* Step 4: Your Finances. */}
         {step === 4 && (
           <div className="animate-fade-in">
-            <h1 className="font-serif text-3xl font-semibold mb-2">Your Finances.</h1>
+            <h1 className="text-3xl font-light tracking-[0.01em] mb-2" style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}>Your Finances.</h1>
             <p className="text-gray-500 mb-8">Walk Us Through</p>
 
             <div className="space-y-6">
@@ -537,7 +537,7 @@ export default function SurveyPage() {
         {/* Step 5: How you bank. */}
         {step === 5 && (
           <div className="animate-fade-in">
-            <h1 className="font-serif text-3xl font-semibold mb-2">How you bank.</h1>
+            <h1 className="text-3xl font-light tracking-[0.01em] mb-2" style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}>How you bank.</h1>
             <p className="text-gray-500 mb-8">Select what matters.</p>
 
             <div className="space-y-6">
@@ -587,7 +587,7 @@ export default function SurveyPage() {
         {/* Step 6: Global. */}
         {step === 6 && (
           <div className="animate-fade-in">
-            <h1 className="font-serif text-3xl font-semibold mb-2">Global.</h1>
+            <h1 className="text-3xl font-light tracking-[0.01em] mb-2" style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}>Global.</h1>
             <p className="text-gray-500 mb-8">How you move across borders.</p>
 
             <div className="space-y-6">
@@ -635,7 +635,7 @@ export default function SurveyPage() {
         {/* Step 7: Your goals. */}
         {step === 7 && (
           <div className="animate-fade-in">
-            <h1 className="font-serif text-3xl font-semibold mb-2">Your goals.</h1>
+            <h1 className="text-3xl font-light tracking-[0.01em] mb-2" style={{ fontFamily: "'Cormorant Garamond', 'EB Garamond', Georgia, serif" }}>Your goals.</h1>
             <p className="text-gray-500 mb-8">What matters to you right now.</p>
 
             <div className="space-y-6">
