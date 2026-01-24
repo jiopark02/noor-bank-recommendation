@@ -79,10 +79,21 @@ CREATE TABLE IF NOT EXISTS saved_scholarships (
     UNIQUE(user_id, scholarship_id)
 );
 
--- 5. Create indexes
+-- 5. Create chat_history table for Noor AI
+CREATE TABLE IF NOT EXISTS chat_history (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role text NOT NULL CHECK (role IN ('user', 'assistant')),
+    message text NOT NULL,
+    created_at timestamptz DEFAULT now()
+);
+
+-- 6. Create indexes
 CREATE INDEX IF NOT EXISTS idx_recommendations_user ON recommendations_new(user_id);
 CREATE INDEX IF NOT EXISTS idx_recommendations_type ON recommendations_new(recommendation_type);
 CREATE INDEX IF NOT EXISTS idx_recommendations_score ON recommendations_new(fit_score DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_history_created ON chat_history(created_at DESC);
 
 -- Done!
 SELECT 'Schema updates applied successfully!' as result;

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { ClientLayout } from '@/components/layout/ClientLayout';
 
 export const metadata: Metadata = {
   title: 'Noor - Financial Services for International Students',
@@ -38,7 +39,9 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <ThemeProvider>
-          {children}
+          <ClientLayout>
+            {children}
+          </ClientLayout>
         </ThemeProvider>
       </body>
     </html>
