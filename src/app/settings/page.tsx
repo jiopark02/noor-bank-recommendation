@@ -22,6 +22,8 @@ export default function SettingsPage() {
   const [showThemePreview, setShowThemePreview] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showResetChecklistConfirm, setShowResetChecklistConfirm] = useState(false);
+  const [checklistCompleted, setChecklistCompleted] = useState(false);
 
   useEffect(() => {
     const profile = localStorage.getItem('noor_user_profile');
@@ -33,7 +35,27 @@ export default function SettingsPage() {
     if (notifications !== null) {
       setNotificationsEnabled(notifications === 'true');
     }
+    // Load checklist completion state
+    const checklistDone = localStorage.getItem('noor_checklist_completed');
+    setChecklistCompleted(checklistDone === 'true');
   }, []);
+
+  const handleResetChecklist = () => {
+    // Clear checklist data
+    localStorage.removeItem('noor_checklist_completed');
+    localStorage.removeItem('noor_checklist_items');
+    // Update user profile
+    const profile = localStorage.getItem('noor_user_profile');
+    if (profile) {
+      const parsed = JSON.parse(profile);
+      parsed.onboarding_checklist_completed = false;
+      delete parsed.checklist_completed_at;
+      localStorage.setItem('noor_user_profile', JSON.stringify(parsed));
+    }
+    setChecklistCompleted(false);
+    setShowResetChecklistConfirm(false);
+    router.push('/');
+  };
 
   const handleNotificationsToggle = (enabled: boolean) => {
     setNotificationsEnabled(enabled);
@@ -338,6 +360,18 @@ export default function SettingsPage() {
               <span className="text-sm text-[#1A1A1A]">→</span>
             </button>
             <button
+              onClick={() => setShowResetChecklistConfirm(true)}
+              className="w-full flex justify-between items-center py-2 border-b border-[#E8E6E3] text-left"
+            >
+              <div>
+                <span className="text-sm text-[#1A1A1A]">Reset Checklist</span>
+                <p className="text-xs text-[#9B9B9B] mt-0.5">
+                  {checklistCompleted ? 'Start your first week checklist again' : 'Checklist not completed yet'}
+                </p>
+              </div>
+              <span className="text-sm text-[#1A1A1A]">→</span>
+            </button>
+            <button
               onClick={() => setShowDeleteConfirm(true)}
               className="w-full flex justify-between items-center py-2 text-left"
             >
@@ -363,6 +397,36 @@ export default function SettingsPage() {
             Sign Out
           </button>
         </motion.div>
+
+        {/* Reset Checklist Confirmation Modal */}
+        {showResetChecklistConfirm && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl p-6 max-w-sm w-full"
+            >
+              <h3 className="text-lg font-medium text-[#1A1A1A] mb-2">Reset Checklist?</h3>
+              <p className="text-sm text-[#6B6B6B] mb-6">
+                This will reset your first week checklist progress and show it again on the home screen.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowResetChecklistConfirm(false)}
+                  className="flex-1 py-3 bg-gray-100 text-[#1A1A1A] rounded-xl font-medium text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleResetChecklist}
+                  className="flex-1 py-3 bg-black text-white rounded-xl font-medium text-sm"
+                >
+                  Reset
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
 
         {/* Delete Confirmation Modal */}
         {showDeleteConfirm && (

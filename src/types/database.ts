@@ -49,6 +49,8 @@ export interface User {
   onboarding_completed: boolean;
   onboarding_step: number;
   campus_side?: 'north' | 'south' | 'east' | 'west' | 'center';
+  onboarding_checklist_completed?: boolean;
+  checklist_completed_at?: string;
 }
 
 export interface BankAccount {
