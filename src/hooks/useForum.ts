@@ -1,26 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  getPosts,
+  getPostById,
+  getUserPosts,
+  saveUserPost,
+  getUserVotes,
+  saveUserVote,
+  Post,
+  Comment,
+  FORUM_CATEGORIES,
+} from '@/lib/forumData';
 
-export interface Post {
-  id: string;
-  user_id: string | null;
-  title: string;
-  content: string | null;
-  category: string | null;
-  tags: string[] | null;
-  upvotes: number;
-  comment_count: number;
-  is_pinned: boolean;
-  created_at: string;
-  users?: {
-    first_name: string;
-    last_name: string | null;
-    profile_picture: string | null;
-  } | null;
-}
+export type { Post, Comment } from '@/lib/forumData';
+export { FORUM_CATEGORIES } from '@/lib/forumData';
 
 interface UseForumOptions {
-  limit?: number;
-  category?: string | null;
+  category?: string;
   autoFetch?: boolean;
 }
 
@@ -28,79 +23,143 @@ interface UseForumReturn {
   posts: Post[];
   isLoading: boolean;
   error: string | null;
-  total: number;
-  refetch: () => Promise<void>;
-  createPost: (post: { title: string; content?: string; category?: string; tags?: string[] }) => Promise<void>;
+  refetch: () => void;
+  createPost: (post: { title: string; content?: string; category: string; tags?: string[] }) => Post;
+  getPost: (id: string) => Post | undefined;
+  votePost: (postId: string, vote: 'up' | 'down') => void;
+  userVotes: Record<string, 'up' | 'down'>;
+  categories: typeof FORUM_CATEGORIES;
 }
 
 export function useForum({
-  limit = 20,
-  category = null,
+  category = 'all',
   autoFetch = true,
 }: UseForumOptions = {}): UseForumReturn {
   const [posts, setPosts] = useState<Post[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [total, setTotal] = useState(0);
+  const [userVotes, setUserVotes] = useState<Record<string, 'up' | 'down'>>({});
 
-  const fetchPosts = useCallback(async () => {
+  const fetchPosts = useCallback(() => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const params = new URLSearchParams();
-      params.set('limit', limit.toString());
-      if (category) params.set('category', category);
+      // Get mock posts + user's own posts
+      const mockPosts = getPosts(category);
+      const userPosts = getUserPosts();
 
-      const response = await fetch(`/api/forum?${params}`);
+      // Filter user posts by category if needed
+      const filteredUserPosts = category === 'all'
+        ? userPosts
+        : userPosts.filter(p => p.category === category);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch posts');
-      }
+      // Combine and sort
+      const allPosts = [...filteredUserPosts, ...mockPosts];
 
-      const data = await response.json();
-      setPosts(data.data);
-      setTotal(data.meta.total);
+      // Sort by pinned first, then by date (newest first for user posts)
+      allPosts.sort((a, b) => {
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+        // User posts (with user_ prefix) should appear at top
+        if (a.id.startsWith('user_') && !b.id.startsWith('user_')) return -1;
+        if (!a.id.startsWith('user_') && b.id.startsWith('user_')) return 1;
+        return b.upvotes - a.upvotes;
+      });
+
+      setPosts(allPosts);
+      setUserVotes(getUserVotes());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err instanceof Error ? err.message : 'Failed to load posts');
       setPosts([]);
     } finally {
       setIsLoading(false);
     }
-  }, [limit, category]);
+  }, [category]);
 
   useEffect(() => {
     if (autoFetch) {
-      fetchPosts();
+      // Simulate network delay for realism
+      const timer = setTimeout(fetchPosts, 300);
+      return () => clearTimeout(timer);
     }
   }, [autoFetch, fetchPosts]);
 
-  const createPost = useCallback(async (post: { title: string; content?: string; category?: string; tags?: string[] }) => {
-    try {
-      const response = await fetch('/api/forum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(post),
-      });
+  const createPost = useCallback((postData: { title: string; content?: string; category: string; tags?: string[] }): Post => {
+    const newPost = saveUserPost({
+      user_id: 'current_user',
+      title: postData.title,
+      content: postData.content || null,
+      category: postData.category,
+      tags: postData.tags || [],
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create post');
+    // Add to local state immediately
+    setPosts(prev => [newPost, ...prev]);
+
+    return newPost;
+  }, []);
+
+  const getPost = useCallback((id: string): Post | undefined => {
+    // Check user posts first
+    const userPosts = getUserPosts();
+    const userPost = userPosts.find(p => p.id === id);
+    if (userPost) return userPost;
+
+    // Then check mock posts
+    return getPostById(id);
+  }, []);
+
+  const votePost = useCallback((postId: string, vote: 'up' | 'down') => {
+    const currentVote = userVotes[postId];
+
+    // Toggle vote if same, otherwise set new vote
+    const newVote = currentVote === vote ? null : vote;
+    saveUserVote(postId, newVote);
+
+    // Update local state
+    setUserVotes(prev => {
+      const updated = { ...prev };
+      if (newVote === null) {
+        delete updated[postId];
+      } else {
+        updated[postId] = newVote;
       }
+      return updated;
+    });
 
-      await fetchPosts();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    }
-  }, [fetchPosts]);
+    // Update post votes in local state
+    setPosts(prev => prev.map(post => {
+      if (post.id !== postId) return post;
+
+      let upvoteDelta = 0;
+      let downvoteDelta = 0;
+
+      // Remove old vote
+      if (currentVote === 'up') upvoteDelta--;
+      if (currentVote === 'down') downvoteDelta--;
+
+      // Add new vote
+      if (newVote === 'up') upvoteDelta++;
+      if (newVote === 'down') downvoteDelta++;
+
+      return {
+        ...post,
+        upvotes: post.upvotes + upvoteDelta,
+        downvotes: post.downvotes + downvoteDelta,
+      };
+    }));
+  }, [userVotes]);
 
   return {
     posts,
     isLoading,
     error,
-    total,
     refetch: fetchPosts,
     createPost,
+    getPost,
+    votePost,
+    userVotes,
+    categories: FORUM_CATEGORIES,
   };
 }
