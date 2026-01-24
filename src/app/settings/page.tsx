@@ -20,13 +20,40 @@ export default function SettingsPage() {
   const { theme, useSchoolTheme, toggleSchoolTheme, setTheme } = useTheme();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [showThemePreview, setShowThemePreview] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     const profile = localStorage.getItem('noor_user_profile');
     if (profile) {
       setUserProfile(JSON.parse(profile));
     }
+    // Load notifications preference
+    const notifications = localStorage.getItem('noor_notifications');
+    if (notifications !== null) {
+      setNotificationsEnabled(notifications === 'true');
+    }
   }, []);
+
+  const handleNotificationsToggle = (enabled: boolean) => {
+    setNotificationsEnabled(enabled);
+    localStorage.setItem('noor_notifications', String(enabled));
+  };
+
+  const handleRetakeSurvey = () => {
+    // Clear survey data but keep user ID to maintain account
+    localStorage.removeItem('noor_user_profile');
+    router.push('/survey');
+  };
+
+  const handleDeleteAccount = () => {
+    // Clear all user data
+    localStorage.removeItem('noor_user_id');
+    localStorage.removeItem('noor_user_profile');
+    localStorage.removeItem('noor_notifications');
+    localStorage.removeItem('noor_chat_history');
+    router.push('/welcome');
+  };
 
   const schoolTheme = userProfile?.institutionId
     ? getSchoolTheme(userProfile.institutionId)
@@ -215,6 +242,48 @@ export default function SettingsPage() {
           </div>
         </motion.div>
 
+        {/* Notifications Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]"
+        >
+          <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">Notifications</h3>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center py-2 border-b border-[#E8E6E3]">
+              <div>
+                <span className="text-sm text-[#1A1A1A]">Push Notifications</span>
+                <p className="text-xs text-[#9B9B9B] mt-0.5">Visa deadlines, new deals, forum replies</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notificationsEnabled}
+                  onChange={(e) => handleNotificationsToggle(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-black"></div>
+              </label>
+            </div>
+            <div className="flex justify-between items-center py-2">
+              <div>
+                <span className="text-sm text-[#1A1A1A]">Email Updates</span>
+                <p className="text-xs text-[#9B9B9B] mt-0.5">Weekly digest of new opportunities</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notificationsEnabled}
+                  onChange={(e) => handleNotificationsToggle(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-black"></div>
+              </label>
+            </div>
+          </div>
+        </motion.div>
+
         {/* Data & Privacy Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -235,6 +304,38 @@ export default function SettingsPage() {
           </div>
         </motion.div>
 
+        {/* Account Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]"
+        >
+          <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">Account</h3>
+          <div className="space-y-3">
+            <button
+              onClick={handleRetakeSurvey}
+              className="w-full flex justify-between items-center py-2 border-b border-[#E8E6E3] text-left"
+            >
+              <div>
+                <span className="text-sm text-[#1A1A1A]">Retake Survey</span>
+                <p className="text-xs text-[#9B9B9B] mt-0.5">Update your preferences and visa info</p>
+              </div>
+              <span className="text-sm text-[#1A1A1A]">→</span>
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="w-full flex justify-between items-center py-2 text-left"
+            >
+              <div>
+                <span className="text-sm text-red-500">Delete Account</span>
+                <p className="text-xs text-[#9B9B9B] mt-0.5">Permanently remove all your data</p>
+              </div>
+              <span className="text-sm text-red-500">→</span>
+            </button>
+          </div>
+        </motion.div>
+
         {/* Logout Button */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -248,6 +349,36 @@ export default function SettingsPage() {
             Sign Out
           </button>
         </motion.div>
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl p-6 max-w-sm w-full"
+            >
+              <h3 className="text-lg font-medium text-[#1A1A1A] mb-2">Delete Account?</h3>
+              <p className="text-sm text-[#6B6B6B] mb-6">
+                This will permanently delete all your data including saved preferences, chat history, and survey responses. This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-3 bg-gray-100 text-[#1A1A1A] rounded-xl font-medium text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteAccount}
+                  className="flex-1 py-3 bg-red-500 text-white rounded-xl font-medium text-sm"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
 
         {/* Version Info */}
         <p className="text-center text-xs text-[#9B9B9B] pt-4">

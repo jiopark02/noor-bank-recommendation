@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 import { getSchoolTheme, hasCustomTheme } from '@/lib/schoolThemes';
+import { SearchModal } from '@/components/search';
 
 interface HeaderProps {
   userName?: string;
@@ -12,6 +13,7 @@ interface HeaderProps {
 export function Header({ userName = 'there' }: HeaderProps) {
   const { theme, useSchoolTheme } = useTheme();
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
     const profile = localStorage.getItem('noor_user_profile');
@@ -27,91 +29,97 @@ export function Header({ userName = 'there' }: HeaderProps) {
   const showSchoolBranding = useSchoolTheme && schoolTheme && hasCustomTheme(institutionId || '');
 
   return (
-    <header
-      className="sticky top-0 z-40 backdrop-blur-sm border-b"
-      style={{
-        backgroundColor: showSchoolBranding
-          ? `${theme.primary_color}F5`
-          : 'rgba(255, 255, 255, 0.95)',
-        borderColor: showSchoolBranding
-          ? `${theme.secondary_color}40`
-          : 'rgb(243, 244, 246)',
-      }}
-    >
-      <div className="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between">
-        {/* Logo Section */}
-        <Link href="/" className="flex flex-col items-start">
-          <span
-            className="text-base tracking-[0.25em] font-medium transition-opacity duration-300 hover:opacity-60"
-            style={{
-              color: showSchoolBranding
-                ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                : '#000000',
-            }}
-          >
-            NOOR
-          </span>
-          {showSchoolBranding && schoolTheme && (
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <div
-                className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
-                style={{
-                  backgroundColor: theme.secondary_color,
-                  color: theme.primary_color,
-                }}
-              >
-                {schoolTheme.short_name.charAt(0)}
+    <>
+      <header
+        className="sticky top-0 z-40 backdrop-blur-sm border-b"
+        style={{
+          backgroundColor: showSchoolBranding
+            ? `${theme.primary_color}F5`
+            : 'rgba(255, 255, 255, 0.95)',
+          borderColor: showSchoolBranding
+            ? `${theme.secondary_color}40`
+            : 'rgb(243, 244, 246)',
+        }}
+      >
+        <div className="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between">
+          {/* Logo Section */}
+          <Link href="/" className="flex flex-col items-start">
+            <span
+              className="text-base tracking-[0.25em] font-medium transition-opacity duration-300 hover:opacity-60"
+              style={{
+                color: showSchoolBranding
+                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
+                  : '#000000',
+              }}
+            >
+              NOOR
+            </span>
+            {showSchoolBranding && schoolTheme && (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <div
+                  className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+                  style={{
+                    backgroundColor: theme.secondary_color,
+                    color: theme.primary_color,
+                  }}
+                >
+                  {schoolTheme.short_name.charAt(0)}
+                </div>
+                <span
+                  className="text-[10px] tracking-wide"
+                  style={{
+                    color: showSchoolBranding
+                      ? (theme.text_on_primary === 'white' ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)')
+                      : '#6B7280',
+                  }}
+                >
+                  {schoolTheme.short_name}
+                </span>
               </div>
-              <span
-                className="text-[10px] tracking-wide"
-                style={{
-                  color: showSchoolBranding
-                    ? (theme.text_on_primary === 'white' ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)')
-                    : '#6B7280',
-                }}
-              >
-                {schoolTheme.short_name}
-              </span>
-            </div>
-          )}
-        </Link>
-
-        {/* Actions */}
-        <div className="flex items-center gap-1">
-          <button
-            className="p-2.5 rounded-xl transition-all duration-300"
-            style={{
-              color: showSchoolBranding
-                ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                : '#000000',
-            }}
-          >
-            <SearchIcon />
-          </button>
-          <button
-            className="p-2.5 rounded-xl transition-all duration-300"
-            style={{
-              color: showSchoolBranding
-                ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                : '#000000',
-            }}
-          >
-            <NotificationIcon />
-          </button>
-          <Link
-            href="/settings"
-            className="p-2.5 rounded-xl transition-all duration-300"
-            style={{
-              color: showSchoolBranding
-                ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                : '#000000',
-            }}
-          >
-            <SettingsIcon />
+            )}
           </Link>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setIsSearchOpen(true)}
+              className="p-2.5 rounded-xl transition-all duration-300 hover:bg-black/5"
+              style={{
+                color: showSchoolBranding
+                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
+                  : '#000000',
+              }}
+            >
+              <SearchIcon />
+            </button>
+            <button
+              className="p-2.5 rounded-xl transition-all duration-300 hover:bg-black/5"
+              style={{
+                color: showSchoolBranding
+                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
+                  : '#000000',
+              }}
+            >
+              <NotificationIcon />
+            </button>
+            <Link
+              href="/settings"
+              className="p-2.5 rounded-xl transition-all duration-300 hover:bg-black/5"
+              style={{
+                color: showSchoolBranding
+                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
+                  : '#000000',
+              }}
+            >
+              <SettingsIcon />
+            </Link>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      {/* Search Modal */}
+      <SearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
+    </>
   );
 }
 
