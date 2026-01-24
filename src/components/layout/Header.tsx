@@ -56,11 +56,26 @@ export function Header({ userName = 'there' }: HeaderProps) {
             </span>
             {showSchoolBranding && schoolTheme && (
               <div className="flex items-center gap-1.5 mt-0.5">
+                {schoolTheme.logo_url && schoolTheme.logo_url.startsWith('http') ? (
+                  <img
+                    src={schoolTheme.logo_url}
+                    alt={schoolTheme.short_name}
+                    className="w-4 h-4 rounded-full object-contain"
+                    style={{ backgroundColor: theme.secondary_color }}
+                    onError={(e) => {
+                      // Fallback to letter if image fails
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
                 <div
-                  className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+                  className="w-4 h-4 rounded-full items-center justify-center text-[8px] font-bold"
                   style={{
                     backgroundColor: theme.secondary_color,
                     color: theme.primary_color,
+                    display: schoolTheme.logo_url && schoolTheme.logo_url.startsWith('http') ? 'none' : 'flex',
                   }}
                 >
                   {schoolTheme.short_name.charAt(0)}

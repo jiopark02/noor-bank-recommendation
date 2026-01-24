@@ -157,11 +157,25 @@ export default function SettingsPage() {
                   backgroundColor: useSchoolTheme ? schoolTheme.primary_color : '#F5F4F2',
                 }}
               >
+                {schoolTheme.logo_url && schoolTheme.logo_url.startsWith('http') ? (
+                  <img
+                    src={schoolTheme.logo_url}
+                    alt={schoolTheme.short_name}
+                    className="w-12 h-12 rounded-full object-contain"
+                    style={{ backgroundColor: schoolTheme.secondary_color }}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
                 <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-medium"
+                  className="w-12 h-12 rounded-full items-center justify-center text-lg font-medium"
                   style={{
                     backgroundColor: schoolTheme.secondary_color,
                     color: schoolTheme.primary_color,
+                    display: schoolTheme.logo_url && schoolTheme.logo_url.startsWith('http') ? 'none' : 'flex',
                   }}
                 >
                   {schoolTheme.short_name.charAt(0)}
