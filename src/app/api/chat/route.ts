@@ -3,9 +3,17 @@ import Anthropic from '@anthropic-ai/sdk';
 import { generateSystemPrompt, UserContext } from '@/lib/noorAIPrompt';
 import { createServerClient } from '@/lib/supabase';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
+// Initialize Anthropic client only if API key exists
+function getAnthropicClient() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+  return new Anthropic({ apiKey });
+}
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -14,6 +22,15 @@ interface ChatMessage {
 
 export async function POST(request: NextRequest) {
   try {
+    const anthropic = getAnthropicClient();
+
+    if (!anthropic) {
+      return NextResponse.json(
+        { error: 'AI service is not configured. Please set ANTHROPIC_API_KEY.' },
+        { status: 503 }
+      );
+    }
+
     const { messages, userContext, userId } = await request.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
