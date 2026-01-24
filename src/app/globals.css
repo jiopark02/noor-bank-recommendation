@@ -14,6 +14,12 @@
   --noor-gray-400: #BDBDBD;
   --noor-gray-500: #9E9E9E;
   --noor-gray-600: #757575;
+
+  /* School Theme Variables (defaults to Noor black/white) */
+  --theme-primary: #000000;
+  --theme-secondary: #FFFFFF;
+  --theme-accent: #6B6B6B;
+  --theme-text-on-primary: #FFFFFF;
 }
 
 /* Base Styles */

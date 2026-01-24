@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Home', icon: HomeIcon },
@@ -14,6 +15,10 @@ const NAV_ITEMS = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { theme, useSchoolTheme } = useTheme();
+
+  const activeColor = useSchoolTheme ? theme.primary_color : '#000000';
+  const inactiveColor = '#9CA3AF';
 
   return (
     <>
@@ -33,12 +38,13 @@ export function BottomNav() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex flex-col items-center justify-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300 ${
-                    isActive ? 'text-black' : 'text-gray-400 hover:text-gray-600'
-                  }`}
+                  className="flex flex-col items-center justify-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300"
+                  style={{ color: isActive ? activeColor : inactiveColor }}
                 >
-                  <Icon active={isActive} />
-                  <span className={`text-[10px] tracking-wide ${isActive ? 'font-medium' : ''}`}>
+                  <Icon active={isActive} activeColor={activeColor} />
+                  <span
+                    className={`text-[10px] tracking-wide ${isActive ? 'font-medium' : ''}`}
+                  >
                     {item.label}
                   </span>
                 </Link>
@@ -56,9 +62,10 @@ export function BottomNav() {
 
 interface IconProps {
   active?: boolean;
+  activeColor?: string;
 }
 
-function HomeIcon({ active }: IconProps) {
+function HomeIcon({ active, activeColor }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
       <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" strokeLinecap="round" strokeLinejoin="round"/>
@@ -67,7 +74,7 @@ function HomeIcon({ active }: IconProps) {
   );
 }
 
-function BankingIcon({ active }: IconProps) {
+function BankingIcon({ active, activeColor }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
       <path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3" strokeLinecap="round" strokeLinejoin="round"/>
@@ -75,7 +82,7 @@ function BankingIcon({ active }: IconProps) {
   );
 }
 
-function HousingIcon({ active }: IconProps) {
+function HousingIcon({ active, activeColor }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
       <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" strokeLinecap="round" strokeLinejoin="round"/>
@@ -84,7 +91,7 @@ function HousingIcon({ active }: IconProps) {
   );
 }
 
-function VisaIcon({ active }: IconProps) {
+function VisaIcon({ active, activeColor }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
       <rect x="2" y="4" width="20" height="16" rx="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -94,7 +101,7 @@ function VisaIcon({ active }: IconProps) {
   );
 }
 
-function DealsIcon({ active }: IconProps) {
+function DealsIcon({ active, activeColor }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
       <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinecap="round" strokeLinejoin="round"/>

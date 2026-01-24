@@ -18,6 +18,11 @@ export interface University {
   is_public: boolean;
   has_international_students: boolean;
   international_student_count?: number;
+  // Theme properties
+  primary_color?: string;
+  secondary_color?: string;
+  logo_url?: string;
+  mascot?: string;
 }
 
 export interface TransferAgreement {
