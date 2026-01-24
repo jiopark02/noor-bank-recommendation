@@ -8,6 +8,7 @@ import {
   getUniversities,
   getTAGEligibleUniversities,
   getInstitutionById,
+  searchInstitutions,
   University,
 } from '@/lib/universitiesData';
 
@@ -312,20 +313,25 @@ export default function SurveyPage() {
   // Filter institutions based on search and type
   const filteredInstitutions = useMemo(() => {
     if (!data.institutionType) return [];
+
+    // Use search function for better matching
+    if (institutionSearch && institutionSearch.length >= 2) {
+      const results = searchInstitutions(institutionSearch, 30);
+      return results.filter(inst =>
+        data.institutionType === 'community_college'
+          ? inst.type === 'community_college'
+          : inst.type === 'university'
+      ).slice(0, 15);
+    }
+
+    // Default: show popular institutions by enrollment
     const institutions = data.institutionType === 'community_college'
       ? getCommunityColleges()
       : getUniversities();
 
-    if (!institutionSearch) return institutions.slice(0, 20);
-
-    const search = institutionSearch.toLowerCase();
     return institutions
-      .filter(inst =>
-        inst.name.toLowerCase().includes(search) ||
-        inst.short_name.toLowerCase().includes(search) ||
-        inst.city.toLowerCase().includes(search)
-      )
-      .slice(0, 15);
+      .sort((a, b) => (b.international_student_count || 0) - (a.international_student_count || 0))
+      .slice(0, 20);
   }, [data.institutionType, institutionSearch]);
 
   // Get TAG-eligible universities for CC students
@@ -556,20 +562,43 @@ export default function SurveyPage() {
                     placeholder={`Search ${data.institutionType === 'community_college' ? 'community colleges' : 'universities'}...`}
                     className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
                   />
-                  {showInstitutionList && filteredInstitutions.length > 0 && (
+                  {showInstitutionList && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                      {filteredInstitutions.map(inst => (
+                      {filteredInstitutions.length > 0 ? (
+                        <>
+                          {filteredInstitutions.map(inst => (
+                            <button
+                              key={inst.id}
+                              onClick={() => selectInstitution(inst)}
+                              className={`w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 ${
+                                data.institutionId === inst.id ? 'bg-gray-50' : ''
+                              }`}
+                            >
+                              <p className="font-medium text-sm text-gray-900">{inst.short_name}</p>
+                              <p className="text-xs text-gray-500">{inst.name} · {inst.city}, {inst.state}</p>
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => {
+                              updateField('institutionId', 'other');
+                              setShowInstitutionList(false);
+                            }}
+                            className="w-full px-4 py-3 text-left hover:bg-gray-50 text-gray-500 text-sm"
+                          >
+                            Can't find your school? Continue anyway
+                          </button>
+                        </>
+                      ) : institutionSearch.length >= 2 ? (
                         <button
-                          key={inst.id}
-                          onClick={() => selectInstitution(inst)}
-                          className={`w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-0 ${
-                            data.institutionId === inst.id ? 'bg-gray-50' : ''
-                          }`}
+                          onClick={() => {
+                            updateField('institutionId', 'other');
+                            setShowInstitutionList(false);
+                          }}
+                          className="w-full px-4 py-3 text-left text-gray-500 text-sm"
                         >
-                          <p className="font-medium text-sm text-gray-900">{inst.short_name}</p>
-                          <p className="text-xs text-gray-500">{inst.name} · {inst.city}, {inst.state}</p>
+                          No results found. Continue without selecting a school
                         </button>
-                      ))}
+                      ) : null}
                     </div>
                   )}
                   {data.institutionId && (
