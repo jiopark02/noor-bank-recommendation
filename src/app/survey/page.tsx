@@ -1,7 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  ALL_INSTITUTIONS,
+  getCommunityColleges,
+  getUniversities,
+  getTAGEligibleUniversities,
+  getInstitutionById,
+  University,
+} from '@/lib/universitiesData';
 
 interface SurveyData {
   // Step 1
@@ -11,11 +19,17 @@ interface SurveyData {
   password: string;
   confirmPassword: string;
   staySignedIn: boolean;
-  university: string;
+  institutionId: string;
+  institutionType: 'university' | 'community_college' | '';
   countryOfOrigin: string;
   // Step 2
   academicLevel: string;
   year: string;
+  // Step 2.5 (for CC students)
+  planningToTransfer: boolean | null;
+  targetUniversities: string[];
+  targetMajor: string;
+  expectedTransferYear: string;
   // Step 3
   hasSSN: boolean | null;
   hasITIN: boolean | null;
@@ -43,10 +57,15 @@ const INITIAL_DATA: SurveyData = {
   password: '',
   confirmPassword: '',
   staySignedIn: false,
-  university: '',
+  institutionId: '',
+  institutionType: '',
   countryOfOrigin: '',
   academicLevel: '',
   year: '',
+  planningToTransfer: null,
+  targetUniversities: [],
+  targetMajor: '',
+  expectedTransferYear: '',
   hasSSN: null,
   hasITIN: null,
   hasUSAddress: null,
@@ -62,19 +81,10 @@ const INITIAL_DATA: SurveyData = {
   creditCardInterest: '',
 };
 
-const UNIVERSITIES = [
-  'Stanford',
-  'UC Berkeley',
-  'UIUC',
-  'USC',
-  'UCLA',
-  'Columbia',
-  'NYU',
-  'Cornell',
-  'Northeastern',
-  'UC Irvine',
-  'Boston U',
-  'Other',
+// Institution type options
+const INSTITUTION_TYPES = [
+  { id: 'university', label: '4-Year University' },
+  { id: 'community_college', label: 'Community College' },
 ];
 
 const COUNTRIES = [
@@ -291,20 +301,56 @@ export default function SurveyPage() {
   const [step, setStep] = useState(1);
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [institutionSearch, setInstitutionSearch] = useState('');
+  const [showInstitutionList, setShowInstitutionList] = useState(false);
 
-  const totalSteps = 7;
+  // Total steps: 8 for CC students with transfer, 7 for others
+  const isCC = data.institutionType === 'community_college';
+  const showTransferStep = isCC && data.planningToTransfer === true;
+  const totalSteps = showTransferStep ? 8 : 7;
+
+  // Filter institutions based on search and type
+  const filteredInstitutions = useMemo(() => {
+    if (!data.institutionType) return [];
+    const institutions = data.institutionType === 'community_college'
+      ? getCommunityColleges()
+      : getUniversities();
+
+    if (!institutionSearch) return institutions.slice(0, 20);
+
+    const search = institutionSearch.toLowerCase();
+    return institutions
+      .filter(inst =>
+        inst.name.toLowerCase().includes(search) ||
+        inst.short_name.toLowerCase().includes(search) ||
+        inst.city.toLowerCase().includes(search)
+      )
+      .slice(0, 15);
+  }, [data.institutionType, institutionSearch]);
+
+  // Get TAG-eligible universities for CC students
+  const tagUniversities = useMemo(() => {
+    if (!data.institutionId || !isCC) return [];
+    return getTAGEligibleUniversities(data.institutionId);
+  }, [data.institutionId, isCC]);
 
   const updateField = <K extends keyof SurveyData>(field: K, value: SurveyData[K]) => {
     setData(prev => ({ ...prev, [field]: value }));
   };
 
-  const toggleArrayField = (field: 'bankingNeeds' | 'goals', value: string) => {
+  const toggleArrayField = (field: 'bankingNeeds' | 'goals' | 'targetUniversities', value: string) => {
     setData(prev => ({
       ...prev,
       [field]: prev[field].includes(value)
         ? prev[field].filter(v => v !== value)
         : [...prev[field], value],
     }));
+  };
+
+  const selectInstitution = (inst: University) => {
+    updateField('institutionId', inst.id);
+    setInstitutionSearch(inst.short_name);
+    setShowInstitutionList(false);
   };
 
   const handleNext = () => {
@@ -322,6 +368,8 @@ export default function SurveyPage() {
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
+      const institution = data.institutionId ? getInstitutionById(data.institutionId) : null;
+
       const response = await fetch('/api/survey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -331,7 +379,9 @@ export default function SurveyPage() {
           email: data.email,
           password: data.password,
           country_of_origin: data.countryOfOrigin,
-          university: data.university,
+          university: institution?.short_name || '',
+          institution_id: data.institutionId,
+          institution_type: data.institutionType,
           visa_status: 'F-1',
           has_ssn: data.hasSSN ?? false,
           has_itin: data.hasITIN ?? false,
@@ -350,6 +400,11 @@ export default function SurveyPage() {
           fee_sensitivity: data.feePriority === 'budget' ? 'very-sensitive' : data.feePriority === 'premium' ? 'not-sensitive' : 'medium',
           digital_preference: data.bankingStyle === 'Digital' ? 'mobile-first' : data.bankingStyle === 'Branches' ? 'branch' : 'both',
           campus_proximity: data.branchPreference === 'must' ? 'very-important' : data.branchPreference === 'preferred' ? 'somewhat-important' : 'not-important',
+          // Transfer-related fields for CC students
+          planning_to_transfer: data.planningToTransfer,
+          target_universities: data.targetUniversities,
+          target_major: data.targetMajor,
+          expected_transfer_year: data.expectedTransferYear,
         }),
       });
 
@@ -364,7 +419,9 @@ export default function SurveyPage() {
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email,
-        university: data.university,
+        institutionId: data.institutionId,
+        institutionType: data.institutionType,
+        university: institution?.short_name || '',
         countryOfOrigin: data.countryOfOrigin,
         hasSSN: data.hasSSN,
         hasITIN: data.hasITIN,
@@ -378,6 +435,11 @@ export default function SurveyPage() {
         campusSide: data.campusSide !== 'unknown' ? data.campusSide : null,
         goals: data.goals,
         creditCardInterest: data.creditCardInterest,
+        // Transfer-related fields
+        planningToTransfer: data.planningToTransfer,
+        targetUniversities: data.targetUniversities,
+        targetMajor: data.targetMajor,
+        expectedTransferYear: data.expectedTransferYear,
       };
       localStorage.setItem('noor_user_profile', JSON.stringify(userProfile));
 
@@ -453,12 +515,71 @@ export default function SurveyPage() {
                 <span className="text-sm text-gray-600">Stay signed in</span>
               </label>
 
-              <Select
-                placeholder="University"
-                value={data.university}
-                onChange={v => updateField('university', v)}
-                options={UNIVERSITIES}
-              />
+              {/* Institution Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">School type</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {INSTITUTION_TYPES.map(type => (
+                    <button
+                      key={type.id}
+                      onClick={() => {
+                        updateField('institutionType', type.id as 'university' | 'community_college');
+                        updateField('institutionId', '');
+                        setInstitutionSearch('');
+                      }}
+                      className={`py-3 rounded-xl border-2 font-medium text-sm transition-all duration-300 ${
+                        data.institutionType === type.id
+                          ? 'border-black bg-black text-white'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      {type.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Institution Search */}
+              {data.institutionType && (
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {data.institutionType === 'community_college' ? 'Community College' : 'University'}
+                  </label>
+                  <input
+                    type="text"
+                    value={institutionSearch}
+                    onChange={e => {
+                      setInstitutionSearch(e.target.value);
+                      setShowInstitutionList(true);
+                    }}
+                    onFocus={() => setShowInstitutionList(true)}
+                    placeholder={`Search ${data.institutionType === 'community_college' ? 'community colleges' : 'universities'}...`}
+                    className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
+                  />
+                  {showInstitutionList && filteredInstitutions.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                      {filteredInstitutions.map(inst => (
+                        <button
+                          key={inst.id}
+                          onClick={() => selectInstitution(inst)}
+                          className={`w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-0 ${
+                            data.institutionId === inst.id ? 'bg-gray-50' : ''
+                          }`}
+                        >
+                          <p className="font-medium text-sm text-gray-900">{inst.short_name}</p>
+                          <p className="text-xs text-gray-500">{inst.name} · {inst.city}, {inst.state}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {data.institutionId && (
+                    <p className="text-xs text-emerald-600 mt-1">
+                      ✓ {getInstitutionById(data.institutionId)?.name}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <Select
                 placeholder="Country of Origin"
                 value={data.countryOfOrigin}
@@ -477,21 +598,35 @@ export default function SurveyPage() {
 
             <div className="space-y-6">
               <div className="space-y-2">
-                {["Bachelor's", "Master's", 'PhD', 'Postdoc', 'Exchange/Visiting'].map(level => (
-                  <OptionButton
-                    key={level}
-                    selected={data.academicLevel === level}
-                    onClick={() => updateField('academicLevel', level)}
-                  >
-                    {level}
-                  </OptionButton>
-                ))}
+                {isCC ? (
+                  // CC-specific options
+                  ["Associate's", 'Certificate Program', 'ESL/Language', 'Undecided'].map(level => (
+                    <OptionButton
+                      key={level}
+                      selected={data.academicLevel === level}
+                      onClick={() => updateField('academicLevel', level)}
+                    >
+                      {level}
+                    </OptionButton>
+                  ))
+                ) : (
+                  // University options
+                  ["Bachelor's", "Master's", 'PhD', 'Postdoc', 'Exchange/Visiting'].map(level => (
+                    <OptionButton
+                      key={level}
+                      selected={data.academicLevel === level}
+                      onClick={() => updateField('academicLevel', level)}
+                    >
+                      {level}
+                    </OptionButton>
+                  ))
+                )}
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-3">Year</label>
                 <div className="flex gap-2">
-                  {['1', '2', '3', '4', '5+'].map(year => (
+                  {(isCC ? ['1', '2', '3+'] : ['1', '2', '3', '4', '5+']).map(year => (
                     <button
                       key={year}
                       onClick={() => updateField('year', year)}
@@ -507,6 +642,20 @@ export default function SurveyPage() {
                 </div>
               </div>
 
+              {/* Transfer question for CC students */}
+              {isCC && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">Planning to transfer?</label>
+                  <ToggleButtons
+                    value={data.planningToTransfer}
+                    onChange={v => updateField('planningToTransfer', v)}
+                  />
+                  {data.planningToTransfer === true && (
+                    <Feedback>Great! We'll help you prepare for transfer.</Feedback>
+                  )}
+                </div>
+              )}
+
               {data.academicLevel && data.year && (
                 <Feedback>Got it. We'll tailor your options.</Feedback>
               )}
@@ -514,8 +663,102 @@ export default function SurveyPage() {
           </div>
         )}
 
-        {/* Step 3: What We're Working With. */}
-        {step === 3 && (
+        {/* Step 2.5: Transfer Goals (CC students only) */}
+        {step === 3 && isCC && data.planningToTransfer && (
+          <div className="animate-fade-in">
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">Your Transfer Goals.</h1>
+            <p className="text-gray-500 mb-8">Let's plan your path to a 4-year university.</p>
+
+            <div className="space-y-6">
+              {/* TAG Eligible Universities */}
+              {tagUniversities.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    TAG-Eligible Universities
+                    <span className="text-xs text-emerald-600 ml-2">Guaranteed admission</span>
+                  </label>
+                  <div className="space-y-2">
+                    {tagUniversities.map(uni => (
+                      <button
+                        key={uni.id}
+                        onClick={() => toggleArrayField('targetUniversities', uni.id)}
+                        className={`w-full p-3 rounded-xl border-2 text-left transition-all duration-300 ${
+                          data.targetUniversities.includes(uni.id)
+                            ? 'border-black bg-black text-white'
+                            : 'border-gray-200 hover:border-gray-400'
+                        }`}
+                      >
+                        <p className="font-medium text-sm">{uni.short_name}</p>
+                        <p className={`text-xs ${data.targetUniversities.includes(uni.id) ? 'text-gray-300' : 'text-gray-500'}`}>
+                          {uni.name}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Other UC options */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Other Target Universities</label>
+                <div className="flex flex-wrap gap-2">
+                  {['ucla', 'ucb', 'usc', 'stanford'].map(uniId => {
+                    const uni = getInstitutionById(uniId);
+                    if (!uni || data.targetUniversities.includes(uniId)) return null;
+                    return (
+                      <ChipButton
+                        key={uniId}
+                        selected={data.targetUniversities.includes(uniId)}
+                        onClick={() => toggleArrayField('targetUniversities', uniId)}
+                      >
+                        {uni.short_name}
+                      </ChipButton>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Target Major */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Target Major</label>
+                <Input
+                  placeholder="e.g., Computer Science, Business..."
+                  value={data.targetMajor}
+                  onChange={v => updateField('targetMajor', v)}
+                />
+              </div>
+
+              {/* Expected Transfer Year */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Expected Transfer</label>
+                <div className="flex gap-2">
+                  {['Fall 2026', 'Spring 2027', 'Fall 2027', 'Later'].map(term => (
+                    <button
+                      key={term}
+                      onClick={() => updateField('expectedTransferYear', term)}
+                      className={`flex-1 py-3 rounded-xl border-2 font-medium text-sm transition-all duration-300 ${
+                        data.expectedTransferYear === term
+                          ? 'border-black bg-black text-white'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      {term}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {data.targetUniversities.length > 0 && (
+                <Feedback>
+                  {data.targetUniversities.length} target{data.targetUniversities.length > 1 ? 's' : ''} selected. We'll track deadlines for you.
+                </Feedback>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Step 3 or 4: What We're Working With. */}
+        {((step === 3 && !showTransferStep) || (step === 4 && showTransferStep)) && (
           <div className="animate-fade-in">
             <h1 className="text-3xl font-semibold tracking-tight mb-2">What We're Working With.</h1>
             <p className="text-gray-500 mb-8">We Tailor From Here</p>
@@ -554,8 +797,8 @@ export default function SurveyPage() {
           </div>
         )}
 
-        {/* Step 4: Your Finances. */}
-        {step === 4 && (
+        {/* Step 4 or 5: Your Finances. */}
+        {((step === 4 && !showTransferStep) || (step === 5 && showTransferStep)) && (
           <div className="animate-fade-in">
             <h1 className="text-3xl font-semibold tracking-tight mb-2">Your Finances.</h1>
             <p className="text-gray-500 mb-8">Walk Us Through</p>
@@ -601,8 +844,8 @@ export default function SurveyPage() {
           </div>
         )}
 
-        {/* Step 5: How you bank. */}
-        {step === 5 && (
+        {/* Step 5 or 6: How you bank. */}
+        {((step === 5 && !showTransferStep) || (step === 6 && showTransferStep)) && (
           <div className="animate-fade-in">
             <h1 className="text-3xl font-semibold tracking-tight mb-2">How you bank.</h1>
             <p className="text-gray-500 mb-8">Select what matters.</p>
@@ -651,8 +894,8 @@ export default function SurveyPage() {
           </div>
         )}
 
-        {/* Step 6: Global. */}
-        {step === 6 && (
+        {/* Step 6 or 7: Global. */}
+        {((step === 6 && !showTransferStep) || (step === 7 && showTransferStep)) && (
           <div className="animate-fade-in">
             <h1 className="text-3xl font-semibold tracking-tight mb-2">Global.</h1>
             <p className="text-gray-500 mb-8">How you move across borders.</p>
@@ -726,8 +969,8 @@ export default function SurveyPage() {
           </div>
         )}
 
-        {/* Step 7: Your goals. */}
-        {step === 7 && (
+        {/* Step 7 or 8: Your goals. */}
+        {((step === 7 && !showTransferStep) || (step === 8 && showTransferStep)) && (
           <div className="animate-fade-in">
             <h1 className="text-3xl font-semibold tracking-tight mb-2">Your goals.</h1>
             <p className="text-gray-500 mb-8">What matters to you right now.</p>
