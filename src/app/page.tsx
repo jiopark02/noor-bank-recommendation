@@ -4,12 +4,14 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PageLayout } from '@/components/layout';
-
-const IMPORTANT_DATES = [
-  { label: 'FAFSA', days: 15 },
-  { label: 'Tax', days: 42 },
-  { label: 'OPT', days: 90 },
-];
+import {
+  generateNotifications,
+  getUnreadNotificationCount,
+  markNotificationAsRead,
+  getReadNotifications,
+  formatReminderDate,
+  Notification,
+} from '@/lib/notificationsData';
 
 const QUICK_LINKS = [
   { label: 'SSN Guide', href: '/guides/ssn' },
@@ -65,6 +67,8 @@ export default function HomePage() {
   const [completedItems, setCompletedItems] = useState<Set<string>>(new Set());
   const [userName, setUserName] = useState('there');
   const [isLoading, setIsLoading] = useState(true);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [readNotifications, setReadNotifications] = useState<string[]>([]);
 
   useEffect(() => {
     const userId = localStorage.getItem('noor_user_id');
@@ -86,8 +90,23 @@ export default function HomePage() {
       }
     }
 
+    // Load notifications
+    const notifs = generateNotifications();
+    const read = getReadNotifications();
+    setNotifications(notifs);
+    setReadNotifications(read);
+
     setIsLoading(false);
   }, [router]);
+
+  const handleDismissNotification = (notifId: string) => {
+    markNotificationAsRead(notifId);
+    setReadNotifications((prev) => [...prev, notifId]);
+  };
+
+  const unreadNotifications = notifications.filter(
+    (n) => !readNotifications.includes(n.id)
+  );
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -139,20 +158,51 @@ export default function HomePage() {
         <p className="page-subtitle">We've prepared a few things.</p>
       </header>
 
-      {/* Important Dates */}
-      <section className="mb-12 animate-fade-in">
-        <h2 className="section-title mb-4">Important dates.</h2>
-        <div className="flex gap-3 flex-wrap">
-          {IMPORTANT_DATES.map((date) => (
-            <span
-              key={date.label}
-              className="px-4 py-2.5 border border-gray-200 rounded-full text-sm transition-all duration-300 hover:border-gray-400"
-            >
-              {date.label} · {date.days}d
-            </span>
-          ))}
-        </div>
-      </section>
+      {/* Smart Notifications */}
+      {unreadNotifications.length > 0 && (
+        <section className="mb-12 animate-fade-in">
+          <h2 className="section-title mb-4">Reminders.</h2>
+          <div className="space-y-2">
+            {unreadNotifications.slice(0, 3).map((notif) => (
+              <div
+                key={notif.id}
+                className={`noor-card px-4 py-3 flex items-center justify-between ${
+                  notif.severity === 'urgent'
+                    ? 'border-l-2 border-l-red-500'
+                    : notif.severity === 'warning'
+                    ? 'border-l-2 border-l-yellow-500'
+                    : ''
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-lg">
+                    {notif.severity === 'urgent' ? '🚨' : notif.severity === 'warning' ? '⚠️' : '📌'}
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium text-black">{notif.title}</p>
+                    <p className="text-xs text-gray-500">
+                      {notif.message} • {formatReminderDate(notif.due_date)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDismissNotification(notif.id)}
+                  className="text-gray-400 hover:text-gray-600 p-1"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+            {unreadNotifications.length > 3 && (
+              <Link href="/visa" className="block text-center text-sm text-gray-500 hover:text-black py-2">
+                View all {unreadNotifications.length} reminders →
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Quick Links */}
       <section className="mb-12 animate-fade-in">

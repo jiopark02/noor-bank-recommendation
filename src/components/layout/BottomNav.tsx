@@ -8,9 +8,8 @@ const NAV_ITEMS = [
   { href: '/', label: 'Home', icon: HomeIcon },
   { href: '/banking', label: 'Banking', icon: BankingIcon },
   { href: '/housing', label: 'Housing', icon: HousingIcon },
-  { href: '/jobs', label: 'Jobs', icon: JobsIcon },
-  { href: '/funding', label: 'Funding', icon: FundingIcon },
-  { href: '/forum', label: 'Forum', icon: ForumIcon },
+  { href: '/visa', label: 'Visa', icon: VisaIcon },
+  { href: '/deals', label: 'Deals', icon: DealsIcon },
 ];
 
 export function BottomNav() {
@@ -85,28 +84,22 @@ function HousingIcon({ active }: IconProps) {
   );
 }
 
-function JobsIcon({ active }: IconProps) {
+function VisaIcon({ active }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
-      <rect x="2" y="7" width="20" height="14" rx="2" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2M12 12v4M8 12h8" strokeLinecap="round" strokeLinejoin="round"/>
+      <rect x="2" y="4" width="20" height="16" rx="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M2 10h20" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M6 16h4M14 16h4" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
 
-function FundingIcon({ active }: IconProps) {
+function DealsIcon({ active }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
-      <path d="M22 10v6M2 10l10-5 10 5-10 5-10-5z" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M6 12v5c3 3 9 3 12 0v-5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  );
-}
-
-function ForumIcon({ active }: IconProps) {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
-      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M2 17l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
