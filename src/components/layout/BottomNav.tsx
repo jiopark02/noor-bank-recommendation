@@ -9,8 +9,8 @@ const NAV_ITEMS = [
   { href: '/', label: 'Home', icon: HomeIcon },
   { href: '/banking', label: 'Banking', icon: BankingIcon },
   { href: '/housing', label: 'Housing', icon: HousingIcon },
-  { href: '/visa', label: 'Visa', icon: VisaIcon },
-  { href: '/deals', label: 'Deals', icon: DealsIcon },
+  { href: '/funding', label: 'Funding', icon: FundingIcon },
+  { href: '/forum', label: 'Forum', icon: ForumIcon },
 ];
 
 export function BottomNav() {
@@ -101,12 +101,19 @@ function VisaIcon({ active, activeColor }: IconProps) {
   );
 }
 
-function DealsIcon({ active, activeColor }: IconProps) {
+function FundingIcon({ active, activeColor }: IconProps) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
-      <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M2 17l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M22 10v6M2 10l10-5 10 5-10 5-10-5z" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M6 12v5c3 3 9 3 12 0v-5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function ForumIcon({ active, activeColor }: IconProps) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
