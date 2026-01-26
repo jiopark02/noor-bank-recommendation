@@ -457,7 +457,7 @@ export default function HomePage() {
                   </div>
                 </div>
                 <Link
-                  href="/budget"
+                  href="/money"
                   className="block w-full mt-4 py-2 text-center text-sm font-medium text-gray-600 hover:text-black transition-colors"
                 >
                   Manage Budget →
