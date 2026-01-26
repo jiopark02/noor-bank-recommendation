@@ -104,9 +104,16 @@ export default function BankingPage() {
   return (
     <PageLayout>
       <PageHeader
-        title="Banking."
-        subtitle="Matched to your situation."
+        title="Banking"
+        subtitle="We'll help you find the right fit."
       />
+
+      {/* Reassurance message */}
+      <div className="bg-gray-50 rounded-xl p-4 mb-6">
+        <p className="text-sm text-gray-600 leading-relaxed">
+          Most banks here accept international students — you don't need an SSN to get started. Take your time to compare.
+        </p>
+      </div>
 
       <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />
 
@@ -138,12 +145,14 @@ export default function BankingPage() {
             </div>
           </div>
 
-          <h2 className="section-title mb-5">Best for you.</h2>
+          <h2 className="section-title mb-3">Recommended for you</h2>
+          <p className="text-sm text-gray-500 mb-5">Based on your situation. No pressure to decide today.</p>
           <BankRecommendationList userId={userId} limit={10} />
 
           {/* Branch Locations Section */}
           <div className="mt-10 pt-8 border-t border-gray-100">
-            <h2 className="section-title mb-5">Branches near campus.</h2>
+            <h2 className="section-title mb-3">Branches near you</h2>
+            <p className="text-sm text-gray-500 mb-5">In-person help when you need it.</p>
             <BranchLocator
               university={userUniversity}
               userCampusSide={selectedCampusSide !== 'all' ? selectedCampusSide : userCampusSide}
@@ -160,8 +169,13 @@ export default function BankingPage() {
             activeFilters={cardFilters}
             onChange={toggleCardFilter}
           />
-          <p className="text-gray-400 text-sm mb-5">{cardTotal} cards for F-1 students</p>
-          <h2 className="section-title mb-5">Best first cards.</h2>
+          <div className="bg-gray-50 rounded-xl p-4 mb-5">
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Building credit takes time — start with one card and use it responsibly. No need to rush.
+            </p>
+          </div>
+          <h2 className="section-title mb-3">Good first cards</h2>
+          <p className="text-sm text-gray-500 mb-5">{cardTotal} options for international students</p>
 
           {cardsLoading ? (
             <LoadingSpinner />

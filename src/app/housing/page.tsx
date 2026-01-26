@@ -88,8 +88,8 @@ export default function HousingPage() {
   return (
     <PageLayout>
       <PageHeader
-        title="Housing."
-        subtitle={`${total} near campus.`}
+        title="Housing"
+        subtitle="Find your home near campus"
         rightContent={
           <button
             onClick={() => setShowMap(!showMap)}
@@ -99,6 +99,13 @@ export default function HousingPage() {
           </button>
         }
       />
+
+      {/* Reassurance message */}
+      <div className="bg-gray-50 rounded-xl p-4 mb-6">
+        <p className="text-sm text-gray-600 leading-relaxed">
+          Finding housing can feel overwhelming. Take your time — most leases start 1-2 months before move-in. We found {total} options near your campus.
+        </p>
+      </div>
 
       {/* Amenity Filters */}
       <div className="grid grid-cols-3 gap-3 mb-4">

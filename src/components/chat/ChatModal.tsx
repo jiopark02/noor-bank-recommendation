@@ -140,15 +140,18 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
                   </span>
                 </div>
                 <h4 className="font-medium text-gray-900 mb-1">
-                  안녕하세요! Noor AI예요
+                  Hi! I'm Noor
                 </h4>
-                <p className="text-sm text-gray-500 mb-6">
-                  미국 유학 생활에 대한 금융 질문이 있으시면 언제든 물어보세요.
+                <p className="text-sm text-gray-500 mb-2">
+                  I'm here to help with banking, housing, visa questions, and more.
+                </p>
+                <p className="text-xs text-gray-400 mb-6">
+                  No question is too small. Take your time.
                 </p>
 
                 {/* Quick prompts */}
                 <div className="w-full space-y-2">
-                  <p className="text-xs text-gray-400 mb-2">자주 묻는 질문</p>
+                  <p className="text-xs text-gray-400 mb-2">Common questions</p>
                   {quickPrompts.map((qp, index) => (
                     <button
                       key={index}

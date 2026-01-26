@@ -1,95 +1,185 @@
 'use client';
 
-import React from 'react';
-import Link from 'next/link';
+import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// What brings you here options
+const REASONS = [
+  {
+    id: 'just-arrived',
+    label: 'I just arrived in the US',
+    description: 'Help me get settled',
+    priority: ['bank', 'phone', 'documents'],
+  },
+  {
+    id: 'need-bank',
+    label: 'I need a bank account',
+    description: 'Find the right one for me',
+    priority: ['bank', 'credit'],
+  },
+  {
+    id: 'find-housing',
+    label: 'I\'m looking for housing',
+    description: 'Find apartments near campus',
+    priority: ['housing', 'budget'],
+  },
+  {
+    id: 'build-credit',
+    label: 'I want to build credit',
+    description: 'Start my credit journey',
+    priority: ['credit', 'bank'],
+  },
+  {
+    id: 'just-exploring',
+    label: 'Just exploring',
+    description: 'Show me around',
+    priority: [],
+  },
+];
 
 export default function WelcomePage() {
+  const router = useRouter();
+  const [step, setStep] = useState<'welcome' | 'reason'>('welcome');
+  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+
+  const handleReasonSelect = (reasonId: string) => {
+    setSelectedReason(reasonId);
+
+    // Save the reason for personalization
+    const reason = REASONS.find(r => r.id === reasonId);
+    if (reason) {
+      localStorage.setItem('noor_user_intent', reasonId);
+      localStorage.setItem('noor_user_priorities', JSON.stringify(reason.priority));
+    }
+
+    // Small delay for animation
+    setTimeout(() => {
+      router.push('/survey');
+    }, 300);
+  };
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col items-center justify-center px-8 pb-12">
+      <main className="flex-1 flex flex-col items-center justify-center px-6">
         <div className="max-w-sm w-full">
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <h1
-              className="text-3xl tracking-[0.35em] font-semibold"
-              style={{ fontFamily: "'SF Pro Display', 'Helvetica Neue', Inter, sans-serif" }}
-            >NOOR</h1>
-            <p className="text-gray-400 text-sm italic mt-1">Your money atelier</p>
-          </div>
-
-          {/* Separator */}
-          <div className="text-center mb-8">
-            <span className="text-gray-300">·</span>
-          </div>
-
-          {/* Hero */}
-          <div className="text-center mb-10">
-            <h2 className="text-4xl font-semibold tracking-tight mb-3">
-              Banking, Tailored.
-            </h2>
-            <p className="text-gray-500 text-base">
-              Tell us about you. We'll handle the rest.
-            </p>
-          </div>
-
-          {/* Features Box */}
-          <div className="bg-gray-50 rounded-2xl p-6 mb-10">
-            <ul className="space-y-4">
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
+          <AnimatePresence mode="wait">
+            {step === 'welcome' ? (
+              <motion.div
+                key="welcome"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="text-center"
+              >
+                {/* Simple Logo */}
+                <div className="mb-12">
+                  <h1
+                    className="text-2xl tracking-[0.3em] font-semibold text-black"
+                    style={{ fontFamily: "'SF Pro Display', 'Helvetica Neue', Inter, sans-serif" }}
+                  >
+                    NOOR
+                  </h1>
                 </div>
-                <span className="text-gray-700">Your visa. Your rules.</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <span className="text-gray-700">Campus-ready.</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <span className="text-gray-700">No SSN? No Problem.</span>
-              </li>
-            </ul>
-          </div>
 
-          {/* Buttons */}
-          <div className="space-y-3 mb-10">
-            <Link
-              href="/survey"
-              className="block w-full py-4 bg-black text-white text-center font-medium rounded-xl transition-all duration-300 hover:bg-gray-800"
-            >
-              Sign Up
-            </Link>
-            <Link
-              href="/login"
-              className="block w-full py-4 bg-white text-black text-center font-medium rounded-xl border-[1.5px] border-gray-300 transition-all duration-300 hover:border-black"
-            >
-              Log In
-            </Link>
-          </div>
+                {/* Warm Welcome */}
+                <div className="mb-12">
+                  <h2 className="text-2xl font-medium text-black mb-3 leading-snug">
+                    Welcome to the US.
+                  </h2>
+                  <p className="text-gray-500 text-base leading-relaxed">
+                    We're here to help you navigate banking, housing, and everything in between.
+                  </p>
+                </div>
 
-          {/* Trust Badge */}
-          <p className="text-center text-gray-400 text-sm mb-8">
-            Bank-level encryption · Your data stays yours
-          </p>
+                {/* Reassurance - not features */}
+                <div className="mb-12 space-y-3">
+                  <p className="text-sm text-gray-400">
+                    No rush. Take your time.
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    We'll guide you step by step.
+                  </p>
+                </div>
+
+                {/* Single CTA */}
+                <button
+                  onClick={() => setStep('reason')}
+                  className="w-full py-4 bg-black text-white font-medium rounded-xl transition-all hover:bg-gray-800"
+                >
+                  Get Started
+                </button>
+
+                {/* Existing user link */}
+                <button
+                  onClick={() => router.push('/login')}
+                  className="w-full mt-4 py-3 text-gray-500 text-sm hover:text-black transition-colors"
+                >
+                  I already have an account
+                </button>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="reason"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+              >
+                {/* Back button */}
+                <button
+                  onClick={() => setStep('welcome')}
+                  className="flex items-center text-gray-400 hover:text-black mb-8 transition-colors"
+                >
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Back
+                </button>
+
+                {/* Question */}
+                <div className="mb-8">
+                  <h2 className="text-2xl font-medium text-black mb-2">
+                    What brings you here?
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    This helps us show you the most relevant stuff first.
+                  </p>
+                </div>
+
+                {/* Options */}
+                <div className="space-y-3">
+                  {REASONS.map((reason, index) => (
+                    <motion.button
+                      key={reason.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      onClick={() => handleReasonSelect(reason.id)}
+                      className={`w-full p-4 text-left rounded-xl border-2 transition-all ${
+                        selectedReason === reason.id
+                          ? 'border-black bg-gray-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <span className="font-medium text-black block">
+                        {reason.label}
+                      </span>
+                      <span className="text-sm text-gray-500 mt-0.5 block">
+                        {reason.description}
+                      </span>
+                    </motion.button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="py-6 text-center border-t border-gray-100">
-        <p className="text-xs text-gray-300 tracking-wide">
-          FEATURED IN: <span className="font-medium">FORBES</span> · <span className="font-medium">TECHCRUNCH</span>
+      {/* Minimal footer */}
+      <footer className="py-6 text-center">
+        <p className="text-xs text-gray-300">
+          Your data stays private. Always.
         </p>
       </footer>
     </div>
