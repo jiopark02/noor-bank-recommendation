@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageLayout } from '@/components/layout';
+import { useTheme } from '@/contexts/ThemeContext';
 import {
   generateNotifications,
   getReadNotifications,
@@ -12,119 +13,72 @@ import {
   Notification,
 } from '@/lib/notificationsData';
 
-// This week's priorities based on user's situation
-interface WeeklyPriority {
+// Financial setup items
+interface SetupItem {
   id: string;
   title: string;
-  description: string;
-  action: string;
+  status: 'done' | 'in_progress' | 'upcoming' | 'not_started';
   href: string;
-  completed?: boolean;
+  description?: string;
 }
 
-// Helper to get week-specific priorities based on arrival week
-function getThisWeekPriorities(weekNumber: number, userProfile: Record<string, unknown> | null): WeeklyPriority[] {
-  const hasBankAccount = userProfile?.has_bank_account === true;
-  const hasSSN = userProfile?.has_ssn === true;
-
-  if (weekNumber <= 1) {
-    return [
-      {
-        id: 'phone',
-        title: 'Get a US phone number',
-        description: 'You\'ll need this for everything - banking, housing, and staying connected.',
-        action: 'See options',
-        href: '/guides/phone',
-      },
-      {
-        id: 'bank',
-        title: 'Open a bank account',
-        description: 'Most banks don\'t need SSN. We\'ll help you pick the right one.',
-        action: 'Find a bank',
-        href: '/banking',
-        completed: hasBankAccount,
-      },
-      {
-        id: 'documents',
-        title: 'Collect your I-20',
-        description: 'Visit your international student office to get your documents.',
-        action: 'Learn more',
-        href: '/guides/documents',
-      },
-    ];
-  } else if (weekNumber <= 4) {
-    return [
-      {
-        id: 'ssn',
-        title: 'Apply for SSN (if working)',
-        description: 'If you have a job offer, you can apply now. Otherwise, wait until you have one.',
-        action: 'Learn how',
-        href: '/guides/ssn',
-        completed: hasSSN,
-      },
-      {
-        id: 'credit',
-        title: 'Start building credit',
-        description: 'A secured credit card is the easiest first step.',
-        action: 'See cards',
-        href: '/funding',
-      },
-      {
-        id: 'health',
-        title: 'Set up health insurance',
-        description: 'Make sure you know how to use your school\'s insurance.',
-        action: 'Check coverage',
-        href: '/guides/insurance',
-      },
-    ];
-  } else {
-    return [
-      {
-        id: 'budget',
-        title: 'Review your budget',
-        description: 'You\'ve been here a month. Let\'s see how you\'re doing.',
-        action: 'Open budget',
-        href: '/budget',
-      },
-      {
-        id: 'credit-check',
-        title: 'Check your credit score',
-        description: 'If you got a credit card, your score should be building.',
-        action: 'Learn more',
-        href: '/guides/credit',
-      },
-      {
-        id: 'jobs',
-        title: 'Explore job opportunities',
-        description: 'On-campus jobs can help with expenses and experience.',
-        action: 'Find jobs',
-        href: '/jobs',
-      },
-    ];
-  }
+// Journey steps
+interface JourneyStep {
+  id: string;
+  title: string;
+  status: 'completed' | 'current' | 'upcoming';
+  description: string;
 }
 
-// Calculate which week since arrival
-function getWeeksSinceArrival(arrivalDate: string | undefined): number {
-  if (!arrivalDate) return 1;
-  const arrival = new Date(arrivalDate);
-  const today = new Date();
-  const diffTime = today.getTime() - arrival.getTime();
-  const diffWeeks = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 7));
-  return Math.max(1, diffWeeks);
+// Quick action
+interface QuickAction {
+  id: string;
+  label: string;
+  prompt: string;
 }
 
-const STORAGE_KEY_COMPLETED_PRIORITIES = 'noor_completed_priorities';
+const STORAGE_KEY_SETUP = 'noor_financial_setup';
+const STORAGE_KEY_BUDGET = 'noor_budget';
+
+// Default setup items
+const DEFAULT_SETUP_ITEMS: SetupItem[] = [
+  { id: 'bank', title: 'Bank Account', status: 'not_started', href: '/banking' },
+  { id: 'phone', title: 'Phone Plan', status: 'not_started', href: '/guides/phone' },
+  { id: 'credit', title: 'Credit Card', status: 'not_started', href: '/funding' },
+  { id: 'tax', title: 'Tax Filing', status: 'upcoming', href: '/guides/tax' },
+  { id: 'visa', title: 'Visa Renewal', status: 'not_started', href: '/visa' },
+];
+
+// Journey steps
+const JOURNEY_STEPS: JourneyStep[] = [
+  { id: 'arrived', title: 'Arrived', status: 'completed', description: 'Welcome to the US!' },
+  { id: 'bank', title: 'Bank Account', status: 'completed', description: 'Financial foundation set' },
+  { id: 'housing', title: 'Housing', status: 'completed', description: 'Found your home' },
+  { id: 'credit', title: 'Credit Building', status: 'current', description: 'Building your credit score' },
+  { id: 'tax', title: 'Tax Ready', status: 'upcoming', description: 'Prepared for tax season' },
+];
+
+// Quick AI prompts
+const AI_QUICK_ACTIONS: QuickAction[] = [
+  { id: 'credit', label: 'How do I build credit?', prompt: 'How do I build credit as an international student?' },
+  { id: 'tax', label: 'When is tax season?', prompt: 'When is tax season and what forms do I need as an F-1 student?' },
+  { id: 'ssn', label: 'Do I need SSN?', prompt: 'Do I need an SSN for a bank account?' },
+  { id: 'opt', label: 'OPT explained', prompt: 'Explain OPT and when should I apply?' },
+];
 
 export default function HomePage() {
   const router = useRouter();
+  const { theme, useSchoolTheme } = useTheme();
   const [userName, setUserName] = useState('there');
   const [isLoading, setIsLoading] = useState(true);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [readNotifications, setReadNotifications] = useState<string[]>([]);
+  const [setupItems, setSetupItems] = useState<SetupItem[]>(DEFAULT_SETUP_ITEMS);
+  const [journeySteps, setJourneySteps] = useState<JourneyStep[]>(JOURNEY_STEPS);
+  const [budget, setBudget] = useState({ total: 2000, spent: 1247 });
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [showAIChat, setShowAIChat] = useState(false);
   const [userProfile, setUserProfile] = useState<Record<string, unknown> | null>(null);
-  const [completedPriorities, setCompletedPriorities] = useState<Set<string>>(new Set());
-  const [weekNumber, setWeekNumber] = useState(1);
 
   useEffect(() => {
     const userId = localStorage.getItem('noor_user_id');
@@ -142,21 +96,44 @@ export default function HomePage() {
         if (profile.firstName) {
           setUserName(profile.firstName);
         }
-        // Calculate weeks since arrival
-        const weeks = getWeeksSinceArrival(profile.arrival_date);
-        setWeekNumber(weeks);
+
+        // Update setup items based on profile
+        const updatedSetup = [...DEFAULT_SETUP_ITEMS];
+        if (profile.has_bank_account) {
+          const bankItem = updatedSetup.find(i => i.id === 'bank');
+          if (bankItem) bankItem.status = 'done';
+        }
+        if (profile.has_phone) {
+          const phoneItem = updatedSetup.find(i => i.id === 'phone');
+          if (phoneItem) phoneItem.status = 'done';
+        }
+        if (profile.has_credit_card) {
+          const creditItem = updatedSetup.find(i => i.id === 'credit');
+          if (creditItem) creditItem.status = 'done';
+        }
+        setSetupItems(updatedSetup);
       } catch (e) {
         // ignore parse errors
       }
     }
 
-    // Load completed priorities
-    const savedCompleted = localStorage.getItem(STORAGE_KEY_COMPLETED_PRIORITIES);
-    if (savedCompleted) {
+    // Load saved setup state
+    const savedSetup = localStorage.getItem(STORAGE_KEY_SETUP);
+    if (savedSetup) {
       try {
-        setCompletedPriorities(new Set(JSON.parse(savedCompleted)));
+        setSetupItems(JSON.parse(savedSetup));
       } catch (e) {
-        // ignore parse errors
+        // ignore
+      }
+    }
+
+    // Load budget
+    const savedBudget = localStorage.getItem(STORAGE_KEY_BUDGET);
+    if (savedBudget) {
+      try {
+        setBudget(JSON.parse(savedBudget));
+      } catch (e) {
+        // ignore
       }
     }
 
@@ -169,24 +146,12 @@ export default function HomePage() {
     setIsLoading(false);
   }, [router]);
 
-  // Save completed priorities
+  // Save setup items
   useEffect(() => {
-    if (completedPriorities.size > 0) {
-      localStorage.setItem(STORAGE_KEY_COMPLETED_PRIORITIES, JSON.stringify(Array.from(completedPriorities)));
+    if (setupItems !== DEFAULT_SETUP_ITEMS) {
+      localStorage.setItem(STORAGE_KEY_SETUP, JSON.stringify(setupItems));
     }
-  }, [completedPriorities]);
-
-  const togglePriority = (id: string) => {
-    setCompletedPriorities(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  }, [setupItems]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -195,268 +160,513 @@ export default function HomePage() {
     return 'Good evening';
   };
 
-  // Get this week's priorities
-  const thisWeekPriorities = useMemo(() => {
-    return getThisWeekPriorities(weekNumber, userProfile);
-  }, [weekNumber, userProfile]);
+  // Calculate financial health percentage
+  const healthPercentage = useMemo(() => {
+    const completed = setupItems.filter(i => i.status === 'done').length;
+    return Math.round((completed / setupItems.length) * 100);
+  }, [setupItems]);
 
-  // Find next uncompleted priority
-  const nextStep = useMemo(() => {
-    return thisWeekPriorities.find(p => !completedPriorities.has(p.id) && !p.completed);
-  }, [thisWeekPriorities, completedPriorities]);
+  // Get status icon
+  const getStatusIcon = (status: SetupItem['status']) => {
+    switch (status) {
+      case 'done': return '✓';
+      case 'in_progress': return '↻';
+      case 'upcoming': return '◷';
+      default: return '○';
+    }
+  };
+
+  // Get status color
+  const getStatusColor = (status: SetupItem['status']) => {
+    switch (status) {
+      case 'done': return 'text-green-500 bg-green-50';
+      case 'in_progress': return 'text-blue-500 bg-blue-50';
+      case 'upcoming': return 'text-amber-500 bg-amber-50';
+      default: return 'text-gray-400 bg-gray-50';
+    }
+  };
+
+  // Toggle setup item status
+  const toggleSetupItem = (id: string) => {
+    setSetupItems(prev => prev.map(item => {
+      if (item.id === id) {
+        const nextStatus: Record<SetupItem['status'], SetupItem['status']> = {
+          'not_started': 'in_progress',
+          'in_progress': 'done',
+          'done': 'not_started',
+          'upcoming': 'in_progress',
+        };
+        return { ...item, status: nextStatus[item.status] };
+      }
+      return item;
+    }));
+  };
 
   // Get urgent notifications (Don't Miss)
   const dontMissItems = useMemo(() => {
     return notifications
       .filter(n => !readNotifications.includes(n.id))
       .filter(n => n.severity === 'urgent' || n.severity === 'warning')
-      .slice(0, 3)
-      .map(n => ({
-        id: n.id,
-        title: n.title,
-        date: formatReminderDate(n.due_date),
-        severity: n.severity,
-        message: n.message,
-      }));
+      .slice(0, 3);
   }, [notifications, readNotifications]);
 
-  // Calculate progress for "You're on track"
-  const progressStats = useMemo(() => {
-    const completedCount = thisWeekPriorities.filter(
-      p => completedPriorities.has(p.id) || p.completed
-    ).length;
-    const totalCount = thisWeekPriorities.length;
-    const percentage = Math.round((completedCount / totalCount) * 100);
+  // This week items
+  const thisWeekItems = useMemo(() => {
+    return notifications
+      .filter(n => !readNotifications.includes(n.id))
+      .filter(n => n.days_until <= 7 && n.days_until > 0)
+      .slice(0, 4);
+  }, [notifications, readNotifications]);
 
-    return { completedCount, totalCount, percentage };
-  }, [thisWeekPriorities, completedPriorities]);
-
-  // Get encouraging message based on progress
-  const getEncouragingMessage = () => {
-    const { percentage } = progressStats;
-    if (percentage === 100) {
-      return "You're all caught up! Take a breather.";
-    } else if (percentage >= 66) {
-      return "You're doing great. Almost there!";
-    } else if (percentage >= 33) {
-      return "Good progress! Keep going at your own pace.";
-    } else {
-      return "One step at a time. You've got this.";
-    }
-  };
+  // Budget calculations
+  const budgetRemaining = budget.total - budget.spent;
+  const budgetPercentUsed = Math.round((budget.spent / budget.total) * 100);
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
-        <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin" />
+        <motion.div
+          className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+        />
       </div>
     );
   }
 
   return (
     <PageLayout userName={userName}>
-      {/* Greeting - Calm and personal */}
-      <header className="mb-8 animate-fade-in">
-        <h1 className="text-2xl font-medium text-black mb-1">
-          {getGreeting()}, {userName}.
-        </h1>
-        <p className="text-gray-500 text-sm">
-          Week {weekNumber} in the US
-        </p>
+      {/* Header with greeting and school logo */}
+      <header className="mb-6 flex items-center justify-between">
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <h1 className="text-2xl font-semibold text-black">
+            {getGreeting()}, {userName}
+          </h1>
+          <p className="text-gray-500 text-sm mt-0.5">
+            Let's check your progress
+          </p>
+        </motion.div>
+        {useSchoolTheme && theme.logo_url && (
+          <motion.img
+            src={theme.logo_url}
+            alt="School"
+            className="w-10 h-10 object-contain rounded-lg"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+          />
+        )}
       </header>
 
-      {/* Your Next Step - Single focused action */}
-      {nextStep && (
-        <motion.section
-          className="mb-6"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
+      {/* Financial Health Tracker - Main Card */}
+      <motion.section
+        className="mb-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <motion.div
+          className="noor-card p-6 cursor-pointer"
+          onClick={() => setExpandedCard(expandedCard === 'health' ? null : 'health')}
+          whileTap={{ scale: 0.98 }}
+          style={{
+            background: useSchoolTheme
+              ? `linear-gradient(135deg, ${theme.primary_color}10 0%, white 100%)`
+              : 'linear-gradient(135deg, #f8f9fa 0%, white 100%)',
+          }}
         >
-          <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-            Your Next Step
-          </h2>
-          <Link href={nextStep.href}>
-            <div className="noor-card p-5 bg-gradient-to-br from-gray-50 to-white border-l-4 border-l-black hover:shadow-md transition-shadow">
-              <h3 className="font-medium text-black text-lg mb-2">{nextStep.title}</h3>
-              <p className="text-gray-600 text-sm mb-4 leading-relaxed">
-                {nextStep.description}
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">
+                Your Financial Health
+              </h2>
+              <p className="text-sm text-gray-600">
+                {healthPercentage === 100
+                  ? "You're all set! Great job."
+                  : `${setupItems.filter(i => i.status === 'done').length} of ${setupItems.length} tasks completed`}
               </p>
-              <span className="inline-flex items-center text-sm font-medium text-black">
-                {nextStep.action}
-                <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </span>
             </div>
-          </Link>
-        </motion.section>
-      )}
 
-      {/* Don't Miss - Urgent items only */}
+            {/* Circular Progress */}
+            <div className="relative w-20 h-20">
+              <svg className="w-20 h-20 transform -rotate-90">
+                <circle
+                  cx="40"
+                  cy="40"
+                  r="34"
+                  stroke="#E5E7EB"
+                  strokeWidth="6"
+                  fill="none"
+                />
+                <motion.circle
+                  cx="40"
+                  cy="40"
+                  r="34"
+                  stroke={useSchoolTheme ? theme.primary_color : '#000000'}
+                  strokeWidth="6"
+                  fill="none"
+                  strokeLinecap="round"
+                  initial={{ strokeDasharray: '0 214' }}
+                  animate={{ strokeDasharray: `${(healthPercentage / 100) * 214} 214` }}
+                  transition={{ duration: 1, ease: 'easeOut', delay: 0.3 }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <motion.span
+                  className="text-xl font-semibold text-black"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.5 }}
+                >
+                  {healthPercentage}%
+                </motion.span>
+              </div>
+            </div>
+          </div>
+
+          {/* Expanded Setup Items */}
+          <AnimatePresence>
+            {expandedCard === 'health' && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="mt-5 pt-5 border-t border-gray-100 overflow-hidden"
+              >
+                <div className="space-y-3">
+                  {setupItems.map((item, index) => (
+                    <motion.div
+                      key={item.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSetupItem(item.id);
+                          }}
+                          className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium transition-all ${getStatusColor(item.status)}`}
+                        >
+                          {getStatusIcon(item.status)}
+                        </button>
+                        <span className={`text-sm ${item.status === 'done' ? 'text-gray-400 line-through' : 'text-black'}`}>
+                          {item.title}
+                        </span>
+                      </div>
+                      <Link
+                        href={item.href}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs text-gray-400 hover:text-black transition-colors"
+                      >
+                        {item.status === 'done' ? 'View' : 'Start'} →
+                      </Link>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Expand indicator */}
+          <div className="flex justify-center mt-4">
+            <motion.div
+              animate={{ rotate: expandedCard === 'health' ? 180 : 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </motion.div>
+          </div>
+        </motion.div>
+      </motion.section>
+
+      {/* Quick Glance - Budget Card */}
+      <motion.section
+        className="mb-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <motion.div
+          className="noor-card p-5 cursor-pointer"
+          onClick={() => setExpandedCard(expandedCard === 'budget' ? null : 'budget')}
+          whileTap={{ scale: 0.98 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+              This Month's Budget
+            </h2>
+            <span className="text-xs text-gray-400">
+              {new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+            </span>
+          </div>
+
+          <div className="flex items-end justify-between mb-4">
+            <div>
+              <p className="text-3xl font-semibold text-black">
+                ${budgetRemaining.toLocaleString()}
+              </p>
+              <p className="text-sm text-gray-500 mt-1">remaining</p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-gray-600">
+                <span className="text-black font-medium">${budget.spent.toLocaleString()}</span> of ${budget.total.toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+            <motion.div
+              className={`h-full rounded-full ${budgetPercentUsed > 90 ? 'bg-red-500' : budgetPercentUsed > 70 ? 'bg-amber-500' : 'bg-green-500'}`}
+              initial={{ width: 0 }}
+              animate={{ width: `${budgetPercentUsed}%` }}
+              transition={{ duration: 0.8, ease: 'easeOut', delay: 0.4 }}
+            />
+          </div>
+
+          <AnimatePresence>
+            {expandedCard === 'budget' && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="mt-4 pt-4 border-t border-gray-100 overflow-hidden"
+              >
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center p-3 bg-gray-50 rounded-xl">
+                    <p className="text-lg font-semibold text-black">${budget.total.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500">Budget</p>
+                  </div>
+                  <div className="text-center p-3 bg-gray-50 rounded-xl">
+                    <p className="text-lg font-semibold text-black">${budget.spent.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500">Spent</p>
+                  </div>
+                  <div className="text-center p-3 bg-green-50 rounded-xl">
+                    <p className="text-lg font-semibold text-green-600">${budgetRemaining.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500">Left</p>
+                  </div>
+                </div>
+                <Link
+                  href="/budget"
+                  className="block w-full mt-4 py-2 text-center text-sm font-medium text-gray-600 hover:text-black transition-colors"
+                >
+                  Manage Budget →
+                </Link>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </motion.section>
+
+      {/* Don't Miss - Urgent Alerts */}
       <AnimatePresence>
         {dontMissItems.length > 0 && (
           <motion.section
             className="mb-6"
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ delay: 0.3 }}
           >
             <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
               Don't Miss
             </h2>
             <div className="space-y-2">
-              {dontMissItems.map((item) => (
-                <div
+              {dontMissItems.map((item, index) => (
+                <motion.div
                   key={item.id}
-                  className={`noor-card px-4 py-3 flex items-start gap-3 ${
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.3 + index * 0.1 }}
+                  className={`noor-card px-4 py-3 flex items-center justify-between ${
                     item.severity === 'urgent' ? 'bg-red-50 border-red-100' : 'bg-amber-50 border-amber-100'
                   }`}
                 >
-                  <span className="text-lg flex-shrink-0 mt-0.5">
-                    {item.severity === 'urgent' ? '!' : ''}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-black">{item.title}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{item.date}</p>
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      item.severity === 'urgent' ? 'bg-red-500 text-white' : 'bg-amber-500 text-white'
+                    }`}>
+                      {item.severity === 'urgent' ? 'URGENT' : 'SOON'}
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium text-black">{item.title}</p>
+                      <p className="text-xs text-gray-500">{item.message}</p>
+                    </div>
                   </div>
-                </div>
+                  <span className="text-xs text-gray-400">{item.days_until}d</span>
+                </motion.div>
               ))}
             </div>
           </motion.section>
         )}
       </AnimatePresence>
 
-      {/* This Week - Checkable priorities */}
-      <motion.section
-        className="mb-6"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
-        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-          This Week
-        </h2>
-        <div className="noor-card overflow-hidden">
-          {thisWeekPriorities.map((priority, index) => {
-            const isCompleted = completedPriorities.has(priority.id) || priority.completed;
-            return (
-              <div
-                key={priority.id}
-                className={`flex items-center gap-4 px-5 py-4 ${
-                  index !== thisWeekPriorities.length - 1 ? 'border-b border-gray-100' : ''
-                } ${isCompleted ? 'bg-gray-50' : ''}`}
-              >
-                <button
-                  onClick={() => togglePriority(priority.id)}
-                  className="flex-shrink-0"
+      {/* This Week Timeline */}
+      {thisWeekItems.length > 0 && (
+        <motion.section
+          className="mb-6"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
+            This Week
+          </h2>
+          <div className="noor-card p-4">
+            <div className="space-y-4">
+              {thisWeekItems.map((item, index) => (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.4 + index * 0.1 }}
+                  className="flex items-start gap-3"
                 >
-                  <motion.div
-                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                      isCompleted
-                        ? 'bg-black border-black'
-                        : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    {isCompleted && (
-                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
+                  <div className="flex flex-col items-center">
+                    <div className={`w-3 h-3 rounded-full ${
+                      item.days_until <= 1 ? 'bg-red-500' : item.days_until <= 3 ? 'bg-amber-500' : 'bg-gray-300'
+                    }`} />
+                    {index < thisWeekItems.length - 1 && (
+                      <div className="w-0.5 h-8 bg-gray-200 mt-1" />
                     )}
-                  </motion.div>
-                </button>
-                <div className="flex-1 min-w-0">
-                  <p className={`font-medium text-sm ${isCompleted ? 'text-gray-400 line-through' : 'text-black'}`}>
-                    {priority.title}
-                  </p>
-                </div>
-                <Link
-                  href={priority.href}
-                  className={`text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
-                    isCompleted
-                      ? 'text-gray-400 bg-gray-100'
-                      : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
-                  }`}
-                >
-                  {isCompleted ? 'Done' : priority.action}
-                </Link>
-              </div>
-            );
-          })}
-        </div>
-      </motion.section>
+                  </div>
+                  <div className="flex-1 pb-2">
+                    <p className="text-sm font-medium text-black">{item.title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {item.days_until === 1 ? 'Tomorrow' : `In ${item.days_until} days`} · {formatReminderDate(item.due_date)}
+                    </p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </motion.section>
+      )}
 
-      {/* You're on Track - Reassurance */}
+      {/* Your Journey Progress */}
       <motion.section
         className="mb-6"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-      >
-        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-          You're on Track
-        </h2>
-        <div className="noor-card p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-gray-600">{getEncouragingMessage()}</span>
-            <span className="text-sm font-medium text-black">
-              {progressStats.completedCount}/{progressStats.totalCount}
-            </span>
-          </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <motion.div
-              className="h-full bg-green-500 rounded-full"
-              initial={{ width: 0 }}
-              animate={{ width: `${progressStats.percentage}%` }}
-              transition={{ duration: 0.8, ease: 'easeOut' }}
-            />
-          </div>
-          {progressStats.percentage === 100 && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              <p className="text-sm text-gray-600 mb-2">Ready for more?</p>
-              <Link
-                href="/guides"
-                className="text-sm font-medium text-black hover:underline"
-              >
-                Explore all guides
-              </Link>
-            </div>
-          )}
-        </div>
-      </motion.section>
-
-      {/* Quick Help - Contextual, not feature list */}
-      <motion.section
-        className="mb-8"
-        initial={{ opacity: 0, y: 10 }}
+        initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5 }}
       >
         <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-          Need Help?
+          Your Journey
         </h2>
-        <div className="grid grid-cols-2 gap-3">
-          <Link href="/chat" className="noor-card p-4 hover:shadow-md transition-shadow">
-            <span className="text-2xl mb-2 block">💬</span>
-            <p className="font-medium text-sm text-black">Ask Noor AI</p>
-            <p className="text-xs text-gray-500 mt-1">Get instant answers</p>
-          </Link>
-          <Link href="/guides" className="noor-card p-4 hover:shadow-md transition-shadow">
-            <span className="text-2xl mb-2 block">📚</span>
-            <p className="font-medium text-sm text-black">Browse Guides</p>
-            <p className="text-xs text-gray-500 mt-1">Step-by-step help</p>
-          </Link>
+        <div className="noor-card p-5">
+          <div className="relative">
+            {/* Progress line */}
+            <div className="absolute left-[11px] top-3 bottom-3 w-0.5 bg-gray-200" />
+            <motion.div
+              className="absolute left-[11px] top-3 w-0.5 bg-black"
+              initial={{ height: 0 }}
+              animate={{ height: `${(journeySteps.filter(s => s.status === 'completed').length / journeySteps.length) * 100}%` }}
+              transition={{ duration: 1, delay: 0.6 }}
+            />
+
+            {/* Steps */}
+            <div className="space-y-5">
+              {journeySteps.map((step, index) => (
+                <motion.div
+                  key={step.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.6 + index * 0.1 }}
+                  className="flex items-start gap-4 relative"
+                >
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
+                    step.status === 'completed'
+                      ? 'bg-black text-white'
+                      : step.status === 'current'
+                      ? 'bg-blue-500 text-white animate-pulse'
+                      : 'bg-gray-200 text-gray-400'
+                  }`}>
+                    {step.status === 'completed' ? (
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    ) : step.status === 'current' ? (
+                      <div className="w-2 h-2 bg-white rounded-full" />
+                    ) : (
+                      <span className="text-xs">{index + 1}</span>
+                    )}
+                  </div>
+                  <div className="flex-1 pt-0.5">
+                    <p className={`text-sm font-medium ${
+                      step.status === 'completed' ? 'text-black' : step.status === 'current' ? 'text-blue-600' : 'text-gray-400'
+                    }`}>
+                      {step.title}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">{step.description}</p>
+                  </div>
+                  {step.status === 'completed' && (
+                    <span className="text-green-500 text-xs font-medium">✓</span>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </div>
         </div>
       </motion.section>
 
-      {/* Reassuring footer message */}
-      <div className="text-center pb-8">
+      {/* AI Quick Actions */}
+      <motion.section
+        className="mb-8"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+            Ask Noor AI
+          </h2>
+          <Link href="/chat" className="text-xs text-gray-400 hover:text-black transition-colors">
+            Open chat →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {AI_QUICK_ACTIONS.map((action, index) => (
+            <motion.button
+              key={action.id}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.7 + index * 0.05 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => {
+                // Store the prompt and open chat
+                localStorage.setItem('noor_quick_prompt', action.prompt);
+                router.push('/chat');
+              }}
+              className="noor-card p-4 text-left hover:shadow-md transition-shadow"
+            >
+              <span className="text-sm text-black">{action.label}</span>
+            </motion.button>
+          ))}
+        </div>
+      </motion.section>
+
+      {/* Bottom reassurance */}
+      <motion.div
+        className="text-center pb-8"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.8 }}
+      >
         <p className="text-xs text-gray-400">
-          Take your time. There's no rush.
+          You're doing great. One step at a time.
         </p>
-      </div>
+      </motion.div>
     </PageLayout>
   );
 }
