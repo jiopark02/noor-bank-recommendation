@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ALL_INSTITUTIONS,
   getCommunityColleges,
   getUniversities,
   getTAGEligibleUniversities,
@@ -11,6 +11,14 @@ import {
   searchInstitutions,
   University,
 } from '@/lib/universitiesData';
+import {
+  validatePassword,
+  validateEmail,
+  getPasswordStrengthColor,
+  getPasswordStrengthLabel,
+  createSession,
+  acceptTerms,
+} from '@/lib/validation';
 
 interface SurveyData {
   // Step 1
@@ -20,6 +28,7 @@ interface SurveyData {
   password: string;
   confirmPassword: string;
   staySignedIn: boolean;
+  agreeToTerms: boolean;
   institutionId: string;
   institutionType: 'university' | 'community_college' | '';
   countryOfOrigin: string;
@@ -58,6 +67,7 @@ const INITIAL_DATA: SurveyData = {
   password: '',
   confirmPassword: '',
   staySignedIn: false,
+  agreeToTerms: false,
   institutionId: '',
   institutionType: '',
   countryOfOrigin: '',
@@ -108,20 +118,138 @@ const Input = ({
   value,
   onChange,
   placeholder,
+  error,
+  required,
 }: {
   type?: string;
   value: string | number;
   onChange: (v: string) => void;
   placeholder?: string;
+  error?: string | null;
+  required?: boolean;
 }) => (
-  <input
-    type={type}
-    value={value}
-    onChange={e => onChange(e.target.value)}
-    placeholder={placeholder}
-    className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400"
-  />
+  <div className="space-y-1">
+    <div className="relative">
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`w-full px-4 py-3.5 border rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400 ${
+          error ? 'border-red-300 bg-red-50' : 'border-gray-200'
+        }`}
+      />
+      {required && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400 text-sm">*</span>
+      )}
+    </div>
+    {error && <p className="text-xs text-red-500">{error}</p>}
+  </div>
 );
+
+// Password Input with show/hide toggle
+const PasswordInput = ({
+  value,
+  onChange,
+  placeholder,
+  error,
+  showStrength,
+  strengthData,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  error?: string | null;
+  showStrength?: boolean;
+  strengthData?: { strength: 'weak' | 'medium' | 'strong'; score: number; checks: Record<string, boolean> };
+}) => {
+  const [showPassword, setShowPassword] = useState(false);
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <input
+          type={showPassword ? 'text' : 'password'}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`w-full px-4 py-3.5 pr-12 border rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400 ${
+            error ? 'border-red-300 bg-red-50' : 'border-gray-200'
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() => setShowPassword(!showPassword)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+        >
+          {showPassword ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          )}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      {showStrength && strengthData && value.length > 0 && (
+        <div className="space-y-2">
+          {/* Strength bar */}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ backgroundColor: getPasswordStrengthColor(strengthData.strength) }}
+                initial={{ width: 0 }}
+                animate={{ width: `${strengthData.score}%` }}
+                transition={{ duration: 0.3 }}
+              />
+            </div>
+            <span
+              className="text-xs font-medium"
+              style={{ color: getPasswordStrengthColor(strengthData.strength) }}
+            >
+              {getPasswordStrengthLabel(strengthData.strength)}
+            </span>
+          </div>
+          {/* Checklist */}
+          <div className="grid grid-cols-2 gap-1 text-xs">
+            {[
+              { key: 'minLength', label: '8+ characters' },
+              { key: 'hasUppercase', label: 'Uppercase (A-Z)' },
+              { key: 'hasLowercase', label: 'Lowercase (a-z)' },
+              { key: 'hasNumber', label: 'Number (0-9)' },
+              { key: 'hasSpecial', label: 'Special (!@#$%)' },
+            ].map(item => (
+              <div
+                key={item.key}
+                className={`flex items-center gap-1 ${
+                  strengthData.checks[item.key as keyof typeof strengthData.checks]
+                    ? 'text-emerald-600'
+                    : 'text-gray-400'
+                }`}
+              >
+                {strengthData.checks[item.key as keyof typeof strengthData.checks] ? (
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" strokeWidth={2} />
+                  </svg>
+                )}
+                {item.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Select Component
 const Select = ({
@@ -304,6 +432,46 @@ export default function SurveyPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [institutionSearch, setInstitutionSearch] = useState('');
   const [showInstitutionList, setShowInstitutionList] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+
+  // Validation states
+  const [errors, setErrors] = useState<Record<string, string | null>>({});
+  const [emailSuggestion, setEmailSuggestion] = useState<string | null>(null);
+  const [isEduEmail, setIsEduEmail] = useState(false);
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
+
+  // Password validation
+  const passwordValidation = useMemo(() => {
+    return validatePassword(data.password);
+  }, [data.password]);
+
+  // Email validation
+  const emailValidation = useMemo(() => {
+    return validateEmail(data.email);
+  }, [data.email]);
+
+  // Check if passwords match
+  const passwordsMatch = data.password === data.confirmPassword && data.confirmPassword.length > 0;
+
+  // Update email validation state
+  useEffect(() => {
+    if (data.email && touchedFields.has('email')) {
+      const validation = validateEmail(data.email);
+      if (!validation.isValid) {
+        setErrors(prev => ({ ...prev, email: validation.error }));
+      } else {
+        setErrors(prev => ({ ...prev, email: null }));
+        setEmailSuggestion(validation.suggestion);
+        setIsEduEmail(validation.isEdu);
+      }
+    }
+  }, [data.email, touchedFields]);
+
+  // Mark field as touched
+  const markTouched = (field: string) => {
+    setTouchedFields(prev => new Set(prev).add(field));
+  };
 
   // Total steps: 8 for CC students with transfer, 7 for others
   const isCC = data.institutionType === 'community_college';
@@ -416,8 +584,10 @@ export default function SurveyPage() {
 
       const result = await response.json();
 
-      // Save user ID
+      // Save user ID and create session
       localStorage.setItem('noor_user_id', result.userId);
+      createSession(data.staySignedIn);
+      acceptTerms();
 
       // Save user profile locally as backup
       const userProfile = {
@@ -479,32 +649,97 @@ export default function SurveyPage() {
                   placeholder="First name"
                   value={data.firstName}
                   onChange={v => updateField('firstName', v)}
+                  error={touchedFields.has('firstName') && !data.firstName ? 'Required' : null}
+                  required
                 />
                 <Input
                   placeholder="Last name"
                   value={data.lastName}
                   onChange={v => updateField('lastName', v)}
+                  error={touchedFields.has('lastName') && !data.lastName ? 'Required' : null}
+                  required
                 />
               </div>
-              <Input
-                type="email"
-                placeholder="Email"
-                value={data.email}
-                onChange={v => updateField('email', v)}
-              />
-              <Input
-                type="password"
+
+              {/* Email with validation */}
+              <div className="space-y-1">
+                <Input
+                  type="email"
+                  placeholder="Email"
+                  value={data.email}
+                  onChange={v => {
+                    updateField('email', v);
+                    markTouched('email');
+                  }}
+                  error={touchedFields.has('email') ? errors.email : null}
+                  required
+                />
+                {emailSuggestion && (
+                  <button
+                    onClick={() => {
+                      const corrected = emailSuggestion.replace('Did you mean ', '').replace('?', '');
+                      updateField('email', corrected);
+                      setEmailSuggestion(null);
+                    }}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    {emailSuggestion}
+                  </button>
+                )}
+                {isEduEmail && (
+                  <div className="flex items-center gap-1 text-xs text-emerald-600">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    .edu email verified
+                  </div>
+                )}
+              </div>
+
+              {/* Password with strength indicator */}
+              <PasswordInput
                 placeholder="Password"
                 value={data.password}
-                onChange={v => updateField('password', v)}
-              />
-              <Input
-                type="password"
-                placeholder="Confirm password"
-                value={data.confirmPassword}
-                onChange={v => updateField('confirmPassword', v)}
+                onChange={v => {
+                  updateField('password', v);
+                  markTouched('password');
+                }}
+                showStrength={true}
+                strengthData={passwordValidation}
               />
 
+              {/* Confirm password with match indicator */}
+              <div className="space-y-1">
+                <PasswordInput
+                  placeholder="Confirm password"
+                  value={data.confirmPassword}
+                  onChange={v => {
+                    updateField('confirmPassword', v);
+                    markTouched('confirmPassword');
+                  }}
+                />
+                {touchedFields.has('confirmPassword') && data.confirmPassword && (
+                  <div className={`flex items-center gap-1 text-xs ${passwordsMatch ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {passwordsMatch ? (
+                      <>
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        Passwords match
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                        Passwords don't match
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Stay signed in */}
               <label className="flex items-center gap-3 py-2 cursor-pointer">
                 <div
                   onClick={() => updateField('staySignedIn', !data.staySignedIn)}
@@ -518,7 +753,42 @@ export default function SurveyPage() {
                     </svg>
                   )}
                 </div>
-                <span className="text-sm text-gray-600">Stay signed in</span>
+                <span className="text-sm text-gray-600">Keep me signed in for 30 days</span>
+              </label>
+
+              {/* Terms & Privacy */}
+              <label className="flex items-start gap-3 py-2 cursor-pointer">
+                <div
+                  onClick={() => updateField('agreeToTerms', !data.agreeToTerms)}
+                  className={`w-5 h-5 mt-0.5 rounded border-[1.5px] flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
+                    data.agreeToTerms ? 'bg-black border-black' : 'border-gray-300'
+                  }`}
+                >
+                  {data.agreeToTerms && (
+                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-sm text-gray-600">
+                  I agree to the{' '}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setShowTermsModal(true); }}
+                    className="text-black underline hover:opacity-70"
+                  >
+                    Terms of Service
+                  </button>
+                  {' '}and{' '}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setShowPrivacyModal(true); }}
+                    className="text-black underline hover:opacity-70"
+                  >
+                    Privacy Policy
+                  </button>
+                  <span className="text-red-400 ml-1">*</span>
+                </span>
               </label>
 
               {/* Institution Type */}
@@ -1048,6 +1318,112 @@ export default function SurveyPage() {
         )}
       </div>
 
+      {/* Terms Modal */}
+      <AnimatePresence>
+        {showTermsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden"
+            >
+              <div className="p-6 border-b border-gray-100">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-xl font-semibold">Terms of Service</h2>
+                  <button onClick={() => setShowTermsModal(false)} className="text-gray-400 hover:text-gray-600">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                <div className="prose prose-sm text-gray-600">
+                  <p className="mb-4">Last updated: January 2026</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">1. Acceptance of Terms</h3>
+                  <p className="mb-4">By accessing and using Noor, you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use our service.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">2. Description of Service</h3>
+                  <p className="mb-4">Noor provides financial guidance, banking recommendations, and tools specifically designed for international students in the United States. Our recommendations are for informational purposes only and do not constitute financial advice.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">3. User Responsibilities</h3>
+                  <p className="mb-4">You are responsible for maintaining the confidentiality of your account and password. You agree to provide accurate information and to update your information as necessary.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">4. Privacy</h3>
+                  <p className="mb-4">Your privacy is important to us. Please review our Privacy Policy to understand how we collect, use, and protect your information.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">5. Limitation of Liability</h3>
+                  <p className="mb-4">Noor is not liable for any financial decisions made based on our recommendations. Always consult with a qualified financial advisor for personalized advice.</p>
+                </div>
+              </div>
+              <div className="p-6 border-t border-gray-100">
+                <button
+                  onClick={() => setShowTermsModal(false)}
+                  className="w-full py-3 bg-black text-white rounded-xl font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Privacy Modal */}
+      <AnimatePresence>
+        {showPrivacyModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden"
+            >
+              <div className="p-6 border-b border-gray-100">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-xl font-semibold">Privacy Policy</h2>
+                  <button onClick={() => setShowPrivacyModal(false)} className="text-gray-400 hover:text-gray-600">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                <div className="prose prose-sm text-gray-600">
+                  <p className="mb-4">Last updated: January 2026</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">What We Collect</h3>
+                  <p className="mb-4">We collect information you provide directly to us, including your name, email address, university, visa status, and financial preferences.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">How We Use Your Information</h3>
+                  <p className="mb-4">We use your information to provide personalized banking recommendations, send relevant updates and notifications, and improve our services.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">Data Storage</h3>
+                  <p className="mb-4">Your data is stored securely using industry-standard encryption. We never sell your personal information to third parties.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">Your Rights</h3>
+                  <p className="mb-4">You have the right to access, correct, or delete your personal data at any time. You can export your data or request account deletion from the Settings page.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">Contact Us</h3>
+                  <p className="mb-4">If you have questions about this Privacy Policy, please contact us at privacy@noorapp.com.</p>
+                </div>
+              </div>
+              <div className="p-6 border-t border-gray-100">
+                <button
+                  onClick={() => setShowPrivacyModal(false)}
+                  className="w-full py-3 bg-black text-white rounded-xl font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100">
         <div className="max-w-md mx-auto px-6 py-5 flex gap-3">
@@ -1062,7 +1438,8 @@ export default function SurveyPage() {
           {step < totalSteps ? (
             <button
               onClick={handleNext}
-              className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800"
+              disabled={step === 1 && (!data.firstName || !data.lastName || !data.email || !passwordValidation.isValid || !passwordsMatch || !data.agreeToTerms || !data.institutionId || !data.countryOfOrigin)}
+              className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               Continue
             </button>
@@ -1072,7 +1449,15 @@ export default function SurveyPage() {
               disabled={isSubmitting}
               className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300"
             >
-              {isSubmitting ? 'Processing...' : 'Complete Assessment'}
+              {isSubmitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Creating account...
+                </span>
+              ) : 'Complete Assessment'}
             </button>
           )}
         </div>
