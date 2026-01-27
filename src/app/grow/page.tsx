@@ -19,9 +19,19 @@ import {
   STORAGE_KEY_SAVINGS_GOALS,
   HYSAAccount,
 } from '@/lib/savingsData';
+import {
+  UserLevel,
+  getUserFinanceLevel,
+  getSmartMessage,
+  calculateProgressSteps,
+  FinanceProgress,
+  CATEGORY_INFO,
+  getTipsByCategoryAndLevel,
+  TipCategory,
+  calculateEmergencyFund,
+} from '@/lib/financeProTips';
 
 type TabType = 'start' | 'levelup' | 'goals';
-type UserLevel = 'undergrad' | 'grad' | 'working';
 
 const TABS = [
   { id: 'start', label: 'Start Here' },
@@ -29,10 +39,18 @@ const TABS = [
   { id: 'goals', label: 'My Goals' },
 ];
 
+const STORAGE_KEY_FINANCE_PROGRESS = 'noor_finance_progress';
+
 export default function GrowPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('start');
-  const [userLevel, setUserLevel] = useState<UserLevel>('undergrad');
+  const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
+  const [userProfile, setUserProfile] = useState<{
+    academicLevel?: string;
+    year?: number;
+    visaStatus?: string;
+    studentLevel?: string;
+  }>({});
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
   const [showEligibilityQuiz, setShowEligibilityQuiz] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
@@ -41,6 +59,20 @@ export default function GrowPage() {
   const [showEmergencyGuide, setShowEmergencyGuide] = useState(false);
   const [expandedHYSA, setExpandedHYSA] = useState<string | null>(null);
   const [expandedInvestment, setExpandedInvestment] = useState<string | null>(null);
+  const [financeProgress, setFinanceProgress] = useState<FinanceProgress>({
+    hasEmergencyFund: false,
+    hasHYSA: false,
+    hasCreditCard: false,
+    noHighInterestDebt: true,
+    has401kMatch: false,
+    hasRothIRA: false,
+    fullEmergencyFund: false,
+    hasHSA: false,
+    max401k: false,
+    hasTaxableBrokerage: false,
+  });
+  const [monthlyExpenses, setMonthlyExpenses] = useState(2000);
+  const [showProgressEditor, setShowProgressEditor] = useState(false);
 
   useEffect(() => {
     const userId = localStorage.getItem('noor_user_id');
@@ -54,13 +86,16 @@ export default function GrowPage() {
     if (profile) {
       try {
         const parsed = JSON.parse(profile);
-        if (parsed.academicLevel) {
-          if (['Master\'s', 'PhD', 'Postdoc'].includes(parsed.academicLevel)) {
-            setUserLevel('grad');
-          } else if (parsed.hasJob || parsed.monthlyIncome > 3000) {
-            setUserLevel('working');
-          }
-        }
+        setUserProfile(parsed);
+
+        // Calculate user level based on profile
+        const level = getUserFinanceLevel({
+          studentLevel: parsed.studentLevel,
+          academicLevel: parsed.academicLevel,
+          year: parsed.graduationYear ? new Date().getFullYear() - (parseInt(parsed.graduationYear) - 4) : undefined,
+          visaStatus: parsed.visaStatus,
+        });
+        setUserLevel(level);
       } catch (e) {
         // Use default
       }
@@ -82,6 +117,12 @@ export default function GrowPage() {
         },
       ]);
     }
+
+    // Load finance progress
+    const savedProgress = localStorage.getItem(STORAGE_KEY_FINANCE_PROGRESS);
+    if (savedProgress) {
+      setFinanceProgress(JSON.parse(savedProgress));
+    }
   }, [router]);
 
   // Save goals when they change
@@ -91,11 +132,43 @@ export default function GrowPage() {
     }
   }, [savingsGoals]);
 
+  // Save progress when it changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_FINANCE_PROGRESS, JSON.stringify(financeProgress));
+  }, [financeProgress]);
+
+  // Get smart message based on user profile
+  const smartMessage = useMemo(() => {
+    // Calculate year in school from graduation year
+    let year: number | undefined;
+    if (userProfile.academicLevel === "Bachelor's") {
+      const gradYear = parseInt(localStorage.getItem('noor_graduation_year') || '0');
+      if (gradYear) {
+        year = 4 - (gradYear - new Date().getFullYear());
+      }
+    }
+
+    return getSmartMessage({
+      ...userProfile,
+      year,
+    });
+  }, [userProfile]);
+
+  // Calculate progress
+  const progressInfo = useMemo(() => {
+    return calculateProgressSteps(financeProgress, userLevel);
+  }, [financeProgress, userLevel]);
+
   // Calculate HYSA earnings
   const hysaEarnings = useMemo(() => {
     const bestRate = Math.max(...HYSA_ACCOUNTS.map(a => a.apy));
     return calculateHYSAEarnings(calculatorAmount, bestRate);
   }, [calculatorAmount]);
+
+  // Emergency fund recommendation
+  const emergencyFundTarget = useMemo(() => {
+    return calculateEmergencyFund(monthlyExpenses, true);
+  }, [monthlyExpenses]);
 
   // Handle quiz completion
   const handleQuizComplete = () => {
@@ -135,26 +208,143 @@ export default function GrowPage() {
     setSavingsGoals(prev => [...prev, newGoal]);
   };
 
+  // Toggle progress item
+  const toggleProgress = (key: keyof FinanceProgress) => {
+    setFinanceProgress(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  // Get categories available for user level
+  const availableCategories = useMemo(() => {
+    const levelOrder: UserLevel[] = ['beginner', 'intermediate', 'advanced'];
+    const userLevelIndex = levelOrder.indexOf(userLevel);
+
+    return Object.entries(CATEGORY_INFO).filter(([_, info]) => {
+      const minLevelIndex = levelOrder.indexOf(info.minLevel);
+      return minLevelIndex <= userLevelIndex;
+    });
+  }, [userLevel]);
+
+  // Get locked categories (teaser for beginners)
+  const lockedCategories = useMemo(() => {
+    const levelOrder: UserLevel[] = ['beginner', 'intermediate', 'advanced'];
+    const userLevelIndex = levelOrder.indexOf(userLevel);
+
+    return Object.entries(CATEGORY_INFO).filter(([_, info]) => {
+      const minLevelIndex = levelOrder.indexOf(info.minLevel);
+      return minLevelIndex > userLevelIndex;
+    });
+  }, [userLevel]);
+
   return (
     <div className="min-h-screen bg-[#FAF9F7] pb-24">
       {/* Header */}
       <div className="bg-white border-b border-[#E8E6E3]">
         <div className="px-6 py-4">
-          <h1 className="text-2xl font-light text-[#1A1A1A] tracking-tight">Grow</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">Savings & Investing for your future</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-light text-[#1A1A1A] tracking-tight">Grow</h1>
+              <p className="text-sm text-[#6B6B6B] mt-1">Savings & Investing</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs px-2 py-1 rounded-full ${
+                userLevel === 'beginner' ? 'bg-green-100 text-green-700' :
+                userLevel === 'intermediate' ? 'bg-blue-100 text-blue-700' :
+                'bg-purple-100 text-purple-700'
+              }`}>
+                {userLevel === 'beginner' ? 'Foundations' :
+                 userLevel === 'intermediate' ? 'Building' : 'Optimizing'}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Reassurance Message */}
+      {/* Smart Message & Progress */}
       <div className="px-4 py-4">
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="bg-white rounded-2xl p-4 border border-[#E8E6E3]"
         >
-          <p className="text-sm text-[#6B6B6B] leading-relaxed">
-            Don't worry if this feels new. Everyone starts somewhere. We'll guide you step by step, at your own pace.
-          </p>
+          <h2 className="text-lg font-medium text-[#1A1A1A]">{smartMessage.title}</h2>
+          <p className="text-sm text-[#6B6B6B] mt-1 leading-relaxed">{smartMessage.subtitle}</p>
+
+          {/* Progress Bar */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between text-xs mb-2">
+              <span className="text-[#6B6B6B]">Your progress</span>
+              <span className="text-[#1A1A1A] font-medium">{progressInfo.completed}/{progressInfo.total} steps</span>
+            </div>
+            <div className="h-2 bg-[#F5F4F2] rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full"
+                initial={{ width: 0 }}
+                animate={{ width: `${(progressInfo.completed / progressInfo.total) * 100}%` }}
+                transition={{ duration: 0.8 }}
+              />
+            </div>
+            <p className="text-xs text-emerald-600 mt-2">Next: {progressInfo.nextStep}</p>
+          </div>
+
+          {/* Edit Progress Button */}
+          <button
+            onClick={() => setShowProgressEditor(!showProgressEditor)}
+            className="mt-3 text-xs text-[#6B6B6B] underline"
+          >
+            {showProgressEditor ? 'Hide checklist' : 'Update my progress'}
+          </button>
+
+          <AnimatePresence>
+            {showProgressEditor && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="mt-3 pt-3 border-t border-[#E8E6E3] overflow-hidden"
+              >
+                <div className="space-y-2">
+                  {[
+                    { key: 'hasEmergencyFund', label: 'Started emergency fund' },
+                    { key: 'hasHYSA', label: 'Opened a HYSA' },
+                    { key: 'hasCreditCard', label: 'Have a credit card' },
+                    { key: 'noHighInterestDebt', label: 'No credit card debt' },
+                    ...(userLevel !== 'beginner' ? [
+                      { key: 'has401kMatch', label: 'Getting 401(k) match' },
+                      { key: 'hasRothIRA', label: 'Opened Roth IRA' },
+                      { key: 'fullEmergencyFund', label: '6 months emergency fund' },
+                    ] : []),
+                    ...(userLevel === 'advanced' ? [
+                      { key: 'hasHSA', label: 'Using HSA' },
+                      { key: 'max401k', label: 'Maxing 401(k)' },
+                      { key: 'hasTaxableBrokerage', label: 'Taxable investing' },
+                    ] : []),
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => toggleProgress(item.key as keyof FinanceProgress)}
+                      className="flex items-center gap-3 w-full text-left"
+                    >
+                      <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center ${
+                        financeProgress[item.key as keyof FinanceProgress]
+                          ? 'bg-emerald-500 border-emerald-500'
+                          : 'border-gray-300'
+                      }`}>
+                        {financeProgress[item.key as keyof FinanceProgress] && (
+                          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className="text-sm text-[#1A1A1A]">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         {/* Pro Tips Banner */}
@@ -168,10 +358,14 @@ export default function GrowPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-medium">Pro Tips Library</h3>
-                <p className="text-xs text-gray-300 mt-0.5">80+ tips, calculators & flowcharts</p>
+                <p className="text-xs text-gray-300 mt-0.5">
+                  {userLevel === 'beginner' ? '50+ tips for getting started' :
+                   userLevel === 'intermediate' ? '70+ tips for leveling up' :
+                   '80+ tips for optimization'}
+                </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs px-2 py-1 bg-white/20 rounded-full">New</span>
+                <span className="text-xs px-2 py-1 bg-white/20 rounded-full">Personalized</span>
                 <span className="text-xl">→</span>
               </div>
             </div>
@@ -219,7 +413,7 @@ export default function GrowPage() {
                   </div>
                   <div className="text-left">
                     <h3 className="font-medium text-[#1A1A1A]">Emergency Fund 101</h3>
-                    <p className="text-xs text-[#6B6B6B]">Why you need one & how much</p>
+                    <p className="text-xs text-[#6B6B6B]">Your financial safety net</p>
                   </div>
                 </div>
                 <svg
@@ -246,6 +440,25 @@ export default function GrowPage() {
                         <p className="text-sm text-[#6B6B6B] leading-relaxed">{section.content}</p>
                       </div>
                     ))}
+
+                    {/* Emergency Fund Calculator */}
+                    <div className="mt-4 p-4 bg-emerald-50 rounded-xl">
+                      <h4 className="text-sm font-medium text-emerald-800 mb-2">How much do YOU need?</h4>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-sm text-emerald-700">Monthly expenses: $</span>
+                        <input
+                          type="number"
+                          value={monthlyExpenses}
+                          onChange={(e) => setMonthlyExpenses(parseInt(e.target.value) || 0)}
+                          className="w-20 px-2 py-1 border border-emerald-200 rounded text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-emerald-600">Minimum (3 months): ${emergencyFundTarget.minimum.toLocaleString()}</p>
+                        <p className="text-sm text-emerald-800 font-medium">Recommended (6 months): ${emergencyFundTarget.recommended.toLocaleString()}</p>
+                        <p className="text-xs text-emerald-600">With flight buffer: ${emergencyFundTarget.withFlightBuffer.toLocaleString()}</p>
+                      </div>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -387,264 +600,311 @@ export default function GrowPage() {
             animate={{ opacity: 1 }}
             className="space-y-4"
           >
-            {/* Level selector */}
-            <div className="flex gap-2">
+            {/* Level indicator */}
+            <div className="flex gap-2 mb-2">
               {[
-                { id: 'undergrad', label: 'Student' },
-                { id: 'grad', label: 'Grad/PhD' },
-                { id: 'working', label: 'Working' },
+                { id: 'beginner', label: 'Foundations', color: 'green' },
+                { id: 'intermediate', label: 'Building', color: 'blue' },
+                { id: 'advanced', label: 'Optimizing', color: 'purple' },
               ].map((level) => (
-                <button
+                <div
                   key={level.id}
-                  onClick={() => setUserLevel(level.id as UserLevel)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                  className={`flex-1 py-2 rounded-lg text-xs font-medium text-center ${
                     userLevel === level.id
-                      ? 'bg-black text-white'
-                      : 'bg-white border border-[#E8E6E3] text-[#6B6B6B]'
+                      ? level.color === 'green' ? 'bg-green-100 text-green-700 border-2 border-green-300' :
+                        level.color === 'blue' ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' :
+                        'bg-purple-100 text-purple-700 border-2 border-purple-300'
+                      : 'bg-gray-50 text-gray-400'
                   }`}
                 >
                   {level.label}
-                </button>
+                  {userLevel === level.id && ' ✓'}
+                </div>
               ))}
             </div>
 
-            {/* Roth IRA Section */}
-            <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
-              <button
-                onClick={() => setExpandedInvestment(expandedInvestment === 'roth_ira' ? null : 'roth_ira')}
-                className="w-full p-4 text-left"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-                      <span className="text-lg">📈</span>
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-[#1A1A1A]">Roth IRA</h3>
-                      <p className="text-xs text-[#6B6B6B]">Tax-free retirement savings</p>
-                    </div>
-                  </div>
-                  <svg
-                    className={`w-5 h-5 text-[#6B6B6B] transition-transform ${expandedInvestment === 'roth_ira' ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+            {/* Beginner Lock Message */}
+            {userLevel === 'beginner' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <p className="text-sm text-amber-800">
+                  <span className="font-medium">Retirement accounts unlock later.</span> Focus on building your emergency fund and credit first. You're on the right track!
+                </p>
+              </div>
+            )}
+
+            {/* Available Categories */}
+            {userLevel !== 'beginner' && (
+              <>
+                {/* Roth IRA Section */}
+                <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
+                  <button
+                    onClick={() => setExpandedInvestment(expandedInvestment === 'roth_ira' ? null : 'roth_ira')}
+                    className="w-full p-4 text-left"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </button>
-
-              <AnimatePresence>
-                {expandedInvestment === 'roth_ira' && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="border-t border-[#E8E6E3] overflow-hidden"
-                  >
-                    <div className="p-4 space-y-4">
-                      <div>
-                        <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">What is it?</h4>
-                        <p className="text-sm text-[#6B6B6B] leading-relaxed">
-                          A Roth IRA is a retirement account where you contribute money you've already paid taxes on.
-                          The magic? Your money grows tax-free, and you pay zero taxes when you withdraw in retirement.
-                        </p>
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                          <span className="text-lg">📈</span>
+                        </div>
+                        <div>
+                          <h3 className="font-medium text-[#1A1A1A]">Roth IRA</h3>
+                          <p className="text-xs text-[#6B6B6B]">Tax-free retirement savings</p>
+                        </div>
                       </div>
+                      <svg
+                        className={`w-5 h-5 text-[#6B6B6B] transition-transform ${expandedInvestment === 'roth_ira' ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
 
-                      <div className="bg-blue-50 rounded-xl p-3">
-                        <p className="text-sm font-medium text-blue-800 mb-1">2024 Contribution Limit</p>
-                        <p className="text-2xl font-light text-blue-900">$7,000</p>
-                        <p className="text-xs text-blue-700">per year</p>
-                      </div>
+                  <AnimatePresence>
+                    {expandedInvestment === 'roth_ira' && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="border-t border-[#E8E6E3] overflow-hidden"
+                      >
+                        <div className="p-4 space-y-4">
+                          <div>
+                            <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">What is it?</h4>
+                            <p className="text-sm text-[#6B6B6B] leading-relaxed">
+                              A Roth IRA is a retirement account where you contribute money you've already paid taxes on.
+                              The magic? Your money grows tax-free, and you pay zero taxes when you withdraw in retirement.
+                            </p>
+                          </div>
 
-                      <div>
-                        <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">Can you open one?</h4>
-                        <p className="text-sm text-[#6B6B6B] mb-3">
-                          F-1 students on OPT, H-1B workers, and permanent residents can usually open one.
-                          Take our quick quiz to check.
-                        </p>
-                        <button
-                          onClick={() => setShowEligibilityQuiz(true)}
-                          className="w-full py-3 bg-blue-500 text-white rounded-xl text-sm font-medium"
-                        >
-                          Check My Eligibility
-                        </button>
-                      </div>
+                          <div className="bg-blue-50 rounded-xl p-3">
+                            <p className="text-sm font-medium text-blue-800 mb-1">2024 Contribution Limit</p>
+                            <p className="text-2xl font-light text-blue-900">$7,000</p>
+                            <p className="text-xs text-blue-700">per year</p>
+                          </div>
 
-                      <div>
-                        <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">Best Providers</h4>
-                        <div className="space-y-2">
-                          {INVESTMENT_ACCOUNTS.find(a => a.id === 'roth_ira')?.providers.map((provider) => (
+                          <div>
+                            <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">Can you open one?</h4>
+                            <p className="text-sm text-[#6B6B6B] mb-3">
+                              F-1 students on OPT (after 5 years), H-1B workers, and permanent residents can usually open one.
+                            </p>
                             <button
-                              key={provider.id}
-                              onClick={() => handleAccountClick(provider, 'ira')}
-                              className="w-full p-3 bg-[#F5F4F2] rounded-xl flex items-center justify-between hover:bg-[#EEEDEB] transition-colors"
+                              onClick={() => setShowEligibilityQuiz(true)}
+                              className="w-full py-3 bg-blue-500 text-white rounded-xl text-sm font-medium"
                             >
-                              <div className="text-left">
-                                <p className="text-sm font-medium text-[#1A1A1A]">{provider.name}</p>
-                                <p className="text-xs text-[#6B6B6B]">Min: ${provider.min_investment}</p>
-                              </div>
-                              <span className="text-[#6B6B6B]">→</span>
+                              Check My Eligibility
                             </button>
-                          ))}
+                          </div>
+
+                          <div>
+                            <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">Best Providers</h4>
+                            <div className="space-y-2">
+                              {INVESTMENT_ACCOUNTS.find(a => a.id === 'roth_ira')?.providers.map((provider) => (
+                                <button
+                                  key={provider.id}
+                                  onClick={() => handleAccountClick(provider, 'ira')}
+                                  className="w-full p-3 bg-[#F5F4F2] rounded-xl flex items-center justify-between hover:bg-[#EEEDEB] transition-colors"
+                                >
+                                  <div className="text-left">
+                                    <p className="text-sm font-medium text-[#1A1A1A]">{provider.name}</p>
+                                    <p className="text-xs text-[#6B6B6B]">Min: ${provider.min_investment}</p>
+                                  </div>
+                                  <span className="text-[#6B6B6B]">→</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* 401(k) Section */}
+                <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
+                  <button
+                    onClick={() => setExpandedInvestment(expandedInvestment === '401k' ? null : '401k')}
+                    className="w-full p-4 text-left"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+                          <span className="text-lg">💼</span>
+                        </div>
+                        <div>
+                          <h3 className="font-medium text-[#1A1A1A]">401(k)</h3>
+                          <p className="text-xs text-[#6B6B6B]">Employer retirement plan</p>
                         </div>
                       </div>
+                      <svg
+                        className={`w-5 h-5 text-[#6B6B6B] transition-transform ${expandedInvestment === '401k' ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                  </button>
 
-            {/* 401(k) Section */}
-            <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
-              <button
-                onClick={() => setExpandedInvestment(expandedInvestment === '401k' ? null : '401k')}
-                className="w-full p-4 text-left"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
-                      <span className="text-lg">💼</span>
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-[#1A1A1A]">401(k)</h3>
-                      <p className="text-xs text-[#6B6B6B]">Employer retirement plan</p>
-                    </div>
-                  </div>
-                  <svg
-                    className={`w-5 h-5 text-[#6B6B6B] transition-transform ${expandedInvestment === '401k' ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </button>
+                  <AnimatePresence>
+                    {expandedInvestment === '401k' && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="border-t border-[#E8E6E3] overflow-hidden"
+                      >
+                        <div className="p-4 space-y-4">
+                          <div className="bg-purple-50 rounded-xl p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-lg">🎁</span>
+                              <p className="text-sm font-medium text-purple-800">Employer Match = Free Money</p>
+                            </div>
+                            <p className="text-sm text-purple-700 leading-relaxed">
+                              Many employers match your contributions. If they match 50% up to 6% of salary,
+                              <strong> always contribute at least 6%</strong> to get the full match.
+                            </p>
+                          </div>
 
-              <AnimatePresence>
-                {expandedInvestment === '401k' && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="border-t border-[#E8E6E3] overflow-hidden"
-                  >
-                    <div className="p-4 space-y-4">
-                      <div className="bg-purple-50 rounded-xl p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-lg">🎁</span>
-                          <p className="text-sm font-medium text-purple-800">Employer Match = Free Money</p>
+                          <div>
+                            <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">2024 Limit</h4>
+                            <p className="text-2xl font-light text-[#1A1A1A]">$23,000</p>
+                            <p className="text-xs text-[#6B6B6B]">employee contribution limit</p>
+                          </div>
+
+                          <div>
+                            <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">How to start</h4>
+                            <ol className="text-sm text-[#6B6B6B] space-y-2">
+                              <li className="flex gap-2">
+                                <span className="text-[#1A1A1A] font-medium">1.</span>
+                                Check if your employer offers a 401(k)
+                              </li>
+                              <li className="flex gap-2">
+                                <span className="text-[#1A1A1A] font-medium">2.</span>
+                                Ask HR about the employer match percentage
+                              </li>
+                              <li className="flex gap-2">
+                                <span className="text-[#1A1A1A] font-medium">3.</span>
+                                Contribute at least enough to get the full match
+                              </li>
+                              <li className="flex gap-2">
+                                <span className="text-[#1A1A1A] font-medium">4.</span>
+                                Choose a target-date fund for easy investing
+                              </li>
+                            </ol>
+                          </div>
                         </div>
-                        <p className="text-sm text-purple-700 leading-relaxed">
-                          Many employers match your contributions (e.g., they put in $1 for every $1 you contribute, up to 3-6% of salary).
-                          <strong> Always contribute at least enough to get the full match.</strong>
-                        </p>
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">2024 Limit</h4>
-                        <p className="text-2xl font-light text-[#1A1A1A]">$23,000</p>
-                        <p className="text-xs text-[#6B6B6B]">employee contribution limit</p>
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">How to start</h4>
-                        <ol className="text-sm text-[#6B6B6B] space-y-2">
-                          <li className="flex gap-2">
-                            <span className="text-[#1A1A1A] font-medium">1.</span>
-                            Check if your employer offers a 401(k)
-                          </li>
-                          <li className="flex gap-2">
-                            <span className="text-[#1A1A1A] font-medium">2.</span>
-                            Ask HR about the employer match percentage
-                          </li>
-                          <li className="flex gap-2">
-                            <span className="text-[#1A1A1A] font-medium">3.</span>
-                            Contribute at least enough to get the full match
-                          </li>
-                          <li className="flex gap-2">
-                            <span className="text-[#1A1A1A] font-medium">4.</span>
-                            Choose a target-date fund for easy investing
-                          </li>
-                        </ol>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* HSA Section */}
-            <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
-              <button
-                onClick={() => setExpandedInvestment(expandedInvestment === 'hsa' ? null : 'hsa')}
-                className="w-full p-4 text-left"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
-                      <span className="text-lg">🏥</span>
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-[#1A1A1A]">HSA</h3>
-                      <p className="text-xs text-[#6B6B6B]">Health Savings Account</p>
-                    </div>
-                  </div>
-                  <svg
-                    className={`w-5 h-5 text-[#6B6B6B] transition-transform ${expandedInvestment === 'hsa' ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
-              </button>
+              </>
+            )}
 
-              <AnimatePresence>
-                {expandedInvestment === 'hsa' && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="border-t border-[#E8E6E3] overflow-hidden"
-                  >
-                    <div className="p-4 space-y-4">
-                      <div className="bg-green-50 rounded-xl p-4">
-                        <p className="text-sm font-medium text-green-800 mb-2">Triple Tax Advantage</p>
-                        <ul className="text-sm text-green-700 space-y-1">
-                          <li className="flex items-center gap-2">
-                            <span>✓</span> Contributions are tax-deductible
-                          </li>
-                          <li className="flex items-center gap-2">
-                            <span>✓</span> Growth is tax-free
-                          </li>
-                          <li className="flex items-center gap-2">
-                            <span>✓</span> Withdrawals for medical are tax-free
-                          </li>
-                        </ul>
+            {/* HSA Section - Advanced only */}
+            {userLevel === 'advanced' && (
+              <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
+                <button
+                  onClick={() => setExpandedInvestment(expandedInvestment === 'hsa' ? null : 'hsa')}
+                  className="w-full p-4 text-left"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                        <span className="text-lg">🏥</span>
                       </div>
-
                       <div>
-                        <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">Requirements</h4>
-                        <p className="text-sm text-[#6B6B6B]">
-                          You must have a High Deductible Health Plan (HDHP) to open an HSA.
-                          Check with your employer or health insurance provider.
-                        </p>
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">2024 Limit</h4>
-                        <p className="text-2xl font-light text-[#1A1A1A]">$4,150</p>
-                        <p className="text-xs text-[#6B6B6B]">individual coverage</p>
+                        <h3 className="font-medium text-[#1A1A1A]">HSA</h3>
+                        <p className="text-xs text-[#6B6B6B]">Health Savings Account - Triple tax advantage</p>
                       </div>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                    <svg
+                      className={`w-5 h-5 text-[#6B6B6B] transition-transform ${expandedInvestment === 'hsa' ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </button>
+
+                <AnimatePresence>
+                  {expandedInvestment === 'hsa' && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="border-t border-[#E8E6E3] overflow-hidden"
+                    >
+                      <div className="p-4 space-y-4">
+                        <div className="bg-green-50 rounded-xl p-4">
+                          <p className="text-sm font-medium text-green-800 mb-2">Triple Tax Advantage</p>
+                          <ul className="text-sm text-green-700 space-y-1">
+                            <li className="flex items-center gap-2">
+                              <span>✓</span> Contributions are tax-deductible
+                            </li>
+                            <li className="flex items-center gap-2">
+                              <span>✓</span> Growth is tax-free
+                            </li>
+                            <li className="flex items-center gap-2">
+                              <span>✓</span> Withdrawals for medical are tax-free
+                            </li>
+                          </ul>
+                        </div>
+
+                        <div>
+                          <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">Requirements</h4>
+                          <p className="text-sm text-[#6B6B6B]">
+                            You must have a High Deductible Health Plan (HDHP) to open an HSA.
+                            Check with your employer or health insurance provider.
+                          </p>
+                        </div>
+
+                        <div>
+                          <h4 className="text-sm font-medium text-[#1A1A1A] mb-2">2024 Limit</h4>
+                          <p className="text-2xl font-light text-[#1A1A1A]">$4,150</p>
+                          <p className="text-xs text-[#6B6B6B]">individual coverage ($8,300 family)</p>
+                        </div>
+
+                        <div className="bg-amber-50 rounded-xl p-3">
+                          <p className="text-xs text-amber-800">
+                            <span className="font-medium">Pro Tip:</span> Pay medical expenses out of pocket, keep receipts, invest HSA, and reimburse yourself years later for maximum tax-free growth.
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {/* Locked Categories Preview */}
+            {lockedCategories.length > 0 && (
+              <div className="mt-6">
+                <h4 className="text-xs text-[#6B6B6B] mb-3 px-1">Coming up next...</h4>
+                <div className="space-y-2">
+                  {lockedCategories.slice(0, 3).map(([key, info]) => (
+                    <div
+                      key={key}
+                      className="bg-gray-50 rounded-xl p-3 flex items-center justify-between opacity-60"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg grayscale">{info.icon}</span>
+                        <div>
+                          <p className="text-sm text-gray-500">{info.label}</p>
+                          <p className="text-xs text-gray-400">{info.description}</p>
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-400">🔒</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
 

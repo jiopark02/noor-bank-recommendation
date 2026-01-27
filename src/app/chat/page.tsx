@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
+import { UserLevel, getUserFinanceLevel } from '@/lib/financeProTips';
 
 interface Message {
   id: string;
@@ -14,12 +15,27 @@ interface Message {
 
 const STORAGE_KEY = 'noor_chat_history';
 
-const QUICK_PROMPTS = [
-  { id: 'extra', label: 'What do I do with extra $500?' },
-  { id: 'flowchart', label: 'What\'s the money flowchart?' },
-  { id: '401k', label: 'How does 401(k) matching work?' },
-  { id: 'roth', label: 'Can I open a Roth IRA?' },
-];
+// Level-specific quick prompts
+const QUICK_PROMPTS_BY_LEVEL: Record<UserLevel, { id: string; label: string }[]> = {
+  beginner: [
+    { id: 'hysa', label: 'What is a HYSA?' },
+    { id: 'credit', label: 'How do I build credit?' },
+    { id: 'emergency', label: 'How much emergency fund do I need?' },
+    { id: 'extra', label: 'What do I do with extra $500?' },
+  ],
+  intermediate: [
+    { id: 'extra', label: 'What do I do with extra $500?' },
+    { id: 'roth', label: 'Can I open a Roth IRA?' },
+    { id: '401k', label: 'How does 401(k) matching work?' },
+    { id: 'flowchart', label: 'What\'s the money flowchart?' },
+  ],
+  advanced: [
+    { id: 'flowchart', label: 'What\'s the money flowchart?' },
+    { id: 'hsa', label: 'How do I optimize my HSA?' },
+    { id: 'backdoor', label: 'What is backdoor Roth?' },
+    { id: 'mega', label: 'Mega backdoor Roth explained' },
+  ],
+};
 
 const AI_RESPONSES: Record<string, string> = {
   credit: `Building credit as an international student is totally doable! Here's a simple approach:
@@ -347,39 +363,287 @@ F-1 students (first 5 years) usually can't open Roth IRAs. Check before contribu
 More details in **Grow > Pro Tips > Warnings**!`,
 };
 
-const DEFAULT_RESPONSE = `I can help you with international student finance! Topics I know well:
+// Level-specific additional responses
+const LEVEL_RESPONSES: Record<string, Record<UserLevel, string>> = {
+  emergency: {
+    beginner: `**Emergency Fund 101** - Your financial safety net
 
-**Savings & Investing:**
-- HYSA (High-Yield Savings)
-- Roth IRA eligibility
-- 401(k) and employer matching
-- HSA triple tax advantage
-- Order of operations flowchart
+**Why it matters:**
+As an international student, emergencies can be expensive AND complicated. Think: visa issues, sudden trips home, medical bills without good insurance.
 
-**Banking & Credit:**
-- Building credit score
-- Credit card optimization
-- Bank account setup without SSN
+**How much?**
+- Minimum: 3 months of expenses ($6,000-9,000 for most students)
+- Recommended: 6 months (safer for visa holders)
+- Don't forget: Include potential one-way flight home ($1,500-3,000)
 
-**Visa-specific:**
-- Tax treaties by country
-- FICA exemption rules
-- FBAR/FATCA requirements
-- Day trading restrictions
+**Where to keep it:**
+- **HYSA (High-Yield Savings Account)** - Earns 4-5% while staying safe
+- NOT in checking (0% interest)
+- NOT in stocks (can lose value when you need it most)
+
+**How to start:**
+1. Calculate monthly expenses (rent + food + bills + phone)
+2. Set target: 3 months minimum
+3. Open a HYSA (Marcus, Ally, or Discover)
+4. Set up automatic transfers ($100-200/month)
+
+**Remember:** This is insurance, not investment. It's okay if it feels like "dead" money. That's the point!
+
+Check **Grow** section for the emergency fund calculator.`,
+
+    intermediate: `**Emergency Fund** for graduates
+
+At your stage, you should have:
+- **6 months of expenses** minimum
+- Extra buffer for visa emergencies ($2,000-5,000)
+
+**Key considerations:**
+- OPT has 90-day unemployment limit
+- H-1B transfer can take time
+- Premium processing costs $2,805
+
+Your emergency fund should handle:
+- 6 months living expenses
+- One-way international flight
+- Potential visa processing fees
+
+**Pro tip:** Keep 1-2 months in checking, rest in HYSA. No need for ultra-liquid if you have credit cards for true emergencies.`,
+
+    advanced: `**Emergency Fund Optimization**
+
+At your level, you likely have:
+- Stable income
+- Multiple credit cards as backup
+- Employer-sponsored benefits
+
+**Optimization strategies:**
+1. **Tiered approach:**
+   - 1 month in checking
+   - 2-3 months in HYSA
+   - Remaining in I-bonds (better yield, slight liquidity delay)
+
+2. **Credit line as backup:**
+   - 0% APR offers as last resort
+   - Margin loan from brokerage (risky but available)
+
+3. **Don't over-save:**
+   - If you have 6+ months, excess belongs in investments
+   - Opportunity cost of too much cash
+
+**Visa holders:** Still keep more than typical American advice (3 months). Keep at least 6 months + flight buffer.`,
+  },
+
+  backdoor: {
+    beginner: `**Backdoor Roth IRA** - This is advanced stuff!
+
+You're asking about a strategy that's typically for high earners. At your stage, focus on:
+1. Emergency fund in HYSA
+2. Building credit
+3. Basic budgeting
+
+The backdoor Roth becomes relevant when:
+- You have taxable income over ~$161K
+- You're a tax resident
+- You've maxed direct Roth contributions
+
+For now, check out the **Grow** section to build your foundation first!`,
+
+    intermediate: `**Backdoor Roth IRA** - For when income is "too high"
+
+**What it is:**
+A legal workaround when your income exceeds Roth IRA limits (~$161K single).
+
+**How it works:**
+1. Contribute to Traditional IRA (no tax deduction)
+2. Immediately convert to Roth IRA
+3. Pay taxes on any gains during conversion (usually minimal)
+
+**Requirements:**
+- Must be tax resident (not typically F-1 students <5 years)
+- Works best with $0 in existing Traditional IRA (pro-rata rule)
+
+**When it matters:**
+- Tech workers on H-1B often hit this within 1-2 years
+- Start thinking about this when income exceeds $150K
+
+Check **Grow > Pro Tips** for more retirement strategies!`,
+
+    advanced: `**Backdoor Roth IRA** - Your guide
+
+**The basics:**
+1. Contribute $7,000 to Traditional IRA (non-deductible)
+2. Convert immediately to Roth IRA
+3. Pay minimal/no taxes (because no gains yet)
+4. Enjoy tax-free growth forever
+
+**Critical details:**
+
+**Pro-rata rule:**
+If you have existing Traditional IRA balance, conversion is taxed proportionally. Solution: Roll Traditional IRA into 401(k) first.
+
+**Timing:**
+- Some do it January 1 each year
+- Others wait until they confirm they'll exceed income limits
+- Either is fine; just do it before tax deadline
+
+**Documentation:**
+- Keep Form 8606 for every year
+- Track cost basis of non-deductible contributions
+- Important for eventual withdrawal calculations
+
+**Common mistake:**
+Not converting immediately. If Traditional IRA gains value, you pay more tax on conversion.
+
+Want to know about **mega backdoor Roth** too?`,
+  },
+
+  mega: {
+    beginner: `**Mega Backdoor Roth** - This is very advanced!
+
+This strategy is for people who:
+- Max out regular 401(k) ($23,000/year)
+- Max out Roth IRA ($7,000/year)
+- Still want more tax-advantaged space
+
+For now, focus on building your foundation:
+1. Emergency fund
+2. Start building credit
+3. Learn about HYSA
+
+You'll get here eventually! Check the **Grow** section to start your journey.`,
+
+    intermediate: `**Mega Backdoor Roth** - The advanced strategy
+
+**What it is:**
+After maxing 401(k) at $23K, some plans allow after-tax contributions up to ~$69K total. You can then convert to Roth.
+
+**Requirements:**
+- 401(k) plan must allow after-tax contributions
+- Plan must allow in-service withdrawals or in-plan conversions
+- Major tech companies often offer this (Google, Meta, Amazon)
+
+**How much extra?**
+- $69,000 total 401(k) limit (2024)
+- Minus $23,000 employee contribution
+- Minus employer match
+- = Your mega backdoor space (often $30-40K extra)
+
+**Action step:**
+Ask HR: "Does our 401(k) plan allow after-tax contributions with in-plan Roth conversion?"
+
+This is an advanced strategy - make sure you've covered basics first!`,
+
+    advanced: `**Mega Backdoor Roth** - Maximize your tax-advantaged space
+
+**The setup:**
+1. Max pre-tax/Roth 401(k): $23,000
+2. Get employer match: Variable
+3. Add after-tax contributions: Up to $69K - above
+4. Convert after-tax to Roth: In-plan or via rollover
+
+**Two methods:**
+
+**In-plan conversion:**
+- After-tax → Roth 401(k) within plan
+- Simpler, automatic
+- Check if plan allows
+
+**Rollover method:**
+- After-tax → Roth IRA
+- Earnings → Traditional IRA
+- More control, requires manual action
+
+**Tax implications:**
+- After-tax contributions: Already taxed, convert free
+- Earnings on after-tax: Small tax on conversion
+- Minimize by converting frequently
+
+**Optimization:**
+- Set up automatic after-tax contributions
+- Convert immediately/frequently (some plans auto-convert)
+- Track basis carefully for mega backdoor
+
+**Visa consideration:**
+If you might leave US, consider:
+- Roth IRA stays in US (can still contribute while abroad with US income)
+- 401(k) can be rolled to IRA if leaving job
+
+Check with HR to confirm your plan supports this!`,
+  },
+};
+
+const DEFAULT_RESPONSE_BY_LEVEL: Record<UserLevel, string> = {
+  beginner: `Hey! I'm Noor, your student finance guide.
+
+**I can help you with:**
+- Emergency fund basics
+- High-yield savings (HYSA)
+- Building credit
+- Understanding taxes
+
+**At your stage, focus on:**
+1. Building an emergency fund
+2. Opening a HYSA
+3. Getting your first credit card
+4. Understanding your tax situation
 
 **Try asking:**
-- "What should I do with extra $500?"
-- "Can I open a Roth IRA on F-1?"
+- "How do I build credit?"
+- "What is a HYSA?"
+- "How much emergency fund do I need?"
+
+Or check out **Grow** for interactive guides!`,
+
+  intermediate: `Hey! I can help you level up your finances.
+
+**Topics I cover:**
+- Roth IRA eligibility & setup
+- 401(k) and employer matching
+- Tax optimization strategies
+- Investment basics
+
+**At your stage, think about:**
+1. Getting your full 401(k) match
+2. Opening a Roth IRA (if eligible)
+3. Building 6-month emergency fund
+4. Tax treaty benefits
+
+**Try asking:**
+- "Can I open a Roth IRA?"
 - "How does 401k matching work?"
 - "What's the money flowchart?"
 
-Or visit **Grow > Pro Tips** for 80+ detailed tips and calculators!`;
+Check **Grow > Pro Tips** for 70+ tips!`,
+
+  advanced: `Ready to optimize everything?
+
+**Advanced topics:**
+- HSA triple tax advantage
+- Backdoor Roth IRA
+- Mega backdoor Roth
+- Tax-loss harvesting
+- Asset location strategy
+
+**At your level:**
+1. Max all tax-advantaged space
+2. Optimize HSA as stealth IRA
+3. Consider backdoor strategies
+4. Think about asset allocation
+
+**Try asking:**
+- "How do I optimize my HSA?"
+- "What is mega backdoor Roth?"
+- "What's the order of operations?"
+
+Check **Grow > Pro Tips** for all 80+ tips!`,
+};
 
 export default function ChatPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -388,6 +652,23 @@ export default function ChatPage() {
     if (!userId) {
       router.push('/welcome');
       return;
+    }
+
+    // Load user profile to determine level
+    const profile = localStorage.getItem('noor_user_profile');
+    if (profile) {
+      try {
+        const parsed = JSON.parse(profile);
+        const level = getUserFinanceLevel({
+          studentLevel: parsed.studentLevel,
+          academicLevel: parsed.academicLevel,
+          year: parsed.graduationYear ? new Date().getFullYear() - (parseInt(parsed.graduationYear) - 4) : undefined,
+          visaStatus: parsed.visaStatus,
+        });
+        setUserLevel(level);
+      } catch (e) {
+        // Use default
+      }
     }
 
     // Load chat history
@@ -431,7 +712,21 @@ export default function ChatPage() {
   const generateResponse = (userMessage: string): string => {
     const lowerMessage = userMessage.toLowerCase();
 
-    // Check for extra money / what to do questions first
+    // Check for level-specific responses first
+    // Emergency fund (level-specific)
+    if (lowerMessage.includes('emergency fund') || lowerMessage.includes('safety net') || (lowerMessage.includes('how much') && lowerMessage.includes('save'))) {
+      return LEVEL_RESPONSES.emergency?.[userLevel] || AI_RESPONSES.savings;
+    }
+    // Backdoor Roth (level-specific)
+    if (lowerMessage.includes('backdoor') && !lowerMessage.includes('mega')) {
+      return LEVEL_RESPONSES.backdoor?.[userLevel] || AI_RESPONSES.roth;
+    }
+    // Mega backdoor (level-specific)
+    if (lowerMessage.includes('mega') || (lowerMessage.includes('after-tax') && lowerMessage.includes('401'))) {
+      return LEVEL_RESPONSES.mega?.[userLevel] || AI_RESPONSES['401k'];
+    }
+
+    // Check for extra money / what to do questions
     if (lowerMessage.includes('extra') || lowerMessage.includes('what should i do with') || lowerMessage.includes('what do i do with') || lowerMessage.includes('spare money')) {
       return AI_RESPONSES.extra_money;
     }
@@ -476,7 +771,7 @@ export default function ChatPage() {
       return AI_RESPONSES.roth;
     }
     // General savings
-    if (lowerMessage.includes('sav') || lowerMessage.includes('emergency fund')) {
+    if (lowerMessage.includes('sav')) {
       return AI_RESPONSES.savings;
     }
     // General investing
@@ -484,7 +779,7 @@ export default function ChatPage() {
       return AI_RESPONSES.invest;
     }
 
-    return DEFAULT_RESPONSE;
+    return DEFAULT_RESPONSE_BY_LEVEL[userLevel];
   };
 
   const handleSend = async (messageText?: string) => {
@@ -537,8 +832,18 @@ export default function ChatPage() {
             </svg>
           </button>
           <div>
-            <h1 className="font-medium text-black">Noor AI</h1>
-            <p className="text-xs text-gray-500">Your student finance assistant</p>
+            <div className="flex items-center gap-2">
+              <h1 className="font-medium text-black">Noor AI</h1>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                userLevel === 'beginner' ? 'bg-green-100 text-green-700' :
+                userLevel === 'intermediate' ? 'bg-blue-100 text-blue-700' :
+                'bg-purple-100 text-purple-700'
+              }`}>
+                {userLevel === 'beginner' ? 'Foundations' :
+                 userLevel === 'intermediate' ? 'Building' : 'Advanced'}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500">Personalized to your level</p>
           </div>
         </div>
         {messages.length > 0 && (
@@ -569,9 +874,9 @@ export default function ChatPage() {
               I can help with banking, visa questions, taxes, and more.
             </p>
 
-            {/* Quick Prompts */}
+            {/* Quick Prompts - Level Specific */}
             <div className="flex flex-wrap justify-center gap-2">
-              {QUICK_PROMPTS.map(prompt => (
+              {QUICK_PROMPTS_BY_LEVEL[userLevel].map(prompt => (
                 <button
                   key={prompt.id}
                   onClick={() => handleQuickPrompt(prompt.label)}

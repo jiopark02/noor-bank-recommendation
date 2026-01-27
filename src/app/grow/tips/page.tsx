@@ -25,23 +25,26 @@ import {
   calculateRothGrowth,
   calculateHYSABenefit,
   calculateTaxTreatySavings,
-  calculateInvestmentGrowth,
-  getVisaRelevantTips,
+  calculateEmergencyFund,
   searchTips,
+  UserLevel,
+  getUserFinanceLevel,
+  getTipsByCategoryAndLevel,
 } from '@/lib/financeProTips';
 
 type ViewMode = 'categories' | 'flowchart' | 'calculators' | 'search';
 
-const CATEGORIES: TipCategory[] = [
+// Categories in order for display
+const ALL_CATEGORIES: TipCategory[] = [
   'order_of_operations',
+  'emergency_fund',
   'hysa',
+  'credit_cards',
+  'tax',
   'roth_ira',
   '401k',
   'hsa',
-  'credit_cards',
-  'tax',
   'investing',
-  'emergency_fund',
   'warnings',
 ];
 
@@ -52,50 +55,106 @@ export default function ProTipsPage() {
   const [expandedTip, setExpandedTip] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showVisaOnly, setShowVisaOnly] = useState(false);
+  const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
 
   // Calculator states
   const [calc401k, setCalc401k] = useState({ salary: 80000, match: 50, maxMatch: 6, current: 3 });
   const [calcRoth, setCalcRoth] = useState({ contribution: 7000, age: 25 });
   const [calcHYSA, setCalcHYSA] = useState({ balance: 10000 });
   const [calcTreaty, setCalcTreaty] = useState({ country: 'China', income: 30000 });
+  const [calcEmergency, setCalcEmergency] = useState({ monthly: 2000 });
 
   useEffect(() => {
     const userId = localStorage.getItem('noor_user_id');
     if (!userId) {
       router.push('/welcome');
+      return;
+    }
+
+    // Load user profile to determine level
+    const profile = localStorage.getItem('noor_user_profile');
+    if (profile) {
+      try {
+        const parsed = JSON.parse(profile);
+        const level = getUserFinanceLevel({
+          studentLevel: parsed.studentLevel,
+          academicLevel: parsed.academicLevel,
+          year: parsed.graduationYear ? new Date().getFullYear() - (parseInt(parsed.graduationYear) - 4) : undefined,
+          visaStatus: parsed.visaStatus,
+        });
+        setUserLevel(level);
+      } catch (e) {
+        // Use default
+      }
     }
   }, [router]);
 
+  // Get tips filtered by user level and category
   const getTipsForCategory = (category: TipCategory): ProTip[] => {
-    const categoryMap: Record<TipCategory, ProTip[]> = {
-      hysa: HYSA_TIPS,
-      roth_ira: ROTH_IRA_TIPS,
-      '401k': FOUR01K_TIPS,
-      hsa: HSA_TIPS,
-      credit_cards: CREDIT_CARD_TIPS,
-      tax: TAX_TIPS,
-      investing: INVESTING_TIPS,
-      emergency_fund: EMERGENCY_FUND_TIPS,
-      order_of_operations: ORDER_OF_OPERATIONS,
-      warnings: WARNINGS,
-    };
-    let tips = categoryMap[category] || [];
+    let tips = getTipsByCategoryAndLevel(category, userLevel);
     if (showVisaOnly) {
       tips = tips.filter(t => t.visaRelevant);
     }
     return tips;
   };
 
+  // Check if category is available for user level
+  const isCategoryAvailable = (category: TipCategory): boolean => {
+    const info = CATEGORY_INFO[category];
+    const levelOrder: UserLevel[] = ['beginner', 'intermediate', 'advanced'];
+    return levelOrder.indexOf(userLevel) >= levelOrder.indexOf(info.minLevel);
+  };
+
+  // Get available categories for user level
+  const availableCategories = useMemo(() => {
+    return ALL_CATEGORIES.filter(cat => isCategoryAvailable(cat));
+  }, [userLevel]);
+
+  // Get locked categories
+  const lockedCategories = useMemo(() => {
+    return ALL_CATEGORIES.filter(cat => !isCategoryAvailable(cat));
+  }, [userLevel]);
+
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
-    return searchTips(searchQuery);
-  }, [searchQuery]);
+    let results = searchTips(searchQuery);
+    // Filter by user level
+    const levelOrder: UserLevel[] = ['beginner', 'intermediate', 'advanced'];
+    const maxIndex = levelOrder.indexOf(userLevel);
+    results = results.filter(tip => levelOrder.indexOf(tip.userLevel) <= maxIndex);
+    if (showVisaOnly) {
+      results = results.filter(t => t.visaRelevant);
+    }
+    return results;
+  }, [searchQuery, userLevel, showVisaOnly]);
 
   // Calculator results
   const matchLoss = calculate401kMatchLoss(calc401k.salary, calc401k.match, calc401k.maxMatch, calc401k.current);
   const rothGrowth = calculateRothGrowth(calcRoth.contribution, calcRoth.age);
   const hysaBenefit = calculateHYSABenefit(calcHYSA.balance);
   const treatySavings = calculateTaxTreatySavings(calcTreaty.country, calcTreaty.income);
+  const emergencyTarget = calculateEmergencyFund(calcEmergency.monthly, true);
+
+  // Get flowchart steps for user level
+  const flowchartSteps = useMemo(() => {
+    if (userLevel === 'beginner') {
+      return ORDER_OF_OPERATIONS.filter(tip =>
+        tip.userLevel === 'beginner' || tip.id === 'order_3'
+      );
+    } else if (userLevel === 'intermediate') {
+      return ORDER_OF_OPERATIONS.filter(tip =>
+        tip.userLevel === 'beginner' || tip.userLevel === 'intermediate'
+      );
+    }
+    return ORDER_OF_OPERATIONS;
+  }, [userLevel]);
+
+  // Total available tips count
+  const totalTipsCount = useMemo(() => {
+    const levelOrder: UserLevel[] = ['beginner', 'intermediate', 'advanced'];
+    const maxIndex = levelOrder.indexOf(userLevel);
+    return ALL_TIPS.filter(tip => levelOrder.indexOf(tip.userLevel) <= maxIndex).length;
+  }, [userLevel]);
 
   return (
     <div className="min-h-screen bg-[#FAF9F7] pb-24">
@@ -107,10 +166,22 @@ export default function ProTipsPage() {
               ← Back
             </Link>
           </div>
-          <h1 className="text-2xl font-light text-[#1A1A1A] tracking-tight">Pro Tips</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">
-            The definitive guide to international student finance
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-light text-[#1A1A1A] tracking-tight">Pro Tips</h1>
+              <p className="text-sm text-[#6B6B6B] mt-1">
+                {totalTipsCount} tips for your level
+              </p>
+            </div>
+            <span className={`text-xs px-2 py-1 rounded-full ${
+              userLevel === 'beginner' ? 'bg-green-100 text-green-700' :
+              userLevel === 'intermediate' ? 'bg-blue-100 text-blue-700' :
+              'bg-purple-100 text-purple-700'
+            }`}>
+              {userLevel === 'beginner' ? 'Foundations' :
+               userLevel === 'intermediate' ? 'Building' : 'Optimizing'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -122,9 +193,13 @@ export default function ProTipsPage() {
           className="bg-gradient-to-br from-blue-50 to-white rounded-2xl p-4 border border-blue-100"
         >
           <p className="text-sm text-[#6B6B6B] leading-relaxed">
-            Hey! Think of this as advice from a friend who's been through it all.
-            I figured this stuff out the hard way - you don't have to.
-            Start with the Order of Operations, then explore what interests you.
+            {userLevel === 'beginner' ? (
+              "Hey! Think of this as advice from a friend who's been through it. Start with the basics - emergency fund, HYSA, credit building. You'll unlock more as you go."
+            ) : userLevel === 'intermediate' ? (
+              "You've got the basics down. Time to level up with retirement accounts and tax optimization. These tips will help you build real wealth."
+            ) : (
+              "You're ready for the advanced stuff. HSA hacking, mega backdoor Roth, and tax optimization. Let's maximize everything."
+            )}
           </p>
         </motion.div>
       </div>
@@ -177,8 +252,8 @@ export default function ProTipsPage() {
         </div>
       </div>
 
-      {/* Visa-only filter */}
-      <div className="px-4 mb-4">
+      {/* Filters */}
+      <div className="px-4 mb-4 flex gap-2">
         <button
           onClick={() => setShowVisaOnly(!showVisaOnly)}
           className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
@@ -187,7 +262,7 @@ export default function ProTipsPage() {
               : 'bg-white border border-gray-200 text-gray-600'
           }`}
         >
-          {showVisaOnly ? '✓ Visa-specific only' : 'Show visa-specific tips'}
+          {showVisaOnly ? '✓ Visa-specific' : 'Visa-specific'}
         </button>
       </div>
 
@@ -200,7 +275,7 @@ export default function ProTipsPage() {
               {searchResults.length} results for "{searchQuery}"
             </p>
             {searchResults.map((tip) => (
-              <TipCard key={tip.id} tip={tip} expanded={expandedTip === tip.id} onToggle={() => setExpandedTip(expandedTip === tip.id ? null : tip.id)} />
+              <TipCard key={tip.id} tip={tip} expanded={expandedTip === tip.id} onToggle={() => setExpandedTip(expandedTip === tip.id ? null : tip.id)} userLevel={userLevel} />
             ))}
             {searchResults.length === 0 && (
               <p className="text-center text-[#6B6B6B] py-8">No tips found. Try different keywords.</p>
@@ -211,7 +286,7 @@ export default function ProTipsPage() {
         {/* CATEGORIES VIEW */}
         {viewMode === 'categories' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
-            {CATEGORIES.map((category, idx) => {
+            {availableCategories.map((category, idx) => {
               const info = CATEGORY_INFO[category];
               const tips = getTipsForCategory(category);
               const isExpanded = expandedCategory === category;
@@ -268,6 +343,7 @@ export default function ProTipsPage() {
                               tip={tip}
                               expanded={expandedTip === tip.id}
                               onToggle={() => setExpandedTip(expandedTip === tip.id ? null : tip.id)}
+                              userLevel={userLevel}
                             />
                           ))}
                         </div>
@@ -277,6 +353,36 @@ export default function ProTipsPage() {
                 </motion.div>
               );
             })}
+
+            {/* Locked Categories */}
+            {lockedCategories.length > 0 && (
+              <div className="mt-6">
+                <h4 className="text-xs text-[#6B6B6B] mb-3 px-1">Unlock more topics as you progress</h4>
+                <div className="space-y-2">
+                  {lockedCategories.map(category => {
+                    const info = CATEGORY_INFO[category];
+                    return (
+                      <div
+                        key={category}
+                        className="bg-gray-50 rounded-xl p-4 flex items-center justify-between opacity-60"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl grayscale">{info.icon}</span>
+                          <div>
+                            <p className="text-sm text-gray-500">{info.label}</p>
+                            <p className="text-xs text-gray-400">{info.description}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400 capitalize">{info.minLevel}</span>
+                          <span className="text-gray-400">🔒</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -286,7 +392,13 @@ export default function ProTipsPage() {
             <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
               <h2 className="text-lg font-medium text-[#1A1A1A] mb-2">The Money Flowchart</h2>
               <p className="text-sm text-[#6B6B6B] mb-6">
-                Follow this order. Don't skip steps. It's optimized for tax efficiency and financial security.
+                {userLevel === 'beginner' ? (
+                  "Here's your starting path. Follow these steps first before worrying about retirement accounts."
+                ) : userLevel === 'intermediate' ? (
+                  "You're ready for the full flowchart. Optimize for tax efficiency and long-term growth."
+                ) : (
+                  "The complete order of operations. You know the drill - tax efficiency first."
+                )}
               </p>
 
               <div className="relative">
@@ -294,7 +406,7 @@ export default function ProTipsPage() {
                 <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-[#E8E6E3]" />
 
                 <div className="space-y-4">
-                  {ORDER_OF_OPERATIONS.map((step, idx) => (
+                  {flowchartSteps.map((step, idx) => (
                     <motion.div
                       key={step.id}
                       initial={{ opacity: 0, x: -20 }}
@@ -302,13 +414,24 @@ export default function ProTipsPage() {
                       transition={{ delay: idx * 0.1 }}
                       className="relative flex gap-4"
                     >
-                      <div className="relative z-10 w-10 h-10 rounded-full bg-black text-white flex items-center justify-center text-sm font-medium">
+                      <div className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium ${
+                        step.userLevel === 'advanced' ? 'bg-purple-500 text-white' :
+                        step.userLevel === 'intermediate' ? 'bg-blue-500 text-white' :
+                        'bg-black text-white'
+                      }`}>
                         {idx + 1}
                       </div>
                       <div className="flex-1 pb-4">
-                        <h3 className="font-medium text-[#1A1A1A]">{step.headline.replace(`Step ${idx + 1}: `, '')}</h3>
+                        <h3 className="font-medium text-[#1A1A1A]">{step.headline.replace(`Step ${idx + 1}: `, '').replace(/^Step \d+: /, '')}</h3>
                         <p className="text-sm text-[#6B6B6B] mt-1">{step.explanation}</p>
                         <p className="text-xs text-blue-600 mt-2 italic">{step.whyItMatters}</p>
+                        {step.userLevel !== 'beginner' && (
+                          <span className={`inline-block mt-2 text-xs px-2 py-0.5 rounded-full ${
+                            step.userLevel === 'advanced' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {step.userLevel}
+                          </span>
+                        )}
                       </div>
                     </motion.div>
                   ))}
@@ -318,7 +441,7 @@ export default function ProTipsPage() {
 
             {/* Quick Decision Tree */}
             <div className="bg-gradient-to-br from-amber-50 to-white rounded-2xl p-5 border border-amber-200">
-              <h3 className="font-medium text-[#1A1A1A] mb-3">Quick Decision: "I have extra $500"</h3>
+              <h3 className="font-medium text-[#1A1A1A] mb-3">"I have extra $500"</h3>
               <div className="space-y-2 text-sm">
                 <p className="text-[#6B6B6B]">
                   <span className="font-medium text-[#1A1A1A]">Credit card debt?</span> → Pay it off first
@@ -326,15 +449,21 @@ export default function ProTipsPage() {
                 <p className="text-[#6B6B6B]">
                   <span className="font-medium text-[#1A1A1A]">No emergency fund?</span> → Put it in HYSA
                 </p>
-                <p className="text-[#6B6B6B]">
-                  <span className="font-medium text-[#1A1A1A]">401(k) match available?</span> → Increase contribution
-                </p>
-                <p className="text-[#6B6B6B]">
-                  <span className="font-medium text-[#1A1A1A]">Roth IRA not maxed?</span> → Contribute to Roth
-                </p>
-                <p className="text-[#6B6B6B]">
-                  <span className="font-medium text-[#1A1A1A]">All the above done?</span> → Taxable brokerage
-                </p>
+                {userLevel !== 'beginner' && (
+                  <>
+                    <p className="text-[#6B6B6B]">
+                      <span className="font-medium text-[#1A1A1A]">401(k) match available?</span> → Increase contribution
+                    </p>
+                    <p className="text-[#6B6B6B]">
+                      <span className="font-medium text-[#1A1A1A]">Roth IRA not maxed?</span> → Contribute to Roth
+                    </p>
+                  </>
+                )}
+                {userLevel === 'advanced' && (
+                  <p className="text-[#6B6B6B]">
+                    <span className="font-medium text-[#1A1A1A]">All the above done?</span> → Taxable brokerage
+                  </p>
+                )}
               </div>
             </div>
           </motion.div>
@@ -343,100 +472,37 @@ export default function ProTipsPage() {
         {/* CALCULATORS VIEW */}
         {viewMode === 'calculators' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-            {/* 401(k) Match Calculator */}
+            {/* Emergency Fund Calculator - All levels */}
             <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
-              <h3 className="font-medium text-[#1A1A1A] mb-1">401(k) Match Calculator</h3>
-              <p className="text-xs text-[#6B6B6B] mb-4">See how much you're leaving on the table</p>
+              <h3 className="font-medium text-[#1A1A1A] mb-1">Emergency Fund Calculator</h3>
+              <p className="text-xs text-[#6B6B6B] mb-4">How much safety net do you need?</p>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs text-[#6B6B6B]">Annual Salary</label>
-                  <input
-                    type="number"
-                    value={calc401k.salary}
-                    onChange={(e) => setCalc401k({ ...calc401k, salary: parseInt(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-[#6B6B6B]">Match % (e.g., 50)</label>
-                    <input
-                      type="number"
-                      value={calc401k.match}
-                      onChange={(e) => setCalc401k({ ...calc401k, match: parseInt(e.target.value) || 0 })}
-                      className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-[#6B6B6B]">Up to % of salary</label>
-                    <input
-                      type="number"
-                      value={calc401k.maxMatch}
-                      onChange={(e) => setCalc401k({ ...calc401k, maxMatch: parseInt(e.target.value) || 0 })}
-                      className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-[#6B6B6B]">Your current contribution %</label>
-                  <input
-                    type="number"
-                    value={calc401k.current}
-                    onChange={(e) => setCalc401k({ ...calc401k, current: parseInt(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4 p-4 bg-red-50 rounded-xl">
-                <p className="text-sm text-red-800">
-                  You're losing <span className="font-bold">${matchLoss.annualLoss.toLocaleString()}</span> per year in free money
-                </p>
-                <p className="text-xs text-red-600 mt-1">
-                  Over 30 years with growth: <span className="font-bold">${matchLoss.withGrowth.toLocaleString()}</span> lost
-                </p>
-              </div>
-            </div>
-
-            {/* Roth IRA Growth Calculator */}
-            <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
-              <h3 className="font-medium text-[#1A1A1A] mb-1">Roth IRA Growth Calculator</h3>
-              <p className="text-xs text-[#6B6B6B] mb-4">See the power of tax-free compounding</p>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs text-[#6B6B6B]">Annual Contribution</label>
-                  <input
-                    type="number"
-                    value={calcRoth.contribution}
-                    onChange={(e) => setCalcRoth({ ...calcRoth, contribution: parseInt(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-[#6B6B6B]">Current Age</label>
-                  <input
-                    type="number"
-                    value={calcRoth.age}
-                    onChange={(e) => setCalcRoth({ ...calcRoth, age: parseInt(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                  />
-                </div>
+              <div>
+                <label className="text-xs text-[#6B6B6B]">Monthly Expenses</label>
+                <input
+                  type="number"
+                  value={calcEmergency.monthly}
+                  onChange={(e) => setCalcEmergency({ monthly: parseInt(e.target.value) || 0 })}
+                  className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                />
               </div>
 
               <div className="mt-4 p-4 bg-emerald-50 rounded-xl">
-                <p className="text-sm text-emerald-800">
-                  At 65, you'll have <span className="font-bold">${rothGrowth.finalBalance.toLocaleString()}</span>
-                </p>
-                <p className="text-xs text-emerald-600 mt-1">
-                  You contributed: ${rothGrowth.totalContributed.toLocaleString()} |
-                  Growth: <span className="font-bold">${rothGrowth.totalGrowth.toLocaleString()}</span> (all tax-free!)
-                </p>
+                <div className="space-y-2">
+                  <p className="text-xs text-emerald-600">
+                    Minimum (3 months): <span className="font-bold">${emergencyTarget.minimum.toLocaleString()}</span>
+                  </p>
+                  <p className="text-sm text-emerald-800">
+                    Recommended (6 months): <span className="font-bold">${emergencyTarget.recommended.toLocaleString()}</span>
+                  </p>
+                  <p className="text-xs text-emerald-600">
+                    With emergency flight: <span className="font-bold">${emergencyTarget.withFlightBuffer.toLocaleString()}</span>
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* HYSA Calculator */}
+            {/* HYSA Calculator - All levels */}
             <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
               <h3 className="font-medium text-[#1A1A1A] mb-1">HYSA vs Checking</h3>
               <p className="text-xs text-[#6B6B6B] mb-4">Stop leaving money on the table</p>
@@ -462,11 +528,108 @@ export default function ProTipsPage() {
                 </div>
               </div>
               <p className="text-center text-sm text-[#1A1A1A] mt-3">
-                Difference: <span className="font-bold text-emerald-600">${hysaBenefit.difference.toFixed(2)}</span>/year
+                You're missing: <span className="font-bold text-emerald-600">${hysaBenefit.difference.toFixed(2)}</span>/year
               </p>
             </div>
 
-            {/* Tax Treaty Calculator */}
+            {/* 401(k) Match Calculator - Intermediate+ */}
+            {userLevel !== 'beginner' && (
+              <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+                <h3 className="font-medium text-[#1A1A1A] mb-1">401(k) Match Calculator</h3>
+                <p className="text-xs text-[#6B6B6B] mb-4">See how much free money you're missing</p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-[#6B6B6B]">Annual Salary</label>
+                    <input
+                      type="number"
+                      value={calc401k.salary}
+                      onChange={(e) => setCalc401k({ ...calc401k, salary: parseInt(e.target.value) || 0 })}
+                      className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-[#6B6B6B]">Match % (e.g., 50)</label>
+                      <input
+                        type="number"
+                        value={calc401k.match}
+                        onChange={(e) => setCalc401k({ ...calc401k, match: parseInt(e.target.value) || 0 })}
+                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-[#6B6B6B]">Up to % of salary</label>
+                      <input
+                        type="number"
+                        value={calc401k.maxMatch}
+                        onChange={(e) => setCalc401k({ ...calc401k, maxMatch: parseInt(e.target.value) || 0 })}
+                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-[#6B6B6B]">Your current contribution %</label>
+                    <input
+                      type="number"
+                      value={calc401k.current}
+                      onChange={(e) => setCalc401k({ ...calc401k, current: parseInt(e.target.value) || 0 })}
+                      className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 p-4 bg-red-50 rounded-xl">
+                  <p className="text-sm text-red-800">
+                    You're losing <span className="font-bold">${matchLoss.annualLoss.toLocaleString()}</span> per year in free money
+                  </p>
+                  <p className="text-xs text-red-600 mt-1">
+                    Over 30 years with growth: <span className="font-bold">${matchLoss.withGrowth.toLocaleString()}</span> lost
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Roth IRA Growth Calculator - Intermediate+ */}
+            {userLevel !== 'beginner' && (
+              <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+                <h3 className="font-medium text-[#1A1A1A] mb-1">Roth IRA Growth Calculator</h3>
+                <p className="text-xs text-[#6B6B6B] mb-4">See the power of tax-free compounding</p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-[#6B6B6B]">Annual Contribution</label>
+                    <input
+                      type="number"
+                      value={calcRoth.contribution}
+                      onChange={(e) => setCalcRoth({ ...calcRoth, contribution: parseInt(e.target.value) || 0 })}
+                      className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-[#6B6B6B]">Current Age</label>
+                    <input
+                      type="number"
+                      value={calcRoth.age}
+                      onChange={(e) => setCalcRoth({ ...calcRoth, age: parseInt(e.target.value) || 0 })}
+                      className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 p-4 bg-emerald-50 rounded-xl">
+                  <p className="text-sm text-emerald-800">
+                    At 65, you'll have <span className="font-bold">${rothGrowth.finalBalance.toLocaleString()}</span>
+                  </p>
+                  <p className="text-xs text-emerald-600 mt-1">
+                    You contributed: ${rothGrowth.totalContributed.toLocaleString()} |
+                    Growth: <span className="font-bold">${rothGrowth.totalGrowth.toLocaleString()}</span> (all tax-free!)
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Tax Treaty Calculator - All levels */}
             <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
               <h3 className="font-medium text-[#1A1A1A] mb-1">Tax Treaty Savings</h3>
               <p className="text-xs text-[#6B6B6B] mb-4">Check your country's student tax benefit</p>
@@ -525,7 +688,7 @@ export default function ProTipsPage() {
 }
 
 // Tip Card Component
-function TipCard({ tip, expanded, onToggle }: { tip: ProTip; expanded: boolean; onToggle: () => void }) {
+function TipCard({ tip, expanded, onToggle, userLevel }: { tip: ProTip; expanded: boolean; onToggle: () => void; userLevel: UserLevel }) {
   return (
     <div
       className={`rounded-xl border overflow-hidden ${
@@ -542,8 +705,11 @@ function TipCard({ tip, expanded, onToggle }: { tip: ProTip; expanded: boolean; 
               {tip.visaRelevant && (
                 <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">visa</span>
               )}
-              {tip.difficulty === 'advanced' && (
+              {tip.userLevel === 'advanced' && userLevel === 'advanced' && (
                 <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">advanced</span>
+              )}
+              {tip.userLevel === 'intermediate' && (
+                <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-500 rounded">intermediate</span>
               )}
             </div>
           </div>
