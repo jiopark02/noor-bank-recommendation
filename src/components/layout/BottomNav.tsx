@@ -10,12 +10,13 @@ import { useTheme } from '@/contexts/ThemeContext';
 const MAIN_NAV_ITEMS = [
   { href: '/', label: 'Home', icon: HomeIcon },
   { href: '/banking', label: 'Banking', icon: BankingIcon },
-  { href: '/housing', label: 'Housing', icon: HousingIcon },
+  { href: '/grow', label: 'Grow', icon: GrowIcon },
   { href: '/visa', label: 'Visa', icon: VisaIcon },
 ];
 
 // More menu items (shown in slide-up panel)
 const MORE_NAV_ITEMS = [
+  { href: '/housing', label: 'Housing', icon: HousingIcon, description: 'Find apartments' },
   { href: '/money', label: 'Money', icon: MoneyIcon, description: 'Track all finances' },
   { href: '/jobs', label: 'Jobs', icon: JobsIcon, description: 'Find part-time jobs' },
   { href: '/funding', label: 'Funding', icon: FundingIcon, description: 'Scholarships & Grants' },
@@ -200,6 +201,19 @@ function VisaIcon({ active }: IconProps) {
       <rect x="2" y="4" width="20" height="16" rx="2" strokeLinecap="round" strokeLinejoin="round"/>
       <path d="M2 10h20" strokeLinecap="round" strokeLinejoin="round"/>
       <path d="M6 16h4M14 16h4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function GrowIcon({ active }: IconProps) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 1.75 : 1.25}>
+      <path d="M12 20V10" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M18 20V4" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M6 20v-4" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="12" cy="6" r="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M9 8c-1.5.5-3 2-3 4" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M15 8c1.5.5 3 2 3 4" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }

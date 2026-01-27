@@ -16,9 +16,9 @@ const STORAGE_KEY = 'noor_chat_history';
 
 const QUICK_PROMPTS = [
   { id: 'credit', label: 'How do I build credit?' },
-  { id: 'ssn', label: 'Do I need an SSN for banking?' },
-  { id: 'tax', label: 'What tax forms do I need?' },
-  { id: 'opt', label: 'Explain OPT timeline' },
+  { id: 'hysa', label: 'What is a HYSA?' },
+  { id: 'roth', label: 'Can I open a Roth IRA?' },
+  { id: 'savings', label: 'How should I save money?' },
 ];
 
 const AI_RESPONSES: Record<string, string> = {
@@ -98,6 +98,98 @@ Would you like more details about any specific form?`,
 **Pro tip:** Start your job search early! Many employers take time to verify work authorization.
 
 Want me to explain CPT or the STEM extension in more detail?`,
+
+  hysa: `**High-Yield Savings Accounts (HYSA)** are the best place for your emergency fund and short-term savings.
+
+**Why HYSA?**
+Regular checking accounts pay almost nothing (0.01%). HYSAs currently pay **4-5% APY**. That's real money!
+
+**Example:** $5,000 in a HYSA = **~$225/year** in interest (vs. $0.50 in regular checking)
+
+**Best HYSAs right now:**
+- **Marcus (Goldman Sachs)** - 4.5% APY, no minimums
+- **Ally Bank** - 4.2% APY, great app with savings buckets
+- **SoFi** - 4.3% APY, all-in-one banking
+- **Wealthfront** - 4.5% APY, good if you plan to invest too
+
+**All of these:**
+- Are FDIC insured (your money is safe)
+- Have no monthly fees
+- Accept international students
+- Work entirely online
+
+Want to see a comparison or learn how to open one?`,
+
+  roth: `**Roth IRA** is one of the best retirement accounts for young people. Let me break it down:
+
+**What is it?**
+A retirement account where your money grows **tax-free forever**. You pay taxes on money going in, but never on gains or withdrawals.
+
+**Why it's amazing for young people:**
+- Your money has decades to grow tax-free
+- You can withdraw contributions (not gains) anytime
+- No required withdrawals ever
+
+**2024 Limit:** $7,000/year
+
+**Can YOU open one?**
+- **F-1 Students (no work):** Usually NO - you need earned income
+- **F-1 on OPT/CPT:** Maybe - depends on tax residency status
+- **H-1B:** YES - if you have earned income
+- **Green Card/Citizen:** YES
+
+**Best providers:**
+- **Fidelity** - No minimums, zero-fee index funds
+- **Schwab** - Great research, physical branches
+- **Vanguard** - Pioneer of low-cost investing
+
+Want me to check if you're eligible? Go to the **Grow** section in the app!`,
+
+  savings: `Here's how to think about **saving money** as an international student:
+
+**Priority Order:**
+1. **Emergency Fund First** - 3-6 months of expenses ($2,000-$5,000 minimum)
+2. **HYSA for Safety** - Keep emergency fund in a high-yield savings account
+3. **Retirement (if eligible)** - Roth IRA after you have income & tax residency
+
+**Where to keep your money:**
+- **Checking Account** - Just enough for monthly bills
+- **High-Yield Savings** - Emergency fund + short-term savings
+- **Roth IRA** - Long-term retirement (if eligible)
+
+**The #1 mistake:** Keeping too much in checking accounts earning 0%!
+
+**Quick win:** Move savings to a HYSA and earn 4-5% instead of 0%.
+
+Check out the **Grow** tab in Noor for:
+- HYSA comparisons
+- Savings goal tracker
+- Roth IRA eligibility quiz`,
+
+  invest: `**Investing basics** for international students:
+
+**Before you invest:**
+1. Have an emergency fund (3-6 months expenses)
+2. No high-interest debt (credit cards paid off)
+3. Understand your tax situation
+
+**For beginners, keep it simple:**
+- **Target-date funds** - Set it and forget it, automatically diversified
+- **Index funds (S&P 500)** - Low fees, follows the market
+- **Example:** VTI (total stock market), VOO (S&P 500)
+
+**Where to invest:**
+- **Roth IRA** first (if eligible) - Tax-free growth!
+- **Taxable brokerage** - After maxing IRA, or if not eligible for IRA
+
+**Best platforms:**
+- **Fidelity** - Best for beginners, no minimums
+- **Schwab** - Good all-around
+- **Vanguard** - Great for buy-and-hold
+
+**The most important rule:** Time in the market > timing the market. Start early, be consistent.
+
+Want to learn more about a specific topic?`,
 };
 
 const DEFAULT_RESPONSE = `I understand you're asking about that topic. As an AI assistant focused on helping international students, I can help with:
@@ -107,6 +199,7 @@ const DEFAULT_RESPONSE = `I understand you're asking about that topic. As an AI 
 - **Housing** - Finding apartments, understanding leases
 - **Taxes** - Filing requirements, forms, deadlines
 - **Jobs** - On-campus work, CPT/OPT employment
+- **Savings** - HYSA, emergency funds, Roth IRA
 
 Could you tell me more about what you'd like to know? I'm here to help!`;
 
@@ -177,6 +270,19 @@ export default function ChatPage() {
     }
     if (lowerMessage.includes('opt') || lowerMessage.includes('cpt') || lowerMessage.includes('work authorization')) {
       return AI_RESPONSES.opt;
+    }
+    // Savings & Investing responses
+    if (lowerMessage.includes('hysa') || lowerMessage.includes('high yield') || lowerMessage.includes('high-yield') || lowerMessage.includes('savings account')) {
+      return AI_RESPONSES.hysa;
+    }
+    if (lowerMessage.includes('roth') || lowerMessage.includes('ira') || lowerMessage.includes('retirement')) {
+      return AI_RESPONSES.roth;
+    }
+    if (lowerMessage.includes('sav') || lowerMessage.includes('emergency fund')) {
+      return AI_RESPONSES.savings;
+    }
+    if (lowerMessage.includes('invest') || lowerMessage.includes('stock') || lowerMessage.includes('index fund') || lowerMessage.includes('401k') || lowerMessage.includes('401(k)')) {
+      return AI_RESPONSES.invest;
     }
 
     return DEFAULT_RESPONSE;
