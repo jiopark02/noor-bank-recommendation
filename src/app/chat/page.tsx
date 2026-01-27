@@ -15,10 +15,10 @@ interface Message {
 const STORAGE_KEY = 'noor_chat_history';
 
 const QUICK_PROMPTS = [
-  { id: 'credit', label: 'How do I build credit?' },
-  { id: 'hysa', label: 'What is a HYSA?' },
+  { id: 'extra', label: 'What do I do with extra $500?' },
+  { id: 'flowchart', label: 'What\'s the money flowchart?' },
+  { id: '401k', label: 'How does 401(k) matching work?' },
   { id: 'roth', label: 'Can I open a Roth IRA?' },
-  { id: 'savings', label: 'How should I save money?' },
 ];
 
 const AI_RESPONSES: Record<string, string> = {
@@ -190,18 +190,190 @@ Check out the **Grow** tab in Noor for:
 **The most important rule:** Time in the market > timing the market. Start early, be consistent.
 
 Want to learn more about a specific topic?`,
+
+  extra_money: `**What to do with extra money** depends on where you are financially. Here's the order:
+
+**1. High-interest debt first**
+If you have credit card debt at 20%+ APR, pay that off. It's a guaranteed 20% return.
+
+**2. Emergency fund**
+Need at least 1 month of expenses as a buffer ($1,000-2,000 minimum).
+
+**3. 401(k) employer match**
+If your company matches, contribute enough to get the full match. It's free money!
+
+**4. Build full emergency fund**
+Work up to 3-6 months of expenses in a HYSA.
+
+**5. Max Roth IRA**
+$7,000/year of tax-free growth (if eligible).
+
+**6. Max 401(k)**
+$23,000/year limit.
+
+**7. Taxable brokerage**
+After maxing tax-advantaged accounts.
+
+**Quick answer for $500:**
+- Credit card debt? → Pay it off
+- No emergency fund? → HYSA
+- Have 401(k) match? → Increase contribution
+- None of above? → Roth IRA or index funds
+
+Check out the **Grow > Pro Tips** section for detailed flowcharts!`,
+
+  '401k': `**401(k) for international students** - yes, you can participate!
+
+**The basics:**
+- Employer-sponsored retirement account
+- 2024 limit: $23,000 (employee contribution)
+- Pre-tax (Traditional) or after-tax (Roth 401k) options
+
+**Why it matters:**
+If your employer matches, that's **free money**. Example:
+- Salary: $80,000
+- Employer matches 50% of your contribution up to 6%
+- You contribute 6% = $4,800
+- Employer adds = $2,400
+- That's a 50% instant return!
+
+**For visa holders:**
+- H-1B, L-1, OPT workers can all participate
+- Money is yours even if you leave the US
+- Can roll over to IRA when changing jobs
+
+**Pro tips:**
+1. Always contribute enough for full match
+2. Understand your vesting schedule
+3. If leaving job, roll over to IRA (don't cash out!)
+4. Choose low-cost index funds if available
+
+Visit **Grow > Pro Tips** for the 401(k) calculator!`,
+
+  hsa: `**HSA (Health Savings Account)** - the ultimate tax-advantaged account!
+
+**Triple tax benefit:**
+1. Contributions are tax-deductible
+2. Growth is tax-free
+3. Withdrawals for medical expenses are tax-free
+
+No other account has all three!
+
+**Requirements:**
+- Must have a High Deductible Health Plan (HDHP)
+- 2024 deductible minimum: $1,600 individual, $3,200 family
+- 2024 contribution limit: $4,150 individual
+
+**Pro strategy (stealth IRA):**
+1. Pay medical expenses out of pocket
+2. Keep all receipts
+3. Invest your HSA in index funds
+4. Let it grow for decades
+5. Withdraw anytime to "reimburse" yourself (no time limit!)
+
+**Best HSA providers:**
+- Fidelity (no fees, best for investing)
+- Lively (modern interface)
+
+**For visa holders:**
+- Can contribute if you have qualifying HDHP
+- Money stays with you if you leave US
+- Great for building wealth long-term
+
+Check **Grow > Pro Tips** for more HSA strategies!`,
+
+  flowchart: `**The Money Flowchart** - follow this order!
+
+This is the optimal sequence based on tax efficiency and guaranteed returns:
+
+**Step 1: 401(k) up to employer match**
+Free money > everything else
+
+**Step 2: Pay off high-interest debt**
+Credit cards at 20%? Pay them off.
+
+**Step 3: Build 1-month emergency fund**
+$1,000-2,000 as a buffer
+
+**Step 4: Max HSA (if eligible)**
+Triple tax advantage is unbeatable
+
+**Step 5: Max Roth IRA**
+$7,000/year of tax-free growth
+
+**Step 6: Build 6-month emergency fund**
+Now you're truly secure
+
+**Step 7: Max 401(k) beyond match**
+Up to $23,000 total
+
+**Step 8: Taxable brokerage**
+After all tax-advantaged space is full
+
+**Quick reference:**
+- Credit card debt? → Stop, pay it off first
+- No emergency fund? → HYSA before investing
+- Employer match available? → Don't leave free money
+- HSA eligible? → Max it before Roth IRA
+
+See the visual flowchart in **Grow > Pro Tips**!`,
+
+  warning: `**Important warnings for international students:**
+
+**Day trading can risk your visa**
+Active trading as income may be considered unauthorized work on F-1. Stick to long-term investing.
+
+**PFIC rules for foreign funds**
+Never buy mutual funds or ETFs domiciled outside the US. Use US-domiciled funds only (VTI, VOO, etc.).
+
+**Don't invest money you need soon**
+If you need it in <5 years (tuition, visa fees), keep it in HYSA. Markets can drop 30%+.
+
+**Pay credit card debt first**
+Investing while carrying 20% APR debt = losing money. Pay it off completely first.
+
+**Crypto is speculation**
+Fine for 1-5% of portfolio. Not a retirement strategy.
+
+**Keep liquid cash for emergencies**
+Visa holders need more buffer ($5,000+) for unexpected immigration costs.
+
+**FBAR requirement**
+If foreign accounts exceed $10K total, file FBAR annually. Penalties are severe.
+
+**Tax residency matters**
+F-1 students (first 5 years) usually can't open Roth IRAs. Check before contributing.
+
+More details in **Grow > Pro Tips > Warnings**!`,
 };
 
-const DEFAULT_RESPONSE = `I understand you're asking about that topic. As an AI assistant focused on helping international students, I can help with:
+const DEFAULT_RESPONSE = `I can help you with international student finance! Topics I know well:
 
-- **Banking** - Opening accounts, building credit, transferring money
-- **Visa** - F-1 status, OPT, CPT, travel rules
-- **Housing** - Finding apartments, understanding leases
-- **Taxes** - Filing requirements, forms, deadlines
-- **Jobs** - On-campus work, CPT/OPT employment
-- **Savings** - HYSA, emergency funds, Roth IRA
+**Savings & Investing:**
+- HYSA (High-Yield Savings)
+- Roth IRA eligibility
+- 401(k) and employer matching
+- HSA triple tax advantage
+- Order of operations flowchart
 
-Could you tell me more about what you'd like to know? I'm here to help!`;
+**Banking & Credit:**
+- Building credit score
+- Credit card optimization
+- Bank account setup without SSN
+
+**Visa-specific:**
+- Tax treaties by country
+- FICA exemption rules
+- FBAR/FATCA requirements
+- Day trading restrictions
+
+**Try asking:**
+- "What should I do with extra $500?"
+- "Can I open a Roth IRA on F-1?"
+- "How does 401k matching work?"
+- "What's the money flowchart?"
+
+Or visit **Grow > Pro Tips** for 80+ detailed tips and calculators!`;
 
 export default function ChatPage() {
   const router = useRouter();
@@ -259,29 +431,56 @@ export default function ChatPage() {
   const generateResponse = (userMessage: string): string => {
     const lowerMessage = userMessage.toLowerCase();
 
+    // Check for extra money / what to do questions first
+    if (lowerMessage.includes('extra') || lowerMessage.includes('what should i do with') || lowerMessage.includes('what do i do with') || lowerMessage.includes('spare money')) {
+      return AI_RESPONSES.extra_money;
+    }
+    // Flowchart / order questions
+    if (lowerMessage.includes('flowchart') || lowerMessage.includes('order') || lowerMessage.includes('priority') || lowerMessage.includes('what first') || lowerMessage.includes('where to start')) {
+      return AI_RESPONSES.flowchart;
+    }
+    // Warning / caution questions
+    if (lowerMessage.includes('warning') || lowerMessage.includes('mistake') || lowerMessage.includes('avoid') || lowerMessage.includes('careful') || lowerMessage.includes('risk')) {
+      return AI_RESPONSES.warning;
+    }
+    // 401(k) specific
+    if (lowerMessage.includes('401k') || lowerMessage.includes('401(k)') || lowerMessage.includes('employer match') || lowerMessage.includes('matching')) {
+      return AI_RESPONSES['401k'];
+    }
+    // HSA specific
+    if (lowerMessage.includes('hsa') || lowerMessage.includes('health savings') || lowerMessage.includes('triple tax')) {
+      return AI_RESPONSES.hsa;
+    }
+    // Credit
     if (lowerMessage.includes('credit') || lowerMessage.includes('credit card') || lowerMessage.includes('build credit')) {
       return AI_RESPONSES.credit;
     }
+    // SSN
     if (lowerMessage.includes('ssn') || lowerMessage.includes('social security')) {
       return AI_RESPONSES.ssn;
     }
-    if (lowerMessage.includes('tax') || lowerMessage.includes('1040') || lowerMessage.includes('8843')) {
+    // Tax
+    if (lowerMessage.includes('tax') || lowerMessage.includes('1040') || lowerMessage.includes('8843') || lowerMessage.includes('fbar') || lowerMessage.includes('treaty')) {
       return AI_RESPONSES.tax;
     }
+    // OPT/CPT
     if (lowerMessage.includes('opt') || lowerMessage.includes('cpt') || lowerMessage.includes('work authorization')) {
       return AI_RESPONSES.opt;
     }
-    // Savings & Investing responses
+    // HYSA
     if (lowerMessage.includes('hysa') || lowerMessage.includes('high yield') || lowerMessage.includes('high-yield') || lowerMessage.includes('savings account')) {
       return AI_RESPONSES.hysa;
     }
+    // Roth IRA
     if (lowerMessage.includes('roth') || lowerMessage.includes('ira') || lowerMessage.includes('retirement')) {
       return AI_RESPONSES.roth;
     }
+    // General savings
     if (lowerMessage.includes('sav') || lowerMessage.includes('emergency fund')) {
       return AI_RESPONSES.savings;
     }
-    if (lowerMessage.includes('invest') || lowerMessage.includes('stock') || lowerMessage.includes('index fund') || lowerMessage.includes('401k') || lowerMessage.includes('401(k)')) {
+    // General investing
+    if (lowerMessage.includes('invest') || lowerMessage.includes('stock') || lowerMessage.includes('index fund') || lowerMessage.includes('etf') || lowerMessage.includes('brokerage')) {
       return AI_RESPONSES.invest;
     }
 

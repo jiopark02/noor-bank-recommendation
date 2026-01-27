@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
 import {
@@ -155,6 +156,27 @@ export default function GrowPage() {
             Don't worry if this feels new. Everyone starts somewhere. We'll guide you step by step, at your own pace.
           </p>
         </motion.div>
+
+        {/* Pro Tips Banner */}
+        <Link href="/grow/tips">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="mt-3 bg-gradient-to-r from-black to-gray-800 rounded-2xl p-4 text-white"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-medium">Pro Tips Library</h3>
+                <p className="text-xs text-gray-300 mt-0.5">80+ tips, calculators & flowcharts</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs px-2 py-1 bg-white/20 rounded-full">New</span>
+                <span className="text-xl">→</span>
+              </div>
+            </div>
+          </motion.div>
+        </Link>
       </div>
 
       {/* Tabs */}
