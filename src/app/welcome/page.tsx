@@ -4,42 +4,42 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// How can we help options
+// Bespoke options - tailored experience
 const REASONS = [
   {
     id: 'just-arrived',
-    label: 'I just arrived in the US',
-    description: 'Help me get settled',
+    label: 'New to the States',
+    description: 'Let us prepare your essentials',
     priority: ['bank', 'phone', 'documents'],
   },
   {
     id: 'already-here',
-    label: 'I\'m already living in the US',
-    description: 'Help me manage my finances',
+    label: 'Settling in',
+    description: 'Time to refine your finances',
     priority: ['bank', 'credit', 'budget'],
   },
   {
     id: 'need-bank',
-    label: 'I need a bank account',
-    description: 'Find the right one for me',
+    label: 'Banking',
+    description: 'We\'ll find your perfect fit',
     priority: ['bank', 'credit'],
   },
   {
     id: 'find-housing',
-    label: 'I\'m looking for housing',
-    description: 'Find apartments near campus',
+    label: 'Housing',
+    description: 'Curated residences near you',
     priority: ['housing', 'budget'],
   },
   {
     id: 'build-credit',
-    label: 'I want to build credit',
-    description: 'Start my credit journey',
+    label: 'Credit',
+    description: 'Begin building your foundation',
     priority: ['credit', 'bank'],
   },
   {
     id: 'just-exploring',
-    label: 'Just exploring',
-    description: 'Show me around',
+    label: 'Browsing',
+    description: 'Take your time, we\'re here',
     priority: [],
   },
 ];
@@ -145,10 +145,10 @@ export default function WelcomePage() {
                 {/* Question */}
                 <div className="mb-8">
                   <h2 className="text-2xl font-medium text-black mb-2">
-                    How can we help?
+                    What brings you in today?
                   </h2>
                   <p className="text-gray-500 text-sm">
-                    This helps us show you the most relevant stuff first.
+                    Allow us to tailor your experience.
                   </p>
                 </div>
 
