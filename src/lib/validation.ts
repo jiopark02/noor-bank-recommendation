@@ -275,22 +275,30 @@ export interface SessionConfig {
 
 const SESSION_KEY = 'noor_session';
 const ACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-const SESSION_DURATION_REMEMBER = 30 * 24 * 60 * 60 * 1000; // 30 days
-const SESSION_DURATION_DEFAULT = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_DURATION_REMEMBER = 365 * 24 * 60 * 60 * 1000; // 1 year
 
 export function createSession(staySignedIn: boolean): SessionConfig {
   const now = Date.now();
   const session: SessionConfig = {
     staySignedIn,
     lastActivity: now,
-    expiresAt: now + (staySignedIn ? SESSION_DURATION_REMEMBER : SESSION_DURATION_DEFAULT),
+    expiresAt: staySignedIn ? now + SESSION_DURATION_REMEMBER : 0, // 0 = session storage (browser close)
   };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+
+  if (staySignedIn) {
+    // Persist across browser sessions
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } else {
+    // Clear on browser close - use sessionStorage
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    localStorage.removeItem(SESSION_KEY);
+  }
   return session;
 }
 
 export function getSession(): SessionConfig | null {
-  const stored = localStorage.getItem(SESSION_KEY);
+  // Check localStorage first (persistent), then sessionStorage (browser session)
+  const stored = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
   if (!stored) return null;
   try {
     return JSON.parse(stored);
@@ -303,7 +311,12 @@ export function updateSessionActivity(): void {
   const session = getSession();
   if (!session) return;
   session.lastActivity = Date.now();
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+
+  if (session.staySignedIn) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } else {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  }
 }
 
 export function isSessionValid(): boolean {
@@ -312,13 +325,14 @@ export function isSessionValid(): boolean {
 
   const now = Date.now();
 
-  // Check if session is expired
-  if (now > session.expiresAt) {
+  // For "stay signed in" sessions, check expiration
+  if (session.staySignedIn && session.expiresAt > 0 && now > session.expiresAt) {
     clearSession();
     return false;
   }
 
-  // Check inactivity timeout (only if not "stay signed in")
+  // For non-persistent sessions (expiresAt = 0), they auto-clear on browser close
+  // Just check inactivity timeout
   if (!session.staySignedIn) {
     const inactiveTime = now - session.lastActivity;
     if (inactiveTime > ACTIVITY_TIMEOUT) {
@@ -339,6 +353,7 @@ export function isInactivityWarning(): boolean {
 
 export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
 // ============================================

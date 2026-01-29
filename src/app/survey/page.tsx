@@ -780,7 +780,7 @@ export default function SurveyPage() {
                     </svg>
                   )}
                 </div>
-                <span className="text-sm text-gray-600">Keep me signed in for 30 days</span>
+                <span className="text-sm text-gray-600">Keep me signed in</span>
               </label>
 
               {/* Terms & Privacy */}
