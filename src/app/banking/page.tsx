@@ -13,11 +13,63 @@ const TABS = [
   { id: 'guides', label: 'Guides' },
 ];
 
-const BANK_FILTERS = [
-  { id: 'no_ssn', label: 'No SSN' },
-  { id: 'traditional', label: 'Traditional' },
-  { id: 'edit', label: 'Edit' },
-];
+// Country-specific configurations
+const COUNTRY_CONFIG = {
+  US: {
+    name: 'United States',
+    idLabel: 'SSN',
+    reassuranceText: "Most banks here accept international students — you don't need an SSN to get started. Take your time to compare.",
+    cardReassuranceText: 'Building credit takes time — start with one card and use it responsibly. No need to rush.',
+    guides: [
+      { title: 'SSN Guide', description: 'How to get your Social Security Number as an F-1 student', href: 'https://www.ssa.gov/ssnumber/' },
+      { title: 'ITIN Guide', description: 'Individual Taxpayer Identification Number explained', href: 'https://www.irs.gov/individuals/individual-taxpayer-identification-number' },
+      { title: 'Building Credit', description: 'Step-by-step guide to building credit history in the US', href: 'https://www.nerdwallet.com/article/finance/how-to-build-credit' },
+      { title: 'Bank Account Comparison', description: 'Detailed comparison of student-friendly bank accounts', href: 'https://www.nerdwallet.com/best/banking/student-checking-accounts' },
+    ],
+  },
+  UK: {
+    name: 'United Kingdom',
+    idLabel: 'NIN',
+    reassuranceText: "Most UK banks welcome international students — you can open an account without a National Insurance Number. Take your time.",
+    cardReassuranceText: 'Building a UK credit file takes time — start with a basic credit card and use it responsibly.',
+    guides: [
+      { title: 'NIN Guide', description: 'How to apply for a National Insurance Number', href: 'https://www.gov.uk/apply-national-insurance-number' },
+      { title: 'UK Student Account', description: 'Guide to opening a UK bank account as a student', href: 'https://www.ukcisa.org.uk/Information--Advice/Studying--living-in-the-UK/Opening-a-bank-account' },
+      { title: 'Building UK Credit', description: 'How to build your credit score in the UK', href: 'https://www.experian.co.uk/consumer/guides/improve-credit-score.html' },
+      { title: 'Monzo vs Starling', description: 'Compare popular digital banks in the UK', href: 'https://www.moneysavingexpert.com/banking/digital-bank-guide/' },
+    ],
+  },
+  CA: {
+    name: 'Canada',
+    idLabel: 'SIN',
+    reassuranceText: "Canadian banks are welcoming to international students — you don't need a SIN to open a basic account. Compare your options.",
+    cardReassuranceText: 'Building Canadian credit takes time — start with a student credit card and use it responsibly.',
+    guides: [
+      { title: 'SIN Guide', description: 'How to get your Social Insurance Number', href: 'https://www.canada.ca/en/employment-social-development/services/sin/apply.html' },
+      { title: 'Canadian Bank Account', description: 'Opening a bank account as an international student', href: 'https://www.canada.ca/en/financial-consumer-agency/services/banking/opening-bank-account.html' },
+      { title: 'Building Credit in Canada', description: 'Guide to establishing credit history', href: 'https://www.canada.ca/en/financial-consumer-agency/services/credit-reports-score/build-credit-history.html' },
+      { title: 'Student Banking Comparison', description: 'Compare Canadian student bank accounts', href: 'https://www.ratehub.ca/chequing-accounts/student' },
+    ],
+  },
+};
+
+const getBankFilters = (country: string) => {
+  const idLabel = COUNTRY_CONFIG[country as keyof typeof COUNTRY_CONFIG]?.idLabel || 'SSN';
+  return [
+    { id: 'no_id', label: `No ${idLabel}` },
+    { id: 'traditional', label: 'Traditional' },
+    { id: 'edit', label: 'Edit' },
+  ];
+};
+
+const getCardFilters = (country: string) => {
+  const idLabel = COUNTRY_CONFIG[country as keyof typeof COUNTRY_CONFIG]?.idLabel || 'SSN';
+  return [
+    { id: 'no_id', label: `No ${idLabel}` },
+    { id: 'no_history', label: 'No Credit History' },
+    { id: 'no_fee', label: 'No Annual Fee' },
+  ];
+};
 
 const CAMPUS_SIDE_FILTERS: { id: CampusSide | 'all'; label: string }[] = [
   { id: 'all', label: 'All Areas' },
@@ -27,21 +79,22 @@ const CAMPUS_SIDE_FILTERS: { id: CampusSide | 'all'; label: string }[] = [
   { id: 'west', label: 'West' },
 ];
 
-const CARD_FILTERS = [
-  { id: 'no_ssn', label: 'No SSN' },
-  { id: 'no_history', label: 'No Credit History' },
-  { id: 'no_fee', label: 'No Annual Fee' },
-];
 
 export default function BankingPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('banks');
-  const [bankFilters, setBankFilters] = useState<string[]>(['no_ssn', 'traditional']);
+  const [bankFilters, setBankFilters] = useState<string[]>(['no_id', 'traditional']);
   const [cardFilters, setCardFilters] = useState<string[]>([]);
   const [userUniversity, setUserUniversity] = useState<string>('Stanford');
   const [userCampusSide, setUserCampusSide] = useState<CampusSide | undefined>(undefined);
   const [selectedCampusSide, setSelectedCampusSide] = useState<CampusSide | 'all'>('all');
+  const [destinationCountry, setDestinationCountry] = useState<string>('US');
+
+  // Get country config
+  const countryConfig = COUNTRY_CONFIG[destinationCountry as keyof typeof COUNTRY_CONFIG] || COUNTRY_CONFIG.US;
+  const BANK_FILTERS = getBankFilters(destinationCountry);
+  const CARD_FILTERS = getCardFilters(destinationCountry);
 
   useEffect(() => {
     const storedUserId = localStorage.getItem('noor_user_id');
@@ -50,6 +103,12 @@ export default function BankingPage() {
       return;
     }
     setUserId(storedUserId);
+
+    // Load destination country
+    const savedCountry = localStorage.getItem('noor_selected_country');
+    if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
+      setDestinationCountry(savedCountry);
+    }
 
     // Load user profile for university and campus side
     try {
@@ -62,6 +121,9 @@ export default function BankingPage() {
         if (parsed.campusSide && parsed.campusSide !== 'unknown') {
           setUserCampusSide(parsed.campusSide as CampusSide);
         }
+        if (parsed.destinationCountry) {
+          setDestinationCountry(parsed.destinationCountry);
+        }
       }
     } catch (e) {
       // Use defaults
@@ -70,7 +132,8 @@ export default function BankingPage() {
 
   const { cards, isLoading: cardsLoading, error: cardsError, total: cardTotal, refetch: refetchCards } = useCreditCards({
     f1Only: true,
-    noSsn: cardFilters.includes('no_ssn'),
+    noSsn: cardFilters.includes('no_id'),
+    country: destinationCountry,
   });
 
   const toggleBankFilter = (filterId: string) => {
@@ -111,7 +174,7 @@ export default function BankingPage() {
       {/* Reassurance message */}
       <div className="bg-gray-50 rounded-xl p-4 mb-6">
         <p className="text-sm text-gray-600 leading-relaxed">
-          Most banks here accept international students — you don't need an SSN to get started. Take your time to compare.
+          {countryConfig.reassuranceText}
         </p>
       </div>
 
@@ -171,7 +234,7 @@ export default function BankingPage() {
           />
           <div className="bg-gray-50 rounded-xl p-4 mb-5">
             <p className="text-sm text-gray-600 leading-relaxed">
-              Building credit takes time — start with one card and use it responsibly. No need to rush.
+              {countryConfig.cardReassuranceText}
             </p>
           </div>
           <h2 className="section-title mb-3">Good first cards</h2>
@@ -202,26 +265,14 @@ export default function BankingPage() {
 
       {activeTab === 'guides' && (
         <div className="space-y-4 animate-fade-in">
-          <GuideCard
-            title="SSN Guide"
-            description="How to get your Social Security Number as an F-1 student"
-            href="https://www.ssa.gov/ssnumber/"
-          />
-          <GuideCard
-            title="ITIN Guide"
-            description="Individual Taxpayer Identification Number explained"
-            href="https://www.irs.gov/individuals/individual-taxpayer-identification-number"
-          />
-          <GuideCard
-            title="Building Credit"
-            description="Step-by-step guide to building credit history in the US"
-            href="https://www.nerdwallet.com/article/finance/how-to-build-credit"
-          />
-          <GuideCard
-            title="Bank Account Comparison"
-            description="Detailed comparison of student-friendly bank accounts"
-            href="https://www.nerdwallet.com/best/banking/student-checking-accounts"
-          />
+          {countryConfig.guides.map((guide, index) => (
+            <GuideCard
+              key={index}
+              title={guide.title}
+              description={guide.description}
+              href={guide.href}
+            />
+          ))}
         </div>
       )}
     </PageLayout>

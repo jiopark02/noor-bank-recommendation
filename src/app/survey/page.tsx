@@ -32,6 +32,7 @@ interface SurveyData {
   institutionId: string;
   institutionType: 'university' | 'community_college' | '';
   countryOfOrigin: string;
+  destinationCountry: string; // US, UK, or CA
   // Step 2
   academicLevel: string;
   year: string;
@@ -40,10 +41,12 @@ interface SurveyData {
   targetUniversities: string[];
   targetMajor: string;
   expectedTransferYear: string;
-  // Step 3
-  hasSSN: boolean | null;
-  hasITIN: boolean | null;
-  hasUSAddress: boolean | null;
+  // Step 3 - ID/Tax Numbers (country-specific)
+  hasSSN: boolean | null;      // US: Social Security Number
+  hasITIN: boolean | null;     // US: Individual Taxpayer Identification Number
+  hasNIN: boolean | null;      // UK: National Insurance Number
+  hasSIN: boolean | null;      // CA: Social Insurance Number
+  hasLocalAddress: boolean | null; // Address in destination country
   // Step 4
   monthlyIncome: number;
   monthlyExpenses: number;
@@ -71,6 +74,7 @@ const INITIAL_DATA: SurveyData = {
   institutionId: '',
   institutionType: '',
   countryOfOrigin: '',
+  destinationCountry: '',
   academicLevel: '',
   year: '',
   planningToTransfer: null,
@@ -79,7 +83,9 @@ const INITIAL_DATA: SurveyData = {
   expectedTransferYear: '',
   hasSSN: null,
   hasITIN: null,
-  hasUSAddress: null,
+  hasNIN: null,
+  hasSIN: null,
+  hasLocalAddress: null,
   monthlyIncome: 0,
   monthlyExpenses: 0,
   feePriority: '',
@@ -90,6 +96,43 @@ const INITIAL_DATA: SurveyData = {
   campusSide: '',
   goals: [],
   creditCardInterest: '',
+};
+
+// Country-specific configurations
+const COUNTRY_CONFIG = {
+  US: {
+    name: 'United States',
+    currency: '$',
+    currencyCode: 'USD',
+    taxIdLabel: 'SSN',
+    taxIdFullName: 'Social Security Number',
+    altTaxIdLabel: 'ITIN',
+    altTaxIdFullName: 'Individual Taxpayer Identification Number',
+    addressLabel: 'US address',
+    visaTypes: ['F-1', 'J-1', 'H-1B', 'OPT', 'Other'],
+  },
+  UK: {
+    name: 'United Kingdom',
+    currency: '£',
+    currencyCode: 'GBP',
+    taxIdLabel: 'NIN',
+    taxIdFullName: 'National Insurance Number',
+    altTaxIdLabel: null,
+    altTaxIdFullName: null,
+    addressLabel: 'UK address',
+    visaTypes: ['Tier 4 Student', 'Tier 2 Work', 'Youth Mobility', 'Graduate', 'Other'],
+  },
+  CA: {
+    name: 'Canada',
+    currency: '$',
+    currencyCode: 'CAD',
+    taxIdLabel: 'SIN',
+    taxIdFullName: 'Social Insurance Number',
+    altTaxIdLabel: null,
+    altTaxIdFullName: null,
+    addressLabel: 'Canadian address',
+    visaTypes: ['Study Permit', 'Work Permit', 'PGWP', 'Co-op Work Permit', 'Other'],
+  },
 };
 
 // Institution type options
@@ -368,10 +411,12 @@ const MoneyInput = ({
   value,
   onChange,
   placeholder = '0',
+  currencySymbol = '$',
 }: {
   value: number;
   onChange: (v: number) => void;
   placeholder?: string;
+  currencySymbol?: string;
 }) => {
   const [text, setText] = React.useState(() => (value > 0 ? String(value) : ''));
 
@@ -382,7 +427,7 @@ const MoneyInput = ({
 
   return (
     <div className="relative">
-      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">{currencySymbol}</span>
       <input
         type="text"
         inputMode="numeric"
@@ -441,6 +486,20 @@ export default function SurveyPage() {
   const [emailSuggestion, setEmailSuggestion] = useState<string | null>(null);
   const [isEduEmail, setIsEduEmail] = useState(false);
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
+
+  // Get country config
+  const countryConfig = COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] || COUNTRY_CONFIG.US;
+
+  // Load destination country from localStorage
+  useEffect(() => {
+    const savedCountry = localStorage.getItem('noor_selected_country');
+    if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
+      setData(prev => ({ ...prev, destinationCountry: savedCountry }));
+    } else {
+      // Default to US if not set
+      setData(prev => ({ ...prev, destinationCountry: 'US' }));
+    }
+  }, []);
 
   // Password validation
   const passwordValidation = useMemo(() => {
@@ -555,15 +614,20 @@ export default function SurveyPage() {
           email: data.email,
           password: data.password,
           country_of_origin: data.countryOfOrigin,
+          destination_country: data.destinationCountry,
           university: institution?.short_name || '',
           institution_id: data.institutionId,
           institution_type: data.institutionType,
-          visa_status: 'F-1',
-          has_ssn: data.hasSSN ?? false,
-          has_itin: data.hasITIN ?? false,
-          has_us_address: data.hasUSAddress ?? false,
+          visa_status: countryConfig.visaTypes[0], // Default to first visa type
+          // Country-specific ID/Tax numbers
+          has_ssn: data.destinationCountry === 'US' ? (data.hasSSN ?? false) : null,
+          has_itin: data.destinationCountry === 'US' ? (data.hasITIN ?? false) : null,
+          has_nin: data.destinationCountry === 'UK' ? (data.hasNIN ?? false) : null,
+          has_sin: data.destinationCountry === 'CA' ? (data.hasSIN ?? false) : null,
+          has_local_address: data.hasLocalAddress ?? false,
           monthly_income: data.monthlyIncome,
           monthly_budget: data.monthlyExpenses,
+          currency: countryConfig.currencyCode,
           international_transfers: data.transferFrequency,
           branch_preference: data.branchPreference,
           banking_needs: data.bankingNeeds,
@@ -571,7 +635,7 @@ export default function SurveyPage() {
           campus_side: data.campusSide !== 'unknown' ? data.campusSide : null,
           goals: data.goals,
           credit_card_interest: data.creditCardInterest,
-          needs_zelle: data.bankingNeeds.includes('Bill pay'),
+          needs_zelle: data.destinationCountry === 'US' && data.bankingNeeds.includes('Bill pay'),
           credit_goals: data.goals.includes('Credit history') ? 'build-credit' : 'basic',
           fee_sensitivity: data.feePriority === 'budget' ? 'very-sensitive' : data.feePriority === 'premium' ? 'not-sensitive' : 'medium',
           digital_preference: data.bankingStyle === 'Digital' ? 'mobile-first' : data.bankingStyle === 'Branches' ? 'branch' : 'both',
@@ -600,12 +664,16 @@ export default function SurveyPage() {
       const userProfile = result.profile ? {
         id: result.userId,
         ...result.profile,
+        destinationCountry: data.destinationCountry,
         institutionType: data.institutionType,
         hasSSN: data.hasSSN,
         hasITIN: data.hasITIN,
-        hasUSAddress: data.hasUSAddress,
+        hasNIN: data.hasNIN,
+        hasSIN: data.hasSIN,
+        hasLocalAddress: data.hasLocalAddress,
         monthlyIncome: data.monthlyIncome,
         monthlyExpenses: data.monthlyExpenses,
+        currency: countryConfig.currencyCode,
         bankingNeeds: data.bankingNeeds,
         bankingStyle: data.bankingStyle,
         transferFrequency: data.transferFrequency,
@@ -626,11 +694,15 @@ export default function SurveyPage() {
         institutionType: data.institutionType,
         university: institution?.short_name || '',
         countryOfOrigin: data.countryOfOrigin,
+        destinationCountry: data.destinationCountry,
         hasSSN: data.hasSSN,
         hasITIN: data.hasITIN,
-        hasUSAddress: data.hasUSAddress,
+        hasNIN: data.hasNIN,
+        hasSIN: data.hasSIN,
+        hasLocalAddress: data.hasLocalAddress,
         monthlyIncome: data.monthlyIncome,
         monthlyExpenses: data.monthlyExpenses,
+        currency: countryConfig.currencyCode,
         bankingNeeds: data.bankingNeeds,
         bankingStyle: data.bankingStyle,
         transferFrequency: data.transferFrequency,
@@ -1090,32 +1162,65 @@ export default function SurveyPage() {
             <p className="text-gray-500 mb-8">We Tailor From Here</p>
 
             <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">SSN?</label>
-                <ToggleButtons
-                  value={data.hasSSN}
-                  onChange={v => updateField('hasSSN', v)}
-                />
-                {data.hasSSN === false && (
-                  <Feedback>No problem. We have options.</Feedback>
-                )}
-              </div>
+              {/* US-specific: SSN and ITIN */}
+              {data.destinationCountry === 'US' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">SSN?</label>
+                    <ToggleButtons
+                      value={data.hasSSN}
+                      onChange={v => updateField('hasSSN', v)}
+                    />
+                    {data.hasSSN === false && (
+                      <Feedback>No problem. We have options.</Feedback>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">ITIN?</label>
+                    <ToggleButtons
+                      value={data.hasITIN}
+                      onChange={v => updateField('hasITIN', v)}
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* UK-specific: NIN */}
+              {data.destinationCountry === 'UK' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">National Insurance Number (NIN)?</label>
+                  <ToggleButtons
+                    value={data.hasNIN}
+                    onChange={v => updateField('hasNIN', v)}
+                  />
+                  {data.hasNIN === false && (
+                    <Feedback>No worries. You can apply after arrival.</Feedback>
+                  )}
+                </div>
+              )}
+
+              {/* Canada-specific: SIN */}
+              {data.destinationCountry === 'CA' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">Social Insurance Number (SIN)?</label>
+                  <ToggleButtons
+                    value={data.hasSIN}
+                    onChange={v => updateField('hasSIN', v)}
+                  />
+                  {data.hasSIN === false && (
+                    <Feedback>You can apply for one after arriving in Canada.</Feedback>
+                  )}
+                </div>
+              )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">ITIN?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{countryConfig.addressLabel}?</label>
                 <ToggleButtons
-                  value={data.hasITIN}
-                  onChange={v => updateField('hasITIN', v)}
+                  value={data.hasLocalAddress}
+                  onChange={v => updateField('hasLocalAddress', v)}
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">US address?</label>
-                <ToggleButtons
-                  value={data.hasUSAddress}
-                  onChange={v => updateField('hasUSAddress', v)}
-                />
-                {data.hasUSAddress === true && (
+                {data.hasLocalAddress === true && (
                   <Feedback>Good. More doors open.</Feedback>
                 )}
               </div>
@@ -1131,19 +1236,21 @@ export default function SurveyPage() {
 
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">What comes in</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What comes in <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
                 <MoneyInput
                   value={data.monthlyIncome}
                   onChange={v => updateField('monthlyIncome', v)}
+                  currencySymbol={countryConfig.currency}
                 />
                 <p className="text-gray-400 text-xs mt-1.5">Scholarships, family support, work-study</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">What goes out</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What goes out <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
                 <MoneyInput
                   value={data.monthlyExpenses}
                   onChange={v => updateField('monthlyExpenses', v)}
+                  currencySymbol={countryConfig.currency}
                 />
                 <p className="text-gray-400 text-xs mt-1.5">Rent, food, transportation, entertainment</p>
               </div>

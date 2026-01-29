@@ -29,6 +29,7 @@ interface UseCreditCardsOptions {
   f1Only?: boolean;
   noSsn?: boolean;
   autoFetch?: boolean;
+  country?: string;
 }
 
 interface UseCreditCardsReturn {
@@ -44,6 +45,7 @@ export function useCreditCards({
   f1Only = true,
   noSsn = false,
   autoFetch = true,
+  country = 'US',
 }: UseCreditCardsOptions = {}): UseCreditCardsReturn {
   const [cards, setCards] = useState<CreditCard[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -59,6 +61,7 @@ export function useCreditCards({
       params.set('limit', limit.toString());
       if (f1Only) params.set('f1', 'true');
       if (noSsn) params.set('no_ssn', 'true');
+      if (country) params.set('country', country);
 
       const response = await fetch(`/api/credit-cards?${params}`);
 
@@ -76,7 +79,7 @@ export function useCreditCards({
     } finally {
       setIsLoading(false);
     }
-  }, [limit, f1Only, noSsn]);
+  }, [limit, f1Only, noSsn, country]);
 
   useEffect(() => {
     if (autoFetch) {

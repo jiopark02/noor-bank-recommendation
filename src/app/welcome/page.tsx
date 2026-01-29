@@ -4,6 +4,28 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Country options
+const COUNTRIES = [
+  {
+    id: 'US',
+    name: 'United States',
+    flag: '🇺🇸',
+    description: 'Study or work in the USA',
+  },
+  {
+    id: 'UK',
+    name: 'United Kingdom',
+    flag: '🇬🇧',
+    description: 'Study or work in the UK',
+  },
+  {
+    id: 'CA',
+    name: 'Canada',
+    flag: '🇨🇦',
+    description: 'Study or work in Canada',
+  },
+];
+
 // Bespoke options - tailored experience
 const REASONS = [
   {
@@ -46,8 +68,19 @@ const REASONS = [
 
 export default function WelcomePage() {
   const router = useRouter();
-  const [step, setStep] = useState<'welcome' | 'reason'>('welcome');
+  const [step, setStep] = useState<'welcome' | 'country' | 'reason'>('welcome');
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
+
+  const handleCountrySelect = (countryId: string) => {
+    setSelectedCountry(countryId);
+    localStorage.setItem('noor_selected_country', countryId);
+
+    // Small delay for animation
+    setTimeout(() => {
+      setStep('reason');
+    }, 300);
+  };
 
   const handleReasonSelect = (reasonId: string) => {
     setSelectedReason(reasonId);
@@ -110,7 +143,7 @@ export default function WelcomePage() {
 
                 {/* Single CTA */}
                 <button
-                  onClick={() => setStep('reason')}
+                  onClick={() => setStep('country')}
                   className="w-full py-4 bg-black text-white font-medium rounded-xl transition-all hover:bg-gray-800"
                 >
                   Get Started
@@ -124,6 +157,64 @@ export default function WelcomePage() {
                   I already have an account
                 </button>
               </motion.div>
+            ) : step === 'country' ? (
+              <motion.div
+                key="country"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+              >
+                {/* Back button */}
+                <button
+                  onClick={() => setStep('welcome')}
+                  className="flex items-center text-gray-400 hover:text-black mb-8 transition-colors"
+                >
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Back
+                </button>
+
+                {/* Question */}
+                <div className="mb-8">
+                  <h2 className="text-2xl font-medium text-black mb-2">
+                    Where are you headed?
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    Select your destination country.
+                  </p>
+                </div>
+
+                {/* Country Options */}
+                <div className="space-y-3">
+                  {COUNTRIES.map((country, index) => (
+                    <motion.button
+                      key={country.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      onClick={() => handleCountrySelect(country.id)}
+                      className={`w-full p-4 text-left rounded-xl border-2 transition-all ${
+                        selectedCountry === country.id
+                          ? 'border-black bg-gray-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{country.flag}</span>
+                        <div>
+                          <span className="font-medium text-black block">
+                            {country.name}
+                          </span>
+                          <span className="text-sm text-gray-500 mt-0.5 block">
+                            {country.description}
+                          </span>
+                        </div>
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
+              </motion.div>
             ) : (
               <motion.div
                 key="reason"
@@ -133,7 +224,7 @@ export default function WelcomePage() {
               >
                 {/* Back button */}
                 <button
-                  onClick={() => setStep('welcome')}
+                  onClick={() => setStep('country')}
                   className="flex items-center text-gray-400 hover:text-black mb-8 transition-colors"
                 >
                   <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -7,12 +7,14 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const f1Only = searchParams.get('f1') === 'true';
     const noSsn = searchParams.get('no_ssn') === 'true';
+    const country = searchParams.get('country') || 'US';
 
     const supabase = createServerClient();
 
     let query = supabase
       .from('credit_cards')
       .select('*')
+      .eq('country', country)
       .order('f1_friendly', { ascending: false })
       .limit(limit);
 
