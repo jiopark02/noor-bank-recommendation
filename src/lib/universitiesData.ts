@@ -403,7 +403,7 @@ export function calculateDaysUntilDeadline(deadline: string): number {
 
 // Search function (uses comprehensive search)
 export function searchInstitutions(query: string, limit: number = 20): University[] {
-  return searchUniversities(query, limit).map(toUniversity);
+  return searchUniversities(query, { limit }).map(toUniversity);
 }
 
 // Storage

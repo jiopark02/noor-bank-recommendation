@@ -2,7 +2,17 @@
 // UNIVERSITY DATABASE TYPES
 // ============================================================================
 
-export type InstitutionType = 'university' | 'community_college' | 'technical_college';
+export type Country = 'US' | 'UK' | 'CA';
+
+export type InstitutionType =
+  | 'university'
+  | 'community_college'
+  | 'technical_college'
+  | 'college'           // UK/Canada colleges
+  | 'russell_group'     // UK Russell Group
+  | 'ivy_league'        // US Ivy League
+  | 'cegep';            // Quebec CEGEP
+
 export type CampusType = 'main' | 'branch' | 'satellite' | 'online' | 'regional';
 
 export interface University {
@@ -11,8 +21,9 @@ export interface University {
   short_name: string;
   system_name?: string;
   city: string;
-  state: string;
-  zip_code: string;
+  state: string;           // state/province/region
+  country?: Country;       // defaults to 'US' if not specified
+  zip_code: string;        // postal code
   latitude: number;
   longitude: number;
   type: InstitutionType;
