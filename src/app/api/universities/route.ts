@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
+import { ALL_UNIVERSITIES, searchUniversities, getUniversityById } from '@/lib/universities';
 
 export interface UniversitySearchResult {
   id: string;
@@ -15,6 +15,7 @@ export interface UniversitySearchResult {
   website?: string;
 }
 
+// Search universities using local data (comprehensive, fast, no database needed)
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -24,69 +25,102 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') || '20'), 100);
     const offset = parseInt(searchParams.get('offset') || '0');
 
-    if (!isSupabaseConfigured()) {
-      return NextResponse.json(
-        { error: 'Database not configured', fallback: true },
-        { status: 503 }
-      );
-    }
-
-    const supabase = createServerClient();
-
-    // Build the query
-    let dbQuery = supabase
-      .from('universities')
-      .select('id, name, short_name, city, state, country, type, is_public, enrollment, international_students, website')
-      .order('enrollment', { ascending: false, nullsFirst: false });
-
-    // Full-text search if query provided
-    if (query && query.length >= 2) {
-      // Search in name, short_name, city, and aliases
-      dbQuery = dbQuery.or(
-        `name.ilike.%${query}%,short_name.ilike.%${query}%,city.ilike.%${query}%`
-      );
-    }
+    // Start with all universities from comprehensive local data
+    let results = [...ALL_UNIVERSITIES];
 
     // Filter by country
     if (country) {
       const countries = country.split(',').map(c => c.trim().toUpperCase());
-      if (countries.length === 1) {
-        dbQuery = dbQuery.eq('country', countries[0]);
-      } else {
-        dbQuery = dbQuery.in('country', countries);
-      }
+      results = results.filter(uni => {
+        const uniCountry = uni.country || 'US';
+        return countries.includes(uniCountry);
+      });
     }
 
     // Filter by type
     if (type) {
-      const types = type.split(',').map(t => t.trim());
-      if (types.length === 1) {
-        dbQuery = dbQuery.eq('type', types[0]);
-      } else {
-        dbQuery = dbQuery.in('type', types);
-      }
+      const types = type.split(',').map(t => t.trim().toLowerCase());
+      results = results.filter(uni => {
+        // Handle community_college type mapping
+        if (types.includes('community_college') && uni.type === 'community_college') return true;
+        if (types.includes('university') && (uni.type === 'university' || uni.type === 'ivy_league' || uni.type === 'russell_group')) return true;
+        return types.includes(uni.type.toLowerCase());
+      });
     }
 
-    // Pagination
-    dbQuery = dbQuery.range(offset, offset + limit - 1);
+    // Search by query
+    if (query && query.length >= 2) {
+      const searchLower = query.toLowerCase();
+      results = results.filter(uni => {
+        const name = uni.name.toLowerCase();
+        const shortName = uni.short_name.toLowerCase();
+        const city = uni.city.toLowerCase();
+        const state = uni.state.toLowerCase();
+        const aliases = (uni.aliases || []).map(a => a.toLowerCase());
 
-    const { data, error, count } = await dbQuery;
+        return name.includes(searchLower) ||
+               shortName.includes(searchLower) ||
+               city.includes(searchLower) ||
+               state.includes(searchLower) ||
+               aliases.some(a => a.includes(searchLower));
+      });
 
-    if (error) {
-      console.error('Universities search error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      // Score and sort by relevance
+      results = results.map(uni => {
+        let score = 0;
+        const name = uni.name.toLowerCase();
+        const shortName = uni.short_name.toLowerCase();
+
+        // Exact matches
+        if (name === searchLower || shortName === searchLower) score += 100;
+        // Starts with
+        if (name.startsWith(searchLower) || shortName.startsWith(searchLower)) score += 50;
+        // Contains
+        if (name.includes(searchLower)) score += 20;
+        if (shortName.includes(searchLower)) score += 20;
+        // Enrollment bonus (popular schools first)
+        if (uni.enrollment && uni.enrollment > 10000) score += 10;
+        if (uni.international_students && uni.international_students > 1000) score += 5;
+
+        return { ...uni, _score: score };
+      }).sort((a, b) => (b._score || 0) - (a._score || 0));
+    } else {
+      // No search query - sort by enrollment (popular schools first)
+      results = results.sort((a, b) => (b.enrollment || 0) - (a.enrollment || 0));
     }
+
+    // Get total before pagination
+    const total = results.length;
+
+    // Apply pagination
+    results = results.slice(offset, offset + limit);
+
+    // Transform to response format
+    const data: UniversitySearchResult[] = results.map(uni => ({
+      id: uni.id,
+      name: uni.name,
+      short_name: uni.short_name,
+      city: uni.city,
+      state: uni.state,
+      country: uni.country || 'US',
+      type: uni.type,
+      is_public: uni.is_public,
+      enrollment: uni.enrollment,
+      international_students: uni.international_students,
+      website: uni.website,
+    }));
 
     return NextResponse.json({
       success: true,
-      data: data || [],
+      data,
       meta: {
-        total: count ?? data?.length ?? 0,
+        total,
         limit,
         offset,
         query,
         country,
         type,
+        source: 'local_data',
       },
     });
   } catch (error) {
@@ -98,7 +132,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Get university by ID
+// Get university by ID using local data
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -111,27 +145,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isSupabaseConfigured()) {
-      return NextResponse.json(
-        { error: 'Database not configured', fallback: true },
-        { status: 503 }
-      );
-    }
-
-    const supabase = createServerClient();
-
-    const { data, error } = await supabase
-      .from('universities')
-      .select('*')
-      .in('id', ids);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    // Find universities by ID from local data
+    const data = ids
+      .map(id => getUniversityById(id))
+      .filter(Boolean)
+      .map(uni => ({
+        id: uni!.id,
+        name: uni!.name,
+        short_name: uni!.short_name,
+        city: uni!.city,
+        state: uni!.state,
+        country: uni!.country || 'US',
+        type: uni!.type,
+        is_public: uni!.is_public,
+        enrollment: uni!.enrollment,
+        international_students: uni!.international_students,
+        website: uni!.website,
+      }));
 
     return NextResponse.json({
       success: true,
-      data: data || [],
+      data,
+      source: 'local_data',
     });
   } catch (error) {
     console.error('Universities by ID error:', error);

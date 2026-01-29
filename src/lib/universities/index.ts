@@ -21,6 +21,8 @@ import {
 } from './additionalStateUniversities';
 import { ALL_UK_UNIVERSITIES, RUSSELL_GROUP_UNIVERSITIES, OTHER_UK_UNIVERSITIES } from './ukUniversities';
 import { CANADIAN_UNIVERSITIES, CANADIAN_COLLEGES, ALL_CANADIAN_INSTITUTIONS } from './canadaUniversities';
+import { TOP_PRIVATE_ADDITIONAL, STATE_UNIVERSITIES_ADDITIONAL, ALL_TOP_ADDITIONS } from './topUniversitiesAdditions';
+import { MORE_CALIFORNIA_CC, MORE_OTHER_CC, ALL_ADDITIONAL_CC } from './additionalCommunityColleges';
 
 // Re-export types
 export * from './types';
@@ -106,11 +108,14 @@ const ALL_US_UNIVERSITIES: University[] = [
   ...CSU_SYSTEM,
   ...IVY_LEAGUE,
   ...TOP_PRIVATE,
+  ...withCountry(TOP_PRIVATE_ADDITIONAL, 'US'),
+  ...withCountry(STATE_UNIVERSITIES_ADDITIONAL, 'US'),
   ...withCountry(BIG_TEN, 'US'),
   ...withCountry(ALL_TEXAS, 'US'),
   ...withCountry(NY_UNIVERSITIES, 'US'),
   ...withCountry(ALL_ADDITIONAL_STATE_UNIVERSITIES, 'US'),
   ...withCountry(ALL_COMMUNITY_COLLEGES, 'US'),
+  ...withCountry(ALL_ADDITIONAL_CC, 'US'),
 ];
 
 // ============================================================================
@@ -347,6 +352,8 @@ export {
   CSU_SYSTEM,
   IVY_LEAGUE,
   TOP_PRIVATE,
+  TOP_PRIVATE_ADDITIONAL,
+  STATE_UNIVERSITIES_ADDITIONAL,
   BIG_TEN,
   ALL_TEXAS,
   NY_UNIVERSITIES,
@@ -360,5 +367,8 @@ export {
   ARIZONA_UNIVERSITIES,
   COLORADO_UNIVERSITIES,
   ALL_ADDITIONAL_STATE_UNIVERSITIES,
-  ALL_COMMUNITY_COLLEGES
+  ALL_COMMUNITY_COLLEGES,
+  ALL_ADDITIONAL_CC,
+  MORE_CALIFORNIA_CC,
+  MORE_OTHER_CC
 };

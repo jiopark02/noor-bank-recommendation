@@ -1,5 +1,45 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Apartment } from '@/types/database';
+import { getApartmentsForUniversity, ALL_APARTMENTS } from '@/lib/locationData';
+
+// Convert ApartmentData from locationData to Apartment type
+const convertLocationDataToApartment = (apt: typeof ALL_APARTMENTS[0]): Apartment => ({
+  id: apt.id,
+  name: apt.name,
+  address: apt.address,
+  university: apt.university,
+  bedrooms: apt.bedrooms,
+  bathrooms: apt.bathrooms,
+  price_min: apt.price_min,
+  price_max: apt.price_max,
+  shared_price_min: apt.shared_price_min,
+  shared_price_max: apt.shared_price_max,
+  sqft_min: apt.sqft_min,
+  sqft_max: apt.sqft_max,
+  walking_minutes: apt.walking_minutes,
+  biking_minutes: apt.biking_minutes,
+  transit_minutes: apt.transit_minutes,
+  driving_minutes: apt.driving_minutes,
+  rating: apt.rating,
+  review_count: apt.review_count,
+  pet_policy: apt.pet_policy,
+  campus_side: apt.campus_side,
+  furnished: apt.furnished,
+  gym: apt.gym,
+  parking: apt.parking,
+  latitude: apt.latitude,
+  longitude: apt.longitude,
+  contact_website: apt.contact_website,
+  images: apt.images,
+  available_units: 5,
+  woman_only: false,
+  verified: true,
+  created_at: '2026-01-01',
+  updated_at: '2026-01-15',
+});
+
+// New comprehensive apartments from locationData
+const LOCATION_DATA_APARTMENTS: Apartment[] = ALL_APARTMENTS.map(convertLocationDataToApartment);
 
 // Real apartments with real images from apartment websites
 const MOCK_APARTMENTS: Apartment[] = [
@@ -138,17 +178,53 @@ const MOCK_APARTMENTS: Apartment[] = [
 
 type CampusSide = 'north' | 'south' | 'east' | 'west' | 'center';
 
+// Get all apartment data combined (prefer location data, then mock data)
+const getCombinedApartments = (): Apartment[] => {
+  // Create a map by id to deduplicate
+  const apartmentMap = new Map<string, Apartment>();
+
+  // First add all mock apartments
+  MOCK_APARTMENTS.forEach(apt => apartmentMap.set(apt.id, apt));
+
+  // Then add/override with location data apartments
+  LOCATION_DATA_APARTMENTS.forEach(apt => apartmentMap.set(apt.id, apt));
+
+  return Array.from(apartmentMap.values());
+};
+
 // University name mapping for flexible matching
 const UNIVERSITY_ALIASES: Record<string, string[]> = {
   'UC Berkeley': ['Berkeley', 'Cal', 'UCB', 'UC Berkeley', 'University of California Berkeley', 'University of California, Berkeley'],
   'Stanford': ['Stanford', 'Stanford University'],
   'UCLA': ['UCLA', 'UC Los Angeles', 'University of California Los Angeles', 'University of California, Los Angeles'],
-  'USC': ['USC', 'University of Southern California'],
+  // US Universities
   'MIT': ['MIT', 'Massachusetts Institute of Technology'],
   'Harvard': ['Harvard', 'Harvard University'],
   'Columbia': ['Columbia', 'Columbia University'],
   'NYU': ['NYU', 'New York University'],
   'Cornell': ['Cornell', 'Cornell University'],
+  'University of Michigan': ['Michigan', 'UMich', 'University of Michigan', 'U of M'],
+  'Georgia Tech': ['Georgia Tech', 'GT', 'Georgia Institute of Technology'],
+  'Arizona State': ['ASU', 'Arizona State', 'Arizona State University'],
+  'University of Washington': ['UW', 'U Washington', 'University of Washington'],
+  'UT Austin': ['UT Austin', 'Texas', 'University of Texas at Austin'],
+  // UK Universities
+  'Imperial College London': ['Imperial', 'Imperial College', 'Imperial College London'],
+  'UCL': ['UCL', 'University College London'],
+  'LSE': ['LSE', 'London School of Economics'],
+  'Oxford': ['Oxford', 'University of Oxford'],
+  'Cambridge': ['Cambridge', 'University of Cambridge'],
+  'Manchester': ['Manchester', 'University of Manchester'],
+  'Edinburgh': ['Edinburgh', 'University of Edinburgh'],
+  // Canada Universities
+  'University of Toronto': ['U of T', 'UofT', 'Toronto', 'University of Toronto'],
+  'UBC': ['UBC', 'University of British Columbia'],
+  'McGill': ['McGill', 'McGill University'],
+  'Waterloo': ['Waterloo', 'University of Waterloo', 'UWaterloo'],
+  'McMaster': ['McMaster', 'McMaster University'],
+  'University of Calgary': ['UCalgary', 'Calgary', 'University of Calgary'],
+  'SFU': ['SFU', 'Simon Fraser', 'Simon Fraser University'],
+  'USC': ['USC', 'University of Southern California'],
   'UIUC': ['UIUC', 'Illinois', 'University of Illinois', 'University of Illinois Urbana-Champaign'],
   'UC Irvine': ['UCI', 'UC Irvine', 'Irvine', 'University of California Irvine', 'University of California, Irvine'],
   'Northeastern': ['Northeastern', 'Northeastern University'],
@@ -248,7 +324,7 @@ export function useApartments({ limit = 20, filters = {}, autoFetch = true }: Us
         setTotal(data.meta?.total || apiApartments.length);
       } else {
         // Fall back to mock data if API returns empty
-        let filtered = [...MOCK_APARTMENTS];
+        let filtered = getCombinedApartments();
 
         if (filters.university) {
           filtered = filtered.filter(a => matchesUniversity(a.university, filters.university!));
@@ -267,7 +343,7 @@ export function useApartments({ limit = 20, filters = {}, autoFetch = true }: Us
       }
     } catch (err) {
       // Fall back to mock data on error
-      let filtered = [...MOCK_APARTMENTS];
+      let filtered = getCombinedApartments();
 
       if (filters.university) {
         filtered = filtered.filter(a => matchesUniversity(a.university, filters.university!));
