@@ -168,29 +168,79 @@ export function useApartments({ limit = 20, filters = {}, autoFetch = true }: Us
     setIsLoading(true);
     setError(null);
 
-    // Use local mock data directly (has coordinates for maps)
-    let filtered = [...MOCK_APARTMENTS];
+    try {
+      // Get country from localStorage
+      const savedCountry = typeof window !== 'undefined' ? localStorage.getItem('noor_selected_country') : null;
+      const country = savedCountry || 'US';
 
-    // Filter by university first
-    if (filters.university) {
-      filtered = filtered.filter(a => a.university === filters.university);
+      // Build API query params
+      const params = new URLSearchParams({
+        country,
+        limit: limit.toString(),
+      });
+
+      if (filters.university) {
+        params.set('university', filters.university);
+      }
+      if (filters.gym) params.set('gym', 'true');
+      if (filters.furnished) params.set('furnished', 'true');
+      if (filters.parking) params.set('parking', 'true');
+
+      // Try API first
+      const response = await fetch(`/api/apartments?${params}`);
+      const data = await response.json();
+
+      if (response.ok && data.data && data.data.length > 0) {
+        // Apply campus side filter locally (if API doesn't support it)
+        let apiApartments = data.data;
+        if (filters.campusSide) {
+          apiApartments = apiApartments.filter((a: Apartment) =>
+            a.campus_side === filters.campusSide || a.campus_side === 'center'
+          );
+        }
+        setApartments(apiApartments);
+        setTotal(data.meta?.total || apiApartments.length);
+      } else {
+        // Fall back to mock data if API returns empty
+        let filtered = [...MOCK_APARTMENTS];
+
+        if (filters.university) {
+          filtered = filtered.filter(a => a.university === filters.university);
+        }
+        if (filters.gym) filtered = filtered.filter(a => a.gym);
+        if (filters.furnished) filtered = filtered.filter(a => a.furnished);
+        if (filters.parking) filtered = filtered.filter(a => a.parking);
+        if (filters.campusSide) {
+          filtered = filtered.filter(a =>
+            a.campus_side === filters.campusSide || a.campus_side === 'center'
+          );
+        }
+
+        setApartments(filtered.slice(0, limit));
+        setTotal(filtered.length);
+      }
+    } catch (err) {
+      // Fall back to mock data on error
+      let filtered = [...MOCK_APARTMENTS];
+
+      if (filters.university) {
+        filtered = filtered.filter(a => a.university === filters.university);
+      }
+      if (filters.gym) filtered = filtered.filter(a => a.gym);
+      if (filters.furnished) filtered = filtered.filter(a => a.furnished);
+      if (filters.parking) filtered = filtered.filter(a => a.parking);
+      if (filters.campusSide) {
+        filtered = filtered.filter(a =>
+          a.campus_side === filters.campusSide || a.campus_side === 'center'
+        );
+      }
+
+      setApartments(filtered.slice(0, limit));
+      setTotal(filtered.length);
+      setError(err instanceof Error ? err.message : 'Failed to fetch apartments');
+    } finally {
+      setIsLoading(false);
     }
-
-    // Apply amenity filters
-    if (filters.gym) filtered = filtered.filter(a => a.gym);
-    if (filters.furnished) filtered = filtered.filter(a => a.furnished);
-    if (filters.parking) filtered = filtered.filter(a => a.parking);
-
-    // Filter by campus side
-    if (filters.campusSide) {
-      filtered = filtered.filter(a =>
-        a.campus_side === filters.campusSide || a.campus_side === 'center'
-      );
-    }
-
-    setApartments(filtered.slice(0, limit));
-    setTotal(filtered.length);
-    setIsLoading(false);
   }, [limit, filters.gym, filters.furnished, filters.parking, filters.campusSide, filters.university]);
 
   useEffect(() => {

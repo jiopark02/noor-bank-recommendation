@@ -3,14 +3,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  getCommunityColleges,
-  getUniversities,
-  getTAGEligibleUniversities,
-  getInstitutionById,
-  searchInstitutions,
-  University,
-} from '@/lib/universitiesData';
+import { useUniversitySearch, University, getUniversityById } from '@/hooks/useUniversitySearch';
 import {
   validatePassword,
   validateEmail,
@@ -538,35 +531,19 @@ export default function SurveyPage() {
   const showTransferStep = isCC && data.planningToTransfer === true;
   const totalSteps = showTransferStep ? 8 : 7;
 
-  // Filter institutions based on search and type
-  const filteredInstitutions = useMemo(() => {
-    if (!data.institutionType) return [];
+  // Use API-based university search
+  const {
+    universities: filteredInstitutions,
+    isLoading: institutionsLoading,
+  } = useUniversitySearch({
+    country: data.destinationCountry || 'US',
+    type: data.institutionType === 'community_college' ? 'community_college' : data.institutionType === 'university' ? 'university' : 'all',
+    enabled: !!data.institutionType && !!data.destinationCountry,
+    searchQuery: institutionSearch,
+  });
 
-    // Use search function for better matching
-    if (institutionSearch && institutionSearch.length >= 2) {
-      const results = searchInstitutions(institutionSearch, 30);
-      return results.filter(inst =>
-        data.institutionType === 'community_college'
-          ? inst.type === 'community_college'
-          : inst.type === 'university'
-      ).slice(0, 15);
-    }
-
-    // Default: show popular institutions by enrollment
-    const institutions = data.institutionType === 'community_college'
-      ? getCommunityColleges()
-      : getUniversities();
-
-    return institutions
-      .sort((a, b) => (b.international_student_count || 0) - (a.international_student_count || 0))
-      .slice(0, 20);
-  }, [data.institutionType, institutionSearch]);
-
-  // Get TAG-eligible universities for CC students
-  const tagUniversities = useMemo(() => {
-    if (!data.institutionId || !isCC) return [];
-    return getTAGEligibleUniversities(data.institutionId);
-  }, [data.institutionId, isCC]);
+  // TAG-eligible universities (simplified - in production would be from API)
+  const tagUniversities: University[] = [];
 
   const updateField = <K extends keyof SurveyData>(field: K, value: SurveyData[K]) => {
     setData(prev => ({ ...prev, [field]: value }));
@@ -603,7 +580,9 @@ export default function SurveyPage() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const institution = data.institutionId ? getInstitutionById(data.institutionId) : null;
+      // Get institution info from selected institution or fetch by ID
+      const selectedInstitution = filteredInstitutions.find(i => i.id === data.institutionId);
+      const institution = selectedInstitution || (data.institutionId && data.institutionId !== 'other' ? await getUniversityById(data.institutionId) : null);
 
       const response = await fetch('/api/survey', {
         method: 'POST',

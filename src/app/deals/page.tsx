@@ -3,18 +3,20 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
-import {
-  getDeals,
-  submitDeal,
-  upvoteDeal,
-  hasUpvoted,
-  DEAL_CATEGORIES,
-  Deal,
-  DealCategory,
-} from '@/lib/dealsData';
+import { useDeals, Deal } from '@/hooks/useDeals';
+
+// Category definitions
+const DEAL_CATEGORIES = [
+  { id: 'all', label: 'All', icon: '🎁' },
+  { id: 'food', label: 'Food & Drinks', icon: '🍔' },
+  { id: 'shopping', label: 'Shopping', icon: '🛍️' },
+  { id: 'tech', label: 'Tech', icon: '💻' },
+  { id: 'entertainment', label: 'Entertainment', icon: '🎬' },
+  { id: 'transport', label: 'Transport', icon: '🚗' },
+  { id: 'education', label: 'Education', icon: '📚' },
+];
 
 export default function DealsPage() {
-  const [deals, setDeals] = useState<Deal[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [upvotedDeals, setUpvotedDeals] = useState<Set<string>>(new Set());
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -24,37 +26,38 @@ export default function DealsPage() {
     description: '',
     discount_text: '',
     discount_percent: '',
-    category: 'food' as Deal['category'],
+    category: 'food',
     brand: '',
     link: '',
   });
 
-  const loadDeals = () => {
-    const loaded = getDeals(selectedCategory, 'Stanford');
-    setDeals(loaded);
+  // Use the API hook
+  const { deals, isLoading, refetch } = useDeals({
+    category: selectedCategory,
+  });
 
-    // Check upvotes
+  // Load upvotes from localStorage
+  useEffect(() => {
     const upvoted = new Set<string>();
-    loaded.forEach((deal) => {
-      if (hasUpvoted(deal.id)) {
+    deals.forEach((deal) => {
+      const key = `deal_upvoted_${deal.id}`;
+      if (typeof window !== 'undefined' && localStorage.getItem(key)) {
         upvoted.add(deal.id);
       }
     });
     setUpvotedDeals(upvoted);
-  };
-
-  useEffect(() => {
-    loadDeals();
-  }, [selectedCategory]);
+  }, [deals]);
 
   const handleUpvote = (dealId: string) => {
-    upvoteDeal(dealId);
+    const key = `deal_upvoted_${dealId}`;
     setUpvotedDeals((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(dealId)) {
         newSet.delete(dealId);
+        if (typeof window !== 'undefined') localStorage.removeItem(key);
       } else {
         newSet.add(dealId);
+        if (typeof window !== 'undefined') localStorage.setItem(key, 'true');
       }
       return newSet;
     });
@@ -63,18 +66,8 @@ export default function DealsPage() {
   const handleSubmitDeal = () => {
     if (!newDeal.title || !newDeal.description || !newDeal.brand) return;
 
-    submitDeal({
-      title: newDeal.title,
-      description: newDeal.description,
-      discount_text: newDeal.discount_text,
-      discount_percent: newDeal.discount_percent ? parseInt(newDeal.discount_percent) : null,
-      category: newDeal.category,
-      brand: newDeal.brand,
-      link: newDeal.link || '',
-      university_id: 'Stanford',
-      expires_at: null,
-      submitted_by: 'current_user',
-    });
+    // TODO: Implement deal submission via API
+    console.log('Submitting deal:', newDeal);
 
     setShowSubmitModal(false);
     setNewDeal({
@@ -86,7 +79,7 @@ export default function DealsPage() {
       brand: '',
       link: '',
     });
-    loadDeals();
+    refetch();
   };
 
   const getCategoryIcon = (categoryId: string) => {

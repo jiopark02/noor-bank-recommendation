@@ -156,7 +156,12 @@ export function useJobs({
     setError(null);
 
     try {
+      // Get country from localStorage
+      const savedCountry = typeof window !== 'undefined' ? localStorage.getItem('noor_selected_country') : null;
+      const country = savedCountry || 'US';
+
       const params = new URLSearchParams();
+      params.set('country', country);
       params.set('limit', limit.toString());
       if (category) params.set('category', category);
       if (jobType) params.set('type', jobType);

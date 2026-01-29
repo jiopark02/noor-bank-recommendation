@@ -5,9 +5,6 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const country = searchParams.get('country') || 'US';
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const f1Only = searchParams.get('f1') === 'true';
-    const category = searchParams.get('category');
 
     if (!isSupabaseConfigured()) {
       return NextResponse.json(
@@ -18,22 +15,11 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServerClient();
 
-    let query = supabase
-      .from('scholarships')
+    const { data, error } = await supabase
+      .from('visa_types')
       .select('*')
       .eq('country', country)
-      .order('amount_max', { ascending: false, nullsFirst: false })
-      .limit(limit);
-
-    if (f1Only) {
-      query = query.eq('eligibility_f1', true);
-    }
-
-    if (category) {
-      query = query.eq('category', category);
-    }
-
-    const { data, error } = await query;
+      .order('visa_code');
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -45,7 +31,7 @@ export async function GET(request: NextRequest) {
       meta: { total: data?.length || 0, country },
     });
   } catch (error) {
-    console.error('Scholarships API error:', error);
+    console.error('Visa types API error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }
