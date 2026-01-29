@@ -138,6 +138,52 @@ const MOCK_APARTMENTS: Apartment[] = [
 
 type CampusSide = 'north' | 'south' | 'east' | 'west' | 'center';
 
+// University name mapping for flexible matching
+const UNIVERSITY_ALIASES: Record<string, string[]> = {
+  'UC Berkeley': ['Berkeley', 'Cal', 'UCB', 'UC Berkeley', 'University of California Berkeley', 'University of California, Berkeley'],
+  'Stanford': ['Stanford', 'Stanford University'],
+  'UCLA': ['UCLA', 'UC Los Angeles', 'University of California Los Angeles', 'University of California, Los Angeles'],
+  'USC': ['USC', 'University of Southern California'],
+  'MIT': ['MIT', 'Massachusetts Institute of Technology'],
+  'Harvard': ['Harvard', 'Harvard University'],
+  'Columbia': ['Columbia', 'Columbia University'],
+  'NYU': ['NYU', 'New York University'],
+  'Cornell': ['Cornell', 'Cornell University'],
+  'UIUC': ['UIUC', 'Illinois', 'University of Illinois', 'University of Illinois Urbana-Champaign'],
+  'UC Irvine': ['UCI', 'UC Irvine', 'Irvine', 'University of California Irvine', 'University of California, Irvine'],
+  'Northeastern': ['Northeastern', 'Northeastern University'],
+  'Boston U': ['BU', 'Boston University', 'Boston U'],
+};
+
+// Helper function to match university names flexibly
+function matchesUniversity(aptUniversity: string | undefined, filterUniversity: string): boolean {
+  if (!aptUniversity || !filterUniversity) return false;
+
+  const aptLower = aptUniversity.toLowerCase();
+  const filterLower = filterUniversity.toLowerCase();
+
+  // Direct match (case-insensitive)
+  if (aptLower === filterLower) return true;
+
+  // Check if filter matches any alias
+  for (const [canonical, aliases] of Object.entries(UNIVERSITY_ALIASES)) {
+    const aliasesLower = aliases.map(a => a.toLowerCase());
+    if (aliasesLower.includes(filterLower) || filterLower.includes(canonical.toLowerCase())) {
+      // Filter matches an alias, check if apartment matches canonical or any alias
+      if (aptLower === canonical.toLowerCase() || aliasesLower.includes(aptLower)) {
+        return true;
+      }
+    }
+  }
+
+  // Partial match (filter contained in apartment name or vice versa)
+  if (aptLower.includes(filterLower) || filterLower.includes(aptLower)) {
+    return true;
+  }
+
+  return false;
+}
+
 interface UseApartmentsOptions {
   limit?: number;
   filters?: {
@@ -205,7 +251,7 @@ export function useApartments({ limit = 20, filters = {}, autoFetch = true }: Us
         let filtered = [...MOCK_APARTMENTS];
 
         if (filters.university) {
-          filtered = filtered.filter(a => a.university === filters.university);
+          filtered = filtered.filter(a => matchesUniversity(a.university, filters.university!));
         }
         if (filters.gym) filtered = filtered.filter(a => a.gym);
         if (filters.furnished) filtered = filtered.filter(a => a.furnished);
@@ -224,7 +270,7 @@ export function useApartments({ limit = 20, filters = {}, autoFetch = true }: Us
       let filtered = [...MOCK_APARTMENTS];
 
       if (filters.university) {
-        filtered = filtered.filter(a => a.university === filters.university);
+        filtered = filtered.filter(a => matchesUniversity(a.university, filters.university!));
       }
       if (filters.gym) filtered = filtered.filter(a => a.gym);
       if (filters.furnished) filtered = filtered.filter(a => a.furnished);
