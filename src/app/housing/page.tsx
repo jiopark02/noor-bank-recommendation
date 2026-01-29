@@ -216,9 +216,14 @@ function ApartmentCard({ apartment }: { apartment: Apartment }) {
         <h3 className="font-medium text-black text-sm transition-opacity duration-300 group-hover:opacity-70">
           {apartment.name}
         </h3>
-        <p className="text-gray-500 text-sm mt-1">
-          ${apartment.price_min.toLocaleString()}-${apartment.price_max.toLocaleString()}/mo
-        </p>
+        <div className="mt-1 space-y-0.5">
+          <p className="text-gray-700 text-sm">
+            <span className="font-medium">Solo:</span> ${apartment.price_min.toLocaleString()}-${apartment.price_max.toLocaleString()}/mo
+          </p>
+          <p className="text-gray-500 text-sm">
+            <span className="font-medium">Shared:</span> ${(apartment.shared_price_min || Math.round(apartment.price_min * 0.55)).toLocaleString()}-${(apartment.shared_price_max || Math.round(apartment.price_max * 0.55)).toLocaleString()}/mo
+          </p>
+        </div>
         <p className="text-gray-400 text-xs mt-2">
           {apartment.bedrooms} · {apartment.walking_minutes} min walk
         </p>
@@ -269,11 +274,23 @@ function ApartmentDetailModal({ apartment, onClose }: { apartment: Apartment; on
 
           {/* Price */}
           <div className="mb-6">
-            <p className="text-2xl font-semibold text-black">
-              ${apartment.price_min.toLocaleString()} - ${apartment.price_max.toLocaleString()}
-              <span className="text-base font-normal text-gray-500">/mo</span>
-            </p>
-            <p className="text-gray-500 text-sm mt-1">
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-3">
+                <span className="text-xs uppercase tracking-wide text-gray-500 w-14">Solo</span>
+                <p className="text-xl font-semibold text-black">
+                  ${apartment.price_min.toLocaleString()} - ${apartment.price_max.toLocaleString()}
+                  <span className="text-sm font-normal text-gray-500">/mo</span>
+                </p>
+              </div>
+              <div className="flex items-baseline gap-3">
+                <span className="text-xs uppercase tracking-wide text-gray-500 w-14">Shared</span>
+                <p className="text-lg font-medium text-gray-700">
+                  ${(apartment.shared_price_min || Math.round(apartment.price_min * 0.55)).toLocaleString()} - ${(apartment.shared_price_max || Math.round(apartment.price_max * 0.55)).toLocaleString()}
+                  <span className="text-sm font-normal text-gray-500">/mo</span>
+                </p>
+              </div>
+            </div>
+            <p className="text-gray-500 text-sm mt-3">
               {apartment.bedrooms} · {apartment.bathrooms} bath · {apartment.sqft_min}-{apartment.sqft_max} sqft
             </p>
           </div>

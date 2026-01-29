@@ -110,6 +110,8 @@ export interface Apartment {
   bathrooms: string;
   price_min: number;
   price_max: number;
+  shared_price_min?: number;
+  shared_price_max?: number;
   sqft_min: number;
   sqft_max: number;
   walking_minutes: number;
