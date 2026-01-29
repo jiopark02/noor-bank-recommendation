@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { hashPassword, addUser, emailExists } from '@/lib/auth';
+import { sendWelcomeEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
   try {
@@ -89,6 +90,11 @@ export async function POST(request: NextRequest) {
             profile: userData,
           });
 
+          // Send welcome email (don't await - send in background)
+          sendWelcomeEmail(email, userData.first_name).catch(err => {
+            console.error('Failed to send welcome email:', err);
+          });
+
           return NextResponse.json({
             success: true,
             userId: data.id,
@@ -129,6 +135,11 @@ export async function POST(request: NextRequest) {
     });
 
     console.log('User saved to local store:', email);
+
+    // Send welcome email (don't await - send in background)
+    sendWelcomeEmail(email, userData.first_name).catch(err => {
+      console.error('Failed to send welcome email:', err);
+    });
 
     return NextResponse.json({
       success: true,

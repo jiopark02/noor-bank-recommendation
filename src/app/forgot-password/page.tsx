@@ -27,34 +27,13 @@ export default function ForgotPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [canResend, setCanResend] = useState(false);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(null);
 
-  // Check for reset token in URL (Supabase sends it as hash fragment)
+  // Check for reset token in URL
   useEffect(() => {
-    // Check URL search params for type=recovery
-    const type = searchParams.get('type');
-
-    // Check hash fragment for access_token (Supabase format)
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash;
-      if (hash) {
-        const params = new URLSearchParams(hash.substring(1));
-        const token = params.get('access_token');
-        const tokenType = params.get('type');
-
-        if (token && tokenType === 'recovery') {
-          setAccessToken(token);
-          setStep('reset');
-          // Clear the hash from URL for cleaner display
-          window.history.replaceState(null, '', window.location.pathname);
-        }
-      }
-    }
-
-    // Fallback: check for old token format
     const token = searchParams.get('token');
     if (token) {
-      setAccessToken(token);
+      setResetToken(token);
       setStep('reset');
     }
   }, [searchParams]);
@@ -156,7 +135,7 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    if (!accessToken) {
+    if (!resetToken) {
       setError('Invalid or expired reset link. Please request a new one.');
       setIsLoading(false);
       return;
@@ -167,7 +146,7 @@ export default function ForgotPasswordPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          access_token: accessToken,
+          token: resetToken,
           password: newPassword,
         }),
       });
