@@ -4,13 +4,19 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// What brings you here options
+// How can we help options
 const REASONS = [
   {
     id: 'just-arrived',
     label: 'I just arrived in the US',
     description: 'Help me get settled',
     priority: ['bank', 'phone', 'documents'],
+  },
+  {
+    id: 'already-here',
+    label: 'I\'m already living in the US',
+    description: 'Help me manage my finances',
+    priority: ['bank', 'credit', 'budget'],
   },
   {
     id: 'need-bank',
@@ -85,7 +91,7 @@ export default function WelcomePage() {
                 {/* Warm Welcome */}
                 <div className="mb-12">
                   <h2 className="text-2xl font-medium text-black mb-3 leading-snug">
-                    Welcome to the US.
+                    Welcome to NOOR.
                   </h2>
                   <p className="text-gray-500 text-base leading-relaxed">
                     We're here to help you navigate banking, housing, and everything in between.
@@ -139,7 +145,7 @@ export default function WelcomePage() {
                 {/* Question */}
                 <div className="mb-8">
                   <h2 className="text-2xl font-medium text-black mb-2">
-                    What brings you here?
+                    How can we help?
                   </h2>
                   <p className="text-gray-500 text-sm">
                     This helps us show you the most relevant stuff first.
