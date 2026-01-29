@@ -27,11 +27,34 @@ export default function ForgotPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [canResend, setCanResend] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
-  // Check for reset token in URL
+  // Check for reset token in URL (Supabase sends it as hash fragment)
   useEffect(() => {
+    // Check URL search params for type=recovery
+    const type = searchParams.get('type');
+
+    // Check hash fragment for access_token (Supabase format)
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      if (hash) {
+        const params = new URLSearchParams(hash.substring(1));
+        const token = params.get('access_token');
+        const tokenType = params.get('type');
+
+        if (token && tokenType === 'recovery') {
+          setAccessToken(token);
+          setStep('reset');
+          // Clear the hash from URL for cleaner display
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      }
+    }
+
+    // Fallback: check for old token format
     const token = searchParams.get('token');
     if (token) {
+      setAccessToken(token);
       setStep('reset');
     }
   }, [searchParams]);
@@ -67,38 +90,49 @@ export default function ForgotPasswordPage() {
     }
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const response = await fetch('/api/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
 
-      // In production, this would call your API
-      // const response = await fetch('/api/forgot-password', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ email }),
-      // });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send reset email');
+      }
 
       setStep('sent');
       setCountdown(60);
       setCanResend(false);
     } catch (err) {
-      setError(ERROR_MESSAGES.SERVER_ERROR);
+      setError(err instanceof Error ? err.message : ERROR_MESSAGES.SERVER_ERROR);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleResend = async () => {
-    if (!canResend) return;
+    if (!canResend || !email) return;
     setIsLoading(true);
     setCanResend(false);
     setCountdown(60);
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      // Show success feedback
+      const response = await fetch('/api/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to resend email');
+      }
+
       setError('');
     } catch (err) {
-      setError(ERROR_MESSAGES.SERVER_ERROR);
+      setError(err instanceof Error ? err.message : ERROR_MESSAGES.SERVER_ERROR);
     } finally {
       setIsLoading(false);
     }
@@ -122,23 +156,31 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+    if (!accessToken) {
+      setError('Invalid or expired reset link. Please request a new one.');
+      setIsLoading(false);
+      return;
+    }
 
-      // In production:
-      // const response = await fetch('/api/reset-password', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     token: searchParams.get('token'),
-      //     password: newPassword,
-      //   }),
-      // });
+    try {
+      const response = await fetch('/api/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_token: accessToken,
+          password: newPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to reset password');
+      }
 
       setStep('success');
     } catch (err) {
-      setError(ERROR_MESSAGES.SERVER_ERROR);
+      setError(err instanceof Error ? err.message : ERROR_MESSAGES.SERVER_ERROR);
     } finally {
       setIsLoading(false);
     }
