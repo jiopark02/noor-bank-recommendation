@@ -430,6 +430,7 @@ export default function SurveyPage() {
   const [step, setStep] = useState(1);
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [institutionSearch, setInstitutionSearch] = useState('');
   const [showInstitutionList, setShowInstitutionList] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
@@ -541,6 +542,7 @@ export default function SurveyPage() {
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       const institution = data.institutionId ? getInstitutionById(data.institutionId) : null;
 
@@ -584,13 +586,38 @@ export default function SurveyPage() {
 
       const result = await response.json();
 
+      if (!result.success) {
+        setSubmitError(result.message || 'Failed to create account. Please try again.');
+        return;
+      }
+
       // Save user ID and create session
       localStorage.setItem('noor_user_id', result.userId);
       createSession(data.staySignedIn);
       acceptTerms();
 
-      // Save user profile locally as backup
-      const userProfile = {
+      // Save user profile locally (use profile from response if available, otherwise build from form data)
+      const userProfile = result.profile ? {
+        id: result.userId,
+        ...result.profile,
+        institutionType: data.institutionType,
+        hasSSN: data.hasSSN,
+        hasITIN: data.hasITIN,
+        hasUSAddress: data.hasUSAddress,
+        monthlyIncome: data.monthlyIncome,
+        monthlyExpenses: data.monthlyExpenses,
+        bankingNeeds: data.bankingNeeds,
+        bankingStyle: data.bankingStyle,
+        transferFrequency: data.transferFrequency,
+        branchPreference: data.branchPreference,
+        campusSide: data.campusSide !== 'unknown' ? data.campusSide : null,
+        goals: data.goals,
+        creditCardInterest: data.creditCardInterest,
+        planningToTransfer: data.planningToTransfer,
+        targetUniversities: data.targetUniversities,
+        targetMajor: data.targetMajor,
+        expectedTransferYear: data.expectedTransferYear,
+      } : {
         id: result.userId,
         firstName: data.firstName,
         lastName: data.lastName,
@@ -611,7 +638,6 @@ export default function SurveyPage() {
         campusSide: data.campusSide !== 'unknown' ? data.campusSide : null,
         goals: data.goals,
         creditCardInterest: data.creditCardInterest,
-        // Transfer-related fields
         planningToTransfer: data.planningToTransfer,
         targetUniversities: data.targetUniversities,
         targetMajor: data.targetMajor,
@@ -622,6 +648,7 @@ export default function SurveyPage() {
       router.push('/banking');
     } catch (error) {
       console.error('Survey submission error:', error);
+      setSubmitError('Something went wrong. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1426,7 +1453,18 @@ export default function SurveyPage() {
 
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100">
-        <div className="max-w-md mx-auto px-6 py-5 flex gap-3">
+        <div className="max-w-md mx-auto px-6 py-5">
+          {/* Submit Error */}
+          {submitError && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl"
+            >
+              <p className="text-red-600 text-sm text-center">{submitError}</p>
+            </motion.div>
+          )}
+          <div className="flex gap-3">
           {step > 1 && (
             <button
               onClick={handleBack}
@@ -1460,6 +1498,7 @@ export default function SurveyPage() {
               ) : 'Complete Assessment'}
             </button>
           )}
+          </div>
         </div>
       </div>
     </div>
