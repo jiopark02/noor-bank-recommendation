@@ -12,6 +12,14 @@ import {
   createSession,
   acceptTerms,
 } from '@/lib/validation';
+import {
+  Country,
+  getVisaTypes,
+  getRequiredDocuments,
+  getBanks,
+  getCountryDisplay,
+  COUNTRY_DISPLAY,
+} from '@/lib/countryConfig';
 
 interface SurveyData {
   // Step 1
@@ -93,40 +101,51 @@ const INITIAL_DATA: SurveyData = {
   creditCardInterest: '',
 };
 
-// Country-specific configurations
+// Country-specific configurations - using comprehensive data from countryConfig
 const COUNTRY_CONFIG = {
   US: {
-    name: 'United States',
-    currency: '$',
-    currencyCode: 'USD',
+    name: COUNTRY_DISPLAY.US.name,
+    currency: COUNTRY_DISPLAY.US.currencySymbol,
+    currencyCode: COUNTRY_DISPLAY.US.currency,
     taxIdLabel: 'SSN',
     taxIdFullName: 'Social Security Number',
     altTaxIdLabel: 'ITIN',
     altTaxIdFullName: 'Individual Taxpayer Identification Number',
     addressLabel: 'US address',
-    visaTypes: ['F-1', 'J-1', 'H-1B', 'OPT', 'Other'],
+    visaTypes: getVisaTypes('US').map(v => v.code),
+    visaTypesDetailed: getVisaTypes('US'),
+    documents: getRequiredDocuments('US'),
+    banks: getBanks('US'),
   },
   UK: {
-    name: 'United Kingdom',
-    currency: '£',
-    currencyCode: 'GBP',
+    name: COUNTRY_DISPLAY.UK.name,
+    currency: COUNTRY_DISPLAY.UK.currencySymbol,
+    currencyCode: COUNTRY_DISPLAY.UK.currency,
     taxIdLabel: 'NIN',
     taxIdFullName: 'National Insurance Number',
-    altTaxIdLabel: null,
-    altTaxIdFullName: null,
+    altTaxIdLabel: 'BRP',
+    altTaxIdFullName: 'Biometric Residence Permit',
     addressLabel: 'UK address',
-    visaTypes: ['Tier 4 Student', 'Tier 2 Work', 'Youth Mobility', 'Graduate', 'Other'],
+    visaTypes: getVisaTypes('UK').map(v => v.code),
+    visaTypesDetailed: getVisaTypes('UK'),
+    documents: getRequiredDocuments('UK'),
+    banks: getBanks('UK'),
+    requiresNHS: true,
   },
   CA: {
-    name: 'Canada',
-    currency: '$',
-    currencyCode: 'CAD',
+    name: COUNTRY_DISPLAY.CA.name,
+    currency: COUNTRY_DISPLAY.CA.currencySymbol,
+    currencyCode: COUNTRY_DISPLAY.CA.currency,
     taxIdLabel: 'SIN',
     taxIdFullName: 'Social Insurance Number',
     altTaxIdLabel: null,
     altTaxIdFullName: null,
     addressLabel: 'Canadian address',
-    visaTypes: ['Study Permit', 'Work Permit', 'PGWP', 'Co-op Work Permit', 'Other'],
+    visaTypes: getVisaTypes('CA').map(v => v.code),
+    visaTypesDetailed: getVisaTypes('CA'),
+    documents: getRequiredDocuments('CA'),
+    banks: getBanks('CA'),
+    requiresProvincialHealth: true,
   },
 };
 
