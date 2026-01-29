@@ -80,13 +80,16 @@ export default function WelcomePage() {
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
 
   const handleCountrySelect = (countryId: string) => {
-    setSelectedCountry(countryId);
+    // Set both state and localStorage immediately
     localStorage.setItem('noor_selected_country', countryId);
+    setSelectedCountry(countryId);
 
-    // Small delay for animation
-    setTimeout(() => {
-      setStep('reason');
-    }, 300);
+    // Use requestAnimationFrame to ensure state update is processed before step change
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        setStep('reason');
+      }, 250);
+    });
   };
 
   const handleReasonSelect = (reasonId: string) => {
@@ -252,29 +255,36 @@ export default function WelcomePage() {
 
                 {/* Options */}
                 <div className="space-y-3">
-                  {REASONS.map((reason, index) => (
-                    <motion.button
-                      key={reason.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      onClick={() => handleReasonSelect(reason.id)}
-                      className={`w-full p-4 text-left rounded-xl border-2 transition-all ${
-                        selectedReason === reason.id
-                          ? 'border-black bg-gray-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <span className="font-medium text-black block">
-                        {reason.id === 'just-arrived' && selectedCountry
-                          ? COUNTRY_NEW_TEXT[selectedCountry] || reason.label
-                          : reason.label}
-                      </span>
-                      <span className="text-sm text-gray-500 mt-0.5 block">
-                        {reason.description}
-                      </span>
-                    </motion.button>
-                  ))}
+                  {REASONS.map((reason, index) => {
+                    // Get the label - use dynamic text for "just-arrived" option
+                    const getLabel = () => {
+                      if (reason.id !== 'just-arrived') return reason.label;
+                      const country = selectedCountry || (typeof window !== 'undefined' ? localStorage.getItem('noor_selected_country') : null);
+                      return country ? (COUNTRY_NEW_TEXT[country] || reason.label) : reason.label;
+                    };
+
+                    return (
+                      <motion.button
+                        key={reason.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        onClick={() => handleReasonSelect(reason.id)}
+                        className={`w-full p-4 text-left rounded-xl border-2 transition-all ${
+                          selectedReason === reason.id
+                            ? 'border-black bg-gray-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className="font-medium text-black block">
+                          {getLabel()}
+                        </span>
+                        <span className="text-sm text-gray-500 mt-0.5 block">
+                          {reason.description}
+                        </span>
+                      </motion.button>
+                    );
+                  })}
                 </div>
               </motion.div>
             )}
