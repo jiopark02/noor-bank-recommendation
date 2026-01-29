@@ -26,11 +26,18 @@ const COUNTRIES = [
   },
 ];
 
+// Country-specific text for dynamic labels
+const COUNTRY_NEW_TEXT: Record<string, string> = {
+  US: 'New to the States',
+  UK: 'New to the UK',
+  CA: 'New to Canada',
+};
+
 // Bespoke options - tailored experience
 const REASONS = [
   {
     id: 'just-arrived',
-    label: 'New to the States',
+    label: 'New to the States', // Default, will be overridden dynamically
     description: 'Let us prepare your essentials',
     priority: ['bank', 'phone', 'documents'],
   },
@@ -259,7 +266,9 @@ export default function WelcomePage() {
                       }`}
                     >
                       <span className="font-medium text-black block">
-                        {reason.label}
+                        {reason.id === 'just-arrived' && selectedCountry
+                          ? COUNTRY_NEW_TEXT[selectedCountry] || reason.label
+                          : reason.label}
                       </span>
                       <span className="text-sm text-gray-500 mt-0.5 block">
                         {reason.description}

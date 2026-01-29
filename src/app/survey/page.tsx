@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useUniversitySearch, University, getUniversityById } from '@/hooks/useUniversitySearch';
+import { useUniversitySearch, University } from '@/hooks/useUniversitySearch';
 import {
   validatePassword,
   validateEmail,
@@ -23,6 +23,7 @@ interface SurveyData {
   staySignedIn: boolean;
   agreeToTerms: boolean;
   institutionId: string;
+  institutionName: string;
   institutionType: 'university' | 'community_college' | '';
   countryOfOrigin: string;
   destinationCountry: string; // US, UK, or CA
@@ -65,6 +66,7 @@ const INITIAL_DATA: SurveyData = {
   staySignedIn: false,
   agreeToTerms: false,
   institutionId: '',
+  institutionName: '',
   institutionType: '',
   countryOfOrigin: '',
   destinationCountry: '',
@@ -560,6 +562,7 @@ export default function SurveyPage() {
 
   const selectInstitution = (inst: University) => {
     updateField('institutionId', inst.id);
+    updateField('institutionName', inst.name);
     setInstitutionSearch(inst.short_name);
     setShowInstitutionList(false);
   };
@@ -580,9 +583,8 @@ export default function SurveyPage() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      // Get institution info from selected institution or fetch by ID
+      // Get institution info from selected institution
       const selectedInstitution = filteredInstitutions.find(i => i.id === data.institutionId);
-      const institution = selectedInstitution || (data.institutionId && data.institutionId !== 'other' ? await getUniversityById(data.institutionId) : null);
 
       const response = await fetch('/api/survey', {
         method: 'POST',
@@ -594,7 +596,7 @@ export default function SurveyPage() {
           password: data.password,
           country_of_origin: data.countryOfOrigin,
           destination_country: data.destinationCountry,
-          university: institution?.short_name || '',
+          university: selectedInstitution?.short_name || institutionSearch || '',
           institution_id: data.institutionId,
           institution_type: data.institutionType,
           visa_status: countryConfig.visaTypes[0], // Default to first visa type
@@ -671,7 +673,7 @@ export default function SurveyPage() {
         email: data.email,
         institutionId: data.institutionId,
         institutionType: data.institutionType,
-        university: institution?.short_name || '',
+        university: selectedInstitution?.short_name || institutionSearch || '',
         countryOfOrigin: data.countryOfOrigin,
         destinationCountry: data.destinationCountry,
         hasSSN: data.hasSSN,
@@ -949,9 +951,9 @@ export default function SurveyPage() {
                       ) : null}
                     </div>
                   )}
-                  {data.institutionId && (
+                  {data.institutionId && data.institutionName && (
                     <p className="text-xs text-emerald-600 mt-1">
-                      ✓ {getInstitutionById(data.institutionId)?.name}
+                      ✓ {data.institutionName}
                     </p>
                   )}
                 </div>
@@ -1079,16 +1081,20 @@ export default function SurveyPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Other Target Universities</label>
                 <div className="flex flex-wrap gap-2">
-                  {['ucla', 'ucb', 'usc', 'stanford'].map(uniId => {
-                    const uni = getInstitutionById(uniId);
-                    if (!uni || data.targetUniversities.includes(uniId)) return null;
+                  {[
+                    { id: 'ucla', name: 'UCLA' },
+                    { id: 'ucb', name: 'UC Berkeley' },
+                    { id: 'usc', name: 'USC' },
+                    { id: 'stanford', name: 'Stanford' },
+                  ].map(uni => {
+                    if (data.targetUniversities.includes(uni.id)) return null;
                     return (
                       <ChipButton
-                        key={uniId}
-                        selected={data.targetUniversities.includes(uniId)}
-                        onClick={() => toggleArrayField('targetUniversities', uniId)}
+                        key={uni.id}
+                        selected={data.targetUniversities.includes(uni.id)}
+                        onClick={() => toggleArrayField('targetUniversities', uni.id)}
                       >
-                        {uni.short_name}
+                        {uni.name}
                       </ChipButton>
                     );
                   })}

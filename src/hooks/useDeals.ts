@@ -13,6 +13,8 @@ export interface Deal {
   expires_at: string | null;
   upvotes: number;
   country: string;
+  university_id: string | null;
+  is_verified: boolean;
   created_at: string;
 }
 
