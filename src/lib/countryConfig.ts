@@ -569,8 +569,9 @@ export interface Bank {
   logoUrl?: string;
   description: string;
   studentFriendly: boolean;
-  noSsnRequired?: boolean; // US
-  noSinRequired?: boolean; // CA
+  noSsnRequired?: boolean; // US - No SSN required
+  noNinRequired?: boolean; // UK - No NIN required
+  noSinRequired?: boolean; // CA - No SIN required
   internationalTransfers: boolean;
   monthlyFee: string;
   minimumDeposit: string;
@@ -689,6 +690,7 @@ export const BANKS: Record<Country, Bank[]> = {
       type: 'digital',
       description: 'Popular digital bank with excellent app and no foreign fees',
       studentFriendly: true,
+      noNinRequired: true,
       internationalTransfers: true,
       monthlyFee: '£0',
       minimumDeposit: '£0',
@@ -699,6 +701,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'Split bills with friends',
         'Savings pots with interest',
         'Easy international transfers via Wise',
+        'No NIN required to open',
       ],
       requirements: [
         'UK address',
@@ -712,8 +715,9 @@ export const BANKS: Record<Country, Bank[]> = {
       id: 'uk-revolut',
       name: 'Revolut',
       type: 'digital',
-      description: 'Fintech bank with multi-currency support',
+      description: 'Fintech bank with multi-currency support - perfect for international students',
       studentFriendly: true,
+      noNinRequired: true,
       internationalTransfers: true,
       monthlyFee: '£0 (Standard)',
       minimumDeposit: '£0',
@@ -724,6 +728,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'Cryptocurrency trading',
         'Virtual cards',
         'Budget analytics',
+        'No NIN required',
       ],
       requirements: [
         'Valid passport',
@@ -731,22 +736,51 @@ export const BANKS: Record<Country, Bank[]> = {
         'Smartphone for app',
       ],
       website: 'https://www.revolut.com/',
+      studentOffers: ['Free Standard account', 'Discounted Premium for students'],
+    },
+    {
+      id: 'uk-starling',
+      name: 'Starling Bank',
+      type: 'digital',
+      description: 'Award-winning digital bank with great international features',
+      studentFriendly: true,
+      noNinRequired: true,
+      internationalTransfers: true,
+      monthlyFee: '£0',
+      minimumDeposit: '£0',
+      features: [
+        'No fees abroad in 36+ currencies',
+        'Real-time spending notifications',
+        'Savings Goals (Spaces)',
+        'In-app cheque deposits',
+        'Instant payment notifications',
+        'No NIN required to open',
+      ],
+      requirements: [
+        'UK address',
+        'Valid ID (passport or BRP)',
+        'Smartphone for app',
+      ],
+      website: 'https://www.starlingbank.com/',
+      studentOffers: ['Free account with no fees abroad'],
     },
     {
       id: 'uk-barclays',
       name: 'Barclays',
       type: 'traditional',
-      description: 'Major UK bank with good student accounts',
+      description: 'Major UK bank with excellent student accounts and benefits',
       studentFriendly: true,
+      noNinRequired: true,
       internationalTransfers: true,
       monthlyFee: '£0',
       minimumDeposit: '£0',
       features: [
         'Student Additions account',
-        'Interest-free overdraft',
+        'Interest-free overdraft up to £1,500',
         'Barclays app with Pingit',
         'Wide branch network',
-        'Railcard discount',
+        'Free 4-year Railcard worth £120',
+        'No NIN required for students',
       ],
       requirements: [
         'BRP card',
@@ -755,23 +789,25 @@ export const BANKS: Record<Country, Bank[]> = {
         'UCAS confirmation or enrollment letter',
       ],
       website: 'https://www.barclays.co.uk/current-accounts/student-account/',
-      studentOffers: ['0% overdraft up to £1,500', 'Free 4-year Railcard'],
+      studentOffers: ['0% overdraft up to £1,500', 'Free 4-year Railcard worth £120'],
     },
     {
       id: 'uk-hsbc',
-      name: 'HSBC',
+      name: 'HSBC UK',
       type: 'traditional',
-      description: 'International bank with good services for international students',
+      description: 'International bank with excellent services for international students',
       studentFriendly: true,
+      noNinRequired: true,
       internationalTransfers: true,
       monthlyFee: '£0',
       minimumDeposit: '£0',
       features: [
         'Student Bank Account',
-        'Interest-free overdraft',
+        'Interest-free overdraft up to £1,000',
         'Global ATM network',
-        'HSBC Global Money for transfers',
-        'Linked accounts in home country',
+        'HSBC Global Money for cheap transfers',
+        'Can link to HSBC accounts in home country',
+        'No NIN required',
       ],
       requirements: [
         'Valid passport',
@@ -780,7 +816,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'University confirmation letter',
       ],
       website: 'https://www.hsbc.co.uk/current-accounts/products/student/',
-      studentOffers: ['Up to £1,000 interest-free overdraft'],
+      studentOffers: ['Up to £1,000 interest-free overdraft', 'Exclusive international student support'],
     },
     {
       id: 'uk-lloyds',
@@ -788,15 +824,17 @@ export const BANKS: Record<Country, Bank[]> = {
       type: 'traditional',
       description: 'UK high street bank with student-focused accounts',
       studentFriendly: true,
+      noNinRequired: true,
       internationalTransfers: true,
       monthlyFee: '£0',
       minimumDeposit: '£0',
       features: [
         'Student Account',
-        'Interest-free overdraft',
+        'Interest-free overdraft up to £1,500',
         'Mobile banking app',
         'Branch network across UK',
         'Linked savings account',
+        'No NIN required for students',
       ],
       requirements: [
         'BRP card',
@@ -811,17 +849,19 @@ export const BANKS: Record<Country, Bank[]> = {
       id: 'uk-natwest',
       name: 'NatWest',
       type: 'traditional',
-      description: 'UK bank with excellent student benefits',
+      description: 'UK bank with highest student overdraft limit',
       studentFriendly: true,
+      noNinRequired: true,
       internationalTransfers: true,
       monthlyFee: '£0',
       minimumDeposit: '£0',
       features: [
         'Student Account',
-        'Interest-free overdraft',
-        'Free Tastecard',
+        'Highest overdraft up to £2,000',
+        'Free 4-year Tastecard',
         'NatWest mobile app',
         'Contactless payments',
+        'No NIN required',
       ],
       requirements: [
         'BRP card',
@@ -829,7 +869,34 @@ export const BANKS: Record<Country, Bank[]> = {
         'University enrollment proof',
       ],
       website: 'https://www.natwest.com/current-accounts/student-account.html',
-      studentOffers: ['Up to £2,000 interest-free overdraft', '4-year Tastecard'],
+      studentOffers: ['Up to £2,000 interest-free overdraft', '4-year Tastecard worth £80'],
+    },
+    {
+      id: 'uk-santander',
+      name: 'Santander UK',
+      type: 'traditional',
+      description: 'Spanish-owned bank with competitive student benefits',
+      studentFriendly: true,
+      noNinRequired: true,
+      internationalTransfers: true,
+      monthlyFee: '£0',
+      minimumDeposit: '£0',
+      features: [
+        '123 Student Current Account',
+        'Interest-free overdraft up to £1,500',
+        'Free 4-year Railcard',
+        'Cashback on bills',
+        'Interest on balances up to £2,000',
+        'No NIN required for students',
+      ],
+      requirements: [
+        'Valid passport or BRP',
+        'UK address',
+        'Proof of student status',
+        'UCAS confirmation',
+      ],
+      website: 'https://www.santander.co.uk/personal/current-accounts/123-student-current-account',
+      studentOffers: ['Free 4-year Railcard', '1% AER interest on balances up to £2,000'],
     },
   ],
   CA: [
@@ -850,6 +917,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'TD Global Transfer for international transfers',
         'Extended hours at many branches',
         'Student credit card options',
+        'No SIN required to open',
       ],
       requirements: [
         'Valid passport',
@@ -877,6 +945,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'RBC Global Money Transfer',
         'Student line of credit',
         'MyAdvisor appointment booking',
+        'No SIN required to open',
       ],
       requirements: [
         'Valid passport',
@@ -903,6 +972,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'Global ATM Alliance (free withdrawals)',
         'Scotiabank GlobalPlus account',
         'No-fee international transfers to select countries',
+        'No SIN required to open',
       ],
       requirements: [
         'Valid passport',
@@ -929,6 +999,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'Unlimited transactions',
         'BMO Global Money Transfer',
         'Student Mastercard',
+        'No SIN required to open',
       ],
       requirements: [
         'Valid passport',
@@ -955,6 +1026,7 @@ export const BANKS: Record<Country, Bank[]> = {
         'Unlimited everyday banking',
         'CIBC Global Money Transfer',
         'CIBC Aventura for students',
+        'No SIN required to open',
       ],
       requirements: [
         'Valid passport',
@@ -966,6 +1038,58 @@ export const BANKS: Record<Country, Bank[]> = {
       studentOffers: ['Unlimited free transactions', 'No monthly fee'],
     },
     {
+      id: 'ca-tangerine',
+      name: 'Tangerine',
+      type: 'digital',
+      description: 'Scotiabank-owned digital bank with no monthly fees',
+      studentFriendly: true,
+      noSinRequired: true,
+      internationalTransfers: true,
+      monthlyFee: 'C$0',
+      minimumDeposit: 'C$0',
+      features: [
+        'No monthly fees ever',
+        'No minimum balance required',
+        'Free Interac e-Transfers',
+        'High-interest savings account',
+        'Use Scotiabank ATMs free',
+        'No SIN required to open',
+      ],
+      requirements: [
+        'Valid passport',
+        'Canadian address',
+        'Smartphone or computer',
+      ],
+      website: 'https://www.tangerine.ca/',
+      studentOffers: ['$50-$400 welcome bonus', 'Free unlimited transactions'],
+    },
+    {
+      id: 'ca-simplii',
+      name: 'Simplii Financial',
+      type: 'digital',
+      description: 'CIBC-owned digital bank with free banking',
+      studentFriendly: true,
+      noSinRequired: true,
+      internationalTransfers: true,
+      monthlyFee: 'C$0',
+      minimumDeposit: 'C$0',
+      features: [
+        'No monthly fees',
+        'Free Interac e-Transfers',
+        'Free access to CIBC ATMs',
+        'High interest savings account',
+        'Competitive GIC rates',
+        'No SIN required to open',
+      ],
+      requirements: [
+        'Valid passport',
+        'Canadian address',
+        'Email address',
+      ],
+      website: 'https://www.simplii.com/',
+      studentOffers: ['Up to $400 welcome bonus', 'Free unlimited transactions'],
+    },
+    {
       id: 'ca-wise',
       name: 'Wise',
       type: 'digital',
@@ -973,14 +1097,15 @@ export const BANKS: Record<Country, Bank[]> = {
       studentFriendly: true,
       noSinRequired: true,
       internationalTransfers: true,
-      monthlyFee: '$0',
-      minimumDeposit: '$0',
+      monthlyFee: 'C$0',
+      minimumDeposit: 'C$0',
       features: [
         'Hold 40+ currencies',
         'Best exchange rates',
         'Low-cost international transfers',
         'Multi-currency debit card',
         'Direct debits in CAD, USD, GBP, EUR',
+        'No SIN required',
       ],
       requirements: [
         'Valid ID (passport)',
@@ -1067,6 +1192,9 @@ export function getStudentFriendlyBanks(country: Country): Bank[] {
 export function getBanksNoIdRequired(country: Country): Bank[] {
   if (country === 'US') {
     return BANKS.US.filter(bank => bank.noSsnRequired);
+  }
+  if (country === 'UK') {
+    return BANKS.UK.filter(bank => bank.noNinRequired);
   }
   if (country === 'CA') {
     return BANKS.CA.filter(bank => bank.noSinRequired);

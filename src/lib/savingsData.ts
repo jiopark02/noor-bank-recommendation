@@ -1,8 +1,12 @@
 // Savings & Investment Data for Noor
+// Supports US, UK, and Canada specific accounts
 
 export type AccountLevel = 'undergrad' | 'grad' | 'working' | 'all';
-export type AccountType = 'hysa' | 'roth_ira' | '401k' | 'hsa' | 'brokerage';
+export type AccountType = 'hysa' | 'roth_ira' | '401k' | 'hsa' | 'brokerage' | 'isa' | 'lisa' | 'tfsa' | 'rrsp' | 'fhsa';
 export type VisaStatus = 'F-1' | 'F-1 OPT' | 'H-1B' | 'Green Card' | 'Citizen' | 'Other';
+export type UKVisaStatus = 'Student Visa' | 'Graduate Visa' | 'Skilled Worker' | 'Settled Status' | 'UK Citizen' | 'Other';
+export type CAVisaStatus = 'Study Permit' | 'PGWP' | 'Work Permit' | 'PR' | 'CA Citizen' | 'Other';
+export type Country = 'US' | 'UK' | 'CA';
 
 // High-Yield Savings Accounts
 export interface HYSAAccount {
@@ -99,6 +103,528 @@ export const HYSA_ACCOUNTS: HYSAAccount[] = [
     f1_friendly: true,
   },
 ];
+
+// ============================================================================
+// UK SAVINGS ACCOUNTS (ISA - Individual Savings Account)
+// ============================================================================
+
+export interface UKSavingsAccount {
+  id: string;
+  name: string;
+  bank: string;
+  aer: number; // Annual Equivalent Rate (UK equivalent of APY)
+  min_balance: number;
+  min_to_open: number;
+  fscs_protected: boolean; // UK's deposit protection scheme
+  features: string[];
+  pros: string[];
+  cons: string[];
+  best_for: string;
+  link: string;
+  logo_url?: string;
+  no_nin_required: boolean; // No National Insurance Number required
+  type: 'cash_isa' | 'stocks_shares_isa' | 'lifetime_isa' | 'easy_access' | 'fixed_rate';
+}
+
+export const UK_SAVINGS_ACCOUNTS: UKSavingsAccount[] = [
+  // Cash ISAs - Tax-free savings
+  {
+    id: 'monzo_isa',
+    name: 'Monzo Cash ISA',
+    bank: 'Monzo',
+    aer: 4.16,
+    min_balance: 0,
+    min_to_open: 1,
+    fscs_protected: true,
+    features: ['In-app ISA management', 'Instant access', 'No fees', 'Easy transfers'],
+    pros: ['Great app experience', 'No NIN required to open', 'Instant withdrawals'],
+    cons: ['Lower rate than some competitors', 'No fixed rate options'],
+    best_for: 'Best for easy mobile management',
+    link: 'https://monzo.com/isa/',
+    no_nin_required: true,
+    type: 'cash_isa',
+  },
+  {
+    id: 'chase_uk_saver',
+    name: 'Chase Saver Account',
+    bank: 'Chase UK',
+    aer: 3.75,
+    min_balance: 0,
+    min_to_open: 0,
+    fscs_protected: true,
+    features: ['1% cashback on spending', 'Round-ups', 'Easy access', 'No fees'],
+    pros: ['Great current account combo', 'Round-ups feature', '1% cashback debit card'],
+    cons: ['Not an ISA', 'Lower rate than ISAs'],
+    best_for: 'Best for cashback + savings combo',
+    link: 'https://www.chase.co.uk/',
+    no_nin_required: true,
+    type: 'easy_access',
+  },
+  {
+    id: 'marcus_uk',
+    name: 'Marcus Online Savings',
+    bank: 'Goldman Sachs (Marcus)',
+    aer: 4.5,
+    min_balance: 0,
+    min_to_open: 1,
+    fscs_protected: true,
+    features: ['No fees', 'Easy access', 'High interest', 'Simple interface'],
+    pros: ['Top rates', 'Backed by Goldman Sachs', 'Easy withdrawals'],
+    cons: ['No current account', 'No mobile app (web only)'],
+    best_for: 'Best for highest interest rate',
+    link: 'https://www.marcus.co.uk/',
+    no_nin_required: false,
+    type: 'easy_access',
+  },
+  {
+    id: 'trading212_isa',
+    name: 'Trading 212 Cash ISA',
+    bank: 'Trading 212',
+    aer: 5.1,
+    min_balance: 0,
+    min_to_open: 1,
+    fscs_protected: true,
+    features: ['Highest ISA rate', 'Easy access', 'Investment options', 'Great app'],
+    pros: ['Market-leading rate', 'Can switch to Stocks ISA', 'Modern app'],
+    cons: ['Newer to banking', 'Customer support mixed reviews'],
+    best_for: 'Best rate for Cash ISA',
+    link: 'https://www.trading212.com/',
+    no_nin_required: true,
+    type: 'cash_isa',
+  },
+  {
+    id: 'chip_isa',
+    name: 'Chip Cash ISA',
+    bank: 'Chip',
+    aer: 4.84,
+    min_balance: 0,
+    min_to_open: 1,
+    fscs_protected: true,
+    features: ['AI-powered auto-saving', 'Round-ups', 'ISA and savings', 'Smart saving rules'],
+    pros: ['Automatic savings', 'Good ISA rate', 'Clever saving features'],
+    cons: ['Premium features cost extra', 'Not a full bank'],
+    best_for: 'Best for automatic saving',
+    link: 'https://www.getchip.uk/',
+    no_nin_required: true,
+    type: 'cash_isa',
+  },
+];
+
+// UK Investment Account Types
+export interface UKInvestmentAccount {
+  id: string;
+  name: string;
+  type: 'cash_isa' | 'stocks_shares_isa' | 'lifetime_isa' | 'sipp';
+  description: string;
+  annual_limit?: number; // In GBP
+  tax_benefit: string;
+  requirements: string[];
+  visa_eligible: UKVisaStatus[];
+  best_for: string;
+  providers: UKInvestmentProvider[];
+}
+
+export interface UKInvestmentProvider {
+  id: string;
+  name: string;
+  min_investment: number;
+  annual_fee: string;
+  features: string[];
+  link: string;
+}
+
+export const UK_INVESTMENT_ACCOUNTS: UKInvestmentAccount[] = [
+  {
+    id: 'stocks_shares_isa',
+    name: 'Stocks & Shares ISA',
+    type: 'stocks_shares_isa',
+    description: 'Tax-free investing. No capital gains tax or dividend tax on your investments. £20,000 annual limit shared across all ISA types.',
+    annual_limit: 20000,
+    tax_benefit: 'No capital gains tax, no dividend tax, no income tax on gains',
+    requirements: [
+      'Must be UK resident',
+      'Must be 18+ years old',
+      'Can only pay into one Stocks & Shares ISA per tax year',
+    ],
+    visa_eligible: ['Student Visa', 'Graduate Visa', 'Skilled Worker', 'Settled Status', 'UK Citizen'],
+    best_for: 'Long-term investing with tax-free growth',
+    providers: [
+      {
+        id: 'vanguard_uk',
+        name: 'Vanguard UK',
+        min_investment: 100,
+        annual_fee: '0.15% (capped at £375)',
+        features: ['Low-cost index funds', 'Simple interface', 'Trusted brand', 'Great for beginners'],
+        link: 'https://www.vanguardinvestor.co.uk/',
+      },
+      {
+        id: 'trading212_stocks_isa',
+        name: 'Trading 212',
+        min_investment: 1,
+        annual_fee: 'Free',
+        features: ['No fees', 'Fractional shares', 'Great app', 'Free stocks'],
+        link: 'https://www.trading212.com/',
+      },
+      {
+        id: 'freetrade',
+        name: 'Freetrade',
+        min_investment: 2,
+        annual_fee: '£59.88/year for ISA',
+        features: ['Simple interface', 'Fractional shares', 'Good stock selection'],
+        link: 'https://freetrade.io/',
+      },
+      {
+        id: 'hargreaves',
+        name: 'Hargreaves Lansdown',
+        min_investment: 100,
+        annual_fee: '0.45% (capped)',
+        features: ['Excellent research', 'Wide fund selection', 'Great customer service'],
+        link: 'https://www.hl.co.uk/',
+      },
+    ],
+  },
+  {
+    id: 'lifetime_isa',
+    name: 'Lifetime ISA (LISA)',
+    type: 'lifetime_isa',
+    description: 'Save for your first home or retirement. Government adds 25% bonus on your contributions (up to £1,000/year free money).',
+    annual_limit: 4000,
+    tax_benefit: '25% government bonus (up to £1,000 per year)',
+    requirements: [
+      'Must be 18-39 years old to open',
+      'Must be UK resident',
+      'Can only use for first home (£450k max) or retirement (age 60+)',
+      '25% penalty if withdrawn for other reasons',
+    ],
+    visa_eligible: ['Graduate Visa', 'Skilled Worker', 'Settled Status', 'UK Citizen'],
+    best_for: 'First-time home buyers or young retirement savers',
+    providers: [
+      {
+        id: 'moneybox_lisa',
+        name: 'Moneybox',
+        min_investment: 1,
+        annual_fee: '0.45%',
+        features: ['Great app', 'Stocks & Cash LISA options', 'Round-ups'],
+        link: 'https://www.moneyboxapp.com/',
+      },
+      {
+        id: 'aj_bell_lisa',
+        name: 'AJ Bell',
+        min_investment: 25,
+        annual_fee: '0.25%',
+        features: ['Low fees', 'Good fund selection', 'Investment LISA'],
+        link: 'https://www.ajbell.co.uk/',
+      },
+    ],
+  },
+];
+
+// ============================================================================
+// CANADA SAVINGS ACCOUNTS (TFSA, RRSP, FHSA)
+// ============================================================================
+
+export interface CASavingsAccount {
+  id: string;
+  name: string;
+  bank: string;
+  interest_rate: number; // Interest rate percentage
+  min_balance: number;
+  min_to_open: number;
+  cdic_insured: boolean; // Canada Deposit Insurance Corporation
+  features: string[];
+  pros: string[];
+  cons: string[];
+  best_for: string;
+  link: string;
+  logo_url?: string;
+  no_sin_required: boolean; // No Social Insurance Number required to open
+  type: 'tfsa' | 'savings' | 'hisa';
+}
+
+export const CA_SAVINGS_ACCOUNTS: CASavingsAccount[] = [
+  {
+    id: 'eq_bank_tfsa',
+    name: 'EQ Bank TFSA Savings',
+    bank: 'EQ Bank',
+    interest_rate: 4.0,
+    min_balance: 0,
+    min_to_open: 0,
+    cdic_insured: true,
+    features: ['No fees', 'High interest', 'No minimum balance', 'Great mobile app'],
+    pros: ['Consistently high rates', 'No fees ever', 'Great digital experience'],
+    cons: ['No physical branches', 'No US dollar accounts'],
+    best_for: 'Best overall for TFSA',
+    link: 'https://www.eqbank.ca/',
+    no_sin_required: false,
+    type: 'tfsa',
+  },
+  {
+    id: 'tangerine_savings',
+    name: 'Tangerine Savings Account',
+    bank: 'Tangerine',
+    interest_rate: 5.0, // Promotional rate
+    min_balance: 0,
+    min_to_open: 0,
+    cdic_insured: true,
+    features: ['Promo rates for new customers', 'No fees', 'Owned by Scotiabank', 'Great app'],
+    pros: ['High promo rates', 'Backed by Scotiabank', 'Easy to open'],
+    cons: ['Promo rate drops after 5 months', 'No SIN required initially'],
+    best_for: 'Best for promotional rates',
+    link: 'https://www.tangerine.ca/',
+    no_sin_required: true,
+    type: 'savings',
+  },
+  {
+    id: 'simplii_hisa',
+    name: 'Simplii High Interest Savings',
+    bank: 'Simplii Financial',
+    interest_rate: 5.25, // Promotional rate
+    min_balance: 0,
+    min_to_open: 0,
+    cdic_insured: true,
+    features: ['High promo rates', 'No fees', 'CIBC partnership', 'Free banking'],
+    pros: ['CIBC ATM access', 'Great promo rates', 'Free chequing too'],
+    cons: ['Promo rate temporary', 'Limited branches'],
+    best_for: 'Best with Simplii chequing account',
+    link: 'https://www.simplii.com/',
+    no_sin_required: true,
+    type: 'hisa',
+  },
+  {
+    id: 'wealthsimple_save',
+    name: 'Wealthsimple Save',
+    bank: 'Wealthsimple',
+    interest_rate: 4.0,
+    min_balance: 0,
+    min_to_open: 0,
+    cdic_insured: true,
+    features: ['TFSA and regular savings', 'Round-ups', 'Great app', 'Investment integration'],
+    pros: ['All-in-one platform', 'Easy investing', 'Modern experience'],
+    cons: ['Rate not always highest', 'Customer service mixed'],
+    best_for: 'Best for saving + investing combo',
+    link: 'https://www.wealthsimple.com/en-ca/save',
+    no_sin_required: false,
+    type: 'tfsa',
+  },
+  {
+    id: 'neo_savings',
+    name: 'Neo High-Interest Savings',
+    bank: 'Neo Financial',
+    interest_rate: 4.0,
+    min_balance: 0,
+    min_to_open: 0,
+    cdic_insured: true,
+    features: ['Cashback credit card', 'No fees', 'Modern app', 'Instant transfers'],
+    pros: ['Great cashback card combo', 'Modern experience', 'Good rates'],
+    cons: ['Newer bank', 'Limited features'],
+    best_for: 'Best for cashback + savings',
+    link: 'https://www.neofinancial.com/',
+    no_sin_required: true,
+    type: 'savings',
+  },
+];
+
+// Canada Investment Account Types
+export interface CAInvestmentAccount {
+  id: string;
+  name: string;
+  type: 'tfsa' | 'rrsp' | 'fhsa' | 'non_registered';
+  description: string;
+  annual_limit?: number | string; // In CAD, can be string for percentage-based limits
+  tax_benefit: string;
+  requirements: string[];
+  visa_eligible: CAVisaStatus[];
+  best_for: string;
+  providers: CAInvestmentProvider[];
+}
+
+export interface CAInvestmentProvider {
+  id: string;
+  name: string;
+  min_investment: number;
+  annual_fee: string;
+  features: string[];
+  link: string;
+}
+
+export const CA_INVESTMENT_ACCOUNTS: CAInvestmentAccount[] = [
+  {
+    id: 'tfsa',
+    name: 'Tax-Free Savings Account (TFSA)',
+    type: 'tfsa',
+    description: 'Tax-free investment growth and withdrawals. Unlike RRSP, you can withdraw anytime without penalty. Contribution room carries forward.',
+    annual_limit: 7000, // 2024 limit
+    tax_benefit: 'Tax-free growth, tax-free withdrawals anytime',
+    requirements: [
+      'Must be Canadian resident',
+      'Must be 18+ with valid SIN',
+      'Contribution room starts accumulating at age 18',
+    ],
+    visa_eligible: ['Study Permit', 'PGWP', 'Work Permit', 'PR', 'CA Citizen'],
+    best_for: 'Everyone - flexible tax-free savings/investing',
+    providers: [
+      {
+        id: 'wealthsimple_trade',
+        name: 'Wealthsimple Trade',
+        min_investment: 1,
+        annual_fee: 'Free',
+        features: ['No commissions', 'Fractional shares', 'Great app', 'Auto-invest'],
+        link: 'https://www.wealthsimple.com/en-ca/trade',
+      },
+      {
+        id: 'questrade',
+        name: 'Questrade',
+        min_investment: 1000,
+        annual_fee: 'Free (no inactivity fee)',
+        features: ['Low commissions', 'Free ETF purchases', 'Good research tools'],
+        link: 'https://www.questrade.com/',
+      },
+      {
+        id: 'td_direct',
+        name: 'TD Direct Investing',
+        min_investment: 0,
+        annual_fee: 'Free with $15k+ balance',
+        features: ['TD e-Series funds', 'Great research', 'Physical branches'],
+        link: 'https://www.td.com/ca/en/investing/direct-investing',
+      },
+    ],
+  },
+  {
+    id: 'rrsp',
+    name: 'Registered Retirement Savings Plan (RRSP)',
+    type: 'rrsp',
+    description: 'Tax-deferred retirement savings. Contributions reduce your taxable income now, but withdrawals are taxed in retirement (ideally at a lower rate).',
+    annual_limit: '18% of income (max ~$31,560)',
+    tax_benefit: 'Tax deduction now, tax-deferred growth, taxed on withdrawal',
+    requirements: [
+      'Must have Canadian earned income',
+      'Must file Canadian taxes',
+      'Must be under 71 years old',
+    ],
+    visa_eligible: ['PGWP', 'Work Permit', 'PR', 'CA Citizen'],
+    best_for: 'Higher income earners expecting lower tax rate in retirement',
+    providers: [
+      {
+        id: 'wealthsimple_rrsp',
+        name: 'Wealthsimple',
+        min_investment: 1,
+        annual_fee: '0.4-0.5%',
+        features: ['Robo-advisor', 'Auto-rebalancing', 'Great app', 'Low minimums'],
+        link: 'https://www.wealthsimple.com/en-ca/invest',
+      },
+      {
+        id: 'questrade_rrsp',
+        name: 'Questrade',
+        min_investment: 1000,
+        annual_fee: 'Free',
+        features: ['Self-directed', 'Low commissions', 'Good tools'],
+        link: 'https://www.questrade.com/',
+      },
+      {
+        id: 'rbc_direct',
+        name: 'RBC Direct Investing',
+        min_investment: 0,
+        annual_fee: 'Free with $15k+ balance',
+        features: ['Great research', 'RBC integration', 'Physical support'],
+        link: 'https://www.rbcdirectinvesting.com/',
+      },
+    ],
+  },
+  {
+    id: 'fhsa',
+    name: 'First Home Savings Account (FHSA)',
+    type: 'fhsa',
+    description: 'New account combining RRSP + TFSA benefits for first-time home buyers. Tax-deductible contributions AND tax-free withdrawals for home purchase.',
+    annual_limit: 8000, // Max $40,000 lifetime
+    tax_benefit: 'Tax deduction on contributions + tax-free growth + tax-free withdrawal for home',
+    requirements: [
+      'Must be first-time home buyer',
+      'Must be Canadian resident',
+      'Must be 18-71 years old',
+      'Must use within 15 years or transfer to RRSP',
+    ],
+    visa_eligible: ['PR', 'CA Citizen'],
+    best_for: 'First-time home buyers - best of both worlds',
+    providers: [
+      {
+        id: 'wealthsimple_fhsa',
+        name: 'Wealthsimple',
+        min_investment: 1,
+        annual_fee: '0.4-0.5%',
+        features: ['Easy to open', 'Robo-advisor option', 'Great app'],
+        link: 'https://www.wealthsimple.com/en-ca/fhsa',
+      },
+      {
+        id: 'questrade_fhsa',
+        name: 'Questrade',
+        min_investment: 0,
+        annual_fee: 'Free',
+        features: ['Self-directed', 'Free ETF purchases', 'Low minimums'],
+        link: 'https://www.questrade.com/',
+      },
+      {
+        id: 'eq_bank_fhsa',
+        name: 'EQ Bank FHSA',
+        min_investment: 0,
+        annual_fee: 'Free',
+        features: ['High interest savings option', 'GIC option', 'No fees'],
+        link: 'https://www.eqbank.ca/',
+      },
+    ],
+  },
+];
+
+// ============================================================================
+// COUNTRY-SPECIFIC GETTERS
+// ============================================================================
+
+export function getSavingsAccountsByCountry(country: Country) {
+  switch (country) {
+    case 'UK':
+      return UK_SAVINGS_ACCOUNTS;
+    case 'CA':
+      return CA_SAVINGS_ACCOUNTS;
+    case 'US':
+    default:
+      return HYSA_ACCOUNTS;
+  }
+}
+
+export function getInvestmentAccountsByCountry(country: Country) {
+  switch (country) {
+    case 'UK':
+      return UK_INVESTMENT_ACCOUNTS;
+    case 'CA':
+      return CA_INVESTMENT_ACCOUNTS;
+    case 'US':
+    default:
+      return INVESTMENT_ACCOUNTS;
+  }
+}
+
+export function getCurrencySymbol(country: Country): string {
+  switch (country) {
+    case 'UK':
+      return '£';
+    case 'CA':
+      return 'C$';
+    case 'US':
+    default:
+      return '$';
+  }
+}
+
+export function getDepositProtection(country: Country): { name: string; limit: string } {
+  switch (country) {
+    case 'UK':
+      return { name: 'FSCS', limit: '£85,000' };
+    case 'CA':
+      return { name: 'CDIC', limit: 'C$100,000' };
+    case 'US':
+    default:
+      return { name: 'FDIC', limit: '$250,000' };
+  }
+}
 
 // Investment Account Types
 export interface InvestmentAccount {
