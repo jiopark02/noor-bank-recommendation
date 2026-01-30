@@ -22,7 +22,7 @@ import {
   ALL_APARTMENTS,
   US_APARTMENTS,
   UK_APARTMENTS,
-  CANADA_APARTMENTS
+  CA_APARTMENTS
 } from './apartmentsData';
 
 import { BankBranch } from '../universityData';
@@ -63,7 +63,7 @@ export {
   ALL_APARTMENTS,
   US_APARTMENTS,
   UK_APARTMENTS,
-  CANADA_APARTMENTS,
+  CA_APARTMENTS,
 };
 
 // ============================================================================
@@ -217,7 +217,7 @@ export function getDataStatistics() {
       total: ALL_APARTMENTS.length,
       us: US_APARTMENTS.length,
       uk: UK_APARTMENTS.length,
-      canada: CANADA_APARTMENTS.length,
+      canada: CA_APARTMENTS.length,
     },
   };
 }
