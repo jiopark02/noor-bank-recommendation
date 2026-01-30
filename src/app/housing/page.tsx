@@ -21,26 +21,43 @@ const CAMPUS_SIDE_FILTERS: { id: CampusSide | 'all'; label: string }[] = [
   { id: 'west', label: 'West' },
 ];
 
+// Currency symbols by country
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  US: '$',
+  UK: '£',
+  CA: 'C$',
+};
+
 export default function HousingPage() {
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [selectedCampusSide, setSelectedCampusSide] = useState<CampusSide | 'all'>('all');
   const [showMap, setShowMap] = useState(true);
   const [userUniversity, setUserUniversity] = useState<string>('Stanford');
+  const [destinationCountry, setDestinationCountry] = useState<string>('US');
 
-  // Load user profile from localStorage
+  // Load user profile and country from localStorage
   useEffect(() => {
     try {
+      const savedCountry = localStorage.getItem('noor_selected_country');
+      if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
+        setDestinationCountry(savedCountry);
+      }
       const profile = localStorage.getItem('noor_user_profile');
       if (profile) {
         const parsed = JSON.parse(profile);
         if (parsed.university) {
           setUserUniversity(parsed.university);
         }
+        if (parsed.destinationCountry) {
+          setDestinationCountry(parsed.destinationCountry);
+        }
       }
     } catch (e) {
       // Use default
     }
   }, []);
+
+  const currencySymbol = CURRENCY_SYMBOLS[destinationCountry] || '$';
 
   const filters = {
     gym: selectedAmenities.includes('gym'),
@@ -81,9 +98,9 @@ export default function HousingPage() {
       .map((apt) => ({
         position: [apt.latitude!, apt.longitude!] as [number, number],
         label: apt.name,
-        popupContent: `<strong>${apt.name}</strong><br/>$${apt.price_min.toLocaleString()}-${apt.price_max.toLocaleString()}/mo`,
+        popupContent: `<strong>${apt.name}</strong><br/>${currencySymbol}${apt.price_min.toLocaleString()}-${apt.price_max.toLocaleString()}/mo`,
       }));
-  }, [apartments]);
+  }, [apartments, currencySymbol]);
 
   return (
     <PageLayout>
@@ -175,7 +192,7 @@ export default function HousingPage() {
       ) : (
         <div className="grid grid-cols-2 gap-5">
           {apartments.map((apartment) => (
-            <ApartmentCard key={apartment.id} apartment={apartment} />
+            <ApartmentCard key={apartment.id} apartment={apartment} currencySymbol={currencySymbol} />
           ))}
         </div>
       )}
@@ -183,7 +200,7 @@ export default function HousingPage() {
   );
 }
 
-function ApartmentCard({ apartment }: { apartment: Apartment }) {
+function ApartmentCard({ apartment, currencySymbol = '$' }: { apartment: Apartment; currencySymbol?: string }) {
   const [showDetails, setShowDetails] = useState(false);
   const imageUrl = apartment.images?.[0] || null;
 
@@ -218,10 +235,10 @@ function ApartmentCard({ apartment }: { apartment: Apartment }) {
         </h3>
         <div className="mt-1 space-y-0.5">
           <p className="text-gray-700 text-sm">
-            <span className="font-medium">Solo:</span> ${apartment.price_min.toLocaleString()}-${apartment.price_max.toLocaleString()}/mo
+            <span className="font-medium">Solo:</span> {currencySymbol}{apartment.price_min.toLocaleString()}-{apartment.price_max.toLocaleString()}/mo
           </p>
           <p className="text-gray-500 text-sm">
-            <span className="font-medium">Shared:</span> ${(apartment.shared_price_min || Math.round(apartment.price_min * 0.55)).toLocaleString()}-${(apartment.shared_price_max || Math.round(apartment.price_max * 0.55)).toLocaleString()}/mo
+            <span className="font-medium">Shared:</span> {currencySymbol}{(apartment.shared_price_min || Math.round(apartment.price_min * 0.55)).toLocaleString()}-{(apartment.shared_price_max || Math.round(apartment.price_max * 0.55)).toLocaleString()}/mo
           </p>
         </div>
         <p className="text-gray-400 text-xs mt-2">
@@ -231,13 +248,13 @@ function ApartmentCard({ apartment }: { apartment: Apartment }) {
 
       {/* Detail Modal */}
       {showDetails && (
-        <ApartmentDetailModal apartment={apartment} onClose={() => setShowDetails(false)} />
+        <ApartmentDetailModal apartment={apartment} currencySymbol={currencySymbol} onClose={() => setShowDetails(false)} />
       )}
     </>
   );
 }
 
-function ApartmentDetailModal({ apartment, onClose }: { apartment: Apartment; onClose: () => void }) {
+function ApartmentDetailModal({ apartment, currencySymbol = '$', onClose }: { apartment: Apartment; currencySymbol?: string; onClose: () => void }) {
   const imageUrl = apartment.images?.[0] || null;
 
   return (
@@ -278,14 +295,14 @@ function ApartmentDetailModal({ apartment, onClose }: { apartment: Apartment; on
               <div className="flex items-baseline gap-3">
                 <span className="text-xs uppercase tracking-wide text-gray-500 w-14">Solo</span>
                 <p className="text-xl font-semibold text-black">
-                  ${apartment.price_min.toLocaleString()} - ${apartment.price_max.toLocaleString()}
+                  {currencySymbol}{apartment.price_min.toLocaleString()} - {currencySymbol}{apartment.price_max.toLocaleString()}
                   <span className="text-sm font-normal text-gray-500">/mo</span>
                 </p>
               </div>
               <div className="flex items-baseline gap-3">
                 <span className="text-xs uppercase tracking-wide text-gray-500 w-14">Shared</span>
                 <p className="text-lg font-medium text-gray-700">
-                  ${(apartment.shared_price_min || Math.round(apartment.price_min * 0.55)).toLocaleString()} - ${(apartment.shared_price_max || Math.round(apartment.price_max * 0.55)).toLocaleString()}
+                  {currencySymbol}{(apartment.shared_price_min || Math.round(apartment.price_min * 0.55)).toLocaleString()} - {currencySymbol}{(apartment.shared_price_max || Math.round(apartment.price_max * 0.55)).toLocaleString()}
                   <span className="text-sm font-normal text-gray-500">/mo</span>
                 </p>
               </div>

@@ -20,6 +20,7 @@ const COUNTRY_CONFIG = {
     idLabel: 'SSN',
     reassuranceText: "Most banks here accept international students — you don't need an SSN to get started. Take your time to compare.",
     cardReassuranceText: 'Building credit takes time — start with one card and use it responsibly. No need to rush.',
+    recommendedBanks: ['Bank of America', 'Chase', 'Wells Fargo'],
     guides: [
       { title: 'SSN Guide', description: 'How to get your Social Security Number as an F-1 student', href: 'https://www.ssa.gov/ssnumber/' },
       { title: 'ITIN Guide', description: 'Individual Taxpayer Identification Number explained', href: 'https://www.irs.gov/individuals/individual-taxpayer-identification-number' },
@@ -32,6 +33,7 @@ const COUNTRY_CONFIG = {
     idLabel: 'NIN',
     reassuranceText: "Most UK banks welcome international students — you can open an account without a National Insurance Number. Take your time.",
     cardReassuranceText: 'Building a UK credit file takes time — start with a basic credit card and use it responsibly.',
+    recommendedBanks: ['Barclays', 'HSBC', 'Lloyds', 'NatWest'],
     guides: [
       { title: 'NIN Guide', description: 'How to apply for a National Insurance Number', href: 'https://www.gov.uk/apply-national-insurance-number' },
       { title: 'UK Student Account', description: 'Guide to opening a UK bank account as a student', href: 'https://www.ukcisa.org.uk/Information--Advice/Studying--living-in-the-UK/Opening-a-bank-account' },
@@ -44,6 +46,7 @@ const COUNTRY_CONFIG = {
     idLabel: 'SIN',
     reassuranceText: "Canadian banks are welcoming to international students — you don't need a SIN to open a basic account. Compare your options.",
     cardReassuranceText: 'Building Canadian credit takes time — start with a student credit card and use it responsibly.',
+    recommendedBanks: ['TD Canada Trust', 'RBC Royal Bank', 'Scotiabank', 'BMO'],
     guides: [
       { title: 'SIN Guide', description: 'How to get your Social Insurance Number', href: 'https://www.canada.ca/en/employment-social-development/services/sin/apply.html' },
       { title: 'Canadian Bank Account', description: 'Opening a bank account as an international student', href: 'https://www.canada.ca/en/financial-consumer-agency/services/banking/opening-bank-account.html' },
@@ -219,7 +222,7 @@ export default function BankingPage() {
             <BranchLocator
               university={userUniversity}
               userCampusSide={selectedCampusSide !== 'all' ? selectedCampusSide : userCampusSide}
-              recommendedBanks={['Bank of America', 'Chase', 'Wells Fargo']}
+              recommendedBanks={countryConfig.recommendedBanks}
             />
           </div>
         </div>

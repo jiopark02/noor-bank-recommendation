@@ -323,26 +323,15 @@ export default function VisaPage() {
                       Full-time work allowed during official holidays
                     </p>
                   </div>
-                  {(visaInfo as UKVisaInfo).nin_number ? (
-                    <div className="p-3 bg-[#FAF9F7] rounded-xl">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">🆔</span>
-                        <span className="text-sm font-medium text-[#1A1A1A]">National Insurance</span>
-                        <span className="ml-auto text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
-                          Active
-                        </span>
-                      </div>
-                      <p className="text-xs text-[#6B6B6B]">NIN: {(visaInfo as UKVisaInfo).nin_number}</p>
+                  <div className="p-3 bg-[#FAF9F7] rounded-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">🆔</span>
+                      <span className="text-sm font-medium text-[#1A1A1A]">National Insurance Number</span>
                     </div>
-                  ) : (
-                    <div className="p-3 bg-yellow-50 rounded-xl border border-yellow-200">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">⚠️</span>
-                        <span className="text-sm font-medium text-[#1A1A1A]">National Insurance</span>
-                      </div>
-                      <p className="text-xs text-[#6B6B6B]">Apply for NIN to start working</p>
-                    </div>
-                  )}
+                    <p className="text-xs text-[#6B6B6B]">
+                      Apply for your NIN once you start working. You can begin work while waiting for your NIN.
+                    </p>
+                  </div>
                 </>
               )}
 

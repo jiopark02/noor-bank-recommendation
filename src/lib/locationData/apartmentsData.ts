@@ -180,31 +180,103 @@ export const UK_APARTMENTS: ApartmentData[] = [
   apt('imperial-1', 'Griffon Studios', '228 Old Brompton Rd, London SW5', 'Imperial College London', 'Studio', '1', 1400, 1800, 200, 300, 12, 4, 15, 8, 4.3, 89, 'No pets', 'south', true, true, false, 51.4920, -0.1880, 'https://example.com'),
   apt('imperial-2', 'Prince Consort Village', '2 Prince Consort Rd, London SW7', 'Imperial College London', 'Studio-1BR', '1', 1600, 2200, 250, 400, 3, 1, 5, 3, 4.5, 123, 'No pets', 'center', true, true, false, 51.4990, -0.1765),
   apt('imperial-3', 'Woodward Buildings', 'Woodward Way, London SW7', 'Imperial College London', '1BR', '1', 1500, 2000, 350, 450, 5, 2, 8, 4, 4.2, 78, 'No pets', 'center', true, true, false, 51.4985, -0.1755),
+  apt('imperial-4', 'Xenia Students', '56 Princes Gate, London SW7', 'Imperial College London', 'Studio', '1', 1350, 1750, 180, 260, 8, 3, 10, 5, 4.1, 67, 'No pets', 'center', true, false, false, 51.4975, -0.1785),
+  apt('imperial-5', 'Chapter South Kensington', '133-135 Cromwell Rd, London SW7', 'Imperial College London', 'Studio-1BR', '1', 1550, 2100, 200, 380, 10, 4, 12, 6, 4.4, 145, 'No pets', 'south', true, true, false, 51.4935, -0.1825),
 
   // UCL
   apt('ucl-1', 'Chapter Kings Cross', '200 Pentonville Rd, London N1', 'UCL', 'Studio-1BR', '1', 1300, 1900, 200, 350, 15, 5, 18, 10, 4.1, 156, 'No pets', 'north', true, true, false, 51.5305, -0.1180),
   apt('ucl-2', 'iQ Bloomsbury', '25 Bedford Way, London WC1', 'UCL', 'Studio', '1', 1500, 2100, 180, 280, 5, 2, 8, 4, 4.4, 112, 'No pets', 'center', true, true, false, 51.5215, -0.1280),
   apt('ucl-3', 'Urbanest Kings Cross', 'Canal Reach, London N1', 'UCL', 'Studio-1BR', '1', 1400, 2000, 220, 380, 12, 4, 15, 8, 4.3, 134, 'No pets', 'north', true, true, false, 51.5345, -0.1245),
+  apt('ucl-4', 'Nido Tottenham Court Road', '11-15 Goodge St, London W1', 'UCL', 'Studio', '1', 1450, 1950, 170, 250, 5, 2, 7, 4, 4.2, 98, 'No pets', 'center', true, true, false, 51.5200, -0.1345),
+  apt('ucl-5', 'Pure Highbury', '71 Highbury Park, London N5', 'UCL', '1BR', '1', 1100, 1600, 350, 480, 20, 8, 25, 12, 4.0, 56, 'Cats allowed', 'north', false, true, true, 51.5550, -0.0985),
+
+  // LSE
+  apt('lse-1', 'Urbanest Westminster', '30-40 Westminster Bridge Rd, London SE1', 'LSE', 'Studio-1BR', '1', 1400, 2000, 180, 350, 10, 4, 12, 6, 4.3, 178, 'No pets', 'south', true, true, false, 51.5005, -0.1165),
+  apt('lse-2', 'Chapter Old Street', '183 City Rd, London EC1', 'LSE', 'Studio', '1', 1350, 1850, 170, 280, 15, 5, 18, 8, 4.2, 134, 'No pets', 'east', true, true, false, 51.5265, -0.0895),
+  apt('lse-3', 'iQ Aldgate', '50 Commercial Rd, London E1', 'LSE', 'Studio-1BR', '1', 1250, 1750, 190, 320, 18, 6, 20, 10, 4.1, 112, 'No pets', 'east', true, true, false, 51.5125, -0.0675),
+  apt('lse-4', 'Scape Shoreditch', '270-274 Old St, London EC1', 'LSE', 'Studio', '1', 1300, 1800, 160, 260, 20, 7, 22, 12, 4.0, 89, 'No pets', 'north', true, true, false, 51.5270, -0.0785),
+
+  // Kings College London
+  apt('kcl-1', 'Moonraker Point', '4-8 Pocock St, London SE1', 'Kings College London', 'Studio-1BR', '1', 1400, 2000, 200, 370, 8, 3, 10, 5, 4.4, 145, 'No pets', 'south', true, true, false, 51.5025, -0.1065),
+  apt('kcl-2', 'Chapter Tower Bridge', '215 Long Ln, London SE1', 'Kings College London', 'Studio', '1', 1350, 1850, 180, 290, 15, 5, 18, 8, 4.2, 112, 'No pets', 'south', true, true, false, 51.4995, -0.0835),
+  apt('kcl-3', 'Unite Waterloo', '52-62 Stamford St, London SE1', 'Kings College London', 'Studio-1BR', '1', 1450, 2050, 190, 340, 5, 2, 8, 4, 4.3, 167, 'No pets', 'center', true, true, false, 51.5045, -0.1095),
 
   // Oxford
-  apt('oxford-1', 'Alice House', '95 Banbury Rd, Oxford OX2', 'Oxford', 'Studio-1BR', '1', 1200, 1800, 200, 350, 15, 5, 18, 10, 4.2, 89, 'No pets', 'north', true, false, false, 51.7630, -1.2575),
-  apt('oxford-2', 'The Warehouse', '20 Cowley Rd, Oxford OX4', 'Oxford', '1-2BR', '1', 1100, 1600, 350, 550, 10, 4, 12, 6, 4.4, 78, 'Cats allowed', 'east', false, true, true, 51.7475, -1.2405),
-  apt('oxford-3', 'Jericho Quarter', '15 Walton Well Rd, Oxford OX2', 'Oxford', '1BR', '1', 1300, 1700, 400, 500, 12, 4, 15, 8, 4.3, 98, 'No pets', 'west', true, false, false, 51.7610, -1.2680),
+  apt('oxford-1', 'Alice House', '95 Banbury Rd, Oxford OX2', 'University of Oxford', 'Studio-1BR', '1', 1200, 1800, 200, 350, 15, 5, 18, 10, 4.2, 89, 'No pets', 'north', true, false, false, 51.7630, -1.2575),
+  apt('oxford-2', 'The Warehouse', '20 Cowley Rd, Oxford OX4', 'University of Oxford', '1-2BR', '1', 1100, 1600, 350, 550, 10, 4, 12, 6, 4.4, 78, 'Cats allowed', 'east', false, true, true, 51.7475, -1.2405),
+  apt('oxford-3', 'Jericho Quarter', '15 Walton Well Rd, Oxford OX2', 'University of Oxford', '1BR', '1', 1300, 1700, 400, 500, 12, 4, 15, 8, 4.3, 98, 'No pets', 'west', true, false, false, 51.7610, -1.2680),
+  apt('oxford-4', 'Castle Mill', 'Roger Dudman Way, Oxford OX1', 'University of Oxford', '1-2BR', '1-2', 1150, 1650, 380, 580, 8, 3, 10, 5, 4.5, 156, 'No pets', 'west', true, true, false, 51.7555, -1.2740),
+  apt('oxford-5', 'Summertown Apartments', '300 Banbury Rd, Oxford OX2', 'University of Oxford', '1BR', '1', 1000, 1450, 350, 450, 18, 6, 20, 10, 4.1, 67, 'Small pets', 'north', false, false, true, 51.7780, -1.2615),
 
   // Cambridge
-  apt('cambridge-1', 'Brunswick House', 'Brunswick Walk, Cambridge CB5', 'Cambridge', 'Studio-1BR', '1', 1100, 1700, 200, 380, 12, 4, 15, 8, 4.3, 112, 'No pets', 'east', true, false, false, 52.2080, 0.1340),
-  apt('cambridge-2', 'Eddington', 'Eddington Ave, Cambridge CB3', 'Cambridge', '1-2BR', '1-2', 1400, 2200, 400, 700, 15, 5, 18, 10, 4.5, 89, 'Small pets', 'west', true, true, true, 52.2180, 0.0915),
-  apt('cambridge-3', 'Mill Road Apartments', '45 Mill Rd, Cambridge CB1', 'Cambridge', '1BR', '1', 1000, 1500, 350, 450, 10, 4, 12, 6, 4.2, 78, 'No pets', 'south', false, false, true, 52.1985, 0.1365),
+  apt('cambridge-1', 'Brunswick House', 'Brunswick Walk, Cambridge CB5', 'University of Cambridge', 'Studio-1BR', '1', 1100, 1700, 200, 380, 12, 4, 15, 8, 4.3, 112, 'No pets', 'east', true, false, false, 52.2080, 0.1340),
+  apt('cambridge-2', 'Eddington', 'Eddington Ave, Cambridge CB3', 'University of Cambridge', '1-2BR', '1-2', 1400, 2200, 400, 700, 15, 5, 18, 10, 4.5, 89, 'Small pets', 'west', true, true, true, 52.2180, 0.0915),
+  apt('cambridge-3', 'Mill Road Apartments', '45 Mill Rd, Cambridge CB1', 'University of Cambridge', '1BR', '1', 1000, 1500, 350, 450, 10, 4, 12, 6, 4.2, 78, 'No pets', 'south', false, false, true, 52.1985, 0.1365),
+  apt('cambridge-4', 'Chesterton', '180 Milton Rd, Cambridge CB4', 'University of Cambridge', 'Studio-1BR', '1', 950, 1400, 280, 400, 18, 6, 20, 10, 4.0, 56, 'Cats allowed', 'north', false, true, true, 52.2195, 0.1285),
+  apt('cambridge-5', 'Romsey Town', '95 Perne Rd, Cambridge CB1', 'University of Cambridge', '1-2BR', '1', 1050, 1550, 400, 600, 15, 5, 18, 8, 4.1, 89, 'Small pets', 'east', false, false, true, 52.1935, 0.1455),
 
   // Manchester
-  apt('manchester-1', 'Vita Student', 'First St, Manchester M15', 'Manchester', 'Studio', '1', 800, 1200, 180, 280, 10, 4, 12, 6, 4.2, 167, 'No pets', 'south', true, true, false, 53.4715, -2.2465),
-  apt('manchester-2', 'iQ Lambert & Fairfield', 'Upper Brook St, Manchester M13', 'Manchester', 'Studio-1BR', '1', 750, 1100, 200, 350, 5, 2, 8, 4, 4.4, 134, 'No pets', 'center', true, true, false, 53.4695, -2.2320),
-  apt('manchester-3', 'Parkway Gate', 'Chester St, Manchester M1', 'Manchester', '1-2BR', '1', 900, 1400, 350, 550, 12, 4, 15, 8, 4.3, 89, 'No pets', 'south', true, true, true, 53.4735, -2.2415),
+  apt('manchester-1', 'Vita Student', 'First St, Manchester M15', 'University of Manchester', 'Studio', '1', 800, 1200, 180, 280, 10, 4, 12, 6, 4.2, 167, 'No pets', 'south', true, true, false, 53.4715, -2.2465),
+  apt('manchester-2', 'iQ Lambert & Fairfield', 'Upper Brook St, Manchester M13', 'University of Manchester', 'Studio-1BR', '1', 750, 1100, 200, 350, 5, 2, 8, 4, 4.4, 134, 'No pets', 'center', true, true, false, 53.4695, -2.2320),
+  apt('manchester-3', 'Parkway Gate', 'Chester St, Manchester M1', 'University of Manchester', '1-2BR', '1', 900, 1400, 350, 550, 12, 4, 15, 8, 4.3, 89, 'No pets', 'south', true, true, true, 53.4735, -2.2415),
+  apt('manchester-4', 'Unite Oxford Place', 'Oxford Rd, Manchester M1', 'University of Manchester', 'Studio', '1', 720, 1050, 160, 250, 3, 1, 5, 3, 4.5, 198, 'No pets', 'center', true, true, false, 53.4685, -2.2355),
+  apt('manchester-5', 'Fallowfield Campus', '331 Wilmslow Rd, Manchester M14', 'University of Manchester', '1-3BR', '1-2', 650, 1100, 300, 600, 18, 6, 20, 10, 4.0, 145, 'Small pets', 'south', false, true, true, 53.4485, -2.2165),
 
   // Edinburgh
-  apt('edinburgh-1', 'Unite Straits Meadow', 'Fountainbridge, Edinburgh EH3', 'Edinburgh', 'Studio', '1', 750, 1100, 180, 260, 15, 5, 18, 10, 4.1, 123, 'No pets', 'west', true, true, false, 55.9420, -3.2055),
-  apt('edinburgh-2', 'Abodus Holyrood', 'E Market St, Edinburgh EH8', 'Edinburgh', 'Studio-1BR', '1', 800, 1200, 200, 350, 12, 4, 15, 8, 4.3, 98, 'No pets', 'east', true, true, false, 55.9510, -3.1785),
-  apt('edinburgh-3', 'The Brae', 'Causewayside, Edinburgh EH9', 'Edinburgh', '1BR', '1', 850, 1300, 350, 450, 10, 4, 12, 6, 4.4, 78, 'No pets', 'south', true, false, true, 55.9385, -3.1795),
+  apt('edinburgh-1', 'Unite Straits Meadow', 'Fountainbridge, Edinburgh EH3', 'University of Edinburgh', 'Studio', '1', 750, 1100, 180, 260, 15, 5, 18, 10, 4.1, 123, 'No pets', 'west', true, true, false, 55.9420, -3.2055),
+  apt('edinburgh-2', 'Abodus Holyrood', 'E Market St, Edinburgh EH8', 'University of Edinburgh', 'Studio-1BR', '1', 800, 1200, 200, 350, 12, 4, 15, 8, 4.3, 98, 'No pets', 'east', true, true, false, 55.9510, -3.1785),
+  apt('edinburgh-3', 'The Brae', 'Causewayside, Edinburgh EH9', 'University of Edinburgh', '1BR', '1', 850, 1300, 350, 450, 10, 4, 12, 6, 4.4, 78, 'No pets', 'south', true, false, true, 55.9385, -3.1795),
+  apt('edinburgh-4', 'Newington', '55 Nicolson St, Edinburgh EH8', 'University of Edinburgh', '1-2BR', '1', 900, 1400, 380, 550, 8, 3, 10, 5, 4.2, 112, 'Cats allowed', 'south', false, true, true, 55.9445, -3.1835),
+  apt('edinburgh-5', 'Marchmont', '45 Marchmont Rd, Edinburgh EH9', 'University of Edinburgh', 'Studio-1BR', '1', 700, 1050, 200, 320, 12, 4, 15, 8, 4.0, 89, 'No pets', 'south', false, false, true, 55.9365, -3.1945),
+
+  // Bristol
+  apt('bristol-1', 'iQ Marketgate', 'Lamb St, Bristol BS1', 'University of Bristol', 'Studio-1BR', '1', 850, 1300, 180, 340, 8, 3, 10, 5, 4.3, 145, 'No pets', 'center', true, true, false, 51.4565, -2.5925),
+  apt('bristol-2', 'Unite Colston St', '36 Colston St, Bristol BS1', 'University of Bristol', 'Studio', '1', 780, 1150, 160, 260, 5, 2, 8, 4, 4.1, 112, 'No pets', 'center', true, true, false, 51.4555, -2.5965),
+  apt('bristol-3', 'Clifton Village', '95 Queens Rd, Bristol BS8', 'University of Bristol', '1-2BR', '1', 950, 1500, 400, 600, 10, 4, 12, 6, 4.5, 78, 'Small pets', 'west', false, true, true, 51.4615, -2.6125),
+  apt('bristol-4', 'Redland', '145 Redland Rd, Bristol BS6', 'University of Bristol', '1BR', '1', 800, 1200, 350, 450, 15, 5, 18, 8, 4.2, 89, 'Cats allowed', 'north', false, false, true, 51.4725, -2.6015),
+
+  // Leeds
+  apt('leeds-1', 'iQ Opal 3', 'Burley Rd, Leeds LS3', 'University of Leeds', 'Studio', '1', 650, 950, 160, 260, 8, 3, 10, 5, 4.2, 178, 'No pets', 'west', true, true, false, 53.8055, -1.5605),
+  apt('leeds-2', 'Vita Student Leeds', '2 Burley Rd, Leeds LS3', 'University of Leeds', 'Studio-1BR', '1', 700, 1050, 180, 320, 5, 2, 8, 4, 4.4, 156, 'No pets', 'west', true, true, false, 53.8045, -1.5595),
+  apt('leeds-3', 'Headingley', '85 St Michaels Ln, Leeds LS6', 'University of Leeds', '1-3BR', '1-2', 550, 900, 350, 700, 18, 6, 20, 10, 4.0, 134, 'Small pets', 'north', false, true, true, 53.8255, -1.5755),
+  apt('leeds-4', 'Hyde Park', '32 Hyde Park Rd, Leeds LS6', 'University of Leeds', '1-2BR', '1', 500, 800, 300, 500, 12, 4, 15, 8, 4.1, 98, 'Cats allowed', 'north', false, false, true, 53.8155, -1.5685),
+
+  // Birmingham
+  apt('birmingham-1', 'The Toybox', 'Bissell St, Birmingham B5', 'University of Birmingham', 'Studio-1BR', '1', 700, 1100, 180, 320, 12, 4, 15, 8, 4.2, 145, 'No pets', 'center', true, true, false, 52.4755, -1.8875),
+  apt('birmingham-2', 'Unite Bristol St', '54 Bristol St, Birmingham B5', 'University of Birmingham', 'Studio', '1', 650, 950, 160, 260, 10, 4, 12, 6, 4.0, 123, 'No pets', 'center', true, true, false, 52.4725, -1.8915),
+  apt('birmingham-3', 'Selly Oak', '895 Bristol Rd, Birmingham B29', 'University of Birmingham', '1-4BR', '1-2', 550, 1000, 350, 800, 8, 3, 10, 5, 4.3, 178, 'Small pets', 'south', false, true, true, 52.4385, -1.9385),
+  apt('birmingham-4', 'Harborne', '45 High St, Birmingham B17', 'University of Birmingham', '1-2BR', '1', 600, 950, 380, 550, 15, 5, 18, 10, 4.1, 89, 'Cats allowed', 'west', false, false, true, 52.4565, -1.9575),
+
+  // Glasgow
+  apt('glasgow-1', 'iQ Elgin Place', '140 Bath St, Glasgow G2', 'University of Glasgow', 'Studio', '1', 650, 1000, 170, 280, 12, 4, 15, 8, 4.3, 134, 'No pets', 'center', true, true, false, 55.8655, -4.2615),
+  apt('glasgow-2', 'Unite Kelvinhaugh', '225 Kelvinhaugh St, Glasgow G3', 'University of Glasgow', 'Studio-1BR', '1', 600, 900, 180, 310, 8, 3, 10, 5, 4.1, 112, 'No pets', 'west', true, true, false, 55.8675, -4.2895),
+  apt('glasgow-3', 'Hillhead', '65 Byres Rd, Glasgow G12', 'University of Glasgow', '1-2BR', '1', 700, 1100, 380, 550, 5, 2, 8, 4, 4.4, 98, 'Small pets', 'west', false, true, true, 55.8745, -4.2925),
+  apt('glasgow-4', 'Partick', '145 Dumbarton Rd, Glasgow G11', 'University of Glasgow', '1BR', '1', 550, 850, 320, 420, 12, 4, 15, 8, 4.0, 78, 'Cats allowed', 'west', false, false, true, 55.8695, -4.3125),
+
+  // Warwick
+  apt('warwick-1', 'The Oaks', 'Gibbet Hill Rd, Coventry CV4', 'University of Warwick', 'Studio-1BR', '1', 600, 950, 180, 320, 5, 2, 8, 4, 4.2, 123, 'No pets', 'center', true, true, false, 52.3805, -1.5605),
+  apt('warwick-2', 'Cannon Park', '2 Charter Ave, Coventry CV4', 'University of Warwick', '1-2BR', '1', 550, 850, 350, 500, 8, 3, 10, 5, 4.0, 89, 'Small pets', 'north', false, true, true, 52.3895, -1.5485),
+  apt('warwick-3', 'Leamington Spa', '85 Regent St, Leamington Spa CV32', 'University of Warwick', '1-3BR', '1-2', 650, 1100, 380, 700, 20, 8, 25, 12, 4.3, 145, 'Cats allowed', 'east', false, true, true, 52.2875, -1.5315),
+
+  // Durham
+  apt('durham-1', 'College of St Hild', 'South Rd, Durham DH1', 'Durham University', 'Studio-1BR', '1', 600, 950, 180, 320, 8, 3, 10, 5, 4.2, 98, 'No pets', 'south', true, true, false, 54.7665, -1.5755),
+  apt('durham-2', 'Neville House', 'New Elvet, Durham DH1', 'Durham University', 'Studio', '1', 550, 850, 160, 260, 5, 2, 8, 4, 4.0, 78, 'No pets', 'center', true, false, false, 54.7725, -1.5695),
+  apt('durham-3', 'Gilesgate', '125 Gilesgate, Durham DH1', 'Durham University', '1-2BR', '1', 500, 800, 320, 480, 12, 4, 15, 8, 4.1, 112, 'Small pets', 'east', false, false, true, 54.7785, -1.5565),
+
+  // Nottingham
+  apt('nottingham-1', 'iQ Newland House', '27-29 Newland St, Nottingham NG1', 'University of Nottingham', 'Studio', '1', 650, 1000, 170, 280, 12, 4, 15, 8, 4.2, 145, 'No pets', 'center', true, true, false, 52.9505, -1.1475),
+  apt('nottingham-2', 'Vita Student', 'Talbot St, Nottingham NG1', 'University of Nottingham', 'Studio-1BR', '1', 700, 1050, 180, 320, 10, 4, 12, 6, 4.3, 167, 'No pets', 'center', true, true, false, 52.9535, -1.1435),
+  apt('nottingham-3', 'Lenton', '95 Derby Rd, Nottingham NG7', 'University of Nottingham', '1-4BR', '1-2', 500, 900, 350, 800, 15, 5, 18, 10, 4.0, 123, 'Small pets', 'west', false, true, true, 52.9455, -1.1695),
+
+  // Sheffield
+  apt('sheffield-1', 'iQ Steel', 'Broad Ln, Sheffield S1', 'University of Sheffield', 'Studio', '1', 600, 950, 160, 270, 8, 3, 10, 5, 4.1, 134, 'No pets', 'center', true, true, false, 53.3815, -1.4785),
+  apt('sheffield-2', 'The Forge', '55 Boston St, Sheffield S2', 'University of Sheffield', 'Studio-1BR', '1', 650, 1000, 180, 310, 10, 4, 12, 6, 4.3, 112, 'No pets', 'east', true, true, false, 53.3755, -1.4635),
+  apt('sheffield-3', 'Broomhill', '385 Glossop Rd, Sheffield S10', 'University of Sheffield', '1-3BR', '1-2', 500, 850, 350, 650, 12, 4, 15, 8, 4.0, 98, 'Cats allowed', 'west', false, true, true, 53.3775, -1.4985),
+
+  // Southampton
+  apt('southampton-1', 'Mayflower Halls', '2 Commercial Rd, Southampton SO15', 'University of Southampton', 'Studio-1BR', '1', 700, 1100, 180, 320, 10, 4, 12, 6, 4.2, 145, 'No pets', 'center', true, true, false, 50.9085, -1.4095),
+  apt('southampton-2', 'Unite Kimber House', 'Highfield Ln, Southampton SO17', 'University of Southampton', 'Studio', '1', 650, 950, 160, 260, 5, 2, 8, 4, 4.0, 112, 'No pets', 'north', true, true, false, 50.9325, -1.3955),
+  apt('southampton-3', 'Portswood', '145 Portswood Rd, Southampton SO17', 'University of Southampton', '1-3BR', '1-2', 550, 900, 350, 600, 12, 4, 15, 8, 4.1, 89, 'Small pets', 'north', false, true, true, 50.9255, -1.3885),
 ];
 
 // ============================================================================
@@ -217,34 +289,77 @@ export const CANADA_APARTMENTS: ApartmentData[] = [
   apt('uoft-2', 'Campus One', '59 Hayden St, Toronto ON', 'University of Toronto', 'Studio-1BR', '1', 1800, 2600, 350, 550, 10, 4, 12, 5, 4.4, 156, 'Cats only', 'east', true, true, false, 43.6665, -79.3825),
   apt('uoft-3', 'Harbord Village', '95 Harbord St, Toronto ON', 'University of Toronto', '1BR', '1', 1600, 2200, 450, 600, 8, 3, 10, 4, 4.2, 89, 'Small pets', 'west', false, false, true, 43.6605, -79.4045),
   apt('uoft-4', 'The Annex', '456 Bloor St W, Toronto ON', 'University of Toronto', '1-2BR', '1', 1900, 3200, 500, 850, 5, 2, 8, 3, 4.5, 134, 'Dogs & cats', 'north', true, true, true, 43.6670, -79.4070),
+  apt('uoft-5', 'Chestnut Residence', '89 Chestnut St, Toronto ON', 'University of Toronto', 'Studio-1BR', '1', 1700, 2400, 300, 480, 12, 4, 15, 7, 4.0, 178, 'No pets', 'center', true, true, false, 43.6535, -79.3895),
+  apt('uoft-6', 'Kensington Market', '180 Baldwin St, Toronto ON', 'University of Toronto', '1-2BR', '1', 1500, 2100, 420, 650, 15, 5, 18, 8, 4.1, 98, 'Cats allowed', 'west', false, false, true, 43.6545, -79.4015),
 
   // UBC
   apt('ubc-1', 'Marine Gateway', '450 SW Marine Dr, Vancouver BC', 'UBC', '1-2BR', '1-2', 1800, 3200, 550, 950, 15, 5, 18, 10, 4.2, 145, 'Small pets', 'south', true, true, true, 49.2100, -123.1155),
   apt('ubc-2', 'UBC Exchange', '5728 University Blvd, Vancouver BC', 'UBC', 'Studio-1BR', '1', 1500, 2200, 350, 550, 5, 2, 8, 4, 4.4, 178, 'No pets', 'center', true, true, false, 49.2680, -123.2510),
   apt('ubc-3', 'Wesbrook Village', '5908 Birney Ave, Vancouver BC', 'UBC', '1-2BR', '1', 1700, 2800, 500, 800, 8, 3, 10, 5, 4.3, 123, 'Cats allowed', 'east', true, true, true, 49.2545, -123.2375),
+  apt('ubc-4', 'Ponderosa Commons', '6445 University Blvd, Vancouver BC', 'UBC', 'Studio', '1', 1400, 1900, 280, 400, 3, 1, 5, 3, 4.5, 198, 'No pets', 'center', true, true, false, 49.2665, -123.2485),
+  apt('ubc-5', 'Kitsilano', '3475 W Broadway, Vancouver BC', 'UBC', '1-2BR', '1', 1600, 2600, 480, 750, 18, 6, 20, 10, 4.1, 112, 'Dogs & cats', 'east', false, true, true, 49.2635, -123.1855),
 
   // McGill
-  apt('mcgill-1', 'Milton Parc', '3540 Milton St, Montreal QC', 'McGill', 'Studio-2BR', '1', 1000, 1800, 350, 700, 5, 2, 8, 4, 4.3, 167, 'Cats only', 'west', false, false, true, 45.5085, -73.5835),
-  apt('mcgill-2', 'The Plateau', '4250 St Denis St, Montreal QC', 'McGill', '1-2BR', '1', 900, 1600, 400, 650, 15, 5, 18, 8, 4.1, 134, 'Small pets', 'north', false, true, true, 45.5195, -73.5760),
-  apt('mcgill-3', 'Downtown Residences', '2055 Peel St, Montreal QC', 'McGill', '1BR', '1', 1200, 1900, 450, 600, 8, 3, 10, 5, 4.5, 98, 'No pets', 'center', true, true, false, 45.5015, -73.5735),
+  apt('mcgill-1', 'Milton Parc', '3540 Milton St, Montreal QC', 'McGill University', 'Studio-2BR', '1', 1000, 1800, 350, 700, 5, 2, 8, 4, 4.3, 167, 'Cats only', 'west', false, false, true, 45.5085, -73.5835),
+  apt('mcgill-2', 'The Plateau', '4250 St Denis St, Montreal QC', 'McGill University', '1-2BR', '1', 900, 1600, 400, 650, 15, 5, 18, 8, 4.1, 134, 'Small pets', 'north', false, true, true, 45.5195, -73.5760),
+  apt('mcgill-3', 'Downtown Residences', '2055 Peel St, Montreal QC', 'McGill University', '1BR', '1', 1200, 1900, 450, 600, 8, 3, 10, 5, 4.5, 98, 'No pets', 'center', true, true, false, 45.5015, -73.5735),
+  apt('mcgill-4', 'Ghetto', '3625 Park Ave, Montreal QC', 'McGill University', 'Studio-1BR', '1', 850, 1400, 320, 520, 5, 2, 8, 4, 4.2, 145, 'Cats allowed', 'west', false, false, true, 45.5105, -73.5765),
+  apt('mcgill-5', 'Mile End', '5495 St Laurent Blvd, Montreal QC', 'McGill University', '1-2BR', '1', 950, 1550, 400, 620, 18, 6, 20, 10, 4.0, 89, 'Small pets', 'north', false, true, true, 45.5245, -73.5885),
 
   // Waterloo
-  apt('waterloo-1', 'ICON', '330 Philip St, Waterloo ON', 'Waterloo', '1-5BR', '1-3', 700, 1400, 400, 1200, 5, 2, 8, 4, 4.2, 189, 'No pets', 'west', true, true, true, 43.4745, -80.5395),
-  apt('waterloo-2', 'Sage', '275 Lester St, Waterloo ON', 'Waterloo', '1-4BR', '1-2', 650, 1200, 350, 1000, 8, 3, 10, 5, 4.3, 156, 'Cats allowed', 'west', true, true, false, 43.4720, -80.5385),
-  apt('waterloo-3', 'King Street Tower', '112 King St S, Waterloo ON', 'Waterloo', 'Studio-2BR', '1', 800, 1500, 300, 700, 10, 4, 12, 6, 4.4, 112, 'Small pets', 'south', true, true, true, 43.4660, -80.5235),
+  apt('waterloo-1', 'ICON', '330 Philip St, Waterloo ON', 'University of Waterloo', '1-5BR', '1-3', 700, 1400, 400, 1200, 5, 2, 8, 4, 4.2, 189, 'No pets', 'west', true, true, true, 43.4745, -80.5395),
+  apt('waterloo-2', 'Sage', '275 Lester St, Waterloo ON', 'University of Waterloo', '1-4BR', '1-2', 650, 1200, 350, 1000, 8, 3, 10, 5, 4.3, 156, 'Cats allowed', 'west', true, true, false, 43.4720, -80.5385),
+  apt('waterloo-3', 'King Street Tower', '112 King St S, Waterloo ON', 'University of Waterloo', 'Studio-2BR', '1', 800, 1500, 300, 700, 10, 4, 12, 6, 4.4, 112, 'Small pets', 'south', true, true, true, 43.4660, -80.5235),
+  apt('waterloo-4', 'Rez-One', '256 Phillip St, Waterloo ON', 'University of Waterloo', 'Studio-1BR', '1', 750, 1250, 280, 450, 5, 2, 8, 4, 4.1, 178, 'No pets', 'west', true, true, false, 43.4735, -80.5405),
+  apt('waterloo-5', 'Luxe', '200 Lester St, Waterloo ON', 'University of Waterloo', '1-4BR', '1-2', 700, 1350, 380, 950, 8, 3, 10, 5, 4.5, 134, 'Cats only', 'west', true, true, true, 43.4715, -80.5375),
 
   // Calgary
   apt('ucalgary-1', 'Brentwood Station', '4100 Brentwood Rd NW, Calgary AB', 'University of Calgary', '1-2BR', '1-2', 1200, 2000, 500, 850, 10, 4, 12, 6, 4.2, 134, 'Dogs & cats', 'south', true, true, true, 51.0865, -114.1305),
   apt('ucalgary-2', 'University District', '1313 University Ave NW, Calgary AB', 'University of Calgary', '1BR', '1', 1100, 1700, 450, 600, 5, 2, 8, 4, 4.4, 98, 'Small pets', 'center', true, true, false, 51.0785, -114.1275),
   apt('ucalgary-3', 'Varsity Estates', '4800 Varsity Dr NW, Calgary AB', 'University of Calgary', '1-2BR', '1', 1000, 1600, 550, 750, 12, 4, 15, 8, 4.1, 78, 'Cats only', 'west', false, true, true, 51.0920, -114.1455),
+  apt('ucalgary-4', 'Stadium Station', '2015 University Dr NW, Calgary AB', 'University of Calgary', 'Studio-1BR', '1', 1050, 1550, 380, 520, 8, 3, 10, 5, 4.3, 112, 'No pets', 'south', true, true, false, 51.0695, -114.1235),
 
   // SFU
   apt('sfu-1', 'UniverCity', '9100 University Crescent, Burnaby BC', 'SFU', '1-2BR', '1-2', 1400, 2400, 500, 850, 5, 2, 8, 4, 4.3, 112, 'Small pets', 'center', true, true, true, 49.2785, -122.9155),
   apt('sfu-2', 'Burnaby Mountain', '8960 University Dr, Burnaby BC', 'SFU', 'Studio-1BR', '1', 1200, 1800, 350, 550, 8, 3, 10, 5, 4.2, 89, 'No pets', 'west', true, true, false, 49.2755, -122.9225),
+  apt('sfu-3', 'Cornerstone', '9160 University Crescent, Burnaby BC', 'SFU', '1-2BR', '1', 1350, 2200, 480, 780, 5, 2, 8, 4, 4.4, 134, 'Cats allowed', 'center', true, true, true, 49.2795, -122.9135),
+  apt('sfu-4', 'Lougheed Station', '9850 Austin Rd, Burnaby BC', 'SFU', 'Studio-1BR', '1', 1100, 1650, 350, 520, 15, 5, 18, 8, 4.0, 98, 'No pets', 'south', true, true, true, 49.2485, -122.8975),
 
   // McMaster
-  apt('mcmaster-1', 'Westdale Village', '1058 King St W, Hamilton ON', 'McMaster', '1-2BR', '1', 1000, 1600, 450, 750, 8, 3, 10, 5, 4.3, 145, 'Dogs & cats', 'east', false, true, true, 43.2615, -79.9010),
-  apt('mcmaster-2', 'Sterling Apartments', '1315 Main St W, Hamilton ON', 'McMaster', 'Studio-1BR', '1', 850, 1300, 350, 500, 10, 4, 12, 6, 4.1, 112, 'Cats only', 'south', true, false, true, 43.2565, -79.9045),
+  apt('mcmaster-1', 'Westdale Village', '1058 King St W, Hamilton ON', 'McMaster University', '1-2BR', '1', 1000, 1600, 450, 750, 8, 3, 10, 5, 4.3, 145, 'Dogs & cats', 'east', false, true, true, 43.2615, -79.9010),
+  apt('mcmaster-2', 'Sterling Apartments', '1315 Main St W, Hamilton ON', 'McMaster University', 'Studio-1BR', '1', 850, 1300, 350, 500, 10, 4, 12, 6, 4.1, 112, 'Cats only', 'south', true, false, true, 43.2565, -79.9045),
+  apt('mcmaster-3', 'Ainslie Wood', '55 Sterling St, Hamilton ON', 'McMaster University', '1-3BR', '1-2', 750, 1250, 400, 700, 5, 2, 8, 4, 4.2, 89, 'Small pets', 'west', false, true, true, 43.2585, -79.9125),
+  apt('mcmaster-4', 'The Emery', '1102 Main St W, Hamilton ON', 'McMaster University', 'Studio-1BR', '1', 900, 1400, 320, 480, 8, 3, 10, 5, 4.4, 134, 'No pets', 'south', true, true, false, 43.2605, -79.8965),
+
+  // Queens
+  apt('queens-1', 'University District', '320 Earl St, Kingston ON', 'Queens University', '1-4BR', '1-2', 700, 1300, 400, 900, 8, 3, 10, 5, 4.2, 145, 'Cats allowed', 'west', false, true, true, 44.2285, -76.4955),
+  apt('queens-2', 'Sydenham Ward', '165 Bagot St, Kingston ON', 'Queens University', 'Studio-1BR', '1', 850, 1250, 320, 480, 10, 4, 12, 6, 4.3, 112, 'No pets', 'south', true, false, true, 44.2325, -76.4835),
+  apt('queens-3', 'The Hub', '355 King St E, Kingston ON', 'Queens University', '1-2BR', '1', 750, 1150, 380, 580, 5, 2, 8, 4, 4.1, 89, 'Small pets', 'center', true, true, false, 44.2305, -76.4785),
+
+  // Western
+  apt('western-1', 'The Marq', '186 Central Ave, London ON', 'Western University', '1-5BR', '1-3', 650, 1300, 380, 1100, 8, 3, 10, 5, 4.2, 167, 'Small pets', 'center', true, true, true, 43.0105, -81.2695),
+  apt('western-2', 'Richmond Row', '345 Richmond St, London ON', 'Western University', 'Studio-1BR', '1', 900, 1400, 350, 520, 15, 5, 18, 8, 4.0, 134, 'No pets', 'east', true, true, false, 43.0085, -81.2555),
+  apt('western-3', 'Masonville', '1679 Richmond St N, London ON', 'Western University', '1-2BR', '1', 1000, 1600, 450, 700, 12, 4, 15, 7, 4.3, 112, 'Cats only', 'north', false, true, true, 43.0315, -81.2775),
+
+  // Ottawa
+  apt('uottawa-1', 'Sandy Hill', '180 Laurier Ave E, Ottawa ON', 'University of Ottawa', 'Studio-2BR', '1', 1100, 1800, 350, 650, 5, 2, 8, 4, 4.3, 145, 'Cats allowed', 'center', false, true, true, 45.4235, -75.6815),
+  apt('uottawa-2', 'Rideau Centre', '50 Rideau St, Ottawa ON', 'University of Ottawa', '1-2BR', '1-2', 1300, 2200, 450, 780, 10, 4, 12, 6, 4.4, 112, 'No pets', 'west', true, true, true, 45.4265, -75.6920),
+  apt('uottawa-3', 'Byward Market', '95 Clarence St, Ottawa ON', 'University of Ottawa', 'Studio-1BR', '1', 1000, 1500, 300, 480, 12, 4, 15, 8, 4.1, 89, 'Small pets', 'north', false, false, true, 45.4285, -75.6915),
+
+  // Alberta
+  apt('ualberta-1', 'HUB Mall', '9036 112 St NW, Edmonton AB', 'University of Alberta', 'Studio-1BR', '1', 800, 1300, 280, 450, 3, 1, 5, 3, 4.2, 178, 'No pets', 'center', true, true, false, 53.5275, -113.5265),
+  apt('ualberta-2', 'Garneau', '8620 112 St NW, Edmonton AB', 'University of Alberta', '1-2BR', '1', 900, 1500, 400, 650, 8, 3, 10, 5, 4.3, 134, 'Cats allowed', 'south', false, true, true, 53.5215, -113.5245),
+  apt('ualberta-3', 'Whyte Ave', '10405 82 Ave NW, Edmonton AB', 'University of Alberta', '1-3BR', '1-2', 850, 1400, 420, 750, 12, 4, 15, 8, 4.0, 98, 'Small pets', 'south', false, true, true, 53.5185, -113.5025),
+
+  // York
+  apt('york-1', 'The Quad', '15 Assiniboine Rd, Toronto ON', 'York University', '1-4BR', '1-2', 1000, 1800, 400, 900, 5, 2, 8, 4, 4.1, 156, 'No pets', 'center', true, true, true, 43.7755, -79.5025),
+  apt('york-2', 'Village', '85 Four Winds Dr, Toronto ON', 'York University', 'Studio-1BR', '1', 900, 1400, 320, 480, 8, 3, 10, 5, 4.2, 112, 'Cats only', 'west', true, true, false, 43.7715, -79.5095),
+  apt('york-3', 'Keele Station', '4700 Keele St, Toronto ON', 'York University', '1-2BR', '1', 1100, 1700, 420, 650, 10, 4, 12, 6, 4.3, 89, 'Small pets', 'south', true, true, true, 43.7685, -79.4995),
+
+  // Dalhousie
+  apt('dal-1', 'South End', '5643 Spring Garden Rd, Halifax NS', 'Dalhousie University', '1-2BR', '1', 1100, 1700, 400, 650, 8, 3, 10, 5, 4.2, 134, 'Dogs & cats', 'south', false, true, true, 44.6415, -63.5835),
+  apt('dal-2', 'Fenwick Tower', '5599 Fenwick St, Halifax NS', 'Dalhousie University', 'Studio-1BR', '1', 950, 1400, 300, 480, 5, 2, 8, 4, 4.3, 112, 'No pets', 'center', true, true, false, 44.6445, -63.5845),
+  apt('dal-3', 'North End', '2345 Gottingen St, Halifax NS', 'Dalhousie University', '1-3BR', '1-2', 850, 1350, 380, 700, 15, 5, 18, 10, 4.0, 89, 'Cats allowed', 'north', false, false, true, 44.6565, -63.5915),
 ];
 
 // Combine all apartments
