@@ -153,8 +153,17 @@ export interface Scholarship {
   deadline_notes?: string;
   category?: string;
   type?: string;
+  // US visa eligibility
   eligibility_f1: boolean;
   eligibility_j1: boolean;
+  // UK visa eligibility
+  eligibility_tier4?: boolean;
+  eligibility_graduate_visa?: boolean;
+  // Canada visa eligibility
+  eligibility_study_permit?: boolean;
+  eligibility_pgwp?: boolean;
+  // Country for filtering
+  country?: 'US' | 'UK' | 'CA';
   min_gpa?: number;
   requirements?: string[];
   benefits?: string[];

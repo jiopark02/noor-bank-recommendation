@@ -198,7 +198,7 @@ export default function DealsPage() {
                               d="M5 15l7-7 7 7"
                             />
                           </svg>
-                          {deal.upvotes + (upvotedDeals.has(deal.id) ? 1 : 0)}
+                          {(deal.upvotes || 0) + (upvotedDeals.has(deal.id) ? 1 : 0)}
                         </button>
 
                         {/* Get Deal */}

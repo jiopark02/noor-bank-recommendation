@@ -1,11 +1,34 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { PageLayout, PageHeader, LoadingSpinner } from '@/components/layout';
 import { useScholarships } from '@/hooks/useScholarships';
 import { Scholarship } from '@/types/database';
 
+type Country = 'US' | 'UK' | 'CA';
+
+const ELIGIBILITY_LABELS: Record<Country, string> = {
+  US: 'F-1 eligible',
+  UK: 'Tier 4 eligible',
+  CA: 'Study Permit eligible',
+};
+
+const CURRENCY_SYMBOLS: Record<Country, string> = {
+  US: '$',
+  UK: '£',
+  CA: 'C$',
+};
+
 export default function FundingPage() {
+  const [country, setCountry] = useState<Country>('US');
+
+  useEffect(() => {
+    const savedCountry = localStorage.getItem('noor_selected_country');
+    if (savedCountry && ['US', 'UK', 'CA'].includes(savedCountry)) {
+      setCountry(savedCountry as Country);
+    }
+  }, []);
+
   const { scholarships, isLoading, error, total, refetch } = useScholarships({
     limit: 20,
     f1Only: true,
@@ -34,7 +57,7 @@ export default function FundingPage() {
       ) : (
         <div className="space-y-4">
           {scholarships.map((scholarship) => (
-            <ScholarshipCard key={scholarship.id} scholarship={scholarship} />
+            <ScholarshipCard key={scholarship.id} scholarship={scholarship} country={country} />
           ))}
         </div>
       )}
@@ -42,13 +65,22 @@ export default function FundingPage() {
   );
 }
 
-function ScholarshipCard({ scholarship }: { scholarship: Scholarship }) {
+function ScholarshipCard({ scholarship, country }: { scholarship: Scholarship; country: Country }) {
+  const currencySymbol = CURRENCY_SYMBOLS[country];
+
   const formatAmount = (min?: number | null, max?: number | null) => {
     if (!min && !max) return 'Varies';
     if (min && max) {
-      return `$${min.toLocaleString()}-$${max.toLocaleString()}`;
+      return `${currencySymbol}${min.toLocaleString()}-${currencySymbol}${max.toLocaleString()}`;
     }
-    return `Up to $${(max || min || 0).toLocaleString()}`;
+    return `Up to ${currencySymbol}${(max || min || 0).toLocaleString()}`;
+  };
+
+  const isEligible = () => {
+    if (country === 'US') return scholarship.eligibility_f1;
+    if (country === 'UK') return scholarship.eligibility_tier4;
+    if (country === 'CA') return scholarship.eligibility_study_permit;
+    return false;
   };
 
   return (
@@ -63,9 +95,9 @@ function ScholarshipCard({ scholarship }: { scholarship: Scholarship }) {
         </div>
         <div className="text-right">
           <p className="text-gray-400 text-sm">{scholarship.deadline || 'Rolling'}</p>
-          {scholarship.eligibility_f1 && (
+          {isEligible() && (
             <span className="inline-block mt-3 badge text-xs">
-              F-1 eligible
+              {ELIGIBILITY_LABELS[country]}
             </span>
           )}
         </div>

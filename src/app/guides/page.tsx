@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { PageLayout } from '@/components/layout';
 
+type Country = 'US' | 'UK' | 'CA';
+
 // Guide categories organized by life moments
 interface Guide {
   id: string;
@@ -23,176 +25,463 @@ interface GuideMoment {
   guides: Guide[];
 }
 
-const GUIDE_MOMENTS: GuideMoment[] = [
-  {
-    id: 'just-arrived',
-    title: 'Just Arrived',
-    subtitle: 'Your first few days in the US',
-    guides: [
-      {
-        id: 'phone',
-        title: 'Get a US phone number',
-        description: 'Compare prepaid vs postpaid options and find the best deal.',
-        timeEstimate: '5 min read',
-        href: '/guides/phone',
-      },
-      {
-        id: 'documents',
-        title: 'Collect your documents',
-        description: 'I-20, student ID, and other essentials you need to get.',
-        timeEstimate: '3 min read',
-        href: '/guides/documents',
-      },
-      {
-        id: 'campus',
-        title: 'Navigate your campus',
-        description: 'Find the important offices and resources at your school.',
-        timeEstimate: '4 min read',
-        href: '/guides/campus',
-      },
-    ],
-  },
-  {
-    id: 'first-bank',
-    title: 'First Bank Account',
-    subtitle: 'Setting up your finances',
-    guides: [
-      {
-        id: 'bank-account',
-        title: 'Open a bank account without SSN',
-        description: 'Step-by-step guide to opening your first US bank account.',
-        timeEstimate: '7 min read',
-        href: '/banking',
-      },
-      {
-        id: 'transfer-money',
-        title: 'Transfer money from home',
-        description: 'Compare Wise, Remitly, and bank wires for the best rates.',
-        timeEstimate: '5 min read',
-        href: '/guides/transfer',
-      },
-      {
-        id: 'mobile-banking',
-        title: 'Set up mobile banking',
-        description: 'Get the most out of your bank\'s app and features.',
-        timeEstimate: '4 min read',
-        href: '/guides/mobile-banking',
-      },
-    ],
-  },
-  {
-    id: 'build-credit',
-    title: 'Building Credit',
-    subtitle: 'Start your credit journey',
-    guides: [
-      {
-        id: 'credit-basics',
-        title: 'Understanding US credit',
-        description: 'What credit scores mean and why they matter.',
-        timeEstimate: '6 min read',
-        href: '/guides/credit',
-      },
-      {
-        id: 'first-card',
-        title: 'Get your first credit card',
-        description: 'Best secured and student cards for beginners.',
-        timeEstimate: '5 min read',
-        href: '/funding',
-      },
-      {
-        id: 'credit-tips',
-        title: 'Build credit the right way',
-        description: 'Tips to improve your score without debt.',
-        timeEstimate: '4 min read',
-        href: '/guides/credit-tips',
-      },
-    ],
-  },
-  {
-    id: 'first-apartment',
-    title: 'First Apartment',
-    subtitle: 'Finding a place to live',
-    guides: [
-      {
-        id: 'housing-search',
-        title: 'Find apartments near campus',
-        description: 'Where to look and what to watch out for.',
-        timeEstimate: '6 min read',
-        href: '/housing',
-      },
-      {
-        id: 'lease',
-        title: 'Understand your lease',
-        description: 'What to check before signing anything.',
-        timeEstimate: '8 min read',
-        href: '/guides/lease',
-      },
-      {
-        id: 'utilities',
-        title: 'Set up utilities',
-        description: 'Electric, internet, and other essentials.',
-        timeEstimate: '5 min read',
-        href: '/guides/utilities',
-      },
-    ],
-  },
-  {
-    id: 'work-life',
-    title: 'Work & Income',
-    subtitle: 'Earning money as a student',
-    guides: [
-      {
-        id: 'campus-jobs',
-        title: 'Find on-campus jobs',
-        description: 'Where to look and how to apply.',
-        timeEstimate: '5 min read',
-        href: '/jobs',
-      },
-      {
-        id: 'ssn',
-        title: 'Get your SSN',
-        description: 'When you need it and how to apply.',
-        timeEstimate: '6 min read',
-        href: '/guides/ssn',
-      },
-      {
-        id: 'cpt-opt',
-        title: 'Understand CPT and OPT',
-        description: 'Work authorization options explained simply.',
-        timeEstimate: '8 min read',
-        href: '/guides/work-auth',
-      },
-    ],
-  },
-  {
-    id: 'stay-healthy',
-    title: 'Health & Safety',
-    subtitle: 'Taking care of yourself',
-    guides: [
-      {
-        id: 'insurance',
-        title: 'Use your health insurance',
-        description: 'How to find doctors and file claims.',
-        timeEstimate: '6 min read',
-        href: '/guides/insurance',
-      },
-      {
-        id: 'emergency',
-        title: 'What to do in emergencies',
-        description: 'Important numbers and steps to know.',
-        timeEstimate: '4 min read',
-        href: '/guides/emergency',
-      },
-      {
-        id: 'mental-health',
-        title: 'Mental health resources',
-        description: 'Support available at your school.',
-        timeEstimate: '5 min read',
-        href: '/guides/mental-health',
-      },
-    ],
-  },
-];
+// Country-specific guide content
+const GUIDE_MOMENTS_BY_COUNTRY: Record<Country, GuideMoment[]> = {
+  US: [
+    {
+      id: 'just-arrived',
+      title: 'Just Arrived',
+      subtitle: 'Your first few days in the US',
+      guides: [
+        {
+          id: 'phone',
+          title: 'Get a US phone number',
+          description: 'Compare prepaid vs postpaid options and find the best deal.',
+          timeEstimate: '5 min read',
+          href: '/guides/phone',
+        },
+        {
+          id: 'documents',
+          title: 'Collect your documents',
+          description: 'I-20, student ID, and other essentials you need to get.',
+          timeEstimate: '3 min read',
+          href: '/guides/documents',
+        },
+        {
+          id: 'campus',
+          title: 'Navigate your campus',
+          description: 'Find the important offices and resources at your school.',
+          timeEstimate: '4 min read',
+          href: '/guides/campus',
+        },
+      ],
+    },
+    {
+      id: 'first-bank',
+      title: 'First Bank Account',
+      subtitle: 'Setting up your finances',
+      guides: [
+        {
+          id: 'bank-account',
+          title: 'Open a bank account without SSN',
+          description: 'Step-by-step guide to opening your first US bank account.',
+          timeEstimate: '7 min read',
+          href: '/banking',
+        },
+        {
+          id: 'transfer-money',
+          title: 'Transfer money from home',
+          description: 'Compare Wise, Remitly, and bank wires for the best rates.',
+          timeEstimate: '5 min read',
+          href: '/guides/transfer',
+        },
+        {
+          id: 'mobile-banking',
+          title: 'Set up mobile banking',
+          description: 'Get the most out of your bank\'s app and features.',
+          timeEstimate: '4 min read',
+          href: '/guides/mobile-banking',
+        },
+      ],
+    },
+    {
+      id: 'build-credit',
+      title: 'Building Credit',
+      subtitle: 'Start your credit journey',
+      guides: [
+        {
+          id: 'credit-basics',
+          title: 'Understanding US credit',
+          description: 'What credit scores mean and why they matter.',
+          timeEstimate: '6 min read',
+          href: '/guides/credit',
+        },
+        {
+          id: 'first-card',
+          title: 'Get your first credit card',
+          description: 'Best secured and student cards for beginners.',
+          timeEstimate: '5 min read',
+          href: '/funding',
+        },
+        {
+          id: 'credit-tips',
+          title: 'Build credit the right way',
+          description: 'Tips to improve your score without debt.',
+          timeEstimate: '4 min read',
+          href: '/guides/credit-tips',
+        },
+      ],
+    },
+    {
+      id: 'first-apartment',
+      title: 'First Apartment',
+      subtitle: 'Finding a place to live',
+      guides: [
+        {
+          id: 'housing-search',
+          title: 'Find apartments near campus',
+          description: 'Where to look and what to watch out for.',
+          timeEstimate: '6 min read',
+          href: '/housing',
+        },
+        {
+          id: 'lease',
+          title: 'Understand your lease',
+          description: 'What to check before signing anything.',
+          timeEstimate: '8 min read',
+          href: '/guides/lease',
+        },
+        {
+          id: 'utilities',
+          title: 'Set up utilities',
+          description: 'Electric, internet, and other essentials.',
+          timeEstimate: '5 min read',
+          href: '/guides/utilities',
+        },
+      ],
+    },
+    {
+      id: 'work-life',
+      title: 'Work & Income',
+      subtitle: 'Earning money as a student',
+      guides: [
+        {
+          id: 'campus-jobs',
+          title: 'Find on-campus jobs',
+          description: 'Where to look and how to apply.',
+          timeEstimate: '5 min read',
+          href: '/jobs',
+        },
+        {
+          id: 'ssn',
+          title: 'Get your SSN',
+          description: 'When you need it and how to apply.',
+          timeEstimate: '6 min read',
+          href: '/guides/ssn',
+        },
+        {
+          id: 'cpt-opt',
+          title: 'Understand CPT and OPT',
+          description: 'Work authorization options explained simply.',
+          timeEstimate: '8 min read',
+          href: '/guides/work-auth',
+        },
+      ],
+    },
+    {
+      id: 'stay-healthy',
+      title: 'Health & Safety',
+      subtitle: 'Taking care of yourself',
+      guides: [
+        {
+          id: 'insurance',
+          title: 'Use your health insurance',
+          description: 'How to find doctors and file claims.',
+          timeEstimate: '6 min read',
+          href: '/guides/insurance',
+        },
+        {
+          id: 'emergency',
+          title: 'What to do in emergencies',
+          description: 'Important numbers and steps to know.',
+          timeEstimate: '4 min read',
+          href: '/guides/emergency',
+        },
+        {
+          id: 'mental-health',
+          title: 'Mental health resources',
+          description: 'Support available at your school.',
+          timeEstimate: '5 min read',
+          href: '/guides/mental-health',
+        },
+      ],
+    },
+  ],
+  UK: [
+    {
+      id: 'just-arrived',
+      title: 'Just Arrived',
+      subtitle: 'Your first few days in the UK',
+      guides: [
+        {
+          id: 'phone-uk',
+          title: 'Get a UK phone number',
+          description: 'Compare Giffgaff, Three, EE and other mobile options.',
+          timeEstimate: '5 min read',
+          href: '/guides/phone',
+        },
+        {
+          id: 'brp',
+          title: 'Collect your BRP',
+          description: 'Biometric Residence Permit - where to collect and what to check.',
+          timeEstimate: '4 min read',
+          href: '/guides/documents',
+        },
+        {
+          id: 'campus-uk',
+          title: 'Navigate your university',
+          description: 'Find the important offices: Student Union, International Office.',
+          timeEstimate: '4 min read',
+          href: '/guides/campus',
+        },
+      ],
+    },
+    {
+      id: 'first-bank',
+      title: 'First Bank Account',
+      subtitle: 'Setting up your finances',
+      guides: [
+        {
+          id: 'bank-account-uk',
+          title: 'Open a UK bank account',
+          description: 'Monzo, Barclays, HSBC - best options for international students.',
+          timeEstimate: '7 min read',
+          href: '/banking',
+        },
+        {
+          id: 'transfer-money-uk',
+          title: 'Transfer money from home',
+          description: 'Compare Wise, PayPal, and bank transfers for GBP.',
+          timeEstimate: '5 min read',
+          href: '/guides/transfer',
+        },
+        {
+          id: 'student-discount',
+          title: 'Get your student discounts',
+          description: 'TOTUM card, UNiDAYS, and Student Beans explained.',
+          timeEstimate: '4 min read',
+          href: '/guides/discounts',
+        },
+      ],
+    },
+    {
+      id: 'nhs-health',
+      title: 'NHS & Healthcare',
+      subtitle: 'Accessing healthcare in the UK',
+      guides: [
+        {
+          id: 'nhs-registration',
+          title: 'Register with a GP',
+          description: 'How to register with a doctor near your accommodation.',
+          timeEstimate: '5 min read',
+          href: '/guides/nhs',
+        },
+        {
+          id: 'prescriptions',
+          title: 'Getting prescriptions',
+          description: 'How NHS prescriptions work and what they cost.',
+          timeEstimate: '4 min read',
+          href: '/guides/prescriptions',
+        },
+        {
+          id: 'emergency-uk',
+          title: 'What to do in emergencies',
+          description: '999, 111, A&E - when to call and where to go.',
+          timeEstimate: '4 min read',
+          href: '/guides/emergency',
+        },
+      ],
+    },
+    {
+      id: 'accommodation',
+      title: 'Accommodation',
+      subtitle: 'Finding a place to live',
+      guides: [
+        {
+          id: 'housing-uk',
+          title: 'Find student accommodation',
+          description: 'Halls, private rentals, and flat shares explained.',
+          timeEstimate: '6 min read',
+          href: '/housing',
+        },
+        {
+          id: 'tenancy-uk',
+          title: 'Understand your tenancy',
+          description: 'AST agreements, deposits, and your rights.',
+          timeEstimate: '8 min read',
+          href: '/guides/lease',
+        },
+        {
+          id: 'council-tax',
+          title: 'Council Tax exemption',
+          description: 'How to apply for student exemption.',
+          timeEstimate: '3 min read',
+          href: '/guides/council-tax',
+        },
+      ],
+    },
+    {
+      id: 'work-uk',
+      title: 'Work & Income',
+      subtitle: 'Working as a Tier 4 student',
+      guides: [
+        {
+          id: 'work-hours',
+          title: 'Understand your work rights',
+          description: '20 hours term-time, full-time in holidays.',
+          timeEstimate: '5 min read',
+          href: '/guides/work-rights',
+        },
+        {
+          id: 'nin',
+          title: 'Get your National Insurance Number',
+          description: 'Apply for NIN to start working legally.',
+          timeEstimate: '6 min read',
+          href: '/guides/nin',
+        },
+        {
+          id: 'graduate-visa',
+          title: 'Graduate Visa route',
+          description: 'Stay and work for 2 years after graduation.',
+          timeEstimate: '7 min read',
+          href: '/guides/graduate-visa',
+        },
+      ],
+    },
+  ],
+  CA: [
+    {
+      id: 'just-arrived',
+      title: 'Just Arrived',
+      subtitle: 'Your first few days in Canada',
+      guides: [
+        {
+          id: 'phone-ca',
+          title: 'Get a Canadian phone number',
+          description: 'Compare Rogers, Bell, Telus, and budget options.',
+          timeEstimate: '5 min read',
+          href: '/guides/phone',
+        },
+        {
+          id: 'study-permit',
+          title: 'Validate your Study Permit',
+          description: 'What to do at the port of entry and after arrival.',
+          timeEstimate: '4 min read',
+          href: '/guides/documents',
+        },
+        {
+          id: 'campus-ca',
+          title: 'Navigate your campus',
+          description: 'International Student Services, registrar, and key offices.',
+          timeEstimate: '4 min read',
+          href: '/guides/campus',
+        },
+      ],
+    },
+    {
+      id: 'first-bank',
+      title: 'First Bank Account',
+      subtitle: 'Setting up your finances',
+      guides: [
+        {
+          id: 'bank-account-ca',
+          title: 'Open a Canadian bank account',
+          description: 'TD, RBC, Scotiabank - student accounts compared.',
+          timeEstimate: '7 min read',
+          href: '/banking',
+        },
+        {
+          id: 'transfer-money-ca',
+          title: 'Transfer money from home',
+          description: 'Compare Wise, Remitly for CAD transfers.',
+          timeEstimate: '5 min read',
+          href: '/guides/transfer',
+        },
+        {
+          id: 'interac',
+          title: 'Set up Interac e-Transfer',
+          description: 'Canada\'s instant payment system explained.',
+          timeEstimate: '3 min read',
+          href: '/guides/interac',
+        },
+      ],
+    },
+    {
+      id: 'health-ca',
+      title: 'Health Insurance',
+      subtitle: 'Provincial health coverage',
+      guides: [
+        {
+          id: 'provincial-health',
+          title: 'Apply for provincial health insurance',
+          description: 'MSP (BC), OHIP (Ontario), RAMQ (Quebec) guide.',
+          timeEstimate: '6 min read',
+          href: '/guides/health-insurance',
+        },
+        {
+          id: 'uhip',
+          title: 'Understand UHIP coverage',
+          description: 'University health plan while waiting for provincial.',
+          timeEstimate: '4 min read',
+          href: '/guides/uhip',
+        },
+        {
+          id: 'emergency-ca',
+          title: 'What to do in emergencies',
+          description: '911, walk-in clinics, ER - when to use each.',
+          timeEstimate: '4 min read',
+          href: '/guides/emergency',
+        },
+      ],
+    },
+    {
+      id: 'accommodation-ca',
+      title: 'Accommodation',
+      subtitle: 'Finding a place to live',
+      guides: [
+        {
+          id: 'housing-ca',
+          title: 'Find student housing',
+          description: 'On-campus, off-campus, and homestay options.',
+          timeEstimate: '6 min read',
+          href: '/housing',
+        },
+        {
+          id: 'lease-ca',
+          title: 'Understand your lease',
+          description: 'Standard lease terms and tenant rights.',
+          timeEstimate: '8 min read',
+          href: '/guides/lease',
+        },
+        {
+          id: 'utilities-ca',
+          title: 'Set up utilities',
+          description: 'Hydro, internet, and tenant insurance.',
+          timeEstimate: '5 min read',
+          href: '/guides/utilities',
+        },
+      ],
+    },
+    {
+      id: 'work-ca',
+      title: 'Work & Income',
+      subtitle: 'Working as a study permit holder',
+      guides: [
+        {
+          id: 'work-rights-ca',
+          title: 'Understand your work rights',
+          description: 'On-campus, off-campus, and co-op work permits.',
+          timeEstimate: '5 min read',
+          href: '/guides/work-rights',
+        },
+        {
+          id: 'sin',
+          title: 'Get your SIN',
+          description: 'Social Insurance Number - how to apply.',
+          timeEstimate: '5 min read',
+          href: '/guides/sin',
+        },
+        {
+          id: 'pgwp',
+          title: 'Post-Graduation Work Permit',
+          description: 'Work in Canada after graduation.',
+          timeEstimate: '7 min read',
+          href: '/guides/pgwp',
+        },
+      ],
+    },
+  ],
+};
 
 const STORAGE_KEY_COMPLETED_GUIDES = 'noor_completed_guides';
 
@@ -203,12 +492,19 @@ export default function GuidesPage() {
   const [completedGuides, setCompletedGuides] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedMoment, setExpandedMoment] = useState<string | null>('just-arrived');
+  const [country, setCountry] = useState<Country>('US');
 
   useEffect(() => {
     const userId = localStorage.getItem('noor_user_id');
     if (!userId) {
       router.push('/welcome');
       return;
+    }
+
+    // Load selected country
+    const savedCountry = localStorage.getItem('noor_selected_country');
+    if (savedCountry && ['US', 'UK', 'CA'].includes(savedCountry)) {
+      setCountry(savedCountry as Country);
     }
 
     // Load user profile
@@ -237,9 +533,12 @@ export default function GuidesPage() {
     setIsLoading(false);
   }, [router]);
 
+  // Get country-specific guide moments
+  const guideMoments = GUIDE_MOMENTS_BY_COUNTRY[country];
+
   // Filter guides based on search
   const filteredMoments = searchQuery
-    ? GUIDE_MOMENTS.map(moment => ({
+    ? guideMoments.map(moment => ({
         ...moment,
         guides: moment.guides.filter(
           guide =>
@@ -247,10 +546,10 @@ export default function GuidesPage() {
             guide.description.toLowerCase().includes(searchQuery.toLowerCase())
         ),
       })).filter(moment => moment.guides.length > 0)
-    : GUIDE_MOMENTS;
+    : guideMoments;
 
   // Calculate overall progress
-  const totalGuides = GUIDE_MOMENTS.reduce((acc, m) => acc + m.guides.length, 0);
+  const totalGuides = guideMoments.reduce((acc, m) => acc + m.guides.length, 0);
   const completedCount = completedGuides.size;
 
   if (isLoading) {
