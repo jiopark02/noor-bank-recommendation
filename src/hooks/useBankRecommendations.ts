@@ -85,6 +85,7 @@ interface UseBankRecommendationsOptions {
   userId: string | null;
   limit?: number;
   autoFetch?: boolean;
+  country?: string; // US, UK, CA
 }
 
 interface UseBankRecommendationsReturn {
@@ -100,6 +101,7 @@ export function useBankRecommendations({
   userId,
   limit = 5,
   autoFetch = true,
+  country = 'US',
 }: UseBankRecommendationsOptions): UseBankRecommendationsReturn {
   const [recommendations, setRecommendations] = useState<BankRecommendation[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -116,7 +118,7 @@ export function useBankRecommendations({
 
     try {
       const response = await fetch(
-        `/api/recommendations/bank?userId=${userId}&limit=${limit}`
+        `/api/recommendations/bank?userId=${userId}&limit=${limit}&country=${country}`
       );
 
       if (!response.ok) {
@@ -132,7 +134,7 @@ export function useBankRecommendations({
     } finally {
       setIsLoading(false);
     }
-  }, [userId, limit]);
+  }, [userId, limit, country]);
 
   useEffect(() => {
     if (autoFetch) {

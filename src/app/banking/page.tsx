@@ -213,7 +213,7 @@ export default function BankingPage() {
 
           <h2 className="section-title mb-3">Recommended for you</h2>
           <p className="text-sm text-gray-500 mb-5">Based on your situation. No pressure to decide today.</p>
-          <BankRecommendationList userId={userId} limit={10} />
+          <BankRecommendationList userId={userId} limit={10} country={destinationCountry} />
 
           {/* Branch Locations Section */}
           <div className="mt-10 pt-8 border-t border-gray-100">

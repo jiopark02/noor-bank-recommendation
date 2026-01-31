@@ -709,7 +709,8 @@ function generateRecommendation(user: UserProfile, bank: BankAccount): BankRecom
 export async function getRecommendations(
   supabase: SupabaseClient,
   userId: string,
-  limit: number = 5
+  limit: number = 5,
+  country: string = 'US'
 ): Promise<BankRecommendation[]> {
   // 1. Fetch user
   const { data: dbUser, error: userError } = await supabase
@@ -725,10 +726,18 @@ export async function getRecommendations(
   // 2. Map DB user to UserProfile
   const user = mapDbUserToProfile(dbUser);
 
-  // 3. Fetch banks
-  const { data: banks, error: banksError } = await supabase
-    .from('bank_accounts')
-    .select('*');
+  // 3. Fetch banks - filter by country
+  let banksQuery = supabase.from('bank_accounts').select('*');
+
+  // Filter by country if the column exists
+  if (country && country !== 'US') {
+    banksQuery = banksQuery.eq('country', country);
+  } else if (country === 'US') {
+    // For US, get banks that are either US or have no country specified (backwards compatibility)
+    banksQuery = banksQuery.or('country.eq.US,country.is.null');
+  }
+
+  const { data: banks, error: banksError } = await banksQuery;
 
   if (banksError || !banks) {
     throw new Error(`Bank accounts not found: ${banksError?.message}`);

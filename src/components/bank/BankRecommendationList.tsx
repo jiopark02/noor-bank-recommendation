@@ -10,19 +10,21 @@ interface BankRecommendationListProps {
   userId: string;
   limit?: number;
   showComparison?: boolean;
+  country?: string; // US, UK, CA
 }
 
 export function BankRecommendationList({
   userId,
   limit = 10,
   showComparison = true,
+  country = 'US',
 }: BankRecommendationListProps) {
   const {
     recommendations,
     isLoading,
     error,
     refetch,
-  } = useBankRecommendations({ userId, limit });
+  } = useBankRecommendations({ userId, limit, country });
 
   const [selectedBank, setSelectedBank] = useState<BankRecommendation | null>(null);
 
