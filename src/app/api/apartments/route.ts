@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
 import { ALL_APARTMENTS, getUniversityLocation } from '@/lib/locationData';
 
 // Default apartment images (Unsplash)
@@ -51,60 +50,28 @@ export async function GET(request: NextRequest) {
     const parking = searchParams.get('parking') === 'true';
     const campusSide = searchParams.get('campus_side');
 
-    // Try Supabase first if configured
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = createServerClient();
-
-        let query = supabase
-          .from('apartments')
-          .select('*', { count: 'exact' })
-          .eq('country', country)
-          .order('rating', { ascending: false, nullsFirst: false })
-          .range(offset, offset + limit - 1);
-
-        if (city) query = query.ilike('city', `%${city}%`);
-        if (university) query = query.ilike('university', `%${university}%`);
-        if (minPrice) query = query.gte('price_min', parseInt(minPrice));
-        if (maxPrice) query = query.lte('price_max', parseInt(maxPrice));
-        if (bedrooms) query = query.ilike('bedrooms', `%${bedrooms}%`);
-        if (gym) query = query.eq('gym', true);
-        if (furnished) query = query.eq('furnished', true);
-        if (parking) query = query.eq('parking', true);
-        if (campusSide) query = query.eq('campus_side', campusSide);
-
-        const { data, error, count } = await query;
-
-        if (!error && data && data.length > 0) {
-          // Add images to Supabase data if missing
-          const enrichedData = data.map(apt => ({
-            ...apt,
-            images: apt.images && apt.images.length > 0 ? apt.images : getDefaultImage(apt.id),
-          }));
-
-          return NextResponse.json({
-            success: true,
-            data: enrichedData,
-            meta: { total: count || data.length, country, limit, offset },
-          });
-        }
-      } catch (dbError) {
-        console.warn('Supabase error, using local data:', dbError);
-      }
-    }
-
-    // Use local apartment data from locationData
+    // Always use local apartment data (ALL_APARTMENTS) for consistency
+    // This ensures correct university-specific data
     let apartments = ALL_APARTMENTS.map(enrichApartment);
 
-    // Filter by university (exact match for best results)
+    // Filter by university (EXACT match first, then partial)
     if (university) {
       const uniLower = university.toLowerCase().trim();
-      apartments = apartments.filter(a => {
-        const aptUni = a.university.toLowerCase();
-        return aptUni === uniLower ||
-               aptUni.includes(uniLower) ||
-               uniLower.includes(aptUni);
-      });
+
+      // First try exact match
+      let filtered = apartments.filter(a =>
+        a.university.toLowerCase() === uniLower
+      );
+
+      // If no exact match, try partial match
+      if (filtered.length === 0) {
+        filtered = apartments.filter(a => {
+          const aptUni = a.university.toLowerCase();
+          return aptUni.includes(uniLower) || uniLower.includes(aptUni);
+        });
+      }
+
+      apartments = filtered;
     } else {
       // Filter by country if no university specified
       apartments = apartments.filter(a => {
@@ -143,6 +110,7 @@ export async function GET(request: NextRequest) {
       meta: {
         total,
         country,
+        university: university || null,
         limit,
         offset,
         source: 'local',
