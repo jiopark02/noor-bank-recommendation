@@ -1,6 +1,7 @@
 /**
  * Noor Bank Recommendation Algorithm v2
  * Professional bank consulting for international students
+ * Updated: Jan 2026
  */
 
 import { SupabaseClient } from '@supabase/supabase-js';
