@@ -1701,6 +1701,14 @@ export const MOCK_DEALS: Deal[] = [
   ...GLOBAL_DEALS,
 ];
 
+// Get mock deals by country (server-side safe, no localStorage)
+export function getMockDeals(country?: string): Deal[] {
+  if (!country || country === 'ALL') {
+    return [...MOCK_DEALS];
+  }
+  return MOCK_DEALS.filter(d => d.country === country || d.country === 'ALL');
+}
+
 // Get all deals with country filtering
 export function getDeals(category?: string, university?: string, country?: string): Deal[] {
   let deals = [...MOCK_DEALS];
