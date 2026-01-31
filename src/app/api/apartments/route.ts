@@ -1,195 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
+import { ALL_APARTMENTS, getUniversityLocation } from '@/lib/locationData';
 
-// Mock apartment data with coordinates
-const MOCK_APARTMENTS = [
-  {
-    id: 'apt-1',
-    name: 'Cardinal Apartments',
-    address: '123 University Ave, Palo Alto, CA',
-    city: 'Palo Alto',
-    university: 'Stanford',
-    country: 'US',
-    price_min: 2200,
-    price_max: 3500,
-    shared_price_min: 1200,
-    shared_price_max: 1800,
-    bedrooms: 'Studio - 2BR',
-    bathrooms: '1-2',
-    sqft_min: 450,
-    sqft_max: 900,
-    latitude: 37.4419,
-    longitude: -122.1430,
-    walking_minutes: 15,
-    biking_minutes: 5,
-    transit_minutes: 10,
-    driving_minutes: 3,
-    gym: true,
-    furnished: false,
-    parking: true,
-    pet_policy: 'Cats allowed',
-    rating: 4.5,
-    review_count: 128,
-    campus_side: 'north',
-    images: ['https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800'],
-    contact_website: 'https://example.com',
-  },
-  {
-    id: 'apt-2',
-    name: 'Oak Creek Apartments',
-    address: '456 El Camino Real, Palo Alto, CA',
-    city: 'Palo Alto',
-    university: 'Stanford',
-    country: 'US',
-    price_min: 2800,
-    price_max: 4200,
-    shared_price_min: 1500,
-    shared_price_max: 2100,
-    bedrooms: '1BR - 3BR',
-    bathrooms: '1-2',
-    sqft_min: 650,
-    sqft_max: 1200,
-    latitude: 37.4380,
-    longitude: -122.1520,
-    walking_minutes: 20,
-    biking_minutes: 7,
-    transit_minutes: 12,
-    driving_minutes: 5,
-    gym: true,
-    furnished: true,
-    parking: true,
-    pet_policy: 'Dogs & cats',
-    rating: 4.7,
-    review_count: 95,
-    campus_side: 'west',
-    images: ['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800'],
-    contact_website: 'https://example.com',
-  },
-  {
-    id: 'apt-3',
-    name: 'Menlo Park Studios',
-    address: '789 Santa Cruz Ave, Menlo Park, CA',
-    city: 'Menlo Park',
-    university: 'Stanford',
-    country: 'US',
-    price_min: 1900,
-    price_max: 2600,
-    shared_price_min: 1000,
-    shared_price_max: 1400,
-    bedrooms: 'Studio - 1BR',
-    bathrooms: '1',
-    sqft_min: 400,
-    sqft_max: 600,
-    latitude: 37.4530,
-    longitude: -122.1817,
-    walking_minutes: 25,
-    biking_minutes: 10,
-    transit_minutes: 15,
-    driving_minutes: 7,
-    gym: false,
-    furnished: true,
-    parking: false,
-    pet_policy: 'No pets',
-    rating: 4.2,
-    review_count: 67,
-    campus_side: 'north',
-    images: ['https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800'],
-    contact_website: 'https://example.com',
-  },
-  {
-    id: 'apt-4',
-    name: 'Page Mill Residences',
-    address: '321 Page Mill Rd, Palo Alto, CA',
-    city: 'Palo Alto',
-    university: 'Stanford',
-    country: 'US',
-    price_min: 3200,
-    price_max: 4800,
-    shared_price_min: 1700,
-    shared_price_max: 2500,
-    bedrooms: '2BR - 3BR',
-    bathrooms: '2',
-    sqft_min: 900,
-    sqft_max: 1400,
-    latitude: 37.4220,
-    longitude: -122.1410,
-    walking_minutes: 18,
-    biking_minutes: 6,
-    transit_minutes: 14,
-    driving_minutes: 4,
-    gym: true,
-    furnished: false,
-    parking: true,
-    pet_policy: 'Dogs & cats',
-    rating: 4.8,
-    review_count: 156,
-    campus_side: 'south',
-    images: ['https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800'],
-    contact_website: 'https://example.com',
-  },
-  {
-    id: 'apt-5',
-    name: 'Stanford Terrace',
-    address: '555 Stanford Ave, Palo Alto, CA',
-    city: 'Palo Alto',
-    university: 'Stanford',
-    country: 'US',
-    price_min: 2500,
-    price_max: 3800,
-    shared_price_min: 1300,
-    shared_price_max: 2000,
-    bedrooms: '1BR - 2BR',
-    bathrooms: '1-2',
-    sqft_min: 550,
-    sqft_max: 950,
-    latitude: 37.4310,
-    longitude: -122.1680,
-    walking_minutes: 12,
-    biking_minutes: 4,
-    transit_minutes: 8,
-    driving_minutes: 3,
-    gym: true,
-    furnished: true,
-    parking: true,
-    pet_policy: 'Cats allowed',
-    rating: 4.6,
-    review_count: 112,
-    campus_side: 'east',
-    images: ['https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800'],
-    contact_website: 'https://example.com',
-  },
-  {
-    id: 'apt-6',
-    name: 'University Gardens',
-    address: '888 University Ave, Palo Alto, CA',
-    city: 'Palo Alto',
-    university: 'Stanford',
-    country: 'US',
-    price_min: 2100,
-    price_max: 3200,
-    shared_price_min: 1100,
-    shared_price_max: 1700,
-    bedrooms: 'Studio - 2BR',
-    bathrooms: '1',
-    sqft_min: 420,
-    sqft_max: 850,
-    latitude: 37.4450,
-    longitude: -122.1560,
-    walking_minutes: 22,
-    biking_minutes: 8,
-    transit_minutes: 16,
-    driving_minutes: 6,
-    gym: false,
-    furnished: false,
-    parking: true,
-    pet_policy: 'No pets',
-    rating: 4.3,
-    review_count: 89,
-    campus_side: 'north',
-    images: ['https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800'],
-    contact_website: 'https://example.com',
-  },
+// Default apartment images (Unsplash)
+const DEFAULT_APARTMENT_IMAGES = [
+  'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1560185893-a55cbc8c57e8?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1502672023488-70e25813eb80?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1574362848149-11496d93a7c7?w=800&h=600&fit=crop',
 ];
+
+// Get a consistent image based on apartment ID
+const getDefaultImage = (aptId: string): string[] => {
+  const hash = aptId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return [DEFAULT_APARTMENT_IMAGES[hash % DEFAULT_APARTMENT_IMAGES.length]];
+};
+
+// Convert apartment data and add images
+const enrichApartment = (apt: typeof ALL_APARTMENTS[0]) => ({
+  ...apt,
+  images: apt.images && apt.images.length > 0 ? apt.images : getDefaultImage(apt.id),
+  contact_website: apt.contact_website || 'https://www.apartments.com',
+});
+
+// Get country from university location
+const getCountryFromUniversity = (university: string): string => {
+  const location = getUniversityLocation(university);
+  return location?.country || 'US';
+};
 
 export async function GET(request: NextRequest) {
   try {
@@ -200,14 +44,14 @@ export async function GET(request: NextRequest) {
     const minPrice = searchParams.get('min_price');
     const maxPrice = searchParams.get('max_price');
     const bedrooms = searchParams.get('bedrooms');
-    const limit = parseInt(searchParams.get('limit') || '20');
+    const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
     const gym = searchParams.get('gym') === 'true';
     const furnished = searchParams.get('furnished') === 'true';
     const parking = searchParams.get('parking') === 'true';
     const campusSide = searchParams.get('campus_side');
 
-    // Try Supabase first
+    // Try Supabase first if configured
     if (isSupabaseConfigured()) {
       try {
         const supabase = createServerClient();
@@ -232,26 +76,48 @@ export async function GET(request: NextRequest) {
         const { data, error, count } = await query;
 
         if (!error && data && data.length > 0) {
+          // Add images to Supabase data if missing
+          const enrichedData = data.map(apt => ({
+            ...apt,
+            images: apt.images && apt.images.length > 0 ? apt.images : getDefaultImage(apt.id),
+          }));
+
           return NextResponse.json({
             success: true,
-            data: data,
+            data: enrichedData,
             meta: { total: count || data.length, country, limit, offset },
           });
         }
       } catch (dbError) {
-        console.warn('Supabase error, using mock data:', dbError);
+        console.warn('Supabase error, using local data:', dbError);
       }
     }
 
-    // Fallback to mock data
-    let apartments = [...MOCK_APARTMENTS];
+    // Use local apartment data from locationData
+    let apartments = ALL_APARTMENTS.map(enrichApartment);
 
-    // Apply filters
+    // Filter by university (exact match for best results)
     if (university) {
-      apartments = apartments.filter(a => a.university.toLowerCase().includes(university.toLowerCase()));
+      const uniLower = university.toLowerCase().trim();
+      apartments = apartments.filter(a => {
+        const aptUni = a.university.toLowerCase();
+        return aptUni === uniLower ||
+               aptUni.includes(uniLower) ||
+               uniLower.includes(aptUni);
+      });
+    } else {
+      // Filter by country if no university specified
+      apartments = apartments.filter(a => {
+        const aptCountry = getCountryFromUniversity(a.university);
+        return aptCountry === country;
+      });
     }
+
+    // Apply other filters
     if (city) {
-      apartments = apartments.filter(a => a.city.toLowerCase().includes(city.toLowerCase()));
+      apartments = apartments.filter(a =>
+        a.address.toLowerCase().includes(city.toLowerCase())
+      );
     }
     if (minPrice) {
       apartments = apartments.filter(a => a.price_min >= parseInt(minPrice));
@@ -264,18 +130,22 @@ export async function GET(request: NextRequest) {
     if (parking) apartments = apartments.filter(a => a.parking);
     if (campusSide) apartments = apartments.filter(a => a.campus_side === campusSide);
 
+    // Sort by rating
+    apartments.sort((a, b) => b.rating - a.rating);
+
     // Apply pagination
+    const total = apartments.length;
     const paginatedApartments = apartments.slice(offset, offset + limit);
 
     return NextResponse.json({
       success: true,
       data: paginatedApartments,
       meta: {
-        total: apartments.length,
+        total,
         country,
         limit,
         offset,
-        source: 'mock',
+        source: 'local',
       },
     });
   } catch (error) {
