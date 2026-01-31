@@ -159,7 +159,7 @@ export default function HousingPage() {
       </div>
 
       {/* Map Section */}
-      {showMap && mapMarkers.length > 0 && (
+      {showMap && (
         <div className="mb-6">
           <MapView
             center={universityCenter}
@@ -169,7 +169,10 @@ export default function HousingPage() {
             className="border border-gray-200"
           />
           <p className="text-xs text-gray-400 mt-2 text-center">
-            {mapMarkers.length} apartments shown on map
+            {mapMarkers.length > 0
+              ? `${mapMarkers.length} apartments shown on map`
+              : `Showing area near ${userUniversity}`
+            }
           </p>
         </div>
       )}
