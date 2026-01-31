@@ -40,7 +40,7 @@ export interface BankAccount {
   pros: string[];
   cons: string[];
   apply_link: string | null;
-  no_ssn_note?: string | null;
+  no_ssn_note?: string | null; // Note about opening without SSN/NIN/SIN
 }
 
 export interface ComparisonHighlight {
