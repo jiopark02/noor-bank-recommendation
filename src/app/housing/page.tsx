@@ -4,8 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { PageLayout, PageHeader, LoadingSpinner } from '@/components/layout';
 import { useApartments } from '@/hooks/useApartments';
 import { Apartment } from '@/types/database';
-import { MapView, LocationBadge, DirectionsButton } from '@/components/maps';
-import { UNIVERSITY_LOCATIONS, CampusSide } from '@/lib/universityData';
+import { MapView, LocationBadge, DirectionsButton, MapMarker } from '@/components/maps';
+import { UNIVERSITY_LOCATIONS, CampusSide, getBranchesForUniversity } from '@/lib/universityData';
 
 const AMENITY_FILTERS = [
   { id: 'gym', label: 'Gym' },
@@ -92,15 +92,32 @@ export default function HousingPage() {
   }, [userUniversity]);
 
   // Create map markers from apartments with coordinates
-  const mapMarkers = useMemo(() => {
+  const apartmentMarkers: MapMarker[] = useMemo(() => {
     return apartments
       .filter((apt) => apt.latitude && apt.longitude)
       .map((apt) => ({
         position: [apt.latitude!, apt.longitude!] as [number, number],
         label: apt.name,
         popupContent: `<strong>${apt.name}</strong><br/>${currencySymbol}${apt.price_min.toLocaleString()}-${apt.price_max.toLocaleString()}/mo`,
+        color: 'blue' as const,
       }));
   }, [apartments, currencySymbol]);
+
+  // Get bank branch markers
+  const bankMarkers: MapMarker[] = useMemo(() => {
+    const branches = getBranchesForUniversity(userUniversity);
+    return branches.map((branch) => ({
+      position: [branch.lat, branch.lng] as [number, number],
+      label: branch.bank,
+      popupContent: `<strong>${branch.bank}</strong><br/>${branch.name}<br/>${branch.address}`,
+      color: 'green' as const,
+    }));
+  }, [userUniversity]);
+
+  // Combine all markers
+  const mapMarkers = useMemo(() => {
+    return [...apartmentMarkers, ...bankMarkers];
+  }, [apartmentMarkers, bankMarkers]);
 
   return (
     <PageLayout>
@@ -168,12 +185,16 @@ export default function HousingPage() {
             height="250px"
             className="border border-gray-200"
           />
-          <p className="text-xs text-gray-400 mt-2 text-center">
-            {mapMarkers.length > 0
-              ? `${mapMarkers.length} apartments shown on map`
-              : `Showing area near ${userUniversity}`
-            }
-          </p>
+          <div className="flex items-center justify-center gap-4 mt-2">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+              <span className="text-xs text-gray-500">{apartmentMarkers.length} apartments</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+              <span className="text-xs text-gray-500">{bankMarkers.length} bank branches</span>
+            </div>
+          </div>
         </div>
       )}
 

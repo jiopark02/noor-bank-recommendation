@@ -22,8 +22,15 @@ interface MapViewProps {
   showUserLocation?: boolean;
 }
 
-// All markers use black for Noor branding
-const MARKER_COLOR = '#000000';
+// Marker colors for different types
+const MARKER_COLORS: Record<MarkerColor, string> = {
+  blue: '#3b82f6',
+  red: '#ef4444',
+  green: '#22c55e',
+  orange: '#f97316',
+  purple: '#a855f7',
+  default: '#000000',
+};
 
 // Leaflet map component that only loads on the client
 function LeafletMap({
@@ -121,11 +128,14 @@ function LeafletMap({
 
     // Add new markers
     markers.forEach((marker) => {
-      // Create minimal black marker icon (Noor branding)
-      const blackIcon = L.divIcon({
+      // Get marker color
+      const markerColor = MARKER_COLORS[marker.color || 'default'];
+
+      // Create colored marker icon
+      const coloredIcon = L.divIcon({
         html: `
           <div class="noor-marker">
-            <div class="noor-pin"></div>
+            <div class="noor-pin" style="background: ${markerColor};"></div>
           </div>
         `,
         className: 'custom-marker-icon',
@@ -134,7 +144,7 @@ function LeafletMap({
         popupAnchor: [0, -32],
       });
 
-      const leafletMarker = L.marker(marker.position, { icon: blackIcon });
+      const leafletMarker = L.marker(marker.position, { icon: coloredIcon });
 
       if (marker.popupContent || marker.label) {
         leafletMarker.bindPopup(marker.popupContent || marker.label);
