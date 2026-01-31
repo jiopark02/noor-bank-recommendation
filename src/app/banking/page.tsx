@@ -107,12 +107,6 @@ export default function BankingPage() {
     }
     setUserId(storedUserId);
 
-    // Load destination country
-    const savedCountry = localStorage.getItem('noor_selected_country');
-    if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
-      setDestinationCountry(savedCountry);
-    }
-
     // Load user profile for university and campus side
     try {
       const profile = localStorage.getItem('noor_user_profile');
@@ -124,12 +118,16 @@ export default function BankingPage() {
         if (parsed.campusSide && parsed.campusSide !== 'unknown') {
           setUserCampusSide(parsed.campusSide as CampusSide);
         }
-        if (parsed.destinationCountry) {
-          setDestinationCountry(parsed.destinationCountry);
-        }
       }
     } catch (e) {
       // Use defaults
+    }
+
+    // Load destination country - noor_selected_country is the source of truth
+    // This should be checked LAST to override any profile country
+    const savedCountry = localStorage.getItem('noor_selected_country');
+    if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
+      setDestinationCountry(savedCountry);
     }
   }, [router]);
 
