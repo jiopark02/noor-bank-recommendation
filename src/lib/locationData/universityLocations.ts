@@ -87,6 +87,7 @@ export const US_UNIVERSITY_LOCATIONS: Record<string, UniversityLocation> = {
   'Michigan State': { name: 'Michigan State University', center: { lat: 42.7018, lng: -84.4822 }, country: 'US', city: 'East Lansing', state: 'MI' },
   'Ohio State': { name: 'Ohio State University', center: { lat: 40.0067, lng: -83.0305 }, country: 'US', city: 'Columbus', state: 'OH' },
   'Purdue': { name: 'Purdue University', center: { lat: 40.4237, lng: -86.9212 }, country: 'US', city: 'West Lafayette', state: 'IN' },
+  'Purdue Northwest': { name: 'Purdue University Northwest', center: { lat: 41.5842, lng: -87.4739 }, country: 'US', city: 'Hammond', state: 'IN' },
   'Indiana': { name: 'Indiana University', center: { lat: 39.1682, lng: -86.5186 }, country: 'US', city: 'Bloomington', state: 'IN' },
   'Notre Dame': { name: 'University of Notre Dame', center: { lat: 41.7056, lng: -86.2353 }, country: 'US', city: 'Notre Dame', state: 'IN' },
   'Case Western': { name: 'Case Western Reserve University', center: { lat: 41.5045, lng: -81.6078 }, country: 'US', city: 'Cleveland', state: 'OH' },

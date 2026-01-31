@@ -2,6 +2,26 @@ import { useState, useEffect, useCallback } from 'react';
 import { Apartment } from '@/types/database';
 import { getApartmentsForUniversity, ALL_APARTMENTS } from '@/lib/locationData';
 
+// Default apartment images (Unsplash) for apartments without images
+const DEFAULT_APARTMENT_IMAGES = [
+  'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1560185893-a55cbc8c57e8?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1502672023488-70e25813eb80?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800&h=600&fit=crop',
+  'https://images.unsplash.com/photo-1574362848149-11496d93a7c7?w=800&h=600&fit=crop',
+];
+
+// Get a consistent image based on apartment ID
+const getDefaultImage = (aptId: string): string[] => {
+  const hash = aptId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return [DEFAULT_APARTMENT_IMAGES[hash % DEFAULT_APARTMENT_IMAGES.length]];
+};
+
 // Convert ApartmentData from locationData to Apartment type
 const convertLocationDataToApartment = (apt: typeof ALL_APARTMENTS[0]): Apartment => ({
   id: apt.id,
@@ -30,7 +50,7 @@ const convertLocationDataToApartment = (apt: typeof ALL_APARTMENTS[0]): Apartmen
   latitude: apt.latitude,
   longitude: apt.longitude,
   contact_website: apt.contact_website,
-  images: apt.images,
+  images: apt.images && apt.images.length > 0 ? apt.images : getDefaultImage(apt.id),
   available_units: 5,
   woman_only: false,
   verified: true,

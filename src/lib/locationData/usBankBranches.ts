@@ -390,6 +390,12 @@ export const MIDWEST_BRANCHES: Record<string, BankBranch[]> = {
     branch('purdue-chase-1', 'Chase', 'State Street', '200 W State St, West Lafayette, IN', 40.4255, -86.9120, 'west', '(765) 743-8888'),
     branch('purdue-regions-1', 'Regions Bank', 'Campus', '135 S Chauncey Ave, West Lafayette, IN', 40.4250, -86.9085, 'center', '(765) 743-4431'),
   ],
+  'Purdue Northwest': [
+    branch('pnw-chase-1', 'Chase', 'Hammond', '7039 Indianapolis Blvd, Hammond, IN', 41.5835, -87.4815, 'west', '(219) 933-2500'),
+    branch('pnw-bofa-1', 'Bank of America', 'Highland', '8601 Kennedy Ave, Highland, IN', 41.5525, -87.4585, 'south', '(219) 923-7000'),
+    branch('pnw-fifththird-1', 'Fifth Third Bank', 'Hammond', '6840 Indianapolis Blvd, Hammond, IN', 41.5820, -87.4795, 'west', '(219) 931-3500'),
+    branch('pnw-centier-1', 'Centier Bank', 'Hammond', '7001 Calumet Ave, Hammond, IN', 41.5885, -87.5010, 'north', '(219) 933-1234'),
+  ],
   'Indiana': [
     branch('indiana-bofa-1', 'Bank of America', 'Kirkwood', '100 E Kirkwood Ave, Bloomington, IN', 39.1660, -86.5340, 'south', '(812) 334-8201'),
     branch('indiana-chase-1', 'Chase', 'Downtown Bloomington', '201 N College Ave, Bloomington, IN', 39.1680, -86.5345, 'north', '(812) 339-1234'),

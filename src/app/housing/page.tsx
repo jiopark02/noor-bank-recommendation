@@ -99,7 +99,7 @@ export default function HousingPage() {
         position: [apt.latitude!, apt.longitude!] as [number, number],
         label: apt.name,
         popupContent: `<strong>${apt.name}</strong><br/>${currencySymbol}${apt.price_min.toLocaleString()}-${apt.price_max.toLocaleString()}/mo`,
-        color: 'blue' as const,
+        color: 'default' as const,
       }));
   }, [apartments, currencySymbol]);
 
@@ -110,7 +110,7 @@ export default function HousingPage() {
       position: [branch.lat, branch.lng] as [number, number],
       label: branch.bank,
       popupContent: `<strong>${branch.bank}</strong><br/>${branch.name}<br/>${branch.address}`,
-      color: 'green' as const,
+      color: 'default' as const,
     }));
   }, [userUniversity]);
 
@@ -185,15 +185,10 @@ export default function HousingPage() {
             height="250px"
             className="border border-gray-200"
           />
-          <div className="flex items-center justify-center gap-4 mt-2">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-              <span className="text-xs text-gray-500">{apartmentMarkers.length} apartments</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="text-xs text-gray-500">{bankMarkers.length} bank branches</span>
-            </div>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <span className="text-xs text-gray-500">{apartmentMarkers.length} apartments</span>
+            <span className="text-xs text-gray-400">·</span>
+            <span className="text-xs text-gray-500">{bankMarkers.length} bank branches</span>
           </div>
         </div>
       )}
