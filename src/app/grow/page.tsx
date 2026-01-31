@@ -18,6 +18,13 @@ import {
   EligibilityResult,
   STORAGE_KEY_SAVINGS_GOALS,
   HYSAAccount,
+  getSavingsAccountsByCountry,
+  getInvestmentAccountsByCountry,
+  UK_SAVINGS_ACCOUNTS,
+  UK_INVESTMENT_ACCOUNTS,
+  CA_SAVINGS_ACCOUNTS,
+  CA_INVESTMENT_ACCOUNTS,
+  Country,
 } from '@/lib/savingsData';
 import {
   UserLevel,
@@ -73,12 +80,19 @@ export default function GrowPage() {
   });
   const [monthlyExpenses, setMonthlyExpenses] = useState(2000);
   const [showProgressEditor, setShowProgressEditor] = useState(false);
+  const [userCountry, setUserCountry] = useState<Country>('US');
 
   useEffect(() => {
     const userId = localStorage.getItem('noor_user_id');
     if (!userId) {
       router.push('/welcome');
       return;
+    }
+
+    // Load country
+    const savedCountry = localStorage.getItem('noor_selected_country');
+    if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
+      setUserCountry(savedCountry as Country);
     }
 
     // Load user profile to determine level
@@ -159,11 +173,38 @@ export default function GrowPage() {
     return calculateProgressSteps(financeProgress, userLevel);
   }, [financeProgress, userLevel]);
 
+  // Get country-specific accounts
+  const savingsAccounts = useMemo(() => {
+    return getSavingsAccountsByCountry(userCountry);
+  }, [userCountry]);
+
+  const investmentAccounts = useMemo(() => {
+    return getInvestmentAccountsByCountry(userCountry);
+  }, [userCountry]);
+
+  // Currency symbol based on country
+  const currencySymbol = useMemo(() => {
+    switch (userCountry) {
+      case 'UK': return '£';
+      case 'CA': return 'C$';
+      default: return '$';
+    }
+  }, [userCountry]);
+
+  // Get the best rate from available accounts
+  const bestSavingsRate = useMemo(() => {
+    if (userCountry === 'UK') {
+      return Math.max(...UK_SAVINGS_ACCOUNTS.map(a => a.aer));
+    } else if (userCountry === 'CA') {
+      return Math.max(...CA_SAVINGS_ACCOUNTS.map(a => a.interest_rate));
+    }
+    return Math.max(...HYSA_ACCOUNTS.map(a => a.apy));
+  }, [userCountry]);
+
   // Calculate HYSA earnings
   const hysaEarnings = useMemo(() => {
-    const bestRate = Math.max(...HYSA_ACCOUNTS.map(a => a.apy));
-    return calculateHYSAEarnings(calculatorAmount, bestRate);
-  }, [calculatorAmount]);
+    return calculateHYSAEarnings(calculatorAmount, bestSavingsRate);
+  }, [calculatorAmount, bestSavingsRate]);
 
   // Emergency fund recommendation
   const emergencyFundTarget = useMemo(() => {
