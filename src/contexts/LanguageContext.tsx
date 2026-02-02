@@ -3,6 +3,36 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Locale, locales, defaultLocale, isRTL } from '@/i18n/config';
 
+// Import all messages statically
+import en from '../../messages/en.json';
+import ko from '../../messages/ko.json';
+import ja from '../../messages/ja.json';
+import zhCN from '../../messages/zh-CN.json';
+import zhTW from '../../messages/zh-TW.json';
+import it from '../../messages/it.json';
+import es from '../../messages/es.json';
+import fr from '../../messages/fr.json';
+import de from '../../messages/de.json';
+import pt from '../../messages/pt.json';
+import hi from '../../messages/hi.json';
+import ar from '../../messages/ar.json';
+
+// Messages map
+const allMessages: Record<Locale, Record<string, unknown>> = {
+  en,
+  ko,
+  ja,
+  'zh-CN': zhCN,
+  'zh-TW': zhTW,
+  it,
+  es,
+  fr,
+  de,
+  pt,
+  hi,
+  ar,
+};
+
 interface LanguageContextType {
   locale: Locale;
   setLocale: (locale: Locale) => void;
@@ -12,29 +42,6 @@ interface LanguageContextType {
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
-
-// Cache for loaded messages
-const messagesCache: Record<string, Record<string, unknown>> = {};
-
-// Dynamically import messages
-async function loadMessages(locale: Locale): Promise<Record<string, unknown>> {
-  if (messagesCache[locale]) {
-    return messagesCache[locale];
-  }
-
-  try {
-    const messages = await import(`../../messages/${locale}.json`);
-    messagesCache[locale] = messages.default || messages;
-    return messagesCache[locale];
-  } catch (error) {
-    console.error(`Failed to load messages for locale: ${locale}`, error);
-    // Fallback to English
-    if (locale !== 'en') {
-      return loadMessages('en');
-    }
-    return {};
-  }
-}
 
 // Get nested value from object using dot notation
 function getNestedValue(obj: Record<string, unknown>, path: string): string {
@@ -53,7 +60,7 @@ function getNestedValue(obj: Record<string, unknown>, path: string): string {
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(defaultLocale);
-  const [messages, setMessages] = useState<Record<string, unknown>>({});
+  const [messages, setMessages] = useState<Record<string, unknown>>(allMessages[defaultLocale]);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load locale from localStorage on mount
@@ -61,13 +68,14 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const savedLocale = localStorage.getItem('noor_locale') as Locale | null;
     if (savedLocale && locales.includes(savedLocale)) {
       setLocaleState(savedLocale);
+      setMessages(allMessages[savedLocale]);
     }
     setIsLoaded(true);
   }, []);
 
-  // Load messages when locale changes
+  // Update messages when locale changes
   useEffect(() => {
-    loadMessages(locale).then(setMessages);
+    setMessages(allMessages[locale]);
   }, [locale]);
 
   // Update document direction for RTL languages
@@ -80,6 +88,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const setLocale = useCallback((newLocale: Locale) => {
     setLocaleState(newLocale);
+    setMessages(allMessages[newLocale]);
     localStorage.setItem('noor_locale', newLocale);
 
     // Also save to user profile if available
@@ -89,7 +98,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(profile);
         parsed.language = newLocale;
         localStorage.setItem('noor_user_profile', JSON.stringify(parsed));
-      } catch (e) {
+      } catch {
         // Ignore parse errors
       }
     }
