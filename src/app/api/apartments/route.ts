@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ALL_APARTMENTS, getUniversityLocation } from '@/lib/locationData';
+import { getUniversityPricing, getRealisticApartmentName } from '@/lib/locationData/apartmentPricing';
 
 // Default apartment images (Unsplash)
 const DEFAULT_APARTMENT_IMAGES = [
@@ -21,17 +22,42 @@ const getDefaultImage = (aptId: string): string[] => {
   return [DEFAULT_APARTMENT_IMAGES[hash % DEFAULT_APARTMENT_IMAGES.length]];
 };
 
-// Convert apartment data and add images
-const enrichApartment = (apt: typeof ALL_APARTMENTS[0]) => ({
-  ...apt,
-  images: apt.images && apt.images.length > 0 ? apt.images : getDefaultImage(apt.id),
-  contact_website: apt.contact_website || 'https://www.apartments.com',
-});
-
 // Get country from university location
 const getCountryFromUniversity = (university: string): string => {
   const location = getUniversityLocation(university);
   return location?.country || 'US';
+};
+
+// Determine bedroom type from bedrooms string
+const getBedroomType = (bedrooms: string): 'studio' | 'oneBed' | 'twoBed' | 'threeBed' => {
+  const lower = bedrooms.toLowerCase();
+  if (lower.includes('studio')) return 'studio';
+  if (lower.includes('3') || lower.includes('three')) return 'threeBed';
+  if (lower.includes('2') || lower.includes('two')) return 'twoBed';
+  return 'oneBed';
+};
+
+// Convert apartment data with realistic pricing and names
+const enrichApartment = (apt: typeof ALL_APARTMENTS[0], index: number) => {
+  const country = getCountryFromUniversity(apt.university);
+  const pricing = getUniversityPricing(apt.university, country);
+  const bedroomType = getBedroomType(apt.bedrooms);
+  const priceRange = pricing[bedroomType];
+
+  // Use realistic apartment name if available
+  const name = getRealisticApartmentName(apt.university, index);
+
+  return {
+    ...apt,
+    name: name || apt.name,
+    price_min: priceRange[0],
+    price_max: priceRange[1],
+    // Shared prices are typically 40-60% of full price
+    shared_price_min: Math.round(priceRange[0] * 0.4),
+    shared_price_max: Math.round(priceRange[1] * 0.6),
+    images: apt.images && apt.images.length > 0 ? apt.images : getDefaultImage(apt.id),
+    contact_website: apt.contact_website || 'https://www.apartments.com',
+  };
 };
 
 export async function GET(request: NextRequest) {
@@ -51,8 +77,8 @@ export async function GET(request: NextRequest) {
     const campusSide = searchParams.get('campus_side');
 
     // Always use local apartment data (ALL_APARTMENTS) for consistency
-    // This ensures correct university-specific data
-    let apartments = ALL_APARTMENTS.map(enrichApartment);
+    // This ensures correct university-specific data with realistic pricing
+    let apartments = ALL_APARTMENTS.map((apt, index) => enrichApartment(apt, index));
 
     // Filter by university (EXACT match first, then partial)
     if (university) {
@@ -92,6 +118,11 @@ export async function GET(request: NextRequest) {
     if (maxPrice) {
       apartments = apartments.filter(a => a.price_max <= parseInt(maxPrice));
     }
+    if (bedrooms) {
+      apartments = apartments.filter(a =>
+        a.bedrooms.toLowerCase().includes(bedrooms.toLowerCase())
+      );
+    }
     if (gym) apartments = apartments.filter(a => a.gym);
     if (furnished) apartments = apartments.filter(a => a.furnished);
     if (parking) apartments = apartments.filter(a => a.parking);
@@ -114,6 +145,7 @@ export async function GET(request: NextRequest) {
         limit,
         offset,
         source: 'local',
+        pricing: 'market-adjusted', // Indicates pricing is based on real market data
       },
     });
   } catch (error) {
