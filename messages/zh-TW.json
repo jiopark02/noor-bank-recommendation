@@ -1,0 +1,317 @@
+{
+  "common": {
+    "loading": "載入中...",
+    "error": "發生了問題",
+    "retry": "重試",
+    "cancel": "取消",
+    "save": "儲存",
+    "continue": "繼續",
+    "back": "返回",
+    "next": "下一步",
+    "done": "完成",
+    "close": "關閉",
+    "search": "搜尋",
+    "filter": "篩選",
+    "sort": "排序",
+    "viewAll": "查看全部",
+    "learnMore": "了解更多",
+    "getStarted": "開始使用",
+    "signIn": "登入",
+    "signOut": "登出",
+    "signUp": "註冊",
+    "welcome": "歡迎",
+    "settings": "設定",
+    "profile": "個人資料",
+    "help": "幫助",
+    "apply": "申請",
+    "submit": "提交",
+    "edit": "編輯",
+    "delete": "刪除",
+    "confirm": "確認",
+    "yes": "是",
+    "no": "否"
+  },
+  "nav": {
+    "home": "首頁",
+    "banking": "銀行",
+    "housing": "住房",
+    "visa": "簽證",
+    "grow": "理財",
+    "deals": "優惠",
+    "guides": "指南",
+    "community": "社群",
+    "money": "資金",
+    "jobs": "工作",
+    "funding": "融資"
+  },
+  "survey": {
+    "languageSelect": {
+      "title": "選擇語言",
+      "subtitle": "請選擇您偏好的語言",
+      "continue": "繼續"
+    },
+    "welcome": {
+      "title": "歡迎來到Noor",
+      "subtitle": "留學生的財務夥伴",
+      "description": "我們將幫助您開設銀行帳戶、尋找住房並管理您的財務。"
+    },
+    "steps": {
+      "university": "大學",
+      "country": "國家",
+      "visa": "簽證狀態",
+      "preferences": "偏好設定"
+    },
+    "university": {
+      "title": "您在哪裡學習？",
+      "placeholder": "搜尋您的大學...",
+      "notFound": "找不到您的大學？"
+    },
+    "country": {
+      "title": "您在哪個國家？",
+      "us": "美國",
+      "uk": "英國",
+      "ca": "加拿大"
+    },
+    "visa": {
+      "title": "您的簽證狀態是什麼？",
+      "f1": "F-1學生簽證",
+      "j1": "J-1交流簽證",
+      "opt": "OPT/CPT",
+      "h1b": "H-1B工作簽證",
+      "tier4": "Tier 4學生簽證",
+      "studyPermit": "學習許可"
+    },
+    "complete": {
+      "title": "一切就緒！",
+      "subtitle": "開始您的財務之旅"
+    }
+  },
+  "banking": {
+    "title": "銀行",
+    "subtitle": "為留學生找到最佳銀行",
+    "tabs": {
+      "banks": "銀行",
+      "cards": "銀行卡",
+      "guides": "指南"
+    },
+    "filters": {
+      "noSsn": "無需SSN",
+      "traditional": "傳統銀行",
+      "online": "網路銀行",
+      "noFee": "免年費",
+      "noCredit": "無需信用記錄"
+    },
+    "bankCard": {
+      "openAccount": "開設帳戶",
+      "branches": "附近分行",
+      "minDeposit": "最低存款",
+      "monthlyFee": "月費",
+      "features": "功能"
+    },
+    "reassurance": "大多數銀行歡迎留學生 — 無需SSN即可開始。"
+  },
+  "housing": {
+    "title": "住房",
+    "subtitle": "在校園附近找公寓",
+    "filters": {
+      "gym": "健身房",
+      "furnished": "附家具",
+      "parking": "停車位",
+      "allAreas": "所有區域",
+      "north": "北",
+      "south": "南",
+      "east": "東",
+      "west": "西"
+    },
+    "apartment": {
+      "perMonth": "/月",
+      "beds": "臥室",
+      "baths": "浴室",
+      "sqft": "平方英尺",
+      "walkingTime": "分鐘步行",
+      "bikingTime": "分鐘騎車",
+      "rating": "評分",
+      "reviews": "評論",
+      "viewDetails": "查看詳情",
+      "getDirections": "取得路線",
+      "shared": "合租"
+    },
+    "map": {
+      "showMap": "顯示地圖",
+      "hideMap": "隱藏地圖",
+      "apartments": "套公寓",
+      "bankBranches": "家銀行分行"
+    }
+  },
+  "visa": {
+    "title": "簽證與移民",
+    "subtitle": "追蹤您的簽證狀態和截止日期",
+    "status": {
+      "active": "有效",
+      "expiring": "即將到期",
+      "expired": "已過期"
+    },
+    "timeline": {
+      "title": "重要日期",
+      "daysLeft": "天剩餘",
+      "expired": "已過期"
+    },
+    "documents": {
+      "title": "所需文件",
+      "passport": "護照",
+      "i20": "I-20",
+      "visa": "簽證頁",
+      "i94": "I-94"
+    },
+    "work": {
+      "title": "工作許可",
+      "onCampus": "校內工作",
+      "cpt": "CPT",
+      "opt": "OPT",
+      "hoursLimit": "每週小時限制"
+    }
+  },
+  "grow": {
+    "title": "資產增值",
+    "subtitle": "留學期間累積財富",
+    "tabs": {
+      "savings": "儲蓄",
+      "invest": "投資",
+      "tips": "技巧"
+    },
+    "savings": {
+      "title": "高收益儲蓄",
+      "apy": "年收益率",
+      "minBalance": "最低餘額",
+      "fdic": "FDIC保險",
+      "openAccount": "開設帳戶"
+    },
+    "invest": {
+      "title": "投資選項",
+      "stocks": "股票",
+      "etfs": "ETF",
+      "crypto": "加密貨幣",
+      "startInvesting": "開始投資"
+    },
+    "tips": {
+      "title": "理財技巧",
+      "budgeting": "預算管理",
+      "saving": "儲蓄",
+      "credit": "建立信用"
+    }
+  },
+  "deals": {
+    "title": "學生優惠",
+    "subtitle": "學生專屬折扣",
+    "categories": {
+      "all": "所有優惠",
+      "food": "餐飲美食",
+      "shopping": "購物",
+      "transport": "交通",
+      "entertainment": "娛樂",
+      "tech": "科技與軟體",
+      "travel": "旅行"
+    },
+    "deal": {
+      "discount": "折扣",
+      "freeShipping": "免運費",
+      "verifyStudent": "驗證學生身份",
+      "getCoupon": "取得優惠券",
+      "expires": "有效期至"
+    }
+  },
+  "guides": {
+    "title": "指南",
+    "subtitle": "留學生分步指南",
+    "categories": {
+      "banking": "銀行與金融",
+      "housing": "住房",
+      "visa": "簽證與移民",
+      "work": "在美國工作",
+      "taxes": "稅務",
+      "credit": "建立信用"
+    },
+    "readTime": "分鐘閱讀",
+    "updated": "更新於"
+  },
+  "community": {
+    "title": "社群",
+    "subtitle": "與其他留學生交流",
+    "tabs": {
+      "feed": "動態",
+      "questions": "問題",
+      "events": "活動"
+    },
+    "post": {
+      "like": "按讚",
+      "comment": "留言",
+      "share": "分享",
+      "reply": "回覆"
+    },
+    "newPost": {
+      "title": "發布貼文",
+      "placeholder": "與社群分享一些內容..."
+    }
+  },
+  "settings": {
+    "title": "設定",
+    "language": {
+      "title": "語言",
+      "description": "選擇您偏好的語言"
+    },
+    "notifications": {
+      "title": "通知",
+      "description": "管理通知設定"
+    },
+    "privacy": {
+      "title": "隱私",
+      "description": "管理隱私設定"
+    },
+    "account": {
+      "title": "帳戶",
+      "description": "管理帳戶設定"
+    },
+    "theme": {
+      "title": "主題",
+      "light": "淺色",
+      "dark": "深色",
+      "system": "跟隨系統"
+    }
+  },
+  "errors": {
+    "networkError": "網路錯誤，請檢查您的連線。",
+    "serverError": "伺服器錯誤，請稍後重試。",
+    "notFound": "頁面未找到",
+    "unauthorized": "請登入以繼續",
+    "forbidden": "您沒有存取權限",
+    "validation": "請檢查您的輸入",
+    "timeout": "請求逾時，請重試。"
+  },
+  "auth": {
+    "login": {
+      "title": "歡迎回來",
+      "email": "電子郵件",
+      "password": "密碼",
+      "forgotPassword": "忘記密碼？",
+      "signIn": "登入",
+      "noAccount": "沒有帳戶？",
+      "signUp": "註冊"
+    },
+    "register": {
+      "title": "建立帳戶",
+      "name": "姓名",
+      "email": "電子郵件",
+      "password": "密碼",
+      "confirmPassword": "確認密碼",
+      "signUp": "註冊",
+      "hasAccount": "已有帳戶？",
+      "signIn": "登入"
+    },
+    "forgotPassword": {
+      "title": "重設密碼",
+      "description": "輸入您的電子郵件以接收重設連結",
+      "sendLink": "發送重設連結",
+      "backToLogin": "返回登入"
+    }
+  }
+}

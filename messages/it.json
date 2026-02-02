@@ -1,0 +1,317 @@
+{
+  "common": {
+    "loading": "Caricamento...",
+    "error": "Qualcosa è andato storto",
+    "retry": "Riprova",
+    "cancel": "Annulla",
+    "save": "Salva",
+    "continue": "Continua",
+    "back": "Indietro",
+    "next": "Avanti",
+    "done": "Fatto",
+    "close": "Chiudi",
+    "search": "Cerca",
+    "filter": "Filtra",
+    "sort": "Ordina",
+    "viewAll": "Vedi tutto",
+    "learnMore": "Scopri di più",
+    "getStarted": "Inizia",
+    "signIn": "Accedi",
+    "signOut": "Esci",
+    "signUp": "Registrati",
+    "welcome": "Benvenuto",
+    "settings": "Impostazioni",
+    "profile": "Profilo",
+    "help": "Aiuto",
+    "apply": "Richiedi",
+    "submit": "Invia",
+    "edit": "Modifica",
+    "delete": "Elimina",
+    "confirm": "Conferma",
+    "yes": "Sì",
+    "no": "No"
+  },
+  "nav": {
+    "home": "Home",
+    "banking": "Banca",
+    "housing": "Alloggio",
+    "visa": "Visto",
+    "grow": "Crescita",
+    "deals": "Offerte",
+    "guides": "Guide",
+    "community": "Comunità",
+    "money": "Denaro",
+    "jobs": "Lavoro",
+    "funding": "Finanziamenti"
+  },
+  "survey": {
+    "languageSelect": {
+      "title": "Scegli la lingua",
+      "subtitle": "Seleziona la tua lingua preferita",
+      "continue": "Continua"
+    },
+    "welcome": {
+      "title": "Benvenuto su Noor",
+      "subtitle": "Il tuo compagno finanziario per studiare all'estero",
+      "description": "Ti aiuteremo ad aprire un conto in banca, trovare alloggio e gestire le tue finanze."
+    },
+    "steps": {
+      "university": "Università",
+      "country": "Paese",
+      "visa": "Stato del visto",
+      "preferences": "Preferenze"
+    },
+    "university": {
+      "title": "Dove studi?",
+      "placeholder": "Cerca la tua università...",
+      "notFound": "Non trovi la tua università?"
+    },
+    "country": {
+      "title": "In quale paese sei?",
+      "us": "Stati Uniti",
+      "uk": "Regno Unito",
+      "ca": "Canada"
+    },
+    "visa": {
+      "title": "Qual è il tuo stato del visto?",
+      "f1": "Visto studentesco F-1",
+      "j1": "Visto di scambio J-1",
+      "opt": "OPT/CPT",
+      "h1b": "Visto di lavoro H-1B",
+      "tier4": "Visto studentesco Tier 4",
+      "studyPermit": "Permesso di studio"
+    },
+    "complete": {
+      "title": "Tutto pronto!",
+      "subtitle": "Iniziamo il tuo percorso finanziario"
+    }
+  },
+  "banking": {
+    "title": "Banca",
+    "subtitle": "Trova la banca migliore per studenti internazionali",
+    "tabs": {
+      "banks": "Banche",
+      "cards": "Carte",
+      "guides": "Guide"
+    },
+    "filters": {
+      "noSsn": "Senza SSN",
+      "traditional": "Banche tradizionali",
+      "online": "Banche online",
+      "noFee": "Senza canone annuale",
+      "noCredit": "Senza storia creditizia"
+    },
+    "bankCard": {
+      "openAccount": "Apri conto",
+      "branches": "filiali vicine",
+      "minDeposit": "Deposito min.",
+      "monthlyFee": "Canone mensile",
+      "features": "Funzionalità"
+    },
+    "reassurance": "La maggior parte delle banche accetta studenti internazionali — non serve l'SSN per iniziare."
+  },
+  "housing": {
+    "title": "Alloggio",
+    "subtitle": "Trova appartamenti vicino al campus",
+    "filters": {
+      "gym": "Palestra",
+      "furnished": "Arredato",
+      "parking": "Parcheggio",
+      "allAreas": "Tutte le zone",
+      "north": "Nord",
+      "south": "Sud",
+      "east": "Est",
+      "west": "Ovest"
+    },
+    "apartment": {
+      "perMonth": "/mese",
+      "beds": "camere",
+      "baths": "bagni",
+      "sqft": "mq",
+      "walkingTime": "min a piedi",
+      "bikingTime": "min in bici",
+      "rating": "valutazione",
+      "reviews": "recensioni",
+      "viewDetails": "Vedi dettagli",
+      "getDirections": "Indicazioni",
+      "shared": "Condiviso"
+    },
+    "map": {
+      "showMap": "Mostra mappa",
+      "hideMap": "Nascondi mappa",
+      "apartments": "appartamenti",
+      "bankBranches": "filiali bancarie"
+    }
+  },
+  "visa": {
+    "title": "Visto e Immigrazione",
+    "subtitle": "Monitora lo stato del visto e le scadenze",
+    "status": {
+      "active": "Attivo",
+      "expiring": "In scadenza",
+      "expired": "Scaduto"
+    },
+    "timeline": {
+      "title": "Date importanti",
+      "daysLeft": "giorni rimanenti",
+      "expired": "Scaduto"
+    },
+    "documents": {
+      "title": "Documenti richiesti",
+      "passport": "Passaporto",
+      "i20": "I-20",
+      "visa": "Timbro del visto",
+      "i94": "I-94"
+    },
+    "work": {
+      "title": "Autorizzazione al lavoro",
+      "onCampus": "Lavoro nel campus",
+      "cpt": "CPT",
+      "opt": "OPT",
+      "hoursLimit": "ore/settimana limite"
+    }
+  },
+  "grow": {
+    "title": "Fai crescere i tuoi soldi",
+    "subtitle": "Costruisci ricchezza mentre studi",
+    "tabs": {
+      "savings": "Risparmio",
+      "invest": "Investimenti",
+      "tips": "Consigli"
+    },
+    "savings": {
+      "title": "Risparmio ad alto rendimento",
+      "apy": "APY",
+      "minBalance": "Saldo min.",
+      "fdic": "Assicurato FDIC",
+      "openAccount": "Apri conto"
+    },
+    "invest": {
+      "title": "Opzioni di investimento",
+      "stocks": "Azioni",
+      "etfs": "ETF",
+      "crypto": "Crypto",
+      "startInvesting": "Inizia a investire"
+    },
+    "tips": {
+      "title": "Consigli finanziari",
+      "budgeting": "Budget",
+      "saving": "Risparmio",
+      "credit": "Costruire credito"
+    }
+  },
+  "deals": {
+    "title": "Offerte studenti",
+    "subtitle": "Sconti esclusivi per studenti",
+    "categories": {
+      "all": "Tutte le offerte",
+      "food": "Cibo e ristorazione",
+      "shopping": "Shopping",
+      "transport": "Trasporti",
+      "entertainment": "Intrattenimento",
+      "tech": "Tech e software",
+      "travel": "Viaggi"
+    },
+    "deal": {
+      "discount": "di sconto",
+      "freeShipping": "Spedizione gratuita",
+      "verifyStudent": "Verifica stato studente",
+      "getCoupon": "Ottieni coupon",
+      "expires": "Scade"
+    }
+  },
+  "guides": {
+    "title": "Guide",
+    "subtitle": "Guide passo-passo per studenti internazionali",
+    "categories": {
+      "banking": "Banca e finanza",
+      "housing": "Alloggio",
+      "visa": "Visto e immigrazione",
+      "work": "Lavorare negli USA",
+      "taxes": "Tasse",
+      "credit": "Costruire credito"
+    },
+    "readTime": "min di lettura",
+    "updated": "Aggiornato"
+  },
+  "community": {
+    "title": "Comunità",
+    "subtitle": "Connettiti con altri studenti internazionali",
+    "tabs": {
+      "feed": "Feed",
+      "questions": "Domande",
+      "events": "Eventi"
+    },
+    "post": {
+      "like": "Mi piace",
+      "comment": "Commenta",
+      "share": "Condividi",
+      "reply": "Rispondi"
+    },
+    "newPost": {
+      "title": "Crea post",
+      "placeholder": "Condividi qualcosa con la comunità..."
+    }
+  },
+  "settings": {
+    "title": "Impostazioni",
+    "language": {
+      "title": "Lingua",
+      "description": "Scegli la tua lingua preferita"
+    },
+    "notifications": {
+      "title": "Notifiche",
+      "description": "Gestisci le preferenze di notifica"
+    },
+    "privacy": {
+      "title": "Privacy",
+      "description": "Gestisci le impostazioni sulla privacy"
+    },
+    "account": {
+      "title": "Account",
+      "description": "Gestisci le impostazioni dell'account"
+    },
+    "theme": {
+      "title": "Tema",
+      "light": "Chiaro",
+      "dark": "Scuro",
+      "system": "Sistema"
+    }
+  },
+  "errors": {
+    "networkError": "Errore di rete. Controlla la connessione.",
+    "serverError": "Errore del server. Riprova più tardi.",
+    "notFound": "Pagina non trovata",
+    "unauthorized": "Accedi per continuare",
+    "forbidden": "Non hai il permesso di accedere",
+    "validation": "Controlla i dati inseriti",
+    "timeout": "Richiesta scaduta. Riprova."
+  },
+  "auth": {
+    "login": {
+      "title": "Bentornato",
+      "email": "Email",
+      "password": "Password",
+      "forgotPassword": "Password dimenticata?",
+      "signIn": "Accedi",
+      "noAccount": "Non hai un account?",
+      "signUp": "Registrati"
+    },
+    "register": {
+      "title": "Crea account",
+      "name": "Nome completo",
+      "email": "Email",
+      "password": "Password",
+      "confirmPassword": "Conferma password",
+      "signUp": "Registrati",
+      "hasAccount": "Hai già un account?",
+      "signIn": "Accedi"
+    },
+    "forgotPassword": {
+      "title": "Reimposta password",
+      "description": "Inserisci la tua email per ricevere il link di reset",
+      "sendLink": "Invia link di reset",
+      "backToLogin": "Torna al login"
+    }
+  }
+}

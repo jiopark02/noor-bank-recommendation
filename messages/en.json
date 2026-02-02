@@ -1,0 +1,317 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "save": "Save",
+    "continue": "Continue",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "close": "Close",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "viewAll": "View All",
+    "learnMore": "Learn More",
+    "getStarted": "Get Started",
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "signUp": "Sign Up",
+    "welcome": "Welcome",
+    "settings": "Settings",
+    "profile": "Profile",
+    "help": "Help",
+    "apply": "Apply",
+    "submit": "Submit",
+    "edit": "Edit",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "nav": {
+    "home": "Home",
+    "banking": "Banking",
+    "housing": "Housing",
+    "visa": "Visa",
+    "grow": "Grow",
+    "deals": "Deals",
+    "guides": "Guides",
+    "community": "Community",
+    "money": "Money",
+    "jobs": "Jobs",
+    "funding": "Funding"
+  },
+  "survey": {
+    "languageSelect": {
+      "title": "Choose Your Language",
+      "subtitle": "Select your preferred language",
+      "continue": "Continue"
+    },
+    "welcome": {
+      "title": "Welcome to Noor",
+      "subtitle": "Your financial companion for studying abroad",
+      "description": "We'll help you set up banking, find housing, and manage your finances as an international student."
+    },
+    "steps": {
+      "university": "University",
+      "country": "Country",
+      "visa": "Visa Status",
+      "preferences": "Preferences"
+    },
+    "university": {
+      "title": "Where are you studying?",
+      "placeholder": "Search for your university...",
+      "notFound": "Can't find your university?"
+    },
+    "country": {
+      "title": "Which country are you in?",
+      "us": "United States",
+      "uk": "United Kingdom",
+      "ca": "Canada"
+    },
+    "visa": {
+      "title": "What's your visa status?",
+      "f1": "F-1 Student Visa",
+      "j1": "J-1 Exchange Visa",
+      "opt": "OPT/CPT",
+      "h1b": "H-1B Work Visa",
+      "tier4": "Tier 4 Student Visa",
+      "studyPermit": "Study Permit"
+    },
+    "complete": {
+      "title": "You're all set!",
+      "subtitle": "Let's get started with your financial journey"
+    }
+  },
+  "banking": {
+    "title": "Banking",
+    "subtitle": "Find the best bank for international students",
+    "tabs": {
+      "banks": "Banks",
+      "cards": "Cards",
+      "guides": "Guides"
+    },
+    "filters": {
+      "noSsn": "No SSN Required",
+      "traditional": "Traditional Banks",
+      "online": "Online Banks",
+      "noFee": "No Annual Fee",
+      "noCredit": "No Credit History"
+    },
+    "bankCard": {
+      "openAccount": "Open Account",
+      "branches": "branches nearby",
+      "minDeposit": "Min. deposit",
+      "monthlyFee": "Monthly fee",
+      "features": "Features"
+    },
+    "reassurance": "Most banks here accept international students — you don't need an SSN to get started."
+  },
+  "housing": {
+    "title": "Housing",
+    "subtitle": "Find apartments near your campus",
+    "filters": {
+      "gym": "Gym",
+      "furnished": "Furnished",
+      "parking": "Parking",
+      "allAreas": "All Areas",
+      "north": "North",
+      "south": "South",
+      "east": "East",
+      "west": "West"
+    },
+    "apartment": {
+      "perMonth": "/mo",
+      "beds": "beds",
+      "baths": "baths",
+      "sqft": "sqft",
+      "walkingTime": "min walk",
+      "bikingTime": "min bike",
+      "rating": "rating",
+      "reviews": "reviews",
+      "viewDetails": "View Details",
+      "getDirections": "Get Directions",
+      "shared": "Shared"
+    },
+    "map": {
+      "showMap": "Show Map",
+      "hideMap": "Hide Map",
+      "apartments": "apartments",
+      "bankBranches": "bank branches"
+    }
+  },
+  "visa": {
+    "title": "Visa & Immigration",
+    "subtitle": "Track your visa status and deadlines",
+    "status": {
+      "active": "Active",
+      "expiring": "Expiring Soon",
+      "expired": "Expired"
+    },
+    "timeline": {
+      "title": "Important Dates",
+      "daysLeft": "days left",
+      "expired": "Expired"
+    },
+    "documents": {
+      "title": "Required Documents",
+      "passport": "Passport",
+      "i20": "I-20",
+      "visa": "Visa Stamp",
+      "i94": "I-94"
+    },
+    "work": {
+      "title": "Work Authorization",
+      "onCampus": "On-Campus Work",
+      "cpt": "CPT",
+      "opt": "OPT",
+      "hoursLimit": "hours/week limit"
+    }
+  },
+  "grow": {
+    "title": "Grow Your Money",
+    "subtitle": "Build wealth while studying",
+    "tabs": {
+      "savings": "Savings",
+      "invest": "Invest",
+      "tips": "Tips"
+    },
+    "savings": {
+      "title": "High-Yield Savings",
+      "apy": "APY",
+      "minBalance": "Min. balance",
+      "fdic": "FDIC Insured",
+      "openAccount": "Open Account"
+    },
+    "invest": {
+      "title": "Investment Options",
+      "stocks": "Stocks",
+      "etfs": "ETFs",
+      "crypto": "Crypto",
+      "startInvesting": "Start Investing"
+    },
+    "tips": {
+      "title": "Money Tips",
+      "budgeting": "Budgeting",
+      "saving": "Saving",
+      "credit": "Building Credit"
+    }
+  },
+  "deals": {
+    "title": "Student Deals",
+    "subtitle": "Exclusive discounts for students",
+    "categories": {
+      "all": "All Deals",
+      "food": "Food & Dining",
+      "shopping": "Shopping",
+      "transport": "Transport",
+      "entertainment": "Entertainment",
+      "tech": "Tech & Software",
+      "travel": "Travel"
+    },
+    "deal": {
+      "discount": "off",
+      "freeShipping": "Free Shipping",
+      "verifyStudent": "Verify Student Status",
+      "getCoupon": "Get Coupon",
+      "expires": "Expires"
+    }
+  },
+  "guides": {
+    "title": "Guides",
+    "subtitle": "Step-by-step guides for international students",
+    "categories": {
+      "banking": "Banking & Finance",
+      "housing": "Housing",
+      "visa": "Visa & Immigration",
+      "work": "Working in the US",
+      "taxes": "Taxes",
+      "credit": "Building Credit"
+    },
+    "readTime": "min read",
+    "updated": "Updated"
+  },
+  "community": {
+    "title": "Community",
+    "subtitle": "Connect with other international students",
+    "tabs": {
+      "feed": "Feed",
+      "questions": "Questions",
+      "events": "Events"
+    },
+    "post": {
+      "like": "Like",
+      "comment": "Comment",
+      "share": "Share",
+      "reply": "Reply"
+    },
+    "newPost": {
+      "title": "Create Post",
+      "placeholder": "Share something with the community..."
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "language": {
+      "title": "Language",
+      "description": "Choose your preferred language"
+    },
+    "notifications": {
+      "title": "Notifications",
+      "description": "Manage notification preferences"
+    },
+    "privacy": {
+      "title": "Privacy",
+      "description": "Manage your privacy settings"
+    },
+    "account": {
+      "title": "Account",
+      "description": "Manage your account settings"
+    },
+    "theme": {
+      "title": "Theme",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    }
+  },
+  "errors": {
+    "networkError": "Network error. Please check your connection.",
+    "serverError": "Server error. Please try again later.",
+    "notFound": "Page not found",
+    "unauthorized": "Please sign in to continue",
+    "forbidden": "You don't have permission to access this",
+    "validation": "Please check your input",
+    "timeout": "Request timed out. Please try again."
+  },
+  "auth": {
+    "login": {
+      "title": "Welcome Back",
+      "email": "Email",
+      "password": "Password",
+      "forgotPassword": "Forgot password?",
+      "signIn": "Sign In",
+      "noAccount": "Don't have an account?",
+      "signUp": "Sign up"
+    },
+    "register": {
+      "title": "Create Account",
+      "name": "Full Name",
+      "email": "Email",
+      "password": "Password",
+      "confirmPassword": "Confirm Password",
+      "signUp": "Sign Up",
+      "hasAccount": "Already have an account?",
+      "signIn": "Sign in"
+    },
+    "forgotPassword": {
+      "title": "Reset Password",
+      "description": "Enter your email to receive a reset link",
+      "sendLink": "Send Reset Link",
+      "backToLogin": "Back to login"
+    }
+  }
+}

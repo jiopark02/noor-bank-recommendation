@@ -1,0 +1,317 @@
+{
+  "common": {
+    "loading": "جارٍ التحميل...",
+    "error": "حدث خطأ ما",
+    "retry": "إعادة المحاولة",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "continue": "متابعة",
+    "back": "رجوع",
+    "next": "التالي",
+    "done": "تم",
+    "close": "إغلاق",
+    "search": "بحث",
+    "filter": "تصفية",
+    "sort": "ترتيب",
+    "viewAll": "عرض الكل",
+    "learnMore": "اعرف المزيد",
+    "getStarted": "ابدأ الآن",
+    "signIn": "تسجيل الدخول",
+    "signOut": "تسجيل الخروج",
+    "signUp": "إنشاء حساب",
+    "welcome": "مرحباً",
+    "settings": "الإعدادات",
+    "profile": "الملف الشخصي",
+    "help": "المساعدة",
+    "apply": "تقديم",
+    "submit": "إرسال",
+    "edit": "تعديل",
+    "delete": "حذف",
+    "confirm": "تأكيد",
+    "yes": "نعم",
+    "no": "لا"
+  },
+  "nav": {
+    "home": "الرئيسية",
+    "banking": "البنوك",
+    "housing": "السكن",
+    "visa": "التأشيرة",
+    "grow": "النمو",
+    "deals": "العروض",
+    "guides": "الأدلة",
+    "community": "المجتمع",
+    "money": "المال",
+    "jobs": "الوظائف",
+    "funding": "التمويل"
+  },
+  "survey": {
+    "languageSelect": {
+      "title": "اختر لغتك",
+      "subtitle": "حدد لغتك المفضلة",
+      "continue": "متابعة"
+    },
+    "welcome": {
+      "title": "مرحباً بك في Noor",
+      "subtitle": "رفيقك المالي للدراسة في الخارج",
+      "description": "سنساعدك في فتح حساب بنكي وإيجاد سكن وإدارة أموالك."
+    },
+    "steps": {
+      "university": "الجامعة",
+      "country": "البلد",
+      "visa": "حالة التأشيرة",
+      "preferences": "التفضيلات"
+    },
+    "university": {
+      "title": "أين تدرس؟",
+      "placeholder": "ابحث عن جامعتك...",
+      "notFound": "لم تجد جامعتك؟"
+    },
+    "country": {
+      "title": "في أي بلد أنت؟",
+      "us": "الولايات المتحدة",
+      "uk": "المملكة المتحدة",
+      "ca": "كندا"
+    },
+    "visa": {
+      "title": "ما هي حالة تأشيرتك؟",
+      "f1": "تأشيرة طالب F-1",
+      "j1": "تأشيرة تبادل J-1",
+      "opt": "OPT/CPT",
+      "h1b": "تأشيرة عمل H-1B",
+      "tier4": "تأشيرة طالب Tier 4",
+      "studyPermit": "تصريح الدراسة"
+    },
+    "complete": {
+      "title": "أنت جاهز!",
+      "subtitle": "لنبدأ رحلتك المالية"
+    }
+  },
+  "banking": {
+    "title": "البنوك",
+    "subtitle": "اعثر على أفضل بنك للطلاب الدوليين",
+    "tabs": {
+      "banks": "البنوك",
+      "cards": "البطاقات",
+      "guides": "الأدلة"
+    },
+    "filters": {
+      "noSsn": "بدون SSN",
+      "traditional": "البنوك التقليدية",
+      "online": "البنوك الإلكترونية",
+      "noFee": "بدون رسوم سنوية",
+      "noCredit": "بدون سجل ائتماني"
+    },
+    "bankCard": {
+      "openAccount": "فتح حساب",
+      "branches": "فروع قريبة",
+      "minDeposit": "الحد الأدنى للإيداع",
+      "monthlyFee": "الرسوم الشهرية",
+      "features": "المميزات"
+    },
+    "reassurance": "معظم البنوك ترحب بالطلاب الدوليين — لا تحتاج إلى SSN للبدء."
+  },
+  "housing": {
+    "title": "السكن",
+    "subtitle": "اعثر على شقق بالقرب من الحرم الجامعي",
+    "filters": {
+      "gym": "صالة رياضية",
+      "furnished": "مفروش",
+      "parking": "موقف سيارات",
+      "allAreas": "جميع المناطق",
+      "north": "الشمال",
+      "south": "الجنوب",
+      "east": "الشرق",
+      "west": "الغرب"
+    },
+    "apartment": {
+      "perMonth": "/شهر",
+      "beds": "غرف نوم",
+      "baths": "حمامات",
+      "sqft": "قدم مربع",
+      "walkingTime": "دقيقة مشي",
+      "bikingTime": "دقيقة بالدراجة",
+      "rating": "التقييم",
+      "reviews": "المراجعات",
+      "viewDetails": "عرض التفاصيل",
+      "getDirections": "الحصول على الاتجاهات",
+      "shared": "مشترك"
+    },
+    "map": {
+      "showMap": "إظهار الخريطة",
+      "hideMap": "إخفاء الخريطة",
+      "apartments": "شقق",
+      "bankBranches": "فروع البنوك"
+    }
+  },
+  "visa": {
+    "title": "التأشيرة والهجرة",
+    "subtitle": "تتبع حالة تأشيرتك والمواعيد النهائية",
+    "status": {
+      "active": "نشطة",
+      "expiring": "تنتهي قريباً",
+      "expired": "منتهية"
+    },
+    "timeline": {
+      "title": "التواريخ المهمة",
+      "daysLeft": "أيام متبقية",
+      "expired": "منتهية"
+    },
+    "documents": {
+      "title": "المستندات المطلوبة",
+      "passport": "جواز السفر",
+      "i20": "I-20",
+      "visa": "ختم التأشيرة",
+      "i94": "I-94"
+    },
+    "work": {
+      "title": "تصريح العمل",
+      "onCampus": "العمل في الحرم",
+      "cpt": "CPT",
+      "opt": "OPT",
+      "hoursLimit": "ساعة/أسبوع الحد"
+    }
+  },
+  "grow": {
+    "title": "نمّي أموالك",
+    "subtitle": "ابنِ ثروتك أثناء الدراسة",
+    "tabs": {
+      "savings": "المدخرات",
+      "invest": "الاستثمار",
+      "tips": "نصائح"
+    },
+    "savings": {
+      "title": "ادخار عالي العائد",
+      "apy": "العائد السنوي",
+      "minBalance": "الحد الأدنى للرصيد",
+      "fdic": "مؤمن FDIC",
+      "openAccount": "فتح حساب"
+    },
+    "invest": {
+      "title": "خيارات الاستثمار",
+      "stocks": "الأسهم",
+      "etfs": "صناديق ETF",
+      "crypto": "العملات الرقمية",
+      "startInvesting": "ابدأ الاستثمار"
+    },
+    "tips": {
+      "title": "نصائح مالية",
+      "budgeting": "الميزانية",
+      "saving": "الادخار",
+      "credit": "بناء الائتمان"
+    }
+  },
+  "deals": {
+    "title": "عروض الطلاب",
+    "subtitle": "خصومات حصرية للطلاب",
+    "categories": {
+      "all": "جميع العروض",
+      "food": "الطعام والمطاعم",
+      "shopping": "التسوق",
+      "transport": "النقل",
+      "entertainment": "الترفيه",
+      "tech": "التقنية والبرامج",
+      "travel": "السفر"
+    },
+    "deal": {
+      "discount": "خصم",
+      "freeShipping": "شحن مجاني",
+      "verifyStudent": "التحقق من حالة الطالب",
+      "getCoupon": "احصل على القسيمة",
+      "expires": "ينتهي"
+    }
+  },
+  "guides": {
+    "title": "الأدلة",
+    "subtitle": "أدلة خطوة بخطوة للطلاب الدوليين",
+    "categories": {
+      "banking": "البنوك والمال",
+      "housing": "السكن",
+      "visa": "التأشيرة والهجرة",
+      "work": "العمل في أمريكا",
+      "taxes": "الضرائب",
+      "credit": "بناء الائتمان"
+    },
+    "readTime": "دقيقة قراءة",
+    "updated": "تم التحديث"
+  },
+  "community": {
+    "title": "المجتمع",
+    "subtitle": "تواصل مع طلاب دوليين آخرين",
+    "tabs": {
+      "feed": "الخلاصة",
+      "questions": "الأسئلة",
+      "events": "الفعاليات"
+    },
+    "post": {
+      "like": "إعجاب",
+      "comment": "تعليق",
+      "share": "مشاركة",
+      "reply": "رد"
+    },
+    "newPost": {
+      "title": "إنشاء منشور",
+      "placeholder": "شارك شيئاً مع المجتمع..."
+    }
+  },
+  "settings": {
+    "title": "الإعدادات",
+    "language": {
+      "title": "اللغة",
+      "description": "اختر لغتك المفضلة"
+    },
+    "notifications": {
+      "title": "الإشعارات",
+      "description": "إدارة تفضيلات الإشعارات"
+    },
+    "privacy": {
+      "title": "الخصوصية",
+      "description": "إدارة إعدادات الخصوصية"
+    },
+    "account": {
+      "title": "الحساب",
+      "description": "إدارة إعدادات الحساب"
+    },
+    "theme": {
+      "title": "المظهر",
+      "light": "فاتح",
+      "dark": "داكن",
+      "system": "النظام"
+    }
+  },
+  "errors": {
+    "networkError": "خطأ في الشبكة. تحقق من اتصالك.",
+    "serverError": "خطأ في الخادم. حاول مرة أخرى لاحقاً.",
+    "notFound": "الصفحة غير موجودة",
+    "unauthorized": "سجل الدخول للمتابعة",
+    "forbidden": "ليس لديك صلاحية للوصول",
+    "validation": "يرجى التحقق من المدخلات",
+    "timeout": "انتهت مهلة الطلب. حاول مرة أخرى."
+  },
+  "auth": {
+    "login": {
+      "title": "مرحباً بعودتك",
+      "email": "البريد الإلكتروني",
+      "password": "كلمة المرور",
+      "forgotPassword": "نسيت كلمة المرور؟",
+      "signIn": "تسجيل الدخول",
+      "noAccount": "ليس لديك حساب؟",
+      "signUp": "إنشاء حساب"
+    },
+    "register": {
+      "title": "إنشاء حساب",
+      "name": "الاسم الكامل",
+      "email": "البريد الإلكتروني",
+      "password": "كلمة المرور",
+      "confirmPassword": "تأكيد كلمة المرور",
+      "signUp": "إنشاء حساب",
+      "hasAccount": "لديك حساب بالفعل؟",
+      "signIn": "تسجيل الدخول"
+    },
+    "forgotPassword": {
+      "title": "إعادة تعيين كلمة المرور",
+      "description": "أدخل بريدك الإلكتروني لتلقي رابط إعادة التعيين",
+      "sendLink": "إرسال الرابط",
+      "backToLogin": "العودة لتسجيل الدخول"
+    }
+  }
+}

@@ -4,6 +4,8 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUniversitySearch, University } from '@/hooks/useUniversitySearch';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { LanguageSelector } from '@/components/LanguageSelector';
 import {
   validatePassword,
   validateEmail,
@@ -486,7 +488,8 @@ const ProgressDots = ({ step, totalSteps }: { step: number; totalSteps: number }
 
 export default function SurveyPage() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
+  const { t, locale } = useLanguage();
+  const [step, setStep] = useState(0); // Start at 0 for language selection
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -547,10 +550,11 @@ export default function SurveyPage() {
     setTouchedFields(prev => new Set(prev).add(field));
   };
 
-  // Total steps: 8 for CC students with transfer, 7 for others
+  // Total steps: +1 for language selection at start
+  // 9 for CC students with transfer, 8 for others (including step 0)
   const isCC = data.institutionType === 'community_college';
   const showTransferStep = isCC && data.planningToTransfer === true;
-  const totalSteps = showTransferStep ? 8 : 7;
+  const totalSteps = showTransferStep ? 9 : 8; // Includes step 0 for language
 
   // Use API-based university search
   const {
@@ -587,13 +591,13 @@ export default function SurveyPage() {
   };
 
   const handleNext = () => {
-    if (step < totalSteps) {
+    if (step < totalSteps - 1) {
       setStep(step + 1);
     }
   };
 
   const handleBack = () => {
-    if (step > 1) {
+    if (step > 0) {
       setStep(step - 1);
     }
   };
@@ -726,6 +730,11 @@ export default function SurveyPage() {
     }
   };
 
+  // Handle language selection step
+  if (step === 0) {
+    return <LanguageSelector onContinue={() => setStep(1)} />;
+  }
+
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
@@ -734,7 +743,7 @@ export default function SurveyPage() {
       </header>
 
       <div className="max-w-md mx-auto px-6 pb-32">
-        <ProgressDots step={step} totalSteps={totalSteps} />
+        <ProgressDots step={step} totalSteps={totalSteps - 1} />
 
         {/* Step 1: First, you. */}
         {step === 1 && (
@@ -1576,21 +1585,21 @@ export default function SurveyPage() {
             </motion.div>
           )}
           <div className="flex gap-3">
-          {step > 1 && (
+          {step >= 1 && (
             <button
               onClick={handleBack}
               className="px-6 py-3.5 border-[1.5px] border-gray-300 rounded-xl font-medium transition-all duration-300 hover:border-black"
             >
-              Back
+              {t('common.back')}
             </button>
           )}
-          {step < totalSteps ? (
+          {step < totalSteps - 1 ? (
             <button
               onClick={handleNext}
               disabled={step === 1 && (!data.firstName || !data.lastName || !data.email || !passwordValidation.isValid || !passwordsMatch || !data.agreeToTerms || !data.institutionId || !data.countryOfOrigin)}
               className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              Continue
+              {t('common.continue')}
             </button>
           ) : (
             <button

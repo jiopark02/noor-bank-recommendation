@@ -1,0 +1,317 @@
+{
+  "common": {
+    "loading": "加载中...",
+    "error": "出现了问题",
+    "retry": "重试",
+    "cancel": "取消",
+    "save": "保存",
+    "continue": "继续",
+    "back": "返回",
+    "next": "下一步",
+    "done": "完成",
+    "close": "关闭",
+    "search": "搜索",
+    "filter": "筛选",
+    "sort": "排序",
+    "viewAll": "查看全部",
+    "learnMore": "了解更多",
+    "getStarted": "开始使用",
+    "signIn": "登录",
+    "signOut": "退出登录",
+    "signUp": "注册",
+    "welcome": "欢迎",
+    "settings": "设置",
+    "profile": "个人资料",
+    "help": "帮助",
+    "apply": "申请",
+    "submit": "提交",
+    "edit": "编辑",
+    "delete": "删除",
+    "confirm": "确认",
+    "yes": "是",
+    "no": "否"
+  },
+  "nav": {
+    "home": "首页",
+    "banking": "银行",
+    "housing": "住房",
+    "visa": "签证",
+    "grow": "理财",
+    "deals": "优惠",
+    "guides": "指南",
+    "community": "社区",
+    "money": "资金",
+    "jobs": "工作",
+    "funding": "融资"
+  },
+  "survey": {
+    "languageSelect": {
+      "title": "选择语言",
+      "subtitle": "请选择您偏好的语言",
+      "continue": "继续"
+    },
+    "welcome": {
+      "title": "欢迎来到Noor",
+      "subtitle": "留学生的财务伙伴",
+      "description": "我们将帮助您开设银行账户、寻找住房并管理您的财务。"
+    },
+    "steps": {
+      "university": "大学",
+      "country": "国家",
+      "visa": "签证状态",
+      "preferences": "偏好设置"
+    },
+    "university": {
+      "title": "您在哪里学习？",
+      "placeholder": "搜索您的大学...",
+      "notFound": "找不到您的大学？"
+    },
+    "country": {
+      "title": "您在哪个国家？",
+      "us": "美国",
+      "uk": "英国",
+      "ca": "加拿大"
+    },
+    "visa": {
+      "title": "您的签证状态是什么？",
+      "f1": "F-1学生签证",
+      "j1": "J-1交流签证",
+      "opt": "OPT/CPT",
+      "h1b": "H-1B工作签证",
+      "tier4": "Tier 4学生签证",
+      "studyPermit": "学习许可"
+    },
+    "complete": {
+      "title": "一切就绪！",
+      "subtitle": "开始您的财务之旅"
+    }
+  },
+  "banking": {
+    "title": "银行",
+    "subtitle": "为留学生找到最佳银行",
+    "tabs": {
+      "banks": "银行",
+      "cards": "银行卡",
+      "guides": "指南"
+    },
+    "filters": {
+      "noSsn": "无需SSN",
+      "traditional": "传统银行",
+      "online": "网上银行",
+      "noFee": "免年费",
+      "noCredit": "无需信用记录"
+    },
+    "bankCard": {
+      "openAccount": "开设账户",
+      "branches": "附近网点",
+      "minDeposit": "最低存款",
+      "monthlyFee": "月费",
+      "features": "功能"
+    },
+    "reassurance": "大多数银行欢迎留学生 — 无需SSN即可开始。"
+  },
+  "housing": {
+    "title": "住房",
+    "subtitle": "在校园附近找公寓",
+    "filters": {
+      "gym": "健身房",
+      "furnished": "带家具",
+      "parking": "停车位",
+      "allAreas": "所有区域",
+      "north": "北",
+      "south": "南",
+      "east": "东",
+      "west": "西"
+    },
+    "apartment": {
+      "perMonth": "/月",
+      "beds": "卧室",
+      "baths": "浴室",
+      "sqft": "平方英尺",
+      "walkingTime": "分钟步行",
+      "bikingTime": "分钟骑行",
+      "rating": "评分",
+      "reviews": "评论",
+      "viewDetails": "查看详情",
+      "getDirections": "获取路线",
+      "shared": "合租"
+    },
+    "map": {
+      "showMap": "显示地图",
+      "hideMap": "隐藏地图",
+      "apartments": "套公寓",
+      "bankBranches": "家银行网点"
+    }
+  },
+  "visa": {
+    "title": "签证与移民",
+    "subtitle": "追踪您的签证状态和截止日期",
+    "status": {
+      "active": "有效",
+      "expiring": "即将到期",
+      "expired": "已过期"
+    },
+    "timeline": {
+      "title": "重要日期",
+      "daysLeft": "天剩余",
+      "expired": "已过期"
+    },
+    "documents": {
+      "title": "所需文件",
+      "passport": "护照",
+      "i20": "I-20",
+      "visa": "签证页",
+      "i94": "I-94"
+    },
+    "work": {
+      "title": "工作许可",
+      "onCampus": "校内工作",
+      "cpt": "CPT",
+      "opt": "OPT",
+      "hoursLimit": "每周小时限制"
+    }
+  },
+  "grow": {
+    "title": "资产增值",
+    "subtitle": "留学期间积累财富",
+    "tabs": {
+      "savings": "储蓄",
+      "invest": "投资",
+      "tips": "技巧"
+    },
+    "savings": {
+      "title": "高收益储蓄",
+      "apy": "年收益率",
+      "minBalance": "最低余额",
+      "fdic": "FDIC保险",
+      "openAccount": "开设账户"
+    },
+    "invest": {
+      "title": "投资选项",
+      "stocks": "股票",
+      "etfs": "ETF",
+      "crypto": "加密货币",
+      "startInvesting": "开始投资"
+    },
+    "tips": {
+      "title": "理财技巧",
+      "budgeting": "预算管理",
+      "saving": "储蓄",
+      "credit": "建立信用"
+    }
+  },
+  "deals": {
+    "title": "学生优惠",
+    "subtitle": "学生专属折扣",
+    "categories": {
+      "all": "所有优惠",
+      "food": "餐饮美食",
+      "shopping": "购物",
+      "transport": "交通",
+      "entertainment": "娱乐",
+      "tech": "科技与软件",
+      "travel": "旅行"
+    },
+    "deal": {
+      "discount": "折扣",
+      "freeShipping": "免运费",
+      "verifyStudent": "验证学生身份",
+      "getCoupon": "获取优惠券",
+      "expires": "有效期至"
+    }
+  },
+  "guides": {
+    "title": "指南",
+    "subtitle": "留学生分步指南",
+    "categories": {
+      "banking": "银行与金融",
+      "housing": "住房",
+      "visa": "签证与移民",
+      "work": "在美国工作",
+      "taxes": "税务",
+      "credit": "建立信用"
+    },
+    "readTime": "分钟阅读",
+    "updated": "更新于"
+  },
+  "community": {
+    "title": "社区",
+    "subtitle": "与其他留学生交流",
+    "tabs": {
+      "feed": "动态",
+      "questions": "问题",
+      "events": "活动"
+    },
+    "post": {
+      "like": "点赞",
+      "comment": "评论",
+      "share": "分享",
+      "reply": "回复"
+    },
+    "newPost": {
+      "title": "发布帖子",
+      "placeholder": "与社区分享一些内容..."
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "language": {
+      "title": "语言",
+      "description": "选择您偏好的语言"
+    },
+    "notifications": {
+      "title": "通知",
+      "description": "管理通知设置"
+    },
+    "privacy": {
+      "title": "隐私",
+      "description": "管理隐私设置"
+    },
+    "account": {
+      "title": "账户",
+      "description": "管理账户设置"
+    },
+    "theme": {
+      "title": "主题",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    }
+  },
+  "errors": {
+    "networkError": "网络错误，请检查您的连接。",
+    "serverError": "服务器错误，请稍后重试。",
+    "notFound": "页面未找到",
+    "unauthorized": "请登录以继续",
+    "forbidden": "您没有访问权限",
+    "validation": "请检查您的输入",
+    "timeout": "请求超时，请重试。"
+  },
+  "auth": {
+    "login": {
+      "title": "欢迎回来",
+      "email": "邮箱",
+      "password": "密码",
+      "forgotPassword": "忘记密码？",
+      "signIn": "登录",
+      "noAccount": "没有账户？",
+      "signUp": "注册"
+    },
+    "register": {
+      "title": "创建账户",
+      "name": "姓名",
+      "email": "邮箱",
+      "password": "密码",
+      "confirmPassword": "确认密码",
+      "signUp": "注册",
+      "hasAccount": "已有账户？",
+      "signIn": "登录"
+    },
+    "forgotPassword": {
+      "title": "重置密码",
+      "description": "输入您的邮箱以接收重置链接",
+      "sendLink": "发送重置链接",
+      "backToLogin": "返回登录"
+    }
+  }
+}

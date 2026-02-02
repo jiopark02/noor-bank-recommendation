@@ -1,0 +1,317 @@
+{
+  "common": {
+    "loading": "로딩 중...",
+    "error": "문제가 발생했습니다",
+    "retry": "다시 시도",
+    "cancel": "취소",
+    "save": "저장",
+    "continue": "계속",
+    "back": "뒤로",
+    "next": "다음",
+    "done": "완료",
+    "close": "닫기",
+    "search": "검색",
+    "filter": "필터",
+    "sort": "정렬",
+    "viewAll": "전체 보기",
+    "learnMore": "자세히 알아보기",
+    "getStarted": "시작하기",
+    "signIn": "로그인",
+    "signOut": "로그아웃",
+    "signUp": "회원가입",
+    "welcome": "환영합니다",
+    "settings": "설정",
+    "profile": "프로필",
+    "help": "도움말",
+    "apply": "신청하기",
+    "submit": "제출",
+    "edit": "편집",
+    "delete": "삭제",
+    "confirm": "확인",
+    "yes": "예",
+    "no": "아니오"
+  },
+  "nav": {
+    "home": "홈",
+    "banking": "은행",
+    "housing": "주거",
+    "visa": "비자",
+    "grow": "자산 불리기",
+    "deals": "할인",
+    "guides": "가이드",
+    "community": "커뮤니티",
+    "money": "자금 관리",
+    "jobs": "일자리",
+    "funding": "자금 조달"
+  },
+  "survey": {
+    "languageSelect": {
+      "title": "언어를 선택하세요",
+      "subtitle": "원하시는 언어를 선택해 주세요",
+      "continue": "계속"
+    },
+    "welcome": {
+      "title": "Noor에 오신 것을 환영합니다",
+      "subtitle": "유학생을 위한 금융 동반자",
+      "description": "유학 중 은행 개설, 주거 찾기, 재정 관리를 도와드립니다."
+    },
+    "steps": {
+      "university": "대학교",
+      "country": "국가",
+      "visa": "비자 상태",
+      "preferences": "선호 설정"
+    },
+    "university": {
+      "title": "어디서 공부하시나요?",
+      "placeholder": "대학교를 검색하세요...",
+      "notFound": "대학교를 찾을 수 없나요?"
+    },
+    "country": {
+      "title": "어느 나라에 계신가요?",
+      "us": "미국",
+      "uk": "영국",
+      "ca": "캐나다"
+    },
+    "visa": {
+      "title": "비자 상태는 어떻게 되시나요?",
+      "f1": "F-1 학생 비자",
+      "j1": "J-1 교환 비자",
+      "opt": "OPT/CPT",
+      "h1b": "H-1B 취업 비자",
+      "tier4": "Tier 4 학생 비자",
+      "studyPermit": "학업 허가증"
+    },
+    "complete": {
+      "title": "준비가 완료되었습니다!",
+      "subtitle": "금융 여정을 시작해 봅시다"
+    }
+  },
+  "banking": {
+    "title": "은행",
+    "subtitle": "유학생을 위한 최고의 은행을 찾아보세요",
+    "tabs": {
+      "banks": "은행",
+      "cards": "카드",
+      "guides": "가이드"
+    },
+    "filters": {
+      "noSsn": "SSN 불필요",
+      "traditional": "전통 은행",
+      "online": "온라인 은행",
+      "noFee": "연회비 없음",
+      "noCredit": "신용 기록 불필요"
+    },
+    "bankCard": {
+      "openAccount": "계좌 개설",
+      "branches": "개 지점 근처",
+      "minDeposit": "최소 예치금",
+      "monthlyFee": "월 수수료",
+      "features": "기능"
+    },
+    "reassurance": "대부분의 은행은 유학생을 환영합니다 — SSN 없이도 시작할 수 있습니다."
+  },
+  "housing": {
+    "title": "주거",
+    "subtitle": "캠퍼스 근처 아파트 찾기",
+    "filters": {
+      "gym": "헬스장",
+      "furnished": "가구 포함",
+      "parking": "주차",
+      "allAreas": "전체 지역",
+      "north": "북쪽",
+      "south": "남쪽",
+      "east": "동쪽",
+      "west": "서쪽"
+    },
+    "apartment": {
+      "perMonth": "/월",
+      "beds": "침실",
+      "baths": "욕실",
+      "sqft": "평방피트",
+      "walkingTime": "분 도보",
+      "bikingTime": "분 자전거",
+      "rating": "평점",
+      "reviews": "리뷰",
+      "viewDetails": "상세 보기",
+      "getDirections": "길찾기",
+      "shared": "공유"
+    },
+    "map": {
+      "showMap": "지도 보기",
+      "hideMap": "지도 숨기기",
+      "apartments": "개 아파트",
+      "bankBranches": "개 은행 지점"
+    }
+  },
+  "visa": {
+    "title": "비자 & 이민",
+    "subtitle": "비자 상태 및 마감일 추적",
+    "status": {
+      "active": "유효",
+      "expiring": "곧 만료",
+      "expired": "만료됨"
+    },
+    "timeline": {
+      "title": "중요 일정",
+      "daysLeft": "일 남음",
+      "expired": "만료됨"
+    },
+    "documents": {
+      "title": "필요 서류",
+      "passport": "여권",
+      "i20": "I-20",
+      "visa": "비자 스탬프",
+      "i94": "I-94"
+    },
+    "work": {
+      "title": "취업 허가",
+      "onCampus": "교내 근로",
+      "cpt": "CPT",
+      "opt": "OPT",
+      "hoursLimit": "시간/주 제한"
+    }
+  },
+  "grow": {
+    "title": "자산 불리기",
+    "subtitle": "유학 중 자산 형성하기",
+    "tabs": {
+      "savings": "저축",
+      "invest": "투자",
+      "tips": "팁"
+    },
+    "savings": {
+      "title": "고금리 저축",
+      "apy": "연이율",
+      "minBalance": "최소 잔액",
+      "fdic": "FDIC 보험",
+      "openAccount": "계좌 개설"
+    },
+    "invest": {
+      "title": "투자 옵션",
+      "stocks": "주식",
+      "etfs": "ETF",
+      "crypto": "암호화폐",
+      "startInvesting": "투자 시작"
+    },
+    "tips": {
+      "title": "재정 팁",
+      "budgeting": "예산 관리",
+      "saving": "저축",
+      "credit": "신용 쌓기"
+    }
+  },
+  "deals": {
+    "title": "학생 할인",
+    "subtitle": "학생 전용 특별 할인",
+    "categories": {
+      "all": "전체 할인",
+      "food": "음식 & 외식",
+      "shopping": "쇼핑",
+      "transport": "교통",
+      "entertainment": "엔터테인먼트",
+      "tech": "테크 & 소프트웨어",
+      "travel": "여행"
+    },
+    "deal": {
+      "discount": "할인",
+      "freeShipping": "무료 배송",
+      "verifyStudent": "학생 인증",
+      "getCoupon": "쿠폰 받기",
+      "expires": "만료일"
+    }
+  },
+  "guides": {
+    "title": "가이드",
+    "subtitle": "유학생을 위한 단계별 가이드",
+    "categories": {
+      "banking": "은행 & 금융",
+      "housing": "주거",
+      "visa": "비자 & 이민",
+      "work": "미국에서 일하기",
+      "taxes": "세금",
+      "credit": "신용 쌓기"
+    },
+    "readTime": "분 읽기",
+    "updated": "업데이트"
+  },
+  "community": {
+    "title": "커뮤니티",
+    "subtitle": "다른 유학생들과 소통하세요",
+    "tabs": {
+      "feed": "피드",
+      "questions": "질문",
+      "events": "이벤트"
+    },
+    "post": {
+      "like": "좋아요",
+      "comment": "댓글",
+      "share": "공유",
+      "reply": "답글"
+    },
+    "newPost": {
+      "title": "새 글 작성",
+      "placeholder": "커뮤니티와 공유할 내용을 작성하세요..."
+    }
+  },
+  "settings": {
+    "title": "설정",
+    "language": {
+      "title": "언어",
+      "description": "선호하는 언어를 선택하세요"
+    },
+    "notifications": {
+      "title": "알림",
+      "description": "알림 설정 관리"
+    },
+    "privacy": {
+      "title": "개인정보",
+      "description": "개인정보 설정 관리"
+    },
+    "account": {
+      "title": "계정",
+      "description": "계정 설정 관리"
+    },
+    "theme": {
+      "title": "테마",
+      "light": "라이트",
+      "dark": "다크",
+      "system": "시스템"
+    }
+  },
+  "errors": {
+    "networkError": "네트워크 오류입니다. 연결을 확인해 주세요.",
+    "serverError": "서버 오류입니다. 나중에 다시 시도해 주세요.",
+    "notFound": "페이지를 찾을 수 없습니다",
+    "unauthorized": "계속하려면 로그인해 주세요",
+    "forbidden": "접근 권한이 없습니다",
+    "validation": "입력 내용을 확인해 주세요",
+    "timeout": "요청 시간이 초과되었습니다. 다시 시도해 주세요."
+  },
+  "auth": {
+    "login": {
+      "title": "다시 오신 것을 환영합니다",
+      "email": "이메일",
+      "password": "비밀번호",
+      "forgotPassword": "비밀번호를 잊으셨나요?",
+      "signIn": "로그인",
+      "noAccount": "계정이 없으신가요?",
+      "signUp": "회원가입"
+    },
+    "register": {
+      "title": "계정 만들기",
+      "name": "이름",
+      "email": "이메일",
+      "password": "비밀번호",
+      "confirmPassword": "비밀번호 확인",
+      "signUp": "회원가입",
+      "hasAccount": "이미 계정이 있으신가요?",
+      "signIn": "로그인"
+    },
+    "forgotPassword": {
+      "title": "비밀번호 재설정",
+      "description": "재설정 링크를 받을 이메일을 입력하세요",
+      "sendLink": "재설정 링크 보내기",
+      "backToLogin": "로그인으로 돌아가기"
+    }
+  }
+}

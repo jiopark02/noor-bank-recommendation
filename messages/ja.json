@@ -1,0 +1,317 @@
+{
+  "common": {
+    "loading": "読み込み中...",
+    "error": "問題が発生しました",
+    "retry": "再試行",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "continue": "続ける",
+    "back": "戻る",
+    "next": "次へ",
+    "done": "完了",
+    "close": "閉じる",
+    "search": "検索",
+    "filter": "フィルター",
+    "sort": "並べ替え",
+    "viewAll": "すべて見る",
+    "learnMore": "詳細を見る",
+    "getStarted": "始める",
+    "signIn": "ログイン",
+    "signOut": "ログアウト",
+    "signUp": "新規登録",
+    "welcome": "ようこそ",
+    "settings": "設定",
+    "profile": "プロフィール",
+    "help": "ヘルプ",
+    "apply": "申し込む",
+    "submit": "送信",
+    "edit": "編集",
+    "delete": "削除",
+    "confirm": "確認",
+    "yes": "はい",
+    "no": "いいえ"
+  },
+  "nav": {
+    "home": "ホーム",
+    "banking": "銀行",
+    "housing": "住居",
+    "visa": "ビザ",
+    "grow": "資産運用",
+    "deals": "割引",
+    "guides": "ガイド",
+    "community": "コミュニティ",
+    "money": "マネー",
+    "jobs": "仕事",
+    "funding": "資金調達"
+  },
+  "survey": {
+    "languageSelect": {
+      "title": "言語を選択",
+      "subtitle": "ご希望の言語を選択してください",
+      "continue": "続ける"
+    },
+    "welcome": {
+      "title": "Noorへようこそ",
+      "subtitle": "留学生のための金融パートナー",
+      "description": "留学中の銀行口座開設、住居探し、財務管理をサポートします。"
+    },
+    "steps": {
+      "university": "大学",
+      "country": "国",
+      "visa": "ビザ状況",
+      "preferences": "設定"
+    },
+    "university": {
+      "title": "どこで勉強していますか？",
+      "placeholder": "大学を検索...",
+      "notFound": "大学が見つかりませんか？"
+    },
+    "country": {
+      "title": "どの国にいますか？",
+      "us": "アメリカ",
+      "uk": "イギリス",
+      "ca": "カナダ"
+    },
+    "visa": {
+      "title": "ビザの状況は？",
+      "f1": "F-1学生ビザ",
+      "j1": "J-1交換ビザ",
+      "opt": "OPT/CPT",
+      "h1b": "H-1B就労ビザ",
+      "tier4": "Tier 4学生ビザ",
+      "studyPermit": "学習許可証"
+    },
+    "complete": {
+      "title": "準備完了！",
+      "subtitle": "金融の旅を始めましょう"
+    }
+  },
+  "banking": {
+    "title": "銀行",
+    "subtitle": "留学生に最適な銀行を見つけよう",
+    "tabs": {
+      "banks": "銀行",
+      "cards": "カード",
+      "guides": "ガイド"
+    },
+    "filters": {
+      "noSsn": "SSN不要",
+      "traditional": "従来の銀行",
+      "online": "オンラインバンク",
+      "noFee": "年会費無料",
+      "noCredit": "クレジット履歴不要"
+    },
+    "bankCard": {
+      "openAccount": "口座開設",
+      "branches": "近くの支店",
+      "minDeposit": "最低預金額",
+      "monthlyFee": "月額手数料",
+      "features": "機能"
+    },
+    "reassurance": "ほとんどの銀行は留学生を歓迎しています — SSNなしでも始められます。"
+  },
+  "housing": {
+    "title": "住居",
+    "subtitle": "キャンパス近くのアパートを探す",
+    "filters": {
+      "gym": "ジム",
+      "furnished": "家具付き",
+      "parking": "駐車場",
+      "allAreas": "全エリア",
+      "north": "北",
+      "south": "南",
+      "east": "東",
+      "west": "西"
+    },
+    "apartment": {
+      "perMonth": "/月",
+      "beds": "ベッド",
+      "baths": "バス",
+      "sqft": "平方フィート",
+      "walkingTime": "分徒歩",
+      "bikingTime": "分自転車",
+      "rating": "評価",
+      "reviews": "レビュー",
+      "viewDetails": "詳細を見る",
+      "getDirections": "道順を見る",
+      "shared": "シェア"
+    },
+    "map": {
+      "showMap": "地図を表示",
+      "hideMap": "地図を隠す",
+      "apartments": "件のアパート",
+      "bankBranches": "件の銀行支店"
+    }
+  },
+  "visa": {
+    "title": "ビザ・入国管理",
+    "subtitle": "ビザの状況と期限を追跡",
+    "status": {
+      "active": "有効",
+      "expiring": "まもなく期限切れ",
+      "expired": "期限切れ"
+    },
+    "timeline": {
+      "title": "重要な日程",
+      "daysLeft": "日残り",
+      "expired": "期限切れ"
+    },
+    "documents": {
+      "title": "必要書類",
+      "passport": "パスポート",
+      "i20": "I-20",
+      "visa": "ビザスタンプ",
+      "i94": "I-94"
+    },
+    "work": {
+      "title": "就労許可",
+      "onCampus": "学内勤務",
+      "cpt": "CPT",
+      "opt": "OPT",
+      "hoursLimit": "時間/週の制限"
+    }
+  },
+  "grow": {
+    "title": "資産を増やす",
+    "subtitle": "留学中に資産を築く",
+    "tabs": {
+      "savings": "貯蓄",
+      "invest": "投資",
+      "tips": "ヒント"
+    },
+    "savings": {
+      "title": "高金利貯蓄",
+      "apy": "年利",
+      "minBalance": "最低残高",
+      "fdic": "FDIC保険",
+      "openAccount": "口座開設"
+    },
+    "invest": {
+      "title": "投資オプション",
+      "stocks": "株式",
+      "etfs": "ETF",
+      "crypto": "暗号資産",
+      "startInvesting": "投資を始める"
+    },
+    "tips": {
+      "title": "マネーヒント",
+      "budgeting": "予算管理",
+      "saving": "貯蓄",
+      "credit": "クレジット構築"
+    }
+  },
+  "deals": {
+    "title": "学生割引",
+    "subtitle": "学生限定の特別割引",
+    "categories": {
+      "all": "すべての割引",
+      "food": "フード・外食",
+      "shopping": "ショッピング",
+      "transport": "交通",
+      "entertainment": "エンターテイメント",
+      "tech": "テック・ソフトウェア",
+      "travel": "旅行"
+    },
+    "deal": {
+      "discount": "オフ",
+      "freeShipping": "送料無料",
+      "verifyStudent": "学生認証",
+      "getCoupon": "クーポンを取得",
+      "expires": "有効期限"
+    }
+  },
+  "guides": {
+    "title": "ガイド",
+    "subtitle": "留学生のためのステップバイステップガイド",
+    "categories": {
+      "banking": "銀行・金融",
+      "housing": "住居",
+      "visa": "ビザ・入国管理",
+      "work": "アメリカでの就労",
+      "taxes": "税金",
+      "credit": "クレジット構築"
+    },
+    "readTime": "分で読める",
+    "updated": "更新"
+  },
+  "community": {
+    "title": "コミュニティ",
+    "subtitle": "他の留学生とつながる",
+    "tabs": {
+      "feed": "フィード",
+      "questions": "質問",
+      "events": "イベント"
+    },
+    "post": {
+      "like": "いいね",
+      "comment": "コメント",
+      "share": "シェア",
+      "reply": "返信"
+    },
+    "newPost": {
+      "title": "投稿を作成",
+      "placeholder": "コミュニティとシェアしたいことを書いてください..."
+    }
+  },
+  "settings": {
+    "title": "設定",
+    "language": {
+      "title": "言語",
+      "description": "ご希望の言語を選択してください"
+    },
+    "notifications": {
+      "title": "通知",
+      "description": "通知設定を管理"
+    },
+    "privacy": {
+      "title": "プライバシー",
+      "description": "プライバシー設定を管理"
+    },
+    "account": {
+      "title": "アカウント",
+      "description": "アカウント設定を管理"
+    },
+    "theme": {
+      "title": "テーマ",
+      "light": "ライト",
+      "dark": "ダーク",
+      "system": "システム"
+    }
+  },
+  "errors": {
+    "networkError": "ネットワークエラーです。接続を確認してください。",
+    "serverError": "サーバーエラーです。後でもう一度お試しください。",
+    "notFound": "ページが見つかりません",
+    "unauthorized": "続けるにはログインしてください",
+    "forbidden": "アクセス権限がありません",
+    "validation": "入力内容を確認してください",
+    "timeout": "リクエストがタイムアウトしました。もう一度お試しください。"
+  },
+  "auth": {
+    "login": {
+      "title": "おかえりなさい",
+      "email": "メールアドレス",
+      "password": "パスワード",
+      "forgotPassword": "パスワードをお忘れですか？",
+      "signIn": "ログイン",
+      "noAccount": "アカウントをお持ちでないですか？",
+      "signUp": "新規登録"
+    },
+    "register": {
+      "title": "アカウント作成",
+      "name": "氏名",
+      "email": "メールアドレス",
+      "password": "パスワード",
+      "confirmPassword": "パスワード確認",
+      "signUp": "新規登録",
+      "hasAccount": "すでにアカウントをお持ちですか？",
+      "signIn": "ログイン"
+    },
+    "forgotPassword": {
+      "title": "パスワードリセット",
+      "description": "リセットリンクを受け取るメールアドレスを入力してください",
+      "sendLink": "リセットリンクを送信",
+      "backToLogin": "ログインに戻る"
+    }
+  }
+}

@@ -5,30 +5,40 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useLanguage } from '@/contexts/LanguageContext';
+
+// Navigation item type
+interface NavItem {
+  href: string;
+  labelKey: string;
+  icon: React.ComponentType<IconProps>;
+  descriptionKey?: string;
+}
 
 // Main navigation items (shown in bottom bar)
-const MAIN_NAV_ITEMS = [
-  { href: '/', label: 'Home', icon: HomeIcon },
-  { href: '/banking', label: 'Banking', icon: BankingIcon },
-  { href: '/grow', label: 'Grow', icon: GrowIcon },
-  { href: '/visa', label: 'Visa', icon: VisaIcon },
+const MAIN_NAV_ITEMS: NavItem[] = [
+  { href: '/', labelKey: 'nav.home', icon: HomeIcon },
+  { href: '/banking', labelKey: 'nav.banking', icon: BankingIcon },
+  { href: '/grow', labelKey: 'nav.grow', icon: GrowIcon },
+  { href: '/visa', labelKey: 'nav.visa', icon: VisaIcon },
 ];
 
 // More menu items (shown in slide-up panel)
-const MORE_NAV_ITEMS = [
-  { href: '/housing', label: 'Housing', icon: HousingIcon, description: 'Find apartments' },
-  { href: '/money', label: 'Money', icon: MoneyIcon, description: 'Track all finances' },
-  { href: '/jobs', label: 'Jobs', icon: JobsIcon, description: 'Find part-time jobs' },
-  { href: '/funding', label: 'Funding', icon: FundingIcon, description: 'Scholarships & Grants' },
-  { href: '/forum', label: 'Forum', icon: ForumIcon, description: 'Community discussions' },
-  { href: '/deals', label: 'Deals', icon: DealsIcon, description: 'Student discounts' },
-  { href: '/guides', label: 'Guides', icon: GuidesIcon, description: 'Step-by-step help' },
-  { href: '/settings', label: 'Settings', icon: SettingsIcon, description: 'Profile & preferences' },
+const MORE_NAV_ITEMS: NavItem[] = [
+  { href: '/housing', labelKey: 'nav.housing', icon: HousingIcon },
+  { href: '/money', labelKey: 'nav.money', icon: MoneyIcon },
+  { href: '/jobs', labelKey: 'nav.jobs', icon: JobsIcon },
+  { href: '/funding', labelKey: 'nav.funding', icon: FundingIcon },
+  { href: '/forum', labelKey: 'nav.community', icon: ForumIcon },
+  { href: '/deals', labelKey: 'nav.deals', icon: DealsIcon },
+  { href: '/guides', labelKey: 'nav.guides', icon: GuidesIcon },
+  { href: '/settings', labelKey: 'common.settings', icon: SettingsIcon },
 ];
 
 export function BottomNav() {
   const pathname = usePathname();
   const { theme, useSchoolTheme } = useTheme();
+  const { t } = useLanguage();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
 
   const activeColor = useSchoolTheme ? theme.primary_color : '#000000';
@@ -103,7 +113,7 @@ export function BottomNav() {
                       >
                         <Icon active={isActive} activeColor={activeColor} />
                         <span className={`text-xs mt-2 ${isActive ? 'font-medium' : ''}`}>
-                          {item.label}
+                          {t(item.labelKey)}
                         </span>
                       </Link>
                     );
@@ -135,7 +145,7 @@ export function BottomNav() {
                   <span
                     className={`text-[10px] tracking-wide ${isActive ? 'font-medium' : ''}`}
                   >
-                    {item.label}
+                    {t(item.labelKey)}
                   </span>
                 </Link>
               );
