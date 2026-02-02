@@ -16,7 +16,9 @@ import {
   ALL_UNIVERSITY_LOCATIONS,
   US_UNIVERSITY_LOCATIONS,
   UK_UNIVERSITY_LOCATIONS,
-  CANADA_UNIVERSITY_LOCATIONS
+  CANADA_UNIVERSITY_LOCATIONS,
+  findUniversityLocation,
+  normalizeUniversityName
 } from './universityLocations';
 import {
   ALL_APARTMENTS,
@@ -119,28 +121,10 @@ export function getApartmentsForUniversity(university: string): typeof ALL_APART
 
 /**
  * Get university location data
+ * Uses comprehensive matching: short_name, full name, and aliases
  */
 export function getUniversityLocation(university: string) {
-  // Direct match
-  if (ALL_UNIVERSITY_LOCATIONS[university]) {
-    return ALL_UNIVERSITY_LOCATIONS[university];
-  }
-
-  // Fuzzy match
-  const normalizedSearch = university.toLowerCase().trim();
-
-  for (const [key, location] of Object.entries(ALL_UNIVERSITY_LOCATIONS)) {
-    const normalizedKey = key.toLowerCase();
-    if (normalizedKey.includes(normalizedSearch) || normalizedSearch.includes(normalizedKey)) {
-      return location;
-    }
-    // Also check the full name
-    if (location.name.toLowerCase().includes(normalizedSearch)) {
-      return location;
-    }
-  }
-
-  return null;
+  return findUniversityLocation(university);
 }
 
 /**
