@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
 import { ALL_APARTMENTS, getUniversityLocation } from '@/lib/locationData';
 import { getUniversityPricing, getRealisticApartmentName } from '@/lib/locationData/apartmentPricing';
 
@@ -60,6 +61,29 @@ const enrichApartment = (apt: typeof ALL_APARTMENTS[0], index: number) => {
   };
 };
 
+// Try to fetch from Supabase (real data)
+async function fetchFromSupabase(
+  university: string,
+  limit: number
+): Promise<{ data: any[] | null; error: any }> {
+  if (!isSupabaseConfigured()) {
+    return { data: null, error: null };
+  }
+
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from('apartments')
+      .select('*')
+      .eq('university_short_name', university)
+      .limit(limit);
+
+    return { data, error };
+  } catch (e) {
+    return { data: null, error: e };
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -76,8 +100,73 @@ export async function GET(request: NextRequest) {
     const parking = searchParams.get('parking') === 'true';
     const campusSide = searchParams.get('campus_side');
 
-    // Always use local apartment data (ALL_APARTMENTS) for consistency
-    // This ensures correct university-specific data with realistic pricing
+    // Try Supabase first for real data (if university specified)
+    if (university) {
+      const { data: supabaseData } = await fetchFromSupabase(university, limit * 2);
+
+      if (supabaseData && supabaseData.length > 0) {
+        // Get university location for context
+        const location = getUniversityLocation(university);
+        const pricing = getUniversityPricing(university, location?.country || 'US');
+
+        let apartments = supabaseData.map((apt, index) => ({
+          id: apt.id,
+          name: apt.name,
+          address: apt.address,
+          university: apt.university_short_name,
+          bedrooms: apt.bedrooms || 'Studio - 2BR',
+          bathrooms: apt.bathrooms || '1-2',
+          price_min: apt.price_min || pricing.oneBed[0],
+          price_max: apt.price_max || pricing.oneBed[1],
+          shared_price_min: apt.price_min ? Math.round(apt.price_min * 0.4) : Math.round(pricing.oneBed[0] * 0.4),
+          shared_price_max: apt.price_max ? Math.round(apt.price_max * 0.6) : Math.round(pricing.oneBed[1] * 0.6),
+          sqft_min: apt.sqft_min || 400,
+          sqft_max: apt.sqft_max || 900,
+          walking_minutes: apt.walking_minutes || 15,
+          biking_minutes: apt.biking_minutes || 5,
+          transit_minutes: apt.transit_minutes || 20,
+          driving_minutes: apt.driving_minutes || 5,
+          rating: apt.rating || 4.0,
+          review_count: apt.review_count || 50,
+          pet_policy: apt.pet_policy || 'Contact for details',
+          campus_side: apt.campus_side || 'center',
+          furnished: apt.furnished || false,
+          gym: apt.gym || false,
+          parking: apt.parking || false,
+          latitude: apt.latitude,
+          longitude: apt.longitude,
+          images: apt.images || getDefaultImage(apt.id),
+          contact_website: apt.contact_website || 'https://www.apartments.com',
+        }));
+
+        // Apply filters
+        if (gym) apartments = apartments.filter(a => a.gym);
+        if (furnished) apartments = apartments.filter(a => a.furnished);
+        if (parking) apartments = apartments.filter(a => a.parking);
+        if (campusSide) apartments = apartments.filter(a => a.campus_side === campusSide);
+        if (minPrice) apartments = apartments.filter(a => a.price_min >= parseInt(minPrice));
+        if (maxPrice) apartments = apartments.filter(a => a.price_max <= parseInt(maxPrice));
+
+        const total = apartments.length;
+        const paginatedApartments = apartments.slice(offset, offset + limit);
+
+        return NextResponse.json({
+          success: true,
+          data: paginatedApartments,
+          meta: {
+            total,
+            country: location?.country || 'US',
+            university,
+            limit,
+            offset,
+            source: 'supabase',
+            universityCenter: location?.center || null,
+          },
+        });
+      }
+    }
+
+    // Fallback to local apartment data (ALL_APARTMENTS)
     let apartments = ALL_APARTMENTS.map((apt, index) => enrichApartment(apt, index));
 
     // Filter by university (EXACT match first, then partial)
@@ -135,6 +224,9 @@ export async function GET(request: NextRequest) {
     const total = apartments.length;
     const paginatedApartments = apartments.slice(offset, offset + limit);
 
+    // Get university center for map
+    const uniLocation = university ? getUniversityLocation(university) : null;
+
     return NextResponse.json({
       success: true,
       data: paginatedApartments,
@@ -145,7 +237,8 @@ export async function GET(request: NextRequest) {
         limit,
         offset,
         source: 'local',
-        pricing: 'market-adjusted', // Indicates pricing is based on real market data
+        pricing: 'market-adjusted',
+        universityCenter: uniLocation?.center || null,
       },
     });
   } catch (error) {
