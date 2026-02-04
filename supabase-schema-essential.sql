@@ -4,6 +4,7 @@
 -- ============================================================
 
 -- 1. Add missing columns to users table
+ALTER TABLE users ADD COLUMN IF NOT EXISTS language text DEFAULT 'en';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS visa_type text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS major text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS gpa numeric(3,2);

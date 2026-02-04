@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { locales, localeNames, localeFlags, Locale } from '@/i18n/config';
 import { getSchoolTheme, hasCustomTheme } from '@/lib/schoolThemes';
 import {
   validatePassword,
@@ -36,7 +38,9 @@ type ModalType = 'delete' | 'changePassword' | 'changeEmail' | 'editProfile' | '
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, useSchoolTheme, toggleSchoolTheme, setTheme } = useTheme();
+  const { locale, setLocale, t } = useLanguage();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [notifications, setNotifications] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFS);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
@@ -471,6 +475,29 @@ export default function SettingsPage() {
           </motion.div>
         )}
 
+        {/* Language Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18 }}
+          className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]"
+        >
+          <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">{t('settings.language.title')}</h3>
+          <button
+            onClick={() => setShowLanguageModal(true)}
+            className="w-full flex justify-between items-center py-2 text-left"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">{localeFlags[locale]}</span>
+              <div>
+                <span className="text-sm text-[#1A1A1A]">{localeNames[locale]}</span>
+                <p className="text-xs text-[#9B9B9B] mt-0.5">{t('settings.language.description')}</p>
+              </div>
+            </div>
+            <span className="text-sm text-[#1A1A1A]">→</span>
+          </button>
+        </motion.div>
+
         {/* Notifications Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -478,7 +505,7 @@ export default function SettingsPage() {
           transition={{ delay: 0.2 }}
           className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]"
         >
-          <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">Notifications</h3>
+          <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">{t('settings.notifications.title')}</h3>
           <div className="space-y-3">
             {[
               { key: 'emailNotifications', label: 'Email Notifications', desc: 'Important updates and alerts' },
@@ -833,6 +860,42 @@ export default function SettingsPage() {
                 Reset
               </button>
             </div>
+          </Modal>
+        )}
+
+        {/* Language Modal */}
+        {showLanguageModal && (
+          <Modal onClose={() => setShowLanguageModal(false)}>
+            <h3 className="text-lg font-medium text-[#1A1A1A] mb-2">{t('settings.language.title')}</h3>
+            <p className="text-sm text-[#6B6B6B] mb-6">{t('settings.language.description')}</p>
+
+            <div className="grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+              {locales.map((loc) => (
+                <button
+                  key={loc}
+                  onClick={() => {
+                    setLocale(loc);
+                    setShowLanguageModal(false);
+                    showSuccess(t('settings.language.title') + ': ' + localeNames[loc]);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-3 rounded-xl border-2 transition-all ${
+                    locale === loc
+                      ? 'border-black bg-black text-white'
+                      : 'border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <span className="text-xl">{localeFlags[loc]}</span>
+                  <span className="text-sm font-medium">{localeNames[loc]}</span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setShowLanguageModal(false)}
+              className="w-full py-3 mt-6 bg-gray-100 text-[#1A1A1A] rounded-xl font-medium text-sm"
+            >
+              {t('common.close')}
+            </button>
           </Modal>
         )}
 

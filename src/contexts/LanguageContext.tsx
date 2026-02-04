@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Locale, locales, defaultLocale, isRTL } from '@/i18n/config';
+import { supabase } from '@/lib/supabase';
 
 // Import all messages statically
 import en from '../../messages/en.json';
@@ -86,7 +87,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     }
   }, [locale]);
 
-  const setLocale = useCallback((newLocale: Locale) => {
+  const setLocale = useCallback(async (newLocale: Locale) => {
     setLocaleState(newLocale);
     setMessages(allMessages[newLocale]);
     localStorage.setItem('noor_locale', newLocale);
@@ -98,6 +99,18 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(profile);
         parsed.language = newLocale;
         localStorage.setItem('noor_user_profile', JSON.stringify(parsed));
+
+        // Save to Supabase if user is logged in
+        const userId = localStorage.getItem('noor_user_id');
+        if (userId && supabase) {
+          supabase
+            .from('users')
+            .update({ language: newLocale })
+            .eq('id', userId)
+            .then(() => {
+              // Silent update
+            });
+        }
       } catch {
         // Ignore parse errors
       }
