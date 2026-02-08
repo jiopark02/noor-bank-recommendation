@@ -748,23 +748,23 @@ export default function SurveyPage() {
         {/* Step 1: First, you. */}
         {step === 1 && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">First, you.</h1>
-            <p className="text-gray-500 mb-8">So we can build this around you.</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step1.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step1.subtitle')}</p>
 
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <Input
-                  placeholder="First name"
+                  placeholder={t('survey.step1.firstName')}
                   value={data.firstName}
                   onChange={v => updateField('firstName', v)}
-                  error={touchedFields.has('firstName') && !data.firstName ? 'Required' : null}
+                  error={touchedFields.has('firstName') && !data.firstName ? t('errors.required') : null}
                   required
                 />
                 <Input
-                  placeholder="Last name"
+                  placeholder={t('survey.step1.lastName')}
                   value={data.lastName}
                   onChange={v => updateField('lastName', v)}
-                  error={touchedFields.has('lastName') && !data.lastName ? 'Required' : null}
+                  error={touchedFields.has('lastName') && !data.lastName ? t('errors.required') : null}
                   required
                 />
               </div>
@@ -773,7 +773,7 @@ export default function SurveyPage() {
               <div className="space-y-1">
                 <Input
                   type="email"
-                  placeholder="Email"
+                  placeholder={t('survey.step1.email')}
                   value={data.email}
                   onChange={v => {
                     updateField('email', v);
@@ -799,14 +799,14 @@ export default function SurveyPage() {
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                     </svg>
-                    .edu email verified
+                    {t('survey.step1.eduVerified')}
                   </div>
                 )}
               </div>
 
               {/* Password with strength indicator */}
               <PasswordInput
-                placeholder="Password"
+                placeholder={t('survey.password.placeholder')}
                 value={data.password}
                 onChange={v => {
                   updateField('password', v);
@@ -819,7 +819,7 @@ export default function SurveyPage() {
               {/* Confirm password with match indicator */}
               <div className="space-y-1">
                 <PasswordInput
-                  placeholder="Confirm password"
+                  placeholder={t('survey.password.confirm')}
                   value={data.confirmPassword}
                   onChange={v => {
                     updateField('confirmPassword', v);
@@ -833,14 +833,14 @@ export default function SurveyPage() {
                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                         </svg>
-                        Passwords match
+                        {t('survey.password.match')}
                       </>
                     ) : (
                       <>
                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                         </svg>
-                        Passwords don't match
+                        {t('survey.password.noMatch')}
                       </>
                     )}
                   </div>
@@ -861,7 +861,7 @@ export default function SurveyPage() {
                     </svg>
                   )}
                 </div>
-                <span className="text-sm text-gray-600">Keep me signed in</span>
+                <span className="text-sm text-gray-600">{t('survey.step1.staySignedIn')}</span>
               </label>
 
               {/* Terms & Privacy */}
@@ -879,21 +879,21 @@ export default function SurveyPage() {
                   )}
                 </div>
                 <span className="text-sm text-gray-600">
-                  I agree to the{' '}
+                  {t('survey.step1.agreeToTerms')}{' '}
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setShowTermsModal(true); }}
                     className="text-black underline hover:opacity-70"
                   >
-                    Terms of Service
+                    {t('survey.terms.title')}
                   </button>
-                  {' '}and{' '}
+                  {' '}{t('common.and')}{' '}
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setShowPrivacyModal(true); }}
                     className="text-black underline hover:opacity-70"
                   >
-                    Privacy Policy
+                    {t('survey.privacy.title')}
                   </button>
                   <span className="text-red-400 ml-1">*</span>
                 </span>
@@ -901,7 +901,7 @@ export default function SurveyPage() {
 
               {/* Institution Type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">School type</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step1.schoolType')}</label>
                 <div className="grid grid-cols-2 gap-3">
                   {INSTITUTION_TYPES.map(type => (
                     <button
@@ -917,7 +917,7 @@ export default function SurveyPage() {
                           : 'border-gray-200 text-gray-700 hover:border-gray-400'
                       }`}
                     >
-                      {type.label}
+                      {type.id === 'university' ? t('survey.step1.university') : t('survey.step1.communityCollege')}
                     </button>
                   ))}
                 </div>
@@ -927,7 +927,7 @@ export default function SurveyPage() {
               {data.institutionType && (
                 <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {data.institutionType === 'community_college' ? 'Community College' : 'University'}
+                    {data.institutionType === 'community_college' ? t('survey.step1.communityCollege') : t('survey.step1.university')}
                   </label>
                   <input
                     type="text"
@@ -937,7 +937,7 @@ export default function SurveyPage() {
                       setShowInstitutionList(true);
                     }}
                     onFocus={() => setShowInstitutionList(true)}
-                    placeholder={`Search ${data.institutionType === 'community_college' ? 'community colleges' : 'universities'}...`}
+                    placeholder={data.institutionType === 'community_college' ? t('survey.step1.searchCC') : t('survey.step1.searchUni')}
                     className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
                   />
                   {showInstitutionList && (
@@ -963,7 +963,7 @@ export default function SurveyPage() {
                             }}
                             className="w-full px-4 py-3 text-left hover:bg-gray-50 text-gray-500 text-sm"
                           >
-                            Can't find your school? Continue anyway
+                            {t('survey.step1.cantFindSchool')}
                           </button>
                         </>
                       ) : institutionSearch.length >= 2 ? (
@@ -974,7 +974,7 @@ export default function SurveyPage() {
                           }}
                           className="w-full px-4 py-3 text-left text-gray-500 text-sm"
                         >
-                          No results found. Continue without selecting a school
+                          {t('survey.step1.noResults')}
                         </button>
                       ) : null}
                     </div>
@@ -988,7 +988,7 @@ export default function SurveyPage() {
               )}
 
               <Select
-                placeholder="Country of Origin"
+                placeholder={t('survey.step1.countryOfOrigin')}
                 value={data.countryOfOrigin}
                 onChange={v => updateField('countryOfOrigin', v)}
                 options={COUNTRIES}
@@ -1000,8 +1000,8 @@ export default function SurveyPage() {
         {/* Step 2: Where you are. */}
         {step === 2 && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">Where you are.</h1>
-            <p className="text-gray-500 mb-8">Each stage has different needs. We'll match them.</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step2.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step2.subtitle')}</p>
 
             <div className="space-y-6">
               <div className="space-y-2">
@@ -1031,7 +1031,7 @@ export default function SurveyPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Year</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step2.year')}</label>
                 <div className="flex gap-2">
                   {(isCC ? ['1', '2', '3+'] : ['1', '2', '3', '4', '5+']).map(year => (
                     <button
@@ -1052,19 +1052,19 @@ export default function SurveyPage() {
               {/* Transfer question for CC students */}
               {isCC && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">Planning to transfer?</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step2.planningTransfer')}</label>
                   <ToggleButtons
                     value={data.planningToTransfer}
                     onChange={v => updateField('planningToTransfer', v)}
                   />
                   {data.planningToTransfer === true && (
-                    <Feedback>Great! We'll help you prepare for transfer.</Feedback>
+                    <Feedback>{t('survey.step2.transferFeedback')}</Feedback>
                   )}
                 </div>
               )}
 
               {data.academicLevel && data.year && (
-                <Feedback>Got it. We'll tailor your options.</Feedback>
+                <Feedback>{t('survey.step2.tailorFeedback')}</Feedback>
               )}
             </div>
           </div>
@@ -1073,16 +1073,16 @@ export default function SurveyPage() {
         {/* Step 2.5: Transfer Goals (CC students only) */}
         {step === 3 && isCC && data.planningToTransfer && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">Your Transfer Goals.</h1>
-            <p className="text-gray-500 mb-8">Let's plan your path to a 4-year university.</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step2_5.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step2_5.subtitle')}</p>
 
             <div className="space-y-6">
               {/* TAG Eligible Universities */}
               {tagUniversities.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    TAG-Eligible Universities
-                    <span className="text-xs text-emerald-600 ml-2">Guaranteed admission</span>
+                    {t('survey.step2_5.tagEligible')}
+                    <span className="text-xs text-emerald-600 ml-2">{t('survey.step2_5.guaranteed')}</span>
                   </label>
                   <div className="space-y-2">
                     {tagUniversities.map(uni => (
@@ -1107,7 +1107,7 @@ export default function SurveyPage() {
 
               {/* Other UC options */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Other Target Universities</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step2_5.otherTargets')}</label>
                 <div className="flex flex-wrap gap-2">
                   {[
                     { id: 'ucla', name: 'UCLA' },
@@ -1131,9 +1131,9 @@ export default function SurveyPage() {
 
               {/* Target Major */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Target Major</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step2_5.targetMajor')}</label>
                 <Input
-                  placeholder="e.g., Computer Science, Business..."
+                  placeholder={t('survey.step2_5.majorPlaceholder')}
                   value={data.targetMajor}
                   onChange={v => updateField('targetMajor', v)}
                 />
@@ -1141,7 +1141,7 @@ export default function SurveyPage() {
 
               {/* Expected Transfer Year */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Expected Transfer</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step2_5.expectedTransfer')}</label>
                 <div className="flex gap-2">
                   {['Fall 2026', 'Spring 2027', 'Fall 2027', 'Later'].map(term => (
                     <button
@@ -1161,7 +1161,7 @@ export default function SurveyPage() {
 
               {data.targetUniversities.length > 0 && (
                 <Feedback>
-                  {data.targetUniversities.length} target{data.targetUniversities.length > 1 ? 's' : ''} selected. We'll track deadlines for you.
+                  {t('survey.step2_5.targetsFeedback').replace('{count}', String(data.targetUniversities.length))}
                 </Feedback>
               )}
             </div>
@@ -1171,26 +1171,26 @@ export default function SurveyPage() {
         {/* Step 3 or 4: What We're Working With. */}
         {((step === 3 && !showTransferStep) || (step === 4 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">What We're Working With.</h1>
-            <p className="text-gray-500 mb-8">We Tailor From Here</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step3.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step3.subtitle')}</p>
 
             <div className="space-y-6">
               {/* US-specific: SSN and ITIN */}
               {data.destinationCountry === 'US' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">SSN?</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.ssn')}</label>
                     <ToggleButtons
                       value={data.hasSSN}
                       onChange={v => updateField('hasSSN', v)}
                     />
                     {data.hasSSN === false && (
-                      <Feedback>No problem. We have options.</Feedback>
+                      <Feedback>{t('survey.step3.noSsnFeedback')}</Feedback>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">ITIN?</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.itin')}</label>
                     <ToggleButtons
                       value={data.hasITIN}
                       onChange={v => updateField('hasITIN', v)}
@@ -1202,13 +1202,13 @@ export default function SurveyPage() {
               {/* UK-specific: NIN */}
               {data.destinationCountry === 'UK' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">National Insurance Number (NIN)?</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.nin')}</label>
                   <ToggleButtons
                     value={data.hasNIN}
                     onChange={v => updateField('hasNIN', v)}
                   />
                   {data.hasNIN === false && (
-                    <Feedback>No worries. You can apply after arrival.</Feedback>
+                    <Feedback>{t('survey.step3.noNinFeedback')}</Feedback>
                   )}
                 </div>
               )}
@@ -1216,25 +1216,25 @@ export default function SurveyPage() {
               {/* Canada-specific: SIN */}
               {data.destinationCountry === 'CA' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">Social Insurance Number (SIN)?</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.sin')}</label>
                   <ToggleButtons
                     value={data.hasSIN}
                     onChange={v => updateField('hasSIN', v)}
                   />
                   {data.hasSIN === false && (
-                    <Feedback>You can apply for one after arriving in Canada.</Feedback>
+                    <Feedback>{t('survey.step3.noSinFeedback')}</Feedback>
                   )}
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{countryConfig.addressLabel}?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.localAddress')}</label>
                 <ToggleButtons
                   value={data.hasLocalAddress}
                   onChange={v => updateField('hasLocalAddress', v)}
                 />
                 {data.hasLocalAddress === true && (
-                  <Feedback>Good. More doors open.</Feedback>
+                  <Feedback>{t('survey.step3.addressFeedback')}</Feedback>
                 )}
               </div>
             </div>
@@ -1244,44 +1244,44 @@ export default function SurveyPage() {
         {/* Step 4 or 5: Your Finances. */}
         {((step === 4 && !showTransferStep) || (step === 5 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">Your Finances.</h1>
-            <p className="text-gray-500 mb-8">Walk Us Through</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step4.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step4.subtitle')}</p>
 
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">What comes in <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step4.income')} <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
                 <MoneyInput
                   value={data.monthlyIncome}
                   onChange={v => updateField('monthlyIncome', v)}
                   currencySymbol={countryConfig.currency}
                 />
-                <p className="text-gray-400 text-xs mt-1.5">Scholarships, family support, work-study</p>
+                <p className="text-gray-400 text-xs mt-1.5">{t('survey.step4.incomeHint')}</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">What goes out <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step4.expenses')} <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
                 <MoneyInput
                   value={data.monthlyExpenses}
                   onChange={v => updateField('monthlyExpenses', v)}
                   currencySymbol={countryConfig.currency}
                 />
-                <p className="text-gray-400 text-xs mt-1.5">Rent, food, transportation, entertainment</p>
+                <p className="text-gray-400 text-xs mt-1.5">{t('survey.step4.expensesHint')}</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Your priority.</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step4.priority')}</label>
                 <div className="space-y-2">
                   {[
-                    { id: 'budget', label: 'Every dollar counts.' },
-                    { id: 'balance', label: 'Balance value and quality.' },
-                    { id: 'premium', label: 'Pay for premium.' },
+                    { id: 'budget', labelKey: 'survey.step4.budget' },
+                    { id: 'balance', labelKey: 'survey.step4.balance' },
+                    { id: 'premium', labelKey: 'survey.step4.premium' },
                   ].map(opt => (
                     <OptionButton
                       key={opt.id}
                       selected={data.feePriority === opt.id}
                       onClick={() => updateField('feePriority', opt.id)}
                     >
-                      {opt.label}
+                      {t(opt.labelKey)}
                     </OptionButton>
                   ))}
                 </div>
@@ -1293,45 +1293,49 @@ export default function SurveyPage() {
         {/* Step 5 or 6: How you bank. */}
         {((step === 5 && !showTransferStep) || (step === 6 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">How you bank.</h1>
-            <p className="text-gray-500 mb-8">Select what matters.</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step5.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step5.subtitle')}</p>
 
             <div className="space-y-6">
               <div className="flex flex-wrap gap-2">
                 {[
-                  'Everyday spending',
-                  'Family transfers',
-                  'Tuition',
-                  'International wires',
-                  'Campus ATM',
-                  'Mobile deposit',
-                  'Bill pay',
-                  'Savings',
+                  { id: 'Everyday spending', key: 'survey.step5.everyday' },
+                  { id: 'Family transfers', key: 'survey.step5.family' },
+                  { id: 'Tuition', key: 'survey.step5.tuition' },
+                  { id: 'International wires', key: 'survey.step5.international' },
+                  { id: 'Campus ATM', key: 'survey.step5.atm' },
+                  { id: 'Mobile deposit', key: 'survey.step5.mobile' },
+                  { id: 'Bill pay', key: 'survey.step5.billPay' },
+                  { id: 'Savings', key: 'survey.step5.savings' },
                 ].map(need => (
                   <ChipButton
-                    key={need}
-                    selected={data.bankingNeeds.includes(need)}
-                    onClick={() => toggleArrayField('bankingNeeds', need)}
+                    key={need.id}
+                    selected={data.bankingNeeds.includes(need.id)}
+                    onClick={() => toggleArrayField('bankingNeeds', need.id)}
                   >
-                    {need}
+                    {t(need.key)}
                   </ChipButton>
                 ))}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Style.</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step5.style')}</label>
                 <div className="grid grid-cols-3 gap-3">
-                  {['Branches', 'Digital', 'Either'].map(style => (
+                  {[
+                    { id: 'Branches', key: 'survey.step5.branches' },
+                    { id: 'Digital', key: 'survey.step5.digital' },
+                    { id: 'Either', key: 'survey.step5.either' },
+                  ].map(style => (
                     <button
-                      key={style}
-                      onClick={() => updateField('bankingStyle', style)}
+                      key={style.id}
+                      onClick={() => updateField('bankingStyle', style.id)}
                       className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
-                        data.bankingStyle === style
+                        data.bankingStyle === style.id
                           ? 'border-black bg-black text-white'
                           : 'border-gray-200 text-gray-700 hover:border-gray-400'
                       }`}
                     >
-                      {style}
+                      {t(style.key)}
                     </button>
                   ))}
                 </div>
@@ -1343,58 +1347,58 @@ export default function SurveyPage() {
         {/* Step 6 or 7: Global. */}
         {((step === 6 && !showTransferStep) || (step === 7 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">Global.</h1>
-            <p className="text-gray-500 mb-8">How you move across borders.</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step6.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step6.subtitle')}</p>
 
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Transfers abroad.</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step6.transfers')}</label>
                 <div className="space-y-2">
                   {[
-                    { id: 'never', label: 'Never' },
-                    { id: 'few', label: 'A few times a year' },
-                    { id: 'monthly', label: 'Monthly or more' },
+                    { id: 'never', key: 'survey.step6.never' },
+                    { id: 'few', key: 'survey.step6.fewTimes' },
+                    { id: 'monthly', key: 'survey.step6.monthly' },
                   ].map(opt => (
                     <OptionButton
                       key={opt.id}
                       selected={data.transferFrequency === opt.id}
                       onClick={() => updateField('transferFrequency', opt.id)}
                     >
-                      {opt.label}
+                      {t(opt.key)}
                     </OptionButton>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Branch nearby?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step6.branchNearby')}</label>
                 <div className="space-y-2">
                   {[
-                    { id: 'must', label: 'Must have' },
-                    { id: 'preferred', label: 'Preferred' },
-                    { id: 'dont', label: "Don't need" },
+                    { id: 'must', key: 'survey.step6.mustHave' },
+                    { id: 'preferred', key: 'survey.step6.preferred' },
+                    { id: 'dont', key: 'survey.step6.dontNeed' },
                   ].map(opt => (
                     <OptionButton
                       key={opt.id}
                       selected={data.branchPreference === opt.id}
                       onClick={() => updateField('branchPreference', opt.id)}
                     >
-                      {opt.label}
+                      {t(opt.key)}
                     </OptionButton>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Side of campus?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step6.campusSide')}</label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { id: 'north', label: 'North' },
-                    { id: 'south', label: 'South' },
-                    { id: 'east', label: 'East' },
-                    { id: 'west', label: 'West' },
-                    { id: 'center', label: 'Center' },
-                    { id: 'unknown', label: 'Not sure' },
+                    { id: 'north', key: 'survey.step6.north' },
+                    { id: 'south', key: 'survey.step6.south' },
+                    { id: 'east', key: 'survey.step6.east' },
+                    { id: 'west', key: 'survey.step6.west' },
+                    { id: 'center', key: 'survey.step6.center' },
+                    { id: 'unknown', key: 'survey.step6.notSure' },
                   ].map(opt => (
                     <button
                       key={opt.id}
@@ -1405,11 +1409,11 @@ export default function SurveyPage() {
                           : 'border-gray-200 text-gray-700 hover:border-gray-400'
                       }`}
                     >
-                      {opt.label}
+                      {t(opt.key)}
                     </button>
                   ))}
                 </div>
-                <p className="text-gray-400 text-xs mt-2">Helps us find banks and housing nearby</p>
+                <p className="text-gray-400 text-xs mt-2">{t('survey.step6.campusHint')}</p>
               </div>
             </div>
           </div>
@@ -1418,44 +1422,48 @@ export default function SurveyPage() {
         {/* Step 7 or 8: Your goals. */}
         {((step === 7 && !showTransferStep) || (step === 8 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">Your goals.</h1>
-            <p className="text-gray-500 mb-8">What matters to you right now.</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step7.title')}</h1>
+            <p className="text-gray-500 mb-8">{t('survey.step7.subtitle')}</p>
 
             <div className="space-y-6">
               <div className="flex flex-wrap gap-2">
                 {[
-                  'Bank account',
-                  'Credit history',
-                  'Housing',
-                  'Student loans',
-                  'Campus jobs',
-                  'Investing',
-                  'Post-grad planning',
+                  { id: 'Bank account', key: 'survey.step7.bankAccount' },
+                  { id: 'Credit history', key: 'survey.step7.creditHistory' },
+                  { id: 'Housing', key: 'survey.step7.housing' },
+                  { id: 'Student loans', key: 'survey.step7.studentLoans' },
+                  { id: 'Campus jobs', key: 'survey.step7.campusJobs' },
+                  { id: 'Investing', key: 'survey.step7.investing' },
+                  { id: 'Post-grad planning', key: 'survey.step7.postGrad' },
                 ].map(goal => (
                   <ChipButton
-                    key={goal}
-                    selected={data.goals.includes(goal)}
-                    onClick={() => toggleArrayField('goals', goal)}
+                    key={goal.id}
+                    selected={data.goals.includes(goal.id)}
+                    onClick={() => toggleArrayField('goals', goal.id)}
                   >
-                    {goal}
+                    {t(goal.key)}
                   </ChipButton>
                 ))}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Credit cards.</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step7.creditCards')}</label>
                 <div className="grid grid-cols-3 gap-3">
-                  {['Start now', 'Later', 'Skip'].map(opt => (
+                  {[
+                    { id: 'Start now', key: 'survey.step7.startNow' },
+                    { id: 'Later', key: 'survey.step7.later' },
+                    { id: 'Skip', key: 'survey.step7.skip' },
+                  ].map(opt => (
                     <button
-                      key={opt}
-                      onClick={() => updateField('creditCardInterest', opt)}
+                      key={opt.id}
+                      onClick={() => updateField('creditCardInterest', opt.id)}
                       className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
-                        data.creditCardInterest === opt
+                        data.creditCardInterest === opt.id
                           ? 'border-black bg-black text-white'
                           : 'border-gray-200 text-gray-700 hover:border-gray-400'
                       }`}
                     >
-                      {opt}
+                      {t(opt.key)}
                     </button>
                   ))}
                 </div>
@@ -1482,7 +1490,7 @@ export default function SurveyPage() {
             >
               <div className="p-6 border-b border-gray-100">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold">Terms of Service</h2>
+                  <h2 className="text-xl font-semibold">{t('survey.terms.title')}</h2>
                   <button onClick={() => setShowTermsModal(false)} className="text-gray-400 hover:text-gray-600">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1510,7 +1518,7 @@ export default function SurveyPage() {
                   onClick={() => setShowTermsModal(false)}
                   className="w-full py-3 bg-black text-white rounded-xl font-medium"
                 >
-                  Close
+                  {t('common.close')}
                 </button>
               </div>
             </motion.div>
@@ -1535,7 +1543,7 @@ export default function SurveyPage() {
             >
               <div className="p-6 border-b border-gray-100">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold">Privacy Policy</h2>
+                  <h2 className="text-xl font-semibold">{t('survey.privacy.title')}</h2>
                   <button onClick={() => setShowPrivacyModal(false)} className="text-gray-400 hover:text-gray-600">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1563,7 +1571,7 @@ export default function SurveyPage() {
                   onClick={() => setShowPrivacyModal(false)}
                   className="w-full py-3 bg-black text-white rounded-xl font-medium"
                 >
-                  Close
+                  {t('common.close')}
                 </button>
               </div>
             </motion.div>
@@ -1613,9 +1621,9 @@ export default function SurveyPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Creating account...
+                  {t('survey.submit.creating')}
                 </span>
-              ) : 'Complete Assessment'}
+              ) : t('survey.submit.complete')}
             </button>
           )}
           </div>

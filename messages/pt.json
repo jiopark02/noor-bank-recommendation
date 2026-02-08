@@ -3,6 +3,7 @@
     "loading": "Carregando...",
     "error": "Algo deu errado",
     "retry": "Tentar novamente",
+    "tryAgain": "Tentar novamente",
     "cancel": "Cancelar",
     "save": "Salvar",
     "continue": "Continuar",
@@ -24,12 +25,21 @@
     "profile": "Perfil",
     "help": "Ajuda",
     "apply": "Aplicar",
+    "applyNow": "Aplicar agora",
     "submit": "Enviar",
     "edit": "Editar",
     "delete": "Excluir",
     "confirm": "Confirmar",
     "yes": "Sim",
-    "no": "Não"
+    "no": "Não",
+    "required": "Obrigatório",
+    "optional": "Opcional",
+    "all": "Todos",
+    "or": "ou",
+    "and": "e",
+    "readMore": "Leia mais",
+    "viewListing": "Ver anúncio",
+    "privacyFooter": "Seus dados ficam privados. Sempre."
   },
   "nav": {
     "home": "Início",
@@ -44,51 +54,225 @@
     "jobs": "Empregos",
     "funding": "Financiamento"
   },
+  "welcome": {
+    "title": "Bem-vindo ao NOOR.",
+    "subtitle": "Estamos aqui para ajudá-lo a navegar por banco, moradia e tudo mais.",
+    "reassurance1": "Sem pressa. Dedique seu tempo.",
+    "reassurance2": "Guiaremos você passo a passo.",
+    "haveAccount": "Já tenho uma conta",
+    "countrySelect": {
+      "title": "Para onde você está indo?",
+      "subtitle": "Selecione seu país de destino.",
+      "us": "Estados Unidos",
+      "usDesc": "Estudar ou trabalhar nos EUA",
+      "uk": "Reino Unido",
+      "ukDesc": "Estudar ou trabalhar no Reino Unido",
+      "ca": "Canadá",
+      "caDesc": "Estudar ou trabalhar no Canadá"
+    },
+    "reason": {
+      "title": "O que te traz aqui hoje?",
+      "subtitle": "Permita-nos personalizar sua experiência.",
+      "newToUS": "Novo nos EUA",
+      "newToUK": "Novo no Reino Unido",
+      "newToCA": "Novo no Canadá",
+      "newDesc": "Deixe-nos preparar o essencial",
+      "settling": "Assentando-se",
+      "settlingDesc": "Hora de refinar suas finanças",
+      "banking": "Banco",
+      "bankingDesc": "Encontraremos seu ajuste perfeito",
+      "housing": "Moradia",
+      "housingDesc": "Residências selecionadas perto de você",
+      "credit": "Crédito",
+      "creditDesc": "Comece a construir sua fundação",
+      "browsing": "Navegando",
+      "browsingDesc": "Dedique seu tempo, estamos aqui"
+    }
+  },
   "survey": {
     "languageSelect": {
       "title": "Escolha seu idioma",
       "subtitle": "Selecione seu idioma preferido",
       "continue": "Continuar"
     },
-    "welcome": {
-      "title": "Bem-vindo ao Noor",
-      "subtitle": "Seu companheiro financeiro para estudar no exterior",
-      "description": "Vamos ajudá-lo a abrir uma conta bancária, encontrar moradia e gerenciar suas finanças."
+    "step1": {
+      "title": "Primeiro, você.",
+      "subtitle": "Para que possamos construir isso em torno de você.",
+      "firstName": "Primeiro nome",
+      "lastName": "Sobrenome",
+      "email": "Email",
+      "eduVerified": "Email .edu verificado",
+      "staySignedIn": "Mantenha-me conectado",
+      "agreeToTerms": "Eu concordo com os",
+      "termsOfService": "Termos de Serviço",
+      "privacyPolicy": "Política de Privacidade",
+      "schoolType": "Tipo de escola",
+      "fourYearUniversity": "Universidade de 4 anos",
+      "communityCollege": "Faculdade comunitária",
+      "university": "Universidade de 4 anos",
+      "searchUni": "Pesquise universidades...",
+      "searchCC": "Pesquise faculdades comunitárias...",
+      "cantFindSchool": "Não consegue encontrar sua escola? Continue assim mesmo",
+      "noResults": "Nenhum resultado encontrado. Continue sem selecionar uma escola",
+      "countryOfOrigin": "País de origem"
     },
-    "steps": {
-      "university": "Universidade",
-      "country": "País",
-      "visa": "Status do visto",
-      "preferences": "Preferências"
+    "password": {
+      "placeholder": "Senha",
+      "confirm": "Confirmar senha",
+      "match": "As senhas coincidem",
+      "noMatch": "As senhas não coincidem",
+      "minLength": "8+ caracteres",
+      "uppercase": "Maiúscula (A-Z)",
+      "lowercase": "Minúscula (a-z)",
+      "number": "Número (0-9)",
+      "special": "Especial (!@#$%)"
     },
-    "university": {
-      "title": "Onde você estuda?",
-      "placeholder": "Busque sua universidade...",
-      "notFound": "Não encontrou sua universidade?"
+    "step2": {
+      "title": "Onde você está.",
+      "subtitle": "Cada estágio tem necessidades diferentes. Vamos corresponder.",
+      "associates": "Associado",
+      "certificate": "Programa de Certificado",
+      "esl": "ESL/Idioma",
+      "undecided": "Indeciso",
+      "bachelors": "Bacharelado",
+      "masters": "Mestrado",
+      "phd": "Doutorado",
+      "postdoc": "Pós-doutorado",
+      "exchange": "Intercâmbio/Visitante",
+      "year": "Ano",
+      "planningTransfer": "Planejando transferência?",
+      "transferFeedback": "Ótimo! Vamos ajudá-lo a se preparar para a transferência.",
+      "tailorFeedback": "Entendi. Vamos personalizar suas opções."
     },
-    "country": {
-      "title": "Em qual país você está?",
-      "us": "Estados Unidos",
-      "uk": "Reino Unido",
-      "ca": "Canadá"
+    "step2_5": {
+      "title": "Seus objetivos de transferência.",
+      "subtitle": "Vamos planejar seu caminho para uma universidade de 4 anos.",
+      "tagEligible": "Universidades elegíveis para TAG",
+      "guaranteed": "Admissão garantida",
+      "otherTargets": "Outras universidades-alvo",
+      "targetMajor": "Especialização de destino",
+      "majorPlaceholder": "por exemplo, Ciência da Computação, Negócios...",
+      "expectedTransfer": "Transferência esperada",
+      "fall2026": "Outono de 2026",
+      "spring2027": "Primavera de 2027",
+      "fall2027": "Outono de 2027",
+      "later": "Mais tarde",
+      "targetsFeedback": "{count} alvo(s) selecionado(s). Vamos rastrear prazos para você."
     },
-    "visa": {
-      "title": "Qual é seu status de visto?",
-      "f1": "Visto de estudante F-1",
-      "j1": "Visto de intercâmbio J-1",
-      "opt": "OPT/CPT",
-      "h1b": "Visto de trabalho H-1B",
-      "tier4": "Visto de estudante Tier 4",
-      "studyPermit": "Permissão de estudo"
+    "step3": {
+      "title": "O que estamos trabalhando.",
+      "subtitle": "Personalizamos daqui",
+      "ssn": "SSN?",
+      "noSsnFeedback": "Sem problema. Temos opções.",
+      "itin": "ITIN?",
+      "nin": "Número de Seguro Nacional (NIN)?",
+      "noNinFeedback": "Sem preocupações. Você pode se inscrever após chegada.",
+      "sin": "Número de Seguro Social (SIN)?",
+      "noSinFeedback": "Você pode se inscrever para um após chegar no Canadá.",
+      "localAddress": "Endereço local?",
+      "addressFeedback": "Bom. Mais portas se abrem."
     },
-    "complete": {
-      "title": "Tudo pronto!",
-      "subtitle": "Vamos começar sua jornada financeira"
+    "step4": {
+      "title": "Suas finanças.",
+      "subtitle": "Nos leve pelo caminho",
+      "income": "O que entra",
+      "incomeHint": "Bolsas de estudo, apoio familiar, estudo-trabalho",
+      "expenses": "O que sai",
+      "expensesHint": "Aluguel, comida, transporte, entretenimento",
+      "priority": "Sua prioridade.",
+      "budget": "Cada centavo conta.",
+      "balance": "Equilibre valor e qualidade.",
+      "premium": "Pague pelo premium."
+    },
+    "step5": {
+      "title": "Como você faz banco.",
+      "subtitle": "Selecione o que importa.",
+      "everyday": "Gastos do dia a dia",
+      "family": "Transferências familiares",
+      "tuition": "Tuição",
+      "international": "Transferências internacionais",
+      "atm": "Caixa eletrônico do campus",
+      "mobile": "Depósito móvel",
+      "billPay": "Pagamento de contas",
+      "savings": "Poupança",
+      "style": "Estilo.",
+      "branches": "Agências",
+      "digital": "Digital",
+      "either": "Qualquer um"
+    },
+    "step6": {
+      "title": "Global.",
+      "subtitle": "Como você se move entre fronteiras.",
+      "transfers": "Transferências no exterior.",
+      "never": "Nunca",
+      "fewTimes": "Algumas vezes por ano",
+      "monthly": "Mensal ou mais",
+      "branchNearby": "Agência próxima?",
+      "mustHave": "Deve ter",
+      "preferred": "Preferido",
+      "dontNeed": "Não preciso",
+      "campusSide": "Lado do campus?",
+      "north": "Norte",
+      "south": "Sul",
+      "east": "Leste",
+      "west": "Oeste",
+      "center": "Centro",
+      "notSure": "Não tenho certeza",
+      "campusHint": "Nos ajuda a encontrar bancos e moradia próximos"
+    },
+    "step7": {
+      "title": "Seus objetivos.",
+      "subtitle": "O que importa para você agora.",
+      "bankAccount": "Conta bancária",
+      "creditHistory": "Histórico de crédito",
+      "housing": "Moradia",
+      "studentLoans": "Empréstimos para estudantes",
+      "campusJobs": "Empregos no campus",
+      "investing": "Investindo",
+      "postGrad": "Planejamento pós-graduação",
+      "creditCards": "Cartões de crédito.",
+      "startNow": "Começar agora",
+      "later": "Mais tarde",
+      "skip": "Pular"
+    },
+    "submit": {
+      "complete": "Avaliação completa",
+      "creating": "Criando conta...",
+      "error": "Algo deu errado. Tente novamente.",
+      "failed": "Falha ao criar conta. Tente novamente."
+    },
+    "terms": {
+      "title": "Termos de Serviço",
+      "lastUpdated": "Última atualização: janeiro de 2026",
+      "section1Title": "1. Aceitação dos Termos",
+      "section1Body": "Ao acessar e usar o Noor, você aceita e concorda em estar vinculado por estes Termos de Serviço. Se você não concordar com estes termos, não use nosso serviço.",
+      "section2Title": "2. Descrição do Serviço",
+      "section2Body": "O Noor fornece orientação financeira, recomendações bancárias e ferramentas especificamente projetadas para estudantes internacionais. Nossas recomendações são apenas para fins informativos e não constituem aconselhamento financeiro.",
+      "section3Title": "3. Responsabilidades do usuário",
+      "section3Body": "Você é responsável por manter a confidencialidade da sua conta e senha. Você concorda em fornecer informações precisas e atualizar suas informações conforme necessário.",
+      "section4Title": "4. Privacidade",
+      "section4Body": "Sua privacidade é importante para nós. Por favor, revise nossa Política de Privacidade para entender como coletamos, usamos e protegemos suas informações.",
+      "section5Title": "5. Limitação de Responsabilidade",
+      "section5Body": "O Noor não é responsável por nenhuma decisão financeira tomada com base em nossas recomendações. Sempre consulte um consultor financeiro qualificado para aconselhamento personalizado."
+    },
+    "privacy": {
+      "title": "Política de Privacidade",
+      "lastUpdated": "Última atualização: janeiro de 2026",
+      "collectTitle": "O que coletamos",
+      "collectBody": "Coletamos informações fornecidas diretamente por você, incluindo seu nome, endereço de email, universidade, status de visto e preferências financeiras.",
+      "useTitle": "Como usamos suas informações",
+      "useBody": "Usamos suas informações para fornecer recomendações bancárias personalizadas, enviar atualizações e notificações relevantes e melhorar nossos serviços.",
+      "storageTitle": "Armazenamento de dados",
+      "storageBody": "Seus dados são armazenados com segurança usando criptografia padrão da indústria. Nunca vendemos suas informações pessoais a terceiros.",
+      "rightsTitle": "Seus direitos",
+      "rightsBody": "Você tem o direito de acessar, corrigir ou deletar seus dados pessoais a qualquer momento. Você pode exportar seus dados ou solicitar a exclusão da conta na página Configurações.",
+      "contactTitle": "Entre em contato",
+      "contactBody": "Se tiver dúvidas sobre esta Política de Privacidade, entre em contato conosco em privacy@noorapp.com."
     }
   },
   "banking": {
     "title": "Banco",
-    "subtitle": "Encontre o melhor banco para estudantes internacionais",
+    "subtitle": "Vamos ajudá-lo a encontrar o ajuste certo.",
     "tabs": {
       "banks": "Bancos",
       "cards": "Cartões",
@@ -96,10 +280,71 @@
     },
     "filters": {
       "noSsn": "Sem SSN",
-      "traditional": "Bancos tradicionais",
-      "online": "Bancos online",
-      "noFee": "Sem taxa anual",
-      "noCredit": "Sem histórico de crédito"
+      "noNin": "Sem NIN",
+      "noSin": "Sem SIN",
+      "traditional": "Tradicional",
+      "online": "Online",
+      "noFee": "Sem Taxa Anual",
+      "noCredit": "Sem Histórico de Crédito",
+      "allAreas": "Todas as áreas",
+      "north": "Norte",
+      "south": "Sul",
+      "east": "Leste",
+      "west": "Oeste"
+    },
+    "reassurance": {
+      "us": "A maioria dos bancos aqui aceita estudantes internacionais — você não precisa de SSN para começar. Dedique seu tempo para comparar.",
+      "uk": "A maioria dos bancos do Reino Unido recebem bem estudantes internacionais — você pode abrir uma conta sem um Número de Seguro Nacional. Dedique seu tempo.",
+      "ca": "Os bancos canadenses recebem bem estudantes internacionais — você não precisa de um SIN para abrir uma conta básica. Compare suas opções.",
+      "creditUs": "Construir crédito leva tempo — comece com um cartão e use-o responsavelmente. Sem pressa.",
+      "creditUk": "Construir um arquivo de crédito do Reino Unido leva tempo — comece com um cartão de crédito básico e use-o responsavelmente.",
+      "creditCa": "Construir crédito canadense leva tempo — comece com um cartão de crédito para estudantes e use-o responsavelmente."
+    },
+    "sections": {
+      "recommended": "Recomendado para você",
+      "recommendedSubtitle": "Com base em sua situação. Sem pressão para decidir hoje.",
+      "branches": "Agências perto de você",
+      "branchesSubtitle": "Ajuda presencial quando precisar.",
+      "branchLocation": "Local da agência",
+      "goodFirstCards": "Bons primeiros cartões"
+    },
+    "card": {
+      "noSsn": "Sem SSN",
+      "noAnnualFee": "Sem taxa anual",
+      "noFtf": "Sem FTF",
+      "signupBonus": "Bônus de inscrição",
+      "benefits": "Benefícios",
+      "watchOut": "Cuidado com"
+    },
+    "empty": {
+      "noCards": "Nenhum cartão corresponde aos seus critérios.",
+      "loadError": "Falha ao carregar cartões de crédito"
+    },
+    "guides": {
+      "ssnTitle": "Guia de SSN",
+      "ssnDesc": "Como obter seu Número de Segurança Social como estudante F-1",
+      "itinTitle": "Guia de ITIN",
+      "itinDesc": "Número de Identificação do Contribuinte Individual explicado",
+      "creditTitle": "Construindo crédito",
+      "creditDesc": "Guia passo a passo para construir histórico de crédito nos EUA",
+      "comparisonTitle": "Comparação de Contas Bancárias",
+      "comparisonDesc": "Comparação detalhada de contas bancárias amigas de estudantes",
+      "ninTitle": "Guia de NIN",
+      "ninDesc": "Como se inscrever para um Número de Seguro Nacional",
+      "ukAccountTitle": "Conta para estudantes do Reino Unido",
+      "ukAccountDesc": "Guia para abrir uma conta bancária do Reino Unido como estudante",
+      "ukCreditTitle": "Construindo crédito do Reino Unido",
+      "ukCreditDesc": "Como construir sua pontuação de crédito no Reino Unido",
+      "monzoTitle": "Monzo vs Starling",
+      "monzoDesc": "Compare bancos digitais populares no Reino Unido",
+      "sinTitle": "Guia de SIN",
+      "sinDesc": "Como obter seu Número de Seguro Social",
+      "caAccountTitle": "Conta bancária canadense",
+      "caAccountDesc": "Abrindo uma conta bancária como estudante internacional",
+      "caCreditTitle": "Construindo crédito no Canadá",
+      "caCreditDesc": "Guia para estabelecer histórico de crédito",
+      "caComparisonTitle": "Comparação de Banco para Estudantes",
+      "caComparisonDesc": "Compare contas bancárias de estudantes canadenses"
     },
     "bankCard": {
       "openAccount": "Abrir conta",
@@ -107,40 +352,52 @@
       "minDeposit": "Depósito mín.",
       "monthlyFee": "Taxa mensal",
       "features": "Recursos"
-    },
-    "reassurance": "A maioria dos bancos aceita estudantes internacionais — você não precisa de SSN para começar."
+    }
   },
   "housing": {
     "title": "Moradia",
-    "subtitle": "Encontre apartamentos perto do campus",
+    "subtitle": "Encontre sua casa perto do campus",
+    "showMap": "Mostrar mapa",
+    "hideMap": "Ocultar mapa",
     "filters": {
       "gym": "Academia",
       "furnished": "Mobiliado",
       "parking": "Estacionamento",
+      "all": "Todos",
       "allAreas": "Todas as áreas",
       "north": "Norte",
       "south": "Sul",
       "east": "Leste",
       "west": "Oeste"
     },
-    "apartment": {
-      "perMonth": "/mês",
-      "beds": "quartos",
-      "baths": "banheiros",
-      "sqft": "m²",
-      "walkingTime": "min caminhando",
-      "bikingTime": "min de bicicleta",
-      "rating": "avaliação",
-      "reviews": "avaliações",
-      "viewDetails": "Ver detalhes",
-      "getDirections": "Como chegar",
-      "shared": "Compartilhado"
-    },
+    "reassurance": "Encontrar moradia pode parecer assustador. Dedique seu tempo — a maioria dos contratos começa 1-2 meses antes de se mudar. Encontramos {count} opções perto do seu campus.",
     "map": {
-      "showMap": "Mostrar mapa",
-      "hideMap": "Ocultar mapa",
       "apartments": "apartamentos",
       "bankBranches": "agências bancárias"
+    },
+    "empty": {
+      "noApartments": "Nenhum apartamento encontrado.",
+      "adjustFilters": "Tente ajustar seus filtros.",
+      "loadError": "Falha ao carregar apartamentos"
+    },
+    "apartment": {
+      "solo": "Solo",
+      "shared": "Compartilhado",
+      "perMonth": "/mês",
+      "beds": "quartos",
+      "bed": "quarto",
+      "bath": "banheiro",
+      "baths": "banheiros",
+      "sqft": "m²",
+      "minWalk": "min caminhando",
+      "minBike": "min de bicicleta",
+      "minTransit": "min de trânsito",
+      "minDrive": "min de carro",
+      "amenities": "Comodidades",
+      "reviews": "avaliações",
+      "rating": "avaliação",
+      "viewDetails": "Ver detalhes",
+      "getDirections": "Como chegar"
     }
   },
   "visa": {
@@ -278,7 +535,24 @@
       "system": "Sistema"
     }
   },
+  "login": {
+    "title": "Bem-vindo de volta.",
+    "subtitle": "Entre em sua conta",
+    "email": "Email",
+    "password": "Senha",
+    "keepSignedIn": "Mantenha-me conectado",
+    "signIn": "Entrar",
+    "signingIn": "Entrando...",
+    "forgotPassword": "Esqueceu a senha?",
+    "noAccount": "Não tem uma conta?",
+    "signUp": "Cadastre-se",
+    "continueWithGoogle": "Continuar com Google",
+    "invalidCredentials": "Email ou senha inválidos. Tente novamente.",
+    "googleError": "Falha ao fazer login com Google. Tente novamente.",
+    "googleUnavailable": "O login do Google não está disponível. Use o login por email."
+  },
   "errors": {
+    "required": "Obrigatório",
     "networkError": "Erro de rede. Verifique sua conexão.",
     "serverError": "Erro do servidor. Tente novamente mais tarde.",
     "notFound": "Página não encontrada",
@@ -294,7 +568,7 @@
       "password": "Senha",
       "forgotPassword": "Esqueceu a senha?",
       "signIn": "Entrar",
-      "noAccount": "Não tem conta?",
+      "noAccount": "Não tem uma conta?",
       "signUp": "Cadastre-se"
     },
     "register": {
@@ -304,13 +578,13 @@
       "password": "Senha",
       "confirmPassword": "Confirmar senha",
       "signUp": "Cadastrar",
-      "hasAccount": "Já tem conta?",
+      "hasAccount": "Já tem uma conta?",
       "signIn": "Entrar"
     },
     "forgotPassword": {
       "title": "Redefinir senha",
       "description": "Digite seu email para receber o link de redefinição",
-      "sendLink": "Enviar link",
+      "sendLink": "Enviar link de redefinição",
       "backToLogin": "Voltar ao login"
     }
   }

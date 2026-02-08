@@ -3,6 +3,7 @@
     "loading": "加载中...",
     "error": "出现了问题",
     "retry": "重试",
+    "tryAgain": "再试一次",
     "cancel": "取消",
     "save": "保存",
     "continue": "继续",
@@ -24,12 +25,21 @@
     "profile": "个人资料",
     "help": "帮助",
     "apply": "申请",
+    "applyNow": "立即申请",
     "submit": "提交",
     "edit": "编辑",
     "delete": "删除",
     "confirm": "确认",
     "yes": "是",
-    "no": "否"
+    "no": "否",
+    "required": "必填项",
+    "optional": "可选项",
+    "all": "全部",
+    "or": "或",
+    "and": "和",
+    "readMore": "阅读更多",
+    "viewListing": "查看列表",
+    "privacyFooter": "您的数据保持隐私。始终如此。"
   },
   "nav": {
     "home": "首页",
@@ -50,45 +60,235 @@
       "subtitle": "请选择您偏好的语言",
       "continue": "继续"
     },
-    "welcome": {
-      "title": "欢迎来到Noor",
-      "subtitle": "留学生的财务伙伴",
-      "description": "我们将帮助您开设银行账户、寻找住房并管理您的财务。"
+    "step1": {
+      "title": "首先，是您",
+      "subtitle": "这样我们才能围绕您来构建",
+      "firstName": "名字",
+      "lastName": "姓氏",
+      "email": "邮箱",
+      "eduVerified": ".edu邮箱已验证",
+      "staySignedIn": "保持我登录状态",
+      "agreeToTerms": "我同意",
+      "termsOfService": "服务条款",
+      "privacyPolicy": "隐私政策",
+      "schoolType": "学校类型",
+      "fourYearUniversity": "4年制大学",
+      "communityCollege": "社区学院",
+      "university": "4年制大学",
+      "searchUni": "搜索大学...",
+      "searchCC": "搜索社区学院...",
+      "cantFindSchool": "找不到您的学校？继续无论如何",
+      "noResults": "未找到结果。继续而不选择学校",
+      "countryOfOrigin": "原籍国"
     },
-    "steps": {
-      "university": "大学",
-      "country": "国家",
-      "visa": "签证状态",
-      "preferences": "偏好设置"
+    "password": {
+      "placeholder": "密码",
+      "confirm": "确认密码",
+      "match": "密码匹配",
+      "noMatch": "密码不匹配",
+      "minLength": "8个或以上字符",
+      "uppercase": "大写 (A-Z)",
+      "lowercase": "小写 (a-z)",
+      "number": "数字 (0-9)",
+      "special": "特殊字符 (!@#$%)"
     },
-    "university": {
-      "title": "您在哪里学习？",
-      "placeholder": "搜索您的大学...",
-      "notFound": "找不到您的大学？"
+    "step2": {
+      "title": "您现在的位置",
+      "subtitle": "每个阶段都有不同的需求。我们将匹配它们。",
+      "associates": "副学士学位",
+      "certificate": "证书课程",
+      "esl": "英语/语言",
+      "undecided": "未确定",
+      "bachelors": "学士学位",
+      "masters": "硕士学位",
+      "phd": "博士学位",
+      "postdoc": "博士后",
+      "exchange": "交换/访问",
+      "year": "年级",
+      "planningTransfer": "计划转校？",
+      "transferFeedback": "很好！我们将帮助您为转校做准备。",
+      "tailorFeedback": "明白了。我们将为您定制选项。"
     },
-    "country": {
-      "title": "您在哪个国家？",
-      "us": "美国",
-      "uk": "英国",
-      "ca": "加拿大"
+    "step2_5": {
+      "title": "您的转校目标",
+      "subtitle": "让我们规划您进入4年制大学的道路。",
+      "tagEligible": "TAG合格大学",
+      "guaranteed": "保证录取",
+      "otherTargets": "其他目标大学",
+      "targetMajor": "目标专业",
+      "majorPlaceholder": "例如，计算机科学、商业...",
+      "expectedTransfer": "预期转校时间",
+      "fall2026": "2026年秋季",
+      "spring2027": "2027年春季",
+      "fall2027": "2027年秋季",
+      "later": "以后",
+      "targetsFeedback": "已选择{count}个目标。我们将为您跟踪截止日期。"
     },
-    "visa": {
-      "title": "您的签证状态是什么？",
-      "f1": "F-1学生签证",
-      "j1": "J-1交流签证",
-      "opt": "OPT/CPT",
-      "h1b": "H-1B工作签证",
-      "tier4": "Tier 4学生签证",
-      "studyPermit": "学习许可"
+    "step3": {
+      "title": "我们正在处理的内容",
+      "subtitle": "我们从这里开始定制",
+      "ssn": "社会安全号码？",
+      "noSsnFeedback": "没问题。我们有其他选择。",
+      "itin": "个人纳税人号码？",
+      "nin": "国家保险号码 (NIN)？",
+      "noNinFeedback": "别担心。您可以在到达后申请。",
+      "sin": "社会保险号码 (SIN)？",
+      "noSinFeedback": "您可以在到达加拿大后申请。",
+      "localAddress": "本地地址？",
+      "addressFeedback": "很好。更多选择打开了。"
     },
-    "complete": {
-      "title": "一切就绪！",
-      "subtitle": "开始您的财务之旅"
+    "step4": {
+      "title": "您的财务状况",
+      "subtitle": "向我们讲讲",
+      "income": "流入",
+      "incomeHint": "奖学金、家庭支持、勤工俭学",
+      "expenses": "流出",
+      "expensesHint": "租金、食物、交通、娱乐",
+      "priority": "您的优先事项。",
+      "budget": "每一美元都很重要。",
+      "balance": "平衡价值和质量。",
+      "premium": "支付高级费用。"
+    },
+    "step5": {
+      "title": "您如何银行",
+      "subtitle": "选择重要的内容",
+      "everyday": "日常消费",
+      "family": "家庭转账",
+      "tuition": "学费",
+      "international": "国际转账",
+      "atm": "校园ATM",
+      "mobile": "移动存款",
+      "billPay": "账单支付",
+      "savings": "储蓄",
+      "style": "风格。",
+      "branches": "分支机构",
+      "digital": "数字",
+      "either": "两者均可"
+    },
+    "step6": {
+      "title": "全球",
+      "subtitle": "您如何跨越边界",
+      "transfers": "国际转账。",
+      "never": "从不",
+      "fewTimes": "一年几次",
+      "monthly": "每月或更频繁",
+      "branchNearby": "附近有分支机构吗？",
+      "mustHave": "必须有",
+      "preferred": "首选",
+      "dontNeed": "不需要",
+      "campusSide": "校园的哪一侧？",
+      "north": "北",
+      "south": "南",
+      "east": "东",
+      "west": "西",
+      "center": "中心",
+      "notSure": "不确定",
+      "campusHint": "帮助我们找到附近的银行和住房"
+    },
+    "step7": {
+      "title": "您的目标",
+      "subtitle": "现在对您重要的是什么",
+      "bankAccount": "银行账户",
+      "creditHistory": "信用历史",
+      "housing": "住房",
+      "studentLoans": "学生贷款",
+      "campusJobs": "校园工作",
+      "investing": "投资",
+      "postGrad": "毕业后规划",
+      "creditCards": "信用卡。",
+      "startNow": "现在开始",
+      "later": "以后",
+      "skip": "跳过"
+    },
+    "submit": {
+      "complete": "完成评估",
+      "creating": "正在创建账户...",
+      "error": "出现了问题。请重试。",
+      "failed": "创建账户失败。请重试。"
+    },
+    "terms": {
+      "title": "服务条款",
+      "lastUpdated": "最后更新：2026年1月",
+      "section1Title": "1. 接受条款",
+      "section1Body": "通过访问和使用Noor，您接受并同意受这些服务条款的约束。如果您不同意这些条款，请不要使用我们的服务。",
+      "section2Title": "2. 服务描述",
+      "section2Body": "Noor提供专门为国际学生设计的财务指导、银行推荐和工具。我们的推荐仅供参考，不构成财务建议。",
+      "section3Title": "3. 用户责任",
+      "section3Body": "您负责维护账户和密码的保密。您同意提供准确的信息并在必要时更新您的信息。",
+      "section4Title": "4. 隐私",
+      "section4Body": "您的隐私对我们很重要。请查看我们的隐私政策，了解我们如何收集、使用和保护您的信息。",
+      "section5Title": "5. 责任限制",
+      "section5Body": "Noor对基于我们推荐所做的任何财务决定不承担责任。请始终咨询合格的财务顾问以获取个性化建议。"
+    },
+    "privacy": {
+      "title": "隐私政策",
+      "lastUpdated": "最后更新：2026年1月",
+      "collectTitle": "我们收集什么",
+      "collectBody": "我们收集您直接向我们提供的信息，包括您的姓名、电子邮件地址、大学、签证状态和财务偏好。",
+      "useTitle": "我们如何使用您的信息",
+      "useBody": "我们使用您的信息来提供个性化的银行推荐、发送相关的更新和通知，以及改进我们的服务。",
+      "storageTitle": "数据存储",
+      "storageBody": "您的数据使用行业标准加密存储安全。我们永远不会将您的个人信息出售给第三方。",
+      "rightsTitle": "您的权利",
+      "rightsBody": "您有权随时访问、更正或删除您的个人数据。您可以从设置页面导出您的数据或请求删除账户。",
+      "contactTitle": "与我们联系",
+      "contactBody": "如果您对本隐私政策有疑问，请通过privacy@noorapp.com与我们联系。"
     }
+  },
+  "welcome": {
+    "title": "欢迎来到NOOR。",
+    "subtitle": "我们在这里帮助您顺利完成银行开户、住房和一切。",
+    "reassurance1": "不用急。慢慢来。",
+    "reassurance2": "我们将逐步指导您。",
+    "haveAccount": "我已经有账户",
+    "countrySelect": {
+      "title": "您要去哪里？",
+      "subtitle": "选择您的目的地国家。",
+      "us": "美国",
+      "usDesc": "在美国学习或工作",
+      "uk": "英国",
+      "ukDesc": "在英国学习或工作",
+      "ca": "加拿大",
+      "caDesc": "在加拿大学习或工作"
+    },
+    "reason": {
+      "title": "今天您来是为什么？",
+      "subtitle": "让我们为您定制体验。",
+      "newToUS": "刚来美国",
+      "newToUK": "刚来英国",
+      "newToCA": "刚来加拿大",
+      "newDesc": "让我们为您准备必需品",
+      "settling": "安顿下来",
+      "settlingDesc": "是时候完善您的财务了",
+      "banking": "银行",
+      "bankingDesc": "我们将为您找到完美的选择",
+      "housing": "住房",
+      "housingDesc": "精选您附近的住房",
+      "credit": "信用",
+      "creditDesc": "开始建立您的基础",
+      "browsing": "浏览",
+      "browsingDesc": "慢慢来，我们在这里"
+    }
+  },
+  "login": {
+    "title": "欢迎回来",
+    "subtitle": "登录您的账户",
+    "email": "邮箱",
+    "password": "密码",
+    "keepSignedIn": "保持我登录状态",
+    "signIn": "登录",
+    "signingIn": "正在登录...",
+    "forgotPassword": "忘记密码？",
+    "noAccount": "没有账户？",
+    "signUp": "注册",
+    "continueWithGoogle": "使用Google继续",
+    "invalidCredentials": "邮箱或密码无效。请重试。",
+    "googleError": "谷歌登录失败。请重试。",
+    "googleUnavailable": "谷歌登录不可用。请使用邮箱登录。"
   },
   "banking": {
     "title": "银行",
-    "subtitle": "为留学生找到最佳银行",
+    "subtitle": "我们将帮助您找到合适的选择",
     "tabs": {
       "banks": "银行",
       "cards": "银行卡",
@@ -96,51 +296,124 @@
     },
     "filters": {
       "noSsn": "无需SSN",
+      "noNin": "无需NIN",
+      "noSin": "无需SIN",
       "traditional": "传统银行",
       "online": "网上银行",
-      "noFee": "免年费",
-      "noCredit": "无需信用记录"
-    },
-    "bankCard": {
-      "openAccount": "开设账户",
-      "branches": "附近网点",
-      "minDeposit": "最低存款",
-      "monthlyFee": "月费",
-      "features": "功能"
-    },
-    "reassurance": "大多数银行欢迎留学生 — 无需SSN即可开始。"
-  },
-  "housing": {
-    "title": "住房",
-    "subtitle": "在校园附近找公寓",
-    "filters": {
-      "gym": "健身房",
-      "furnished": "带家具",
-      "parking": "停车位",
+      "noFee": "无年费",
+      "noCredit": "无需信用记录",
       "allAreas": "所有区域",
       "north": "北",
       "south": "南",
       "east": "东",
       "west": "西"
     },
-    "apartment": {
-      "perMonth": "/月",
-      "beds": "卧室",
-      "baths": "浴室",
-      "sqft": "平方英尺",
-      "walkingTime": "分钟步行",
-      "bikingTime": "分钟骑行",
-      "rating": "评分",
-      "reviews": "评论",
-      "viewDetails": "查看详情",
-      "getDirections": "获取路线",
-      "shared": "合租"
+    "reassurance": {
+      "us": "大多数美国银行接受国际学生 — 无需SSN即可开始。花时间比较。",
+      "uk": "大多数英国银行欢迎国际学生 — 无需国家保险号即可开设账户。慢慢来。",
+      "ca": "加拿大银行欢迎国际学生 — 无需SIN即可开设基本账户。比较您的选择。",
+      "creditUs": "建立信用需要时间 — 从一张卡开始并负责任地使用它。不用急。",
+      "creditUk": "建立英国信用记录需要时间 — 从基本信用卡开始并负责任地使用它。",
+      "creditCa": "建立加拿大信用需要时间 — 从学生信用卡开始并负责任地使用它。"
     },
+    "sections": {
+      "recommended": "为您推荐",
+      "recommendedSubtitle": "根据您的情况。今天无需决定。",
+      "branches": "您附近的分支机构",
+      "branchesSubtitle": "需要时获得面对面帮助。",
+      "branchLocation": "分支机构位置",
+      "goodFirstCards": "不错的第一张卡"
+    },
+    "card": {
+      "noSsn": "无需SSN",
+      "noAnnualFee": "无年费",
+      "noFtf": "无外汇手续费",
+      "signupBonus": "注册奖金",
+      "benefits": "优势",
+      "watchOut": "需要注意"
+    },
+    "empty": {
+      "noCards": "没有卡符合您的条件。",
+      "loadError": "加载信用卡失败"
+    },
+    "guides": {
+      "ssnTitle": "SSN指南",
+      "ssnDesc": "如何作为F-1学生获得您的社会安全号码",
+      "itinTitle": "ITIN指南",
+      "itinDesc": "个人纳税人号码说明",
+      "creditTitle": "建立信用",
+      "creditDesc": "在美国建立信用历史的分步指南",
+      "comparisonTitle": "银行账户对比",
+      "comparisonDesc": "学生友好型银行账户的详细对比",
+      "ninTitle": "NIN指南",
+      "ninDesc": "如何申请国家保险号码",
+      "ukAccountTitle": "英国学生账户",
+      "ukAccountDesc": "作为学生在英国开设银行账户的指南",
+      "ukCreditTitle": "建立英国信用",
+      "ukCreditDesc": "如何在英国建立您的信用分数",
+      "monzoTitle": "Monzo vs Starling",
+      "monzoDesc": "比较英国流行的数字银行",
+      "sinTitle": "SIN指南",
+      "sinDesc": "如何获得您的社会保险号码",
+      "caAccountTitle": "加拿大银行账户",
+      "caAccountDesc": "作为国际学生开设银行账户",
+      "caCreditTitle": "在加拿大建立信用",
+      "caCreditDesc": "建立信用历史的指南",
+      "caComparisonTitle": "学生银行对比",
+      "caComparisonDesc": "比较加拿大学生银行账户"
+    },
+    "bankCard": {
+      "openAccount": "开设账户",
+      "branches": "附近的分支机构",
+      "minDeposit": "最低存款",
+      "monthlyFee": "月费",
+      "features": "功能"
+    }
+  },
+  "housing": {
+    "title": "住房",
+    "subtitle": "在校园附近找到您的家",
+    "showMap": "显示地图",
+    "hideMap": "隐藏地图",
+    "filters": {
+      "gym": "健身房",
+      "furnished": "带家具",
+      "parking": "停车位",
+      "all": "全部",
+      "allAreas": "所有区域",
+      "north": "北",
+      "south": "南",
+      "east": "东",
+      "west": "西"
+    },
+    "reassurance": "找住房可能会让人感到不堪重负。慢慢来 — 大多数租赁在入住前1-2个月开始。我们在您的校园附近找到了{count}个选择。",
     "map": {
-      "showMap": "显示地图",
-      "hideMap": "隐藏地图",
       "apartments": "套公寓",
       "bankBranches": "家银行网点"
+    },
+    "empty": {
+      "noApartments": "未找到公寓。",
+      "adjustFilters": "尝试调整您的过滤器。",
+      "loadError": "加载公寓失败"
+    },
+    "apartment": {
+      "solo": "单独",
+      "shared": "合租",
+      "perMonth": "/月",
+      "beds": "卧室",
+      "bed": "卧室",
+      "bath": "浴室",
+      "baths": "浴室",
+      "sqft": "平方英尺",
+      "minWalk": "分钟步行",
+      "minBike": "分钟骑行",
+      "minTransit": "分钟交通",
+      "minDrive": "分钟开车",
+      "amenities": "便利设施",
+      "reviews": "评论",
+      "rating": "评分",
+      "viewDetails": "查看详情",
+      "getDirections": "获取路线"
     }
   },
   "visa": {
@@ -279,13 +552,14 @@
     }
   },
   "errors": {
-    "networkError": "网络错误，请检查您的连接。",
-    "serverError": "服务器错误，请稍后重试。",
+    "required": "必填项",
+    "networkError": "网络错误。请检查您的连接。",
+    "serverError": "服务器错误。请稍后重试。",
     "notFound": "页面未找到",
     "unauthorized": "请登录以继续",
-    "forbidden": "您没有访问权限",
+    "forbidden": "您没有权限访问此内容",
     "validation": "请检查您的输入",
-    "timeout": "请求超时，请重试。"
+    "timeout": "请求超时。请重试。"
   },
   "auth": {
     "login": {

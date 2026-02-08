@@ -3,6 +3,7 @@
     "loading": "Loading...",
     "error": "Something went wrong",
     "retry": "Retry",
+    "tryAgain": "Try again",
     "cancel": "Cancel",
     "save": "Save",
     "continue": "Continue",
@@ -24,12 +25,21 @@
     "profile": "Profile",
     "help": "Help",
     "apply": "Apply",
+    "applyNow": "Apply Now",
     "submit": "Submit",
     "edit": "Edit",
     "delete": "Delete",
     "confirm": "Confirm",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "required": "Required",
+    "optional": "Optional",
+    "all": "All",
+    "or": "or",
+    "and": "and",
+    "readMore": "Read more",
+    "viewListing": "View Listing",
+    "privacyFooter": "Your data stays private. Always."
   },
   "nav": {
     "home": "Home",
@@ -44,62 +54,313 @@
     "jobs": "Jobs",
     "funding": "Funding"
   },
+  "welcome": {
+    "title": "Welcome to NOOR.",
+    "subtitle": "We're here to help you navigate banking, housing, and everything in between.",
+    "reassurance1": "No rush. Take your time.",
+    "reassurance2": "We'll guide you step by step.",
+    "haveAccount": "I already have an account",
+    "countrySelect": {
+      "title": "Where are you headed?",
+      "subtitle": "Select your destination country.",
+      "us": "United States",
+      "usDesc": "Study or work in the USA",
+      "uk": "United Kingdom",
+      "ukDesc": "Study or work in the UK",
+      "ca": "Canada",
+      "caDesc": "Study or work in Canada"
+    },
+    "reason": {
+      "title": "What brings you in today?",
+      "subtitle": "Allow us to tailor your experience.",
+      "newToUS": "New to the States",
+      "newToUK": "New to the UK",
+      "newToCA": "New to Canada",
+      "newDesc": "Let us prepare your essentials",
+      "settling": "Settling in",
+      "settlingDesc": "Time to refine your finances",
+      "banking": "Banking",
+      "bankingDesc": "We'll find your perfect fit",
+      "housing": "Housing",
+      "housingDesc": "Curated residences near you",
+      "credit": "Credit",
+      "creditDesc": "Begin building your foundation",
+      "browsing": "Browsing",
+      "browsingDesc": "Take your time, we're here"
+    }
+  },
   "survey": {
     "languageSelect": {
       "title": "Choose Your Language",
       "subtitle": "Select your preferred language",
       "continue": "Continue"
     },
-    "welcome": {
-      "title": "Welcome to Noor",
-      "subtitle": "Your financial companion for studying abroad",
-      "description": "We'll help you set up banking, find housing, and manage your finances as an international student."
+    "step1": {
+      "title": "First, you.",
+      "subtitle": "So we can build this around you.",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "email": "Email",
+      "eduVerified": ".edu email verified",
+      "staySignedIn": "Keep me signed in",
+      "agreeToTerms": "I agree to the",
+      "termsOfService": "Terms of Service",
+      "privacyPolicy": "Privacy Policy",
+      "schoolType": "School type",
+      "fourYearUniversity": "4-Year University",
+      "communityCollege": "Community College",
+      "university": "4-Year University",
+      "searchUni": "Search universities...",
+      "searchCC": "Search community colleges...",
+      "cantFindSchool": "Can't find your school? Continue anyway",
+      "noResults": "No results found. Continue without selecting a school",
+      "countryOfOrigin": "Country of Origin"
     },
-    "steps": {
-      "university": "University",
-      "country": "Country",
-      "visa": "Visa Status",
-      "preferences": "Preferences"
+    "password": {
+      "placeholder": "Password",
+      "confirm": "Confirm password",
+      "match": "Passwords match",
+      "noMatch": "Passwords don't match",
+      "minLength": "8+ characters",
+      "uppercase": "Uppercase (A-Z)",
+      "lowercase": "Lowercase (a-z)",
+      "number": "Number (0-9)",
+      "special": "Special (!@#$%)"
     },
-    "university": {
-      "title": "Where are you studying?",
-      "placeholder": "Search for your university...",
-      "notFound": "Can't find your university?"
+    "step2": {
+      "title": "Where you are.",
+      "subtitle": "Each stage has different needs. We'll match them.",
+      "associates": "Associate's",
+      "certificate": "Certificate Program",
+      "esl": "ESL/Language",
+      "undecided": "Undecided",
+      "bachelors": "Bachelor's",
+      "masters": "Master's",
+      "phd": "PhD",
+      "postdoc": "Postdoc",
+      "exchange": "Exchange/Visiting",
+      "year": "Year",
+      "planningTransfer": "Planning to transfer?",
+      "transferFeedback": "Great! We'll help you prepare for transfer.",
+      "tailorFeedback": "Got it. We'll tailor your options."
     },
-    "country": {
-      "title": "Which country are you in?",
-      "us": "United States",
-      "uk": "United Kingdom",
-      "ca": "Canada"
+    "step2_5": {
+      "title": "Your Transfer Goals.",
+      "subtitle": "Let's plan your path to a 4-year university.",
+      "tagEligible": "TAG-Eligible Universities",
+      "guaranteed": "Guaranteed admission",
+      "otherTargets": "Other Target Universities",
+      "targetMajor": "Target Major",
+      "majorPlaceholder": "e.g., Computer Science, Business...",
+      "expectedTransfer": "Expected Transfer",
+      "fall2026": "Fall 2026",
+      "spring2027": "Spring 2027",
+      "fall2027": "Fall 2027",
+      "later": "Later",
+      "targetsFeedback": "{count} target(s) selected. We'll track deadlines for you."
     },
-    "visa": {
-      "title": "What's your visa status?",
-      "f1": "F-1 Student Visa",
-      "j1": "J-1 Exchange Visa",
-      "opt": "OPT/CPT",
-      "h1b": "H-1B Work Visa",
-      "tier4": "Tier 4 Student Visa",
-      "studyPermit": "Study Permit"
+    "step3": {
+      "title": "What We're Working With.",
+      "subtitle": "We Tailor From Here",
+      "ssn": "SSN?",
+      "noSsnFeedback": "No problem. We have options.",
+      "itin": "ITIN?",
+      "nin": "National Insurance Number (NIN)?",
+      "noNinFeedback": "No worries. You can apply after arrival.",
+      "sin": "Social Insurance Number (SIN)?",
+      "noSinFeedback": "You can apply for one after arriving in Canada.",
+      "localAddress": "Local address?",
+      "addressFeedback": "Good. More doors open."
     },
-    "complete": {
-      "title": "You're all set!",
-      "subtitle": "Let's get started with your financial journey"
+    "step4": {
+      "title": "Your Finances.",
+      "subtitle": "Walk Us Through",
+      "income": "What comes in",
+      "incomeHint": "Scholarships, family support, work-study",
+      "expenses": "What goes out",
+      "expensesHint": "Rent, food, transportation, entertainment",
+      "priority": "Your priority.",
+      "budget": "Every dollar counts.",
+      "balance": "Balance value and quality.",
+      "premium": "Pay for premium."
+    },
+    "step5": {
+      "title": "How you bank.",
+      "subtitle": "Select what matters.",
+      "everyday": "Everyday spending",
+      "family": "Family transfers",
+      "tuition": "Tuition",
+      "international": "International wires",
+      "atm": "Campus ATM",
+      "mobile": "Mobile deposit",
+      "billPay": "Bill pay",
+      "savings": "Savings",
+      "style": "Style.",
+      "branches": "Branches",
+      "digital": "Digital",
+      "either": "Either"
+    },
+    "step6": {
+      "title": "Global.",
+      "subtitle": "How you move across borders.",
+      "transfers": "Transfers abroad.",
+      "never": "Never",
+      "fewTimes": "A few times a year",
+      "monthly": "Monthly or more",
+      "branchNearby": "Branch nearby?",
+      "mustHave": "Must have",
+      "preferred": "Preferred",
+      "dontNeed": "Don't need",
+      "campusSide": "Side of campus?",
+      "north": "North",
+      "south": "South",
+      "east": "East",
+      "west": "West",
+      "center": "Center",
+      "notSure": "Not sure",
+      "campusHint": "Helps us find banks and housing nearby"
+    },
+    "step7": {
+      "title": "Your goals.",
+      "subtitle": "What matters to you right now.",
+      "bankAccount": "Bank account",
+      "creditHistory": "Credit history",
+      "housing": "Housing",
+      "studentLoans": "Student loans",
+      "campusJobs": "Campus jobs",
+      "investing": "Investing",
+      "postGrad": "Post-grad planning",
+      "creditCards": "Credit cards.",
+      "startNow": "Start now",
+      "later": "Later",
+      "skip": "Skip"
+    },
+    "submit": {
+      "complete": "Complete Assessment",
+      "creating": "Creating account...",
+      "error": "Something went wrong. Please try again.",
+      "failed": "Failed to create account. Please try again."
+    },
+    "terms": {
+      "title": "Terms of Service",
+      "lastUpdated": "Last updated: January 2026",
+      "section1Title": "1. Acceptance of Terms",
+      "section1Body": "By accessing and using Noor, you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use our service.",
+      "section2Title": "2. Description of Service",
+      "section2Body": "Noor provides financial guidance, banking recommendations, and tools specifically designed for international students. Our recommendations are for informational purposes only and do not constitute financial advice.",
+      "section3Title": "3. User Responsibilities",
+      "section3Body": "You are responsible for maintaining the confidentiality of your account and password. You agree to provide accurate information and to update your information as necessary.",
+      "section4Title": "4. Privacy",
+      "section4Body": "Your privacy is important to us. Please review our Privacy Policy to understand how we collect, use, and protect your information.",
+      "section5Title": "5. Limitation of Liability",
+      "section5Body": "Noor is not liable for any financial decisions made based on our recommendations. Always consult with a qualified financial advisor for personalized advice."
+    },
+    "privacy": {
+      "title": "Privacy Policy",
+      "lastUpdated": "Last updated: January 2026",
+      "collectTitle": "What We Collect",
+      "collectBody": "We collect information you provide directly to us, including your name, email address, university, visa status, and financial preferences.",
+      "useTitle": "How We Use Your Information",
+      "useBody": "We use your information to provide personalized banking recommendations, send relevant updates and notifications, and improve our services.",
+      "storageTitle": "Data Storage",
+      "storageBody": "Your data is stored securely using industry-standard encryption. We never sell your personal information to third parties.",
+      "rightsTitle": "Your Rights",
+      "rightsBody": "You have the right to access, correct, or delete your personal data at any time. You can export your data or request account deletion from the Settings page.",
+      "contactTitle": "Contact Us",
+      "contactBody": "If you have questions about this Privacy Policy, please contact us at privacy@noorapp.com."
     }
+  },
+  "login": {
+    "title": "Welcome back.",
+    "subtitle": "Sign in to your account",
+    "email": "Email",
+    "password": "Password",
+    "keepSignedIn": "Keep me signed in",
+    "signIn": "Sign In",
+    "signingIn": "Signing in...",
+    "forgotPassword": "Forgot password?",
+    "noAccount": "Don't have an account?",
+    "signUp": "Sign up",
+    "continueWithGoogle": "Continue with Google",
+    "invalidCredentials": "Invalid email or password. Please try again.",
+    "googleError": "Failed to sign in with Google. Please try again.",
+    "googleUnavailable": "Google login is not available. Please use email login."
   },
   "banking": {
     "title": "Banking",
-    "subtitle": "Find the best bank for international students",
+    "subtitle": "We'll help you find the right fit.",
     "tabs": {
       "banks": "Banks",
       "cards": "Cards",
       "guides": "Guides"
     },
     "filters": {
-      "noSsn": "No SSN Required",
-      "traditional": "Traditional Banks",
-      "online": "Online Banks",
+      "noSsn": "No SSN",
+      "noNin": "No NIN",
+      "noSin": "No SIN",
+      "traditional": "Traditional",
+      "online": "Online",
       "noFee": "No Annual Fee",
-      "noCredit": "No Credit History"
+      "noCredit": "No Credit History",
+      "allAreas": "All Areas",
+      "north": "North",
+      "south": "South",
+      "east": "East",
+      "west": "West"
+    },
+    "reassurance": {
+      "us": "Most banks here accept international students — you don't need an SSN to get started. Take your time to compare.",
+      "uk": "Most UK banks welcome international students — you can open an account without a National Insurance Number. Take your time.",
+      "ca": "Canadian banks are welcoming to international students — you don't need a SIN to open a basic account. Compare your options.",
+      "creditUs": "Building credit takes time — start with one card and use it responsibly. No need to rush.",
+      "creditUk": "Building a UK credit file takes time — start with a basic credit card and use it responsibly.",
+      "creditCa": "Building Canadian credit takes time — start with a student credit card and use it responsibly."
+    },
+    "sections": {
+      "recommended": "Recommended for you",
+      "recommendedSubtitle": "Based on your situation. No pressure to decide today.",
+      "branches": "Branches near you",
+      "branchesSubtitle": "In-person help when you need it.",
+      "branchLocation": "Branch Location",
+      "goodFirstCards": "Good first cards"
+    },
+    "card": {
+      "noSsn": "No SSN",
+      "noAnnualFee": "No annual fee",
+      "noFtf": "No FTF",
+      "signupBonus": "Signup Bonus",
+      "benefits": "Benefits",
+      "watchOut": "Watch out for"
+    },
+    "empty": {
+      "noCards": "No cards match your criteria.",
+      "loadError": "Failed to load credit cards"
+    },
+    "guides": {
+      "ssnTitle": "SSN Guide",
+      "ssnDesc": "How to get your Social Security Number as an F-1 student",
+      "itinTitle": "ITIN Guide",
+      "itinDesc": "Individual Taxpayer Identification Number explained",
+      "creditTitle": "Building Credit",
+      "creditDesc": "Step-by-step guide to building credit history in the US",
+      "comparisonTitle": "Bank Account Comparison",
+      "comparisonDesc": "Detailed comparison of student-friendly bank accounts",
+      "ninTitle": "NIN Guide",
+      "ninDesc": "How to apply for a National Insurance Number",
+      "ukAccountTitle": "UK Student Account",
+      "ukAccountDesc": "Guide to opening a UK bank account as a student",
+      "ukCreditTitle": "Building UK Credit",
+      "ukCreditDesc": "How to build your credit score in the UK",
+      "monzoTitle": "Monzo vs Starling",
+      "monzoDesc": "Compare popular digital banks in the UK",
+      "sinTitle": "SIN Guide",
+      "sinDesc": "How to get your Social Insurance Number",
+      "caAccountTitle": "Canadian Bank Account",
+      "caAccountDesc": "Opening a bank account as an international student",
+      "caCreditTitle": "Building Credit in Canada",
+      "caCreditDesc": "Guide to establishing credit history",
+      "caComparisonTitle": "Student Banking Comparison",
+      "caComparisonDesc": "Compare Canadian student bank accounts"
     },
     "bankCard": {
       "openAccount": "Open Account",
@@ -107,40 +368,52 @@
       "minDeposit": "Min. deposit",
       "monthlyFee": "Monthly fee",
       "features": "Features"
-    },
-    "reassurance": "Most banks here accept international students — you don't need an SSN to get started."
+    }
   },
   "housing": {
     "title": "Housing",
-    "subtitle": "Find apartments near your campus",
+    "subtitle": "Find your home near campus",
+    "showMap": "Show map",
+    "hideMap": "Hide map",
     "filters": {
       "gym": "Gym",
       "furnished": "Furnished",
       "parking": "Parking",
+      "all": "All",
       "allAreas": "All Areas",
       "north": "North",
       "south": "South",
       "east": "East",
       "west": "West"
     },
-    "apartment": {
-      "perMonth": "/mo",
-      "beds": "beds",
-      "baths": "baths",
-      "sqft": "sqft",
-      "walkingTime": "min walk",
-      "bikingTime": "min bike",
-      "rating": "rating",
-      "reviews": "reviews",
-      "viewDetails": "View Details",
-      "getDirections": "Get Directions",
-      "shared": "Shared"
-    },
+    "reassurance": "Finding housing can feel overwhelming. Take your time — most leases start 1-2 months before move-in. We found {count} options near your campus.",
     "map": {
-      "showMap": "Show Map",
-      "hideMap": "Hide Map",
       "apartments": "apartments",
       "bankBranches": "bank branches"
+    },
+    "empty": {
+      "noApartments": "No apartments found.",
+      "adjustFilters": "Try adjusting your filters.",
+      "loadError": "Failed to load apartments"
+    },
+    "apartment": {
+      "solo": "Solo",
+      "shared": "Shared",
+      "perMonth": "/mo",
+      "beds": "beds",
+      "bed": "bed",
+      "bath": "bath",
+      "baths": "baths",
+      "sqft": "sqft",
+      "minWalk": "min walk",
+      "minBike": "min bike",
+      "minTransit": "min transit",
+      "minDrive": "min drive",
+      "amenities": "Amenities",
+      "reviews": "reviews",
+      "rating": "rating",
+      "viewDetails": "View Details",
+      "getDirections": "Get Directions"
     }
   },
   "visa": {
@@ -279,6 +552,7 @@
     }
   },
   "errors": {
+    "required": "Required",
     "networkError": "Network error. Please check your connection.",
     "serverError": "Server error. Please try again later.",
     "notFound": "Page not found",

@@ -3,9 +3,10 @@
     "loading": "로딩 중...",
     "error": "문제가 발생했습니다",
     "retry": "다시 시도",
+    "tryAgain": "다시 시도",
     "cancel": "취소",
     "save": "저장",
-    "continue": "계속",
+    "continue": "계속하기",
     "back": "뒤로",
     "next": "다음",
     "done": "완료",
@@ -14,7 +15,7 @@
     "filter": "필터",
     "sort": "정렬",
     "viewAll": "전체 보기",
-    "learnMore": "자세히 알아보기",
+    "learnMore": "자세히 보기",
     "getStarted": "시작하기",
     "signIn": "로그인",
     "signOut": "로그아웃",
@@ -23,72 +24,271 @@
     "settings": "설정",
     "profile": "프로필",
     "help": "도움말",
-    "apply": "신청하기",
+    "apply": "신청",
+    "applyNow": "지금 신청",
     "submit": "제출",
     "edit": "편집",
     "delete": "삭제",
     "confirm": "확인",
     "yes": "예",
-    "no": "아니오"
+    "no": "아니오",
+    "required": "필수",
+    "optional": "선택",
+    "all": "전체",
+    "or": "또는",
+    "and": "및",
+    "readMore": "더 보기",
+    "viewListing": "상세 보기",
+    "privacyFooter": "개인정보는 항상 안전하게 보호됩니다."
   },
   "nav": {
     "home": "홈",
-    "banking": "은행",
+    "banking": "뱅킹",
     "housing": "주거",
     "visa": "비자",
-    "grow": "자산 불리기",
-    "deals": "할인",
+    "grow": "투자",
+    "deals": "혜택",
     "guides": "가이드",
     "community": "커뮤니티",
-    "money": "자금 관리",
-    "jobs": "일자리",
-    "funding": "자금 조달"
+    "money": "자금",
+    "jobs": "취업",
+    "funding": "장학금"
+  },
+  "welcome": {
+    "title": "NOOR에 오신 것을 환영합니다.",
+    "subtitle": "뱅킹, 주거, 그리고 그 사이의 모든 것을 안내해 드릴게요.",
+    "reassurance1": "서두르지 않아도 돼요.",
+    "reassurance2": "차근차근 안내해 드릴게요.",
+    "haveAccount": "이미 계정이 있으신가요?",
+    "countrySelect": {
+      "title": "어디로 가시나요?",
+      "subtitle": "목적지 국가를 선택하세요.",
+      "us": "미국",
+      "usDesc": "미국에서 학업 또는 취업",
+      "uk": "영국",
+      "ukDesc": "영국에서 학업 또는 취업",
+      "ca": "캐나다",
+      "caDesc": "캐나다에서 학업 또는 취업"
+    },
+    "reason": {
+      "title": "오늘 무엇을 도와드릴까요?",
+      "subtitle": "맞춤형 경험을 준비해 드릴게요.",
+      "newToUS": "미국이 처음이에요",
+      "newToUK": "영국이 처음이에요",
+      "newToCA": "캐나다가 처음이에요",
+      "newDesc": "필수 사항들을 준비해 드릴게요",
+      "settling": "정착 중이에요",
+      "settlingDesc": "금융 관리를 다듬어 볼게요",
+      "banking": "뱅킹",
+      "bankingDesc": "최적의 은행을 찾아드릴게요",
+      "housing": "주거",
+      "housingDesc": "근처 최적의 주거지를 안내해 드릴게요",
+      "credit": "신용",
+      "creditDesc": "신용 쌓기를 시작해 볼까요",
+      "browsing": "둘러보기",
+      "browsingDesc": "천천히 둘러보세요"
+    }
   },
   "survey": {
     "languageSelect": {
       "title": "언어를 선택하세요",
-      "subtitle": "원하시는 언어를 선택해 주세요",
-      "continue": "계속"
+      "subtitle": "원하는 언어를 선택해 주세요",
+      "continue": "계속하기"
     },
-    "welcome": {
-      "title": "Noor에 오신 것을 환영합니다",
-      "subtitle": "유학생을 위한 금융 동반자",
-      "description": "유학 중 은행 개설, 주거 찾기, 재정 관리를 도와드립니다."
+    "step1": {
+      "title": "먼저, 당신에 대해.",
+      "subtitle": "당신에게 맞춤화된 경험을 만들어 드릴게요.",
+      "firstName": "이름",
+      "lastName": "성",
+      "email": "이메일",
+      "eduVerified": ".edu 이메일 인증됨",
+      "staySignedIn": "로그인 상태 유지",
+      "agreeToTerms": "동의합니다:",
+      "termsOfService": "서비스 이용약관",
+      "privacyPolicy": "개인정보 처리방침",
+      "schoolType": "학교 유형",
+      "fourYearUniversity": "4년제 대학교",
+      "communityCollege": "커뮤니티 칼리지",
+      "university": "4년제 대학교",
+      "searchUni": "대학교 검색...",
+      "searchCC": "커뮤니티 칼리지 검색...",
+      "cantFindSchool": "학교를 찾을 수 없나요? 그냥 계속하기",
+      "noResults": "결과가 없습니다. 학교 선택 없이 계속하기",
+      "countryOfOrigin": "출신 국가"
     },
-    "steps": {
-      "university": "대학교",
-      "country": "국가",
-      "visa": "비자 상태",
-      "preferences": "선호 설정"
+    "password": {
+      "placeholder": "비밀번호",
+      "confirm": "비밀번호 확인",
+      "match": "비밀번호 일치",
+      "noMatch": "비밀번호가 일치하지 않습니다",
+      "minLength": "8자 이상",
+      "uppercase": "대문자 (A-Z)",
+      "lowercase": "소문자 (a-z)",
+      "number": "숫자 (0-9)",
+      "special": "특수문자 (!@#$%)"
     },
-    "university": {
-      "title": "어디서 공부하시나요?",
-      "placeholder": "대학교를 검색하세요...",
-      "notFound": "대학교를 찾을 수 없나요?"
+    "step2": {
+      "title": "현재 상황.",
+      "subtitle": "각 단계마다 다른 필요가 있어요. 맞춰 드릴게요.",
+      "associates": "준학사",
+      "certificate": "자격증 프로그램",
+      "esl": "ESL/어학연수",
+      "undecided": "미정",
+      "bachelors": "학사",
+      "masters": "석사",
+      "phd": "박사",
+      "postdoc": "박사후연구원",
+      "exchange": "교환/방문",
+      "year": "학년",
+      "planningTransfer": "편입 계획이 있으신가요?",
+      "transferFeedback": "좋아요! 편입 준비를 도와드릴게요.",
+      "tailorFeedback": "알겠습니다. 옵션을 맞춰 드릴게요."
     },
-    "country": {
-      "title": "어느 나라에 계신가요?",
-      "us": "미국",
-      "uk": "영국",
-      "ca": "캐나다"
+    "step2_5": {
+      "title": "편입 목표.",
+      "subtitle": "4년제 대학교로의 길을 계획해 볼게요.",
+      "tagEligible": "TAG 대상 대학교",
+      "guaranteed": "입학 보장",
+      "otherTargets": "기타 목표 대학교",
+      "targetMajor": "목표 전공",
+      "majorPlaceholder": "예: 컴퓨터 공학, 경영학...",
+      "expectedTransfer": "예상 편입 시기",
+      "fall2026": "2026년 가을",
+      "spring2027": "2027년 봄",
+      "fall2027": "2027년 가을",
+      "later": "나중에",
+      "targetsFeedback": "{count}개 목표가 선택되었습니다. 마감일을 추적해 드릴게요."
     },
-    "visa": {
-      "title": "비자 상태는 어떻게 되시나요?",
-      "f1": "F-1 학생 비자",
-      "j1": "J-1 교환 비자",
-      "opt": "OPT/CPT",
-      "h1b": "H-1B 취업 비자",
-      "tier4": "Tier 4 학생 비자",
-      "studyPermit": "학업 허가증"
+    "step3": {
+      "title": "현재 상황 파악.",
+      "subtitle": "여기서부터 맞춤 설정을 해드릴게요",
+      "ssn": "SSN 있으신가요?",
+      "noSsnFeedback": "문제없어요. 다른 옵션이 있어요.",
+      "itin": "ITIN 있으신가요?",
+      "nin": "국민보험번호(NIN) 있으신가요?",
+      "noNinFeedback": "걱정 마세요. 도착 후 신청할 수 있어요.",
+      "sin": "사회보험번호(SIN) 있으신가요?",
+      "noSinFeedback": "캐나다 도착 후 신청할 수 있어요.",
+      "localAddress": "현지 주소 있으신가요?",
+      "addressFeedback": "좋아요. 더 많은 선택지가 열려요."
     },
-    "complete": {
-      "title": "준비가 완료되었습니다!",
-      "subtitle": "금융 여정을 시작해 봅시다"
+    "step4": {
+      "title": "재정 상황.",
+      "subtitle": "알려주세요",
+      "income": "수입",
+      "incomeHint": "장학금, 가족 지원, 근로장학금",
+      "expenses": "지출",
+      "expensesHint": "월세, 식비, 교통비, 여가비",
+      "priority": "우선순위.",
+      "budget": "한 푼이라도 아껴야 해요.",
+      "balance": "가치와 품질의 균형.",
+      "premium": "프리미엄을 위해 투자해요."
+    },
+    "step5": {
+      "title": "뱅킹 스타일.",
+      "subtitle": "중요한 것을 선택하세요.",
+      "everyday": "일상 지출",
+      "family": "가족 송금",
+      "tuition": "등록금",
+      "international": "해외 송금",
+      "atm": "캠퍼스 ATM",
+      "mobile": "모바일 입금",
+      "billPay": "공과금 납부",
+      "savings": "저축",
+      "style": "스타일.",
+      "branches": "오프라인 지점",
+      "digital": "디지털",
+      "either": "상관없음"
+    },
+    "step6": {
+      "title": "글로벌.",
+      "subtitle": "국경을 넘나드는 방법.",
+      "transfers": "해외 송금 빈도.",
+      "never": "없음",
+      "fewTimes": "연 몇 회",
+      "monthly": "월 1회 이상",
+      "branchNearby": "근처 지점 필요?",
+      "mustHave": "필수",
+      "preferred": "선호",
+      "dontNeed": "필요 없음",
+      "campusSide": "캠퍼스 어느 쪽?",
+      "north": "북쪽",
+      "south": "남쪽",
+      "east": "동쪽",
+      "west": "서쪽",
+      "center": "중앙",
+      "notSure": "잘 모르겠음",
+      "campusHint": "근처 은행과 주거지를 찾는 데 도움이 돼요"
+    },
+    "step7": {
+      "title": "목표.",
+      "subtitle": "지금 당신에게 중요한 것.",
+      "bankAccount": "은행 계좌",
+      "creditHistory": "신용 기록",
+      "housing": "주거",
+      "studentLoans": "학자금 대출",
+      "campusJobs": "캠퍼스 일자리",
+      "investing": "투자",
+      "postGrad": "졸업 후 계획",
+      "creditCards": "신용카드.",
+      "startNow": "지금 시작",
+      "later": "나중에",
+      "skip": "건너뛰기"
+    },
+    "submit": {
+      "complete": "평가 완료",
+      "creating": "계정 생성 중...",
+      "error": "문제가 발생했습니다. 다시 시도해 주세요.",
+      "failed": "계정 생성에 실패했습니다. 다시 시도해 주세요."
+    },
+    "terms": {
+      "title": "서비스 이용약관",
+      "lastUpdated": "최종 업데이트: 2026년 1월",
+      "section1Title": "1. 약관 동의",
+      "section1Body": "Noor에 접속하고 사용함으로써 귀하는 본 서비스 이용약관에 동의하게 됩니다. 본 약관에 동의하지 않으시면 서비스를 이용하지 마십시오.",
+      "section2Title": "2. 서비스 설명",
+      "section2Body": "Noor는 유학생을 위해 특별히 설계된 금융 안내, 은행 추천 및 도구를 제공합니다. 당사의 추천은 정보 제공 목적으로만 사용되며 금융 조언을 구성하지 않습니다.",
+      "section3Title": "3. 사용자 책임",
+      "section3Body": "귀하는 계정과 비밀번호의 기밀을 유지할 책임이 있습니다. 귀하는 정확한 정보를 제공하고 필요에 따라 정보를 업데이트하는 데 동의합니다.",
+      "section4Title": "4. 개인정보",
+      "section4Body": "귀하의 개인정보는 당사에게 중요합니다. 당사가 귀하의 정보를 어떻게 수집, 사용 및 보호하는지 이해하려면 개인정보 처리방침을 검토하십시오.",
+      "section5Title": "5. 책임 제한",
+      "section5Body": "Noor는 당사의 추천을 기반으로 한 어떠한 금융 결정에도 책임을 지지 않습니다. 맞춤형 조언은 항상 자격을 갖춘 재정 상담사와 상담하십시오."
+    },
+    "privacy": {
+      "title": "개인정보 처리방침",
+      "lastUpdated": "최종 업데이트: 2026년 1월",
+      "collectTitle": "수집 정보",
+      "collectBody": "당사는 귀하가 직접 제공하는 정보를 수집합니다. 여기에는 이름, 이메일 주소, 대학교, 비자 상태 및 금융 선호도가 포함됩니다.",
+      "useTitle": "정보 사용 방법",
+      "useBody": "당사는 귀하의 정보를 사용하여 맞춤형 은행 추천을 제공하고, 관련 업데이트 및 알림을 보내며, 서비스를 개선합니다.",
+      "storageTitle": "데이터 저장",
+      "storageBody": "귀하의 데이터는 업계 표준 암호화를 사용하여 안전하게 저장됩니다. 당사는 귀하의 개인 정보를 제3자에게 판매하지 않습니다.",
+      "rightsTitle": "귀하의 권리",
+      "rightsBody": "귀하는 언제든지 개인 데이터에 접근, 수정 또는 삭제할 권리가 있습니다. 설정 페이지에서 데이터를 내보내거나 계정 삭제를 요청할 수 있습니다.",
+      "contactTitle": "문의하기",
+      "contactBody": "본 개인정보 처리방침에 대한 질문이 있으시면 privacy@noorapp.com으로 연락해 주십시오."
     }
   },
+  "login": {
+    "title": "다시 오신 것을 환영합니다.",
+    "subtitle": "계정에 로그인하세요",
+    "email": "이메일",
+    "password": "비밀번호",
+    "keepSignedIn": "로그인 상태 유지",
+    "signIn": "로그인",
+    "signingIn": "로그인 중...",
+    "forgotPassword": "비밀번호를 잊으셨나요?",
+    "noAccount": "계정이 없으신가요?",
+    "signUp": "회원가입",
+    "continueWithGoogle": "Google로 계속하기",
+    "invalidCredentials": "이메일 또는 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.",
+    "googleError": "Google 로그인에 실패했습니다. 다시 시도해 주세요.",
+    "googleUnavailable": "Google 로그인을 사용할 수 없습니다. 이메일 로그인을 이용해 주세요."
+  },
   "banking": {
-    "title": "은행",
-    "subtitle": "유학생을 위한 최고의 은행을 찾아보세요",
+    "title": "뱅킹",
+    "subtitle": "최적의 은행을 찾아드릴게요.",
     "tabs": {
       "banks": "은행",
       "cards": "카드",
@@ -96,56 +296,129 @@
     },
     "filters": {
       "noSsn": "SSN 불필요",
-      "traditional": "전통 은행",
+      "noNin": "NIN 불필요",
+      "noSin": "SIN 불필요",
+      "traditional": "일반 은행",
       "online": "온라인 은행",
-      "noFee": "연회비 없음",
-      "noCredit": "신용 기록 불필요"
-    },
-    "bankCard": {
-      "openAccount": "계좌 개설",
-      "branches": "개 지점 근처",
-      "minDeposit": "최소 예치금",
-      "monthlyFee": "월 수수료",
-      "features": "기능"
-    },
-    "reassurance": "대부분의 은행은 유학생을 환영합니다 — SSN 없이도 시작할 수 있습니다."
-  },
-  "housing": {
-    "title": "주거",
-    "subtitle": "캠퍼스 근처 아파트 찾기",
-    "filters": {
-      "gym": "헬스장",
-      "furnished": "가구 포함",
-      "parking": "주차",
+      "noFee": "연회비 무료",
+      "noCredit": "신용 기록 불필요",
       "allAreas": "전체 지역",
       "north": "북쪽",
       "south": "남쪽",
       "east": "동쪽",
       "west": "서쪽"
     },
-    "apartment": {
-      "perMonth": "/월",
-      "beds": "침실",
-      "baths": "욕실",
-      "sqft": "평방피트",
-      "walkingTime": "분 도보",
-      "bikingTime": "분 자전거",
-      "rating": "평점",
-      "reviews": "리뷰",
-      "viewDetails": "상세 보기",
-      "getDirections": "길찾기",
-      "shared": "공유"
+    "reassurance": {
+      "us": "대부분의 은행은 유학생을 환영합니다 — SSN 없이도 시작할 수 있어요. 천천히 비교해 보세요.",
+      "uk": "영국 대부분의 은행은 유학생을 환영합니다 — 국민보험번호 없이도 계좌를 열 수 있어요. 천천히 살펴보세요.",
+      "ca": "캐나다 은행들은 유학생을 환영합니다 — SIN 없이도 기본 계좌를 열 수 있어요. 옵션을 비교해 보세요.",
+      "creditUs": "신용 구축에는 시간이 걸려요 — 카드 하나로 시작해서 책임감 있게 사용하세요. 서두르지 않아도 돼요.",
+      "creditUk": "영국 신용 기록 구축에는 시간이 걸려요 — 기본 신용카드로 시작해서 책임감 있게 사용하세요.",
+      "creditCa": "캐나다 신용 구축에는 시간이 걸려요 — 학생 신용카드로 시작해서 책임감 있게 사용하세요."
     },
+    "sections": {
+      "recommended": "추천 은행",
+      "recommendedSubtitle": "귀하의 상황에 맞춰. 오늘 결정하지 않아도 돼요.",
+      "branches": "근처 지점",
+      "branchesSubtitle": "필요할 때 직접 도움을 받을 수 있어요.",
+      "branchLocation": "지점 위치",
+      "goodFirstCards": "입문용 카드 추천"
+    },
+    "card": {
+      "noSsn": "SSN 불필요",
+      "noAnnualFee": "연회비 무료",
+      "noFtf": "해외결제수수료 없음",
+      "signupBonus": "가입 보너스",
+      "benefits": "혜택",
+      "watchOut": "주의사항"
+    },
+    "empty": {
+      "noCards": "조건에 맞는 카드가 없습니다.",
+      "loadError": "신용카드를 불러오지 못했습니다"
+    },
+    "guides": {
+      "ssnTitle": "SSN 가이드",
+      "ssnDesc": "F-1 학생으로서 사회보장번호 받는 방법",
+      "itinTitle": "ITIN 가이드",
+      "itinDesc": "개인납세자번호 설명",
+      "creditTitle": "신용 구축",
+      "creditDesc": "미국에서 신용 기록 쌓기 단계별 가이드",
+      "comparisonTitle": "은행 계좌 비교",
+      "comparisonDesc": "학생 친화적 은행 계좌 상세 비교",
+      "ninTitle": "NIN 가이드",
+      "ninDesc": "국민보험번호 신청 방법",
+      "ukAccountTitle": "영국 학생 계좌",
+      "ukAccountDesc": "학생으로서 영국 은행 계좌 개설 가이드",
+      "ukCreditTitle": "영국 신용 구축",
+      "ukCreditDesc": "영국에서 신용점수 쌓는 방법",
+      "monzoTitle": "Monzo vs Starling",
+      "monzoDesc": "영국 인기 디지털 은행 비교",
+      "sinTitle": "SIN 가이드",
+      "sinDesc": "사회보험번호 받는 방법",
+      "caAccountTitle": "캐나다 은행 계좌",
+      "caAccountDesc": "유학생으로서 은행 계좌 개설하기",
+      "caCreditTitle": "캐나다 신용 구축",
+      "caCreditDesc": "신용 기록 쌓기 가이드",
+      "caComparisonTitle": "학생 뱅킹 비교",
+      "caComparisonDesc": "캐나다 학생 은행 계좌 비교"
+    },
+    "bankCard": {
+      "openAccount": "계좌 개설",
+      "branches": "개 지점 근처",
+      "minDeposit": "최소 입금액",
+      "monthlyFee": "월 수수료",
+      "features": "특징"
+    }
+  },
+  "housing": {
+    "title": "주거",
+    "subtitle": "캠퍼스 근처 집을 찾아보세요",
+    "showMap": "지도 보기",
+    "hideMap": "지도 숨기기",
+    "filters": {
+      "gym": "헬스장",
+      "furnished": "가구 포함",
+      "parking": "주차장",
+      "all": "전체",
+      "allAreas": "전체 지역",
+      "north": "북쪽",
+      "south": "남쪽",
+      "east": "동쪽",
+      "west": "서쪽"
+    },
+    "reassurance": "주거지 찾기가 부담스러울 수 있어요. 천천히 하세요 — 대부분의 임대는 입주 1-2개월 전에 시작해요. 캠퍼스 근처에서 {count}개의 옵션을 찾았어요.",
     "map": {
-      "showMap": "지도 보기",
-      "hideMap": "지도 숨기기",
       "apartments": "개 아파트",
       "bankBranches": "개 은행 지점"
+    },
+    "empty": {
+      "noApartments": "아파트를 찾을 수 없습니다.",
+      "adjustFilters": "필터를 조정해 보세요.",
+      "loadError": "아파트를 불러오지 못했습니다"
+    },
+    "apartment": {
+      "solo": "1인",
+      "shared": "공유",
+      "perMonth": "/월",
+      "beds": "베드",
+      "bed": "베드",
+      "bath": "욕실",
+      "baths": "욕실",
+      "sqft": "sqft",
+      "minWalk": "분 도보",
+      "minBike": "분 자전거",
+      "minTransit": "분 대중교통",
+      "minDrive": "분 차량",
+      "amenities": "편의시설",
+      "reviews": "개 리뷰",
+      "rating": "평점",
+      "viewDetails": "상세 보기",
+      "getDirections": "길찾기"
     }
   },
   "visa": {
     "title": "비자 & 이민",
-    "subtitle": "비자 상태 및 마감일 추적",
+    "subtitle": "비자 상태와 마감일을 추적하세요",
     "status": {
       "active": "유효",
       "expiring": "곧 만료",
@@ -157,7 +430,7 @@
       "expired": "만료됨"
     },
     "documents": {
-      "title": "필요 서류",
+      "title": "필수 서류",
       "passport": "여권",
       "i20": "I-20",
       "visa": "비자 스탬프",
@@ -165,15 +438,15 @@
     },
     "work": {
       "title": "취업 허가",
-      "onCampus": "교내 근로",
+      "onCampus": "캠퍼스 내 취업",
       "cpt": "CPT",
       "opt": "OPT",
       "hoursLimit": "시간/주 제한"
     }
   },
   "grow": {
-    "title": "자산 불리기",
-    "subtitle": "유학 중 자산 형성하기",
+    "title": "자산 증식",
+    "subtitle": "유학 중 자산을 늘리세요",
     "tabs": {
       "savings": "저축",
       "invest": "투자",
@@ -194,22 +467,22 @@
       "startInvesting": "투자 시작"
     },
     "tips": {
-      "title": "재정 팁",
+      "title": "돈 관리 팁",
       "budgeting": "예산 관리",
       "saving": "저축",
-      "credit": "신용 쌓기"
+      "credit": "신용 구축"
     }
   },
   "deals": {
-    "title": "학생 할인",
-    "subtitle": "학생 전용 특별 할인",
+    "title": "학생 혜택",
+    "subtitle": "학생 전용 할인",
     "categories": {
-      "all": "전체 할인",
-      "food": "음식 & 외식",
+      "all": "전체 혜택",
+      "food": "음식 & 식사",
       "shopping": "쇼핑",
       "transport": "교통",
       "entertainment": "엔터테인먼트",
-      "tech": "테크 & 소프트웨어",
+      "tech": "기술 & 소프트웨어",
       "travel": "여행"
     },
     "deal": {
@@ -217,19 +490,19 @@
       "freeShipping": "무료 배송",
       "verifyStudent": "학생 인증",
       "getCoupon": "쿠폰 받기",
-      "expires": "만료일"
+      "expires": "만료"
     }
   },
   "guides": {
     "title": "가이드",
     "subtitle": "유학생을 위한 단계별 가이드",
     "categories": {
-      "banking": "은행 & 금융",
+      "banking": "뱅킹 & 금융",
       "housing": "주거",
       "visa": "비자 & 이민",
-      "work": "미국에서 일하기",
+      "work": "미국 취업",
       "taxes": "세금",
-      "credit": "신용 쌓기"
+      "credit": "신용 구축"
     },
     "readTime": "분 읽기",
     "updated": "업데이트"
@@ -249,15 +522,15 @@
       "reply": "답글"
     },
     "newPost": {
-      "title": "새 글 작성",
-      "placeholder": "커뮤니티와 공유할 내용을 작성하세요..."
+      "title": "게시물 작성",
+      "placeholder": "커뮤니티와 공유하세요..."
     }
   },
   "settings": {
     "title": "설정",
     "language": {
       "title": "언어",
-      "description": "선호하는 언어를 선택하세요"
+      "description": "원하는 언어를 선택하세요"
     },
     "notifications": {
       "title": "알림",
@@ -279,10 +552,11 @@
     }
   },
   "errors": {
-    "networkError": "네트워크 오류입니다. 연결을 확인해 주세요.",
-    "serverError": "서버 오류입니다. 나중에 다시 시도해 주세요.",
+    "required": "필수 입력",
+    "networkError": "네트워크 오류. 연결을 확인해 주세요.",
+    "serverError": "서버 오류. 나중에 다시 시도해 주세요.",
     "notFound": "페이지를 찾을 수 없습니다",
-    "unauthorized": "계속하려면 로그인해 주세요",
+    "unauthorized": "계속하려면 로그인하세요",
     "forbidden": "접근 권한이 없습니다",
     "validation": "입력 내용을 확인해 주세요",
     "timeout": "요청 시간이 초과되었습니다. 다시 시도해 주세요."

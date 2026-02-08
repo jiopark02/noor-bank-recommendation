@@ -3,6 +3,7 @@
     "loading": "読み込み中...",
     "error": "問題が発生しました",
     "retry": "再試行",
+    "tryAgain": "もう一度試す",
     "cancel": "キャンセル",
     "save": "保存",
     "continue": "続ける",
@@ -24,25 +25,69 @@
     "profile": "プロフィール",
     "help": "ヘルプ",
     "apply": "申し込む",
+    "applyNow": "今すぐ申し込む",
     "submit": "送信",
     "edit": "編集",
     "delete": "削除",
     "confirm": "確認",
     "yes": "はい",
-    "no": "いいえ"
+    "no": "いいえ",
+    "required": "必須",
+    "optional": "オプション",
+    "all": "すべて",
+    "or": "または",
+    "and": "及び",
+    "readMore": "もっと読む",
+    "viewListing": "リストを見る",
+    "privacyFooter": "あなたのデータは常にプライベートです。"
   },
   "nav": {
     "home": "ホーム",
     "banking": "銀行",
     "housing": "住居",
     "visa": "ビザ",
-    "grow": "資産運用",
-    "deals": "割引",
+    "grow": "資産を増やす",
+    "deals": "学生割引",
     "guides": "ガイド",
     "community": "コミュニティ",
     "money": "マネー",
     "jobs": "仕事",
     "funding": "資金調達"
+  },
+  "welcome": {
+    "title": "NOOR へようこそ。",
+    "subtitle": "銀行、住居、その他すべてのナビゲーションをお手伝いします。",
+    "reassurance1": "急ぐ必要はありません。ゆっくり進めてください。",
+    "reassurance2": "ステップバイステップでガイドします。",
+    "haveAccount": "すでにアカウントをお持ちです",
+    "countrySelect": {
+      "title": "どこへ向かっていますか？",
+      "subtitle": "目的地の国を選択してください。",
+      "us": "アメリカ合衆国",
+      "usDesc": "アメリカで勉強または仕事をする",
+      "uk": "イギリス",
+      "ukDesc": "イギリスで勉強または仕事をする",
+      "ca": "カナダ",
+      "caDesc": "カナダで勉強または仕事をする"
+    },
+    "reason": {
+      "title": "今日は何をお手伝いしましょうか？",
+      "subtitle": "あなたの経験をカスタマイズさせてください。",
+      "newToUS": "アメリカが初めて",
+      "newToUK": "イギリスが初めて",
+      "newToCA": "カナダが初めて",
+      "newDesc": "必須事項の準備をさせてください",
+      "settling": "落ち着いている",
+      "settlingDesc": "財務を調整する時間",
+      "banking": "銀行",
+      "bankingDesc": "あなたに最適な銀行を見つけます",
+      "housing": "住居",
+      "housingDesc": "近くの厳選された住居",
+      "credit": "クレジット",
+      "creditDesc": "基礎の構築を開始する",
+      "browsing": "閲覧中",
+      "browsingDesc": "ゆっくり進めてください、ここにいます"
+    }
   },
   "survey": {
     "languageSelect": {
@@ -50,102 +95,330 @@
       "subtitle": "ご希望の言語を選択してください",
       "continue": "続ける"
     },
-    "welcome": {
-      "title": "Noorへようこそ",
-      "subtitle": "留学生のための金融パートナー",
-      "description": "留学中の銀行口座開設、住居探し、財務管理をサポートします。"
+    "step1": {
+      "title": "まず、あなたについて。",
+      "subtitle": "これであなた中心に作ることができます。",
+      "firstName": "名",
+      "lastName": "姓",
+      "email": "メールアドレス",
+      "eduVerified": ".edu メールアドレスが確認されました",
+      "staySignedIn": "サインインしたままにする",
+      "agreeToTerms": "以下に同意します",
+      "termsOfService": "利用規約",
+      "privacyPolicy": "プライバシーポリシー",
+      "schoolType": "学校の種類",
+      "fourYearUniversity": "4年制大学",
+      "communityCollege": "コミュニティカレッジ",
+      "university": "4年制大学",
+      "searchUni": "大学を検索...",
+      "searchCC": "コミュニティカレッジを検索...",
+      "cantFindSchool": "学校が見つかりませんか？ とにかく続ける",
+      "noResults": "結果が見つかりません。学校を選択せずに続行する",
+      "countryOfOrigin": "出身国"
     },
-    "steps": {
-      "university": "大学",
-      "country": "国",
-      "visa": "ビザ状況",
-      "preferences": "設定"
+    "password": {
+      "placeholder": "パスワード",
+      "confirm": "パスワードを確認",
+      "match": "パスワードが一致しています",
+      "noMatch": "パスワードが一致しません",
+      "minLength": "8文字以上",
+      "uppercase": "大文字 (A-Z)",
+      "lowercase": "小文字 (a-z)",
+      "number": "数字 (0-9)",
+      "special": "特殊文字 (!@#$%)"
     },
-    "university": {
-      "title": "どこで勉強していますか？",
-      "placeholder": "大学を検索...",
-      "notFound": "大学が見つかりませんか？"
+    "step2": {
+      "title": "あなたがいるところ。",
+      "subtitle": "各段階で異なるニーズがあります。 一致させます。",
+      "associates": "準学士号",
+      "certificate": "認定プログラム",
+      "esl": "ESL/言語",
+      "undecided": "未定",
+      "bachelors": "学士号",
+      "masters": "修士号",
+      "phd": "博士号",
+      "postdoc": "ポスドク",
+      "exchange": "交換/訪問",
+      "year": "年",
+      "planningTransfer": "転校を計画していますか？",
+      "transferFeedback": "素晴らしい！ 転校の準備をお手伝いします。",
+      "tailorFeedback": "わかりました。 オプションをカスタマイズします。"
     },
-    "country": {
-      "title": "どの国にいますか？",
-      "us": "アメリカ",
-      "uk": "イギリス",
-      "ca": "カナダ"
+    "step2_5": {
+      "title": "あなたの転校の目標。",
+      "subtitle": "4年制大学への道を計画しましょう。",
+      "tagEligible": "TAG対象大学",
+      "guaranteed": "入学保証",
+      "otherTargets": "その他の目標大学",
+      "targetMajor": "目標専攻",
+      "majorPlaceholder": "例：コンピュータサイエンス、ビジネス...",
+      "expectedTransfer": "予想転校",
+      "fall2026": "2026年秋",
+      "spring2027": "2027年春",
+      "fall2027": "2027年秋",
+      "later": "後で",
+      "targetsFeedback": "{count} 件の目標が選択されました。 締め切りを追跡します。"
     },
-    "visa": {
-      "title": "ビザの状況は？",
-      "f1": "F-1学生ビザ",
-      "j1": "J-1交換ビザ",
-      "opt": "OPT/CPT",
-      "h1b": "H-1B就労ビザ",
-      "tier4": "Tier 4学生ビザ",
-      "studyPermit": "学習許可証"
+    "step3": {
+      "title": "私たちが対処していること。",
+      "subtitle": "ここからカスタマイズします",
+      "ssn": "SSN？",
+      "noSsnFeedback": "問題ありません。 選択肢があります。",
+      "itin": "ITIN？",
+      "nin": "国民保険番号 (NIN)？",
+      "noNinFeedback": "心配しないでください。 到着後に申請できます。",
+      "sin": "社会保険番号 (SIN)？",
+      "noSinFeedback": "カナダに到着した後で申請できます。",
+      "localAddress": "現地住所？",
+      "addressFeedback": "いいですね。 より多くの扉が開きます。"
     },
-    "complete": {
-      "title": "準備完了！",
-      "subtitle": "金融の旅を始めましょう"
+    "step4": {
+      "title": "あなたの財務。",
+      "subtitle": "説明してください",
+      "income": "入るもの",
+      "incomeHint": "奨学金、家族からのサポート、学内勤務",
+      "expenses": "出るもの",
+      "expensesHint": "家賃、食料、交通、娯楽",
+      "priority": "あなたの優先事項。",
+      "budget": "すべての1ドルが重要です。",
+      "balance": "価値と品質のバランスを取ります。",
+      "premium": "プレミアムを支払う。"
+    },
+    "step5": {
+      "title": "あなたの銀行方法。",
+      "subtitle": "重要なことを選択してください。",
+      "everyday": "日常の支出",
+      "family": "家族への送金",
+      "tuition": "授業料",
+      "international": "国際送金",
+      "atm": "キャンパスATM",
+      "mobile": "モバイルデポジット",
+      "billPay": "請求書払い",
+      "savings": "貯蓄",
+      "style": "スタイル。",
+      "branches": "支店",
+      "digital": "デジタル",
+      "either": "どちらでも"
+    },
+    "step6": {
+      "title": "グローバル。",
+      "subtitle": "国境を越えた移動方法。",
+      "transfers": "海外送金。",
+      "never": "なし",
+      "fewTimes": "年に数回",
+      "monthly": "月1回以上",
+      "branchNearby": "近くに支店がありますか？",
+      "mustHave": "必須",
+      "preferred": "推奨",
+      "dontNeed": "不要",
+      "campusSide": "キャンパスのどちら側？",
+      "north": "北",
+      "south": "南",
+      "east": "東",
+      "west": "西",
+      "center": "中央",
+      "notSure": "不確定",
+      "campusHint": "近くの銀行と住居を見つけるのに役立ちます"
+    },
+    "step7": {
+      "title": "あなたの目標。",
+      "subtitle": "今、あなたにとって重要なこと。",
+      "bankAccount": "銀行口座",
+      "creditHistory": "信用履歴",
+      "housing": "住居",
+      "studentLoans": "学生ローン",
+      "campusJobs": "キャンパス内の仕事",
+      "investing": "投資",
+      "postGrad": "大学院進学計画",
+      "creditCards": "クレジットカード。",
+      "startNow": "今すぐ開始",
+      "later": "後で",
+      "skip": "スキップ"
+    },
+    "submit": {
+      "complete": "評価を完了",
+      "creating": "アカウントを作成中...",
+      "error": "問題が発生しました。 もう一度お試しください。",
+      "failed": "アカウントの作成に失敗しました。 もう一度お試しください。"
+    },
+    "terms": {
+      "title": "利用規約",
+      "lastUpdated": "最終更新：2026年1月",
+      "section1Title": "1. 利用規約への同意",
+      "section1Body": "Noor にアクセスして使用することで、これらの利用規約に同意します。 これらの利用規約に同意しない場合は、当社のサービスを使用しないでください。",
+      "section2Title": "2. サービスの説明",
+      "section2Body": "Noor は、国際学生向けに特別に設計された財務ガイダンス、銀行の推奨事項、ツールを提供します。 当社の推奨事項は情報提供のみを目的としており、財務的なアドバイスを構成するものではありません。",
+      "section3Title": "3. ユーザーの責任",
+      "section3Body": "アカウントとパスワードの機密性を維持する責任があります。 正確な情報を提供し、必要に応じて情報を更新することに同意します。",
+      "section4Title": "4. プライバシー",
+      "section4Body": "プライバシーは当社にとって重要です。 情報の収集、使用、保護方法については、プライバシーポリシーを参照してください。",
+      "section5Title": "5. 責任の制限",
+      "section5Body": "Noor は、当社の推奨事項に基づいて行われた財務上の決定について責任を負いません。 個人的なアドバイスについては、必ず適格な財務顧問に相談してください。"
+    },
+    "privacy": {
+      "title": "プライバシーポリシー",
+      "lastUpdated": "最終更新：2026年1月",
+      "collectTitle": "収集内容",
+      "collectBody": "お客様が直接当社に提供する情報（氏名、メールアドレス、大学、ビザステータス、財務上の設定を含む）を収集します。",
+      "useTitle": "情報の使用方法",
+      "useBody": "お客様の情報を使用して、パーソナライズされた銀行の推奨事項を提供し、関連する更新と通知を送信し、当社のサービスを改善します。",
+      "storageTitle": "データストレージ",
+      "storageBody": "お客様のデータは、業界標準の暗号化を使用して安全に保存されます。 個人情報を第三者に販売することはありません。",
+      "rightsTitle": "お客様の権利",
+      "rightsBody": "いつでも個人データにアクセス、修正、削除する権利があります。 設定ページからデータをエクスポートするか、アカウント削除をリクエストできます。",
+      "contactTitle": "お問い合わせ",
+      "contactBody": "このプライバシーポリシーについてご質問がある場合は、privacy@noorapp.com までお問い合わせください。"
     }
+  },
+  "login": {
+    "title": "おかえりなさい。",
+    "subtitle": "アカウントにサインインする",
+    "email": "メールアドレス",
+    "password": "パスワード",
+    "keepSignedIn": "サインインしたままにする",
+    "signIn": "ログイン",
+    "signingIn": "ログイン中...",
+    "forgotPassword": "パスワードをお忘れですか？",
+    "noAccount": "アカウントをお持ちでないですか？",
+    "signUp": "新規登録",
+    "continueWithGoogle": "Google で続行",
+    "invalidCredentials": "無効なメールアドレスまたはパスワード。 もう一度お試しください。",
+    "googleError": "Google でのサインインに失敗しました。 もう一度お試しください。",
+    "googleUnavailable": "Google ログインは利用できません。 メールログインを使用してください。"
   },
   "banking": {
     "title": "銀行",
-    "subtitle": "留学生に最適な銀行を見つけよう",
+    "subtitle": "あなたに最適な銀行を見つけるのをお手伝いします。",
     "tabs": {
       "banks": "銀行",
       "cards": "カード",
       "guides": "ガイド"
     },
     "filters": {
-      "noSsn": "SSN不要",
+      "noSsn": "SSN 不要",
+      "noNin": "NIN 不要",
+      "noSin": "SIN 不要",
       "traditional": "従来の銀行",
-      "online": "オンラインバンク",
+      "online": "オンライン",
       "noFee": "年会費無料",
-      "noCredit": "クレジット履歴不要"
-    },
-    "bankCard": {
-      "openAccount": "口座開設",
-      "branches": "近くの支店",
-      "minDeposit": "最低預金額",
-      "monthlyFee": "月額手数料",
-      "features": "機能"
-    },
-    "reassurance": "ほとんどの銀行は留学生を歓迎しています — SSNなしでも始められます。"
-  },
-  "housing": {
-    "title": "住居",
-    "subtitle": "キャンパス近くのアパートを探す",
-    "filters": {
-      "gym": "ジム",
-      "furnished": "家具付き",
-      "parking": "駐車場",
+      "noCredit": "クレジット履歴不要",
       "allAreas": "全エリア",
       "north": "北",
       "south": "南",
       "east": "東",
       "west": "西"
     },
+    "reassurance": {
+      "us": "ここのほとんどの銀行は国際学生を受け入れています — SSN がなくても始められます。 時間をかけて比較してください。",
+      "uk": "ほとんどの英国銀行は国際学生を歓迎しています — 国民保険番号がなくても口座を開設できます。 時間をかけてください。",
+      "ca": "カナダの銀行は国際学生を歓迎しています — 基本的な口座を開設するために SIN は不要です。 オプションを比較してください。",
+      "creditUs": "クレジットを構築するには時間がかかります — 1 枚のカードから始めて責任を持って使用してください。 急ぐ必要はありません。",
+      "creditUk": "英国のクレジット ファイルの構築には時間がかかります — 基本的なクレジット カードから始めて責任を持って使用してください。",
+      "creditCa": "カナダのクレジット構築には時間がかかります — 学生用クレジット カードから始めて責任を持って使用してください。"
+    },
+    "sections": {
+      "recommended": "あなたに推奨",
+      "recommendedSubtitle": "あなたの状況に基づいています。 今日決断する必要はありません。",
+      "branches": "近くの支店",
+      "branchesSubtitle": "必要な時に直接サポートを受けます。",
+      "branchLocation": "支店の場所",
+      "goodFirstCards": "最初に良いカード"
+    },
+    "card": {
+      "noSsn": "SSN 不要",
+      "noAnnualFee": "年会費無料",
+      "noFtf": "FTF なし",
+      "signupBonus": "サインアップボーナス",
+      "benefits": "利点",
+      "watchOut": "注意する"
+    },
+    "empty": {
+      "noCards": "条件に一致するカードはありません。",
+      "loadError": "クレジット カードの読み込みに失敗しました"
+    },
+    "guides": {
+      "ssnTitle": "SSN ガイド",
+      "ssnDesc": "F-1 学生として社会保障番号を取得する方法",
+      "itinTitle": "ITIN ガイド",
+      "itinDesc": "個人識別納税者番号について説明",
+      "creditTitle": "クレジットの構築",
+      "creditDesc": "米国でクレジット履歴を構築するためのステップバイステップ ガイド",
+      "comparisonTitle": "銀行口座の比較",
+      "comparisonDesc": "学生向けの銀行口座の詳細な比較",
+      "ninTitle": "NIN ガイド",
+      "ninDesc": "国民保険番号の申請方法",
+      "ukAccountTitle": "UK 学生口座",
+      "ukAccountDesc": "学生として英国銀行口座を開設するためのガイド",
+      "ukCreditTitle": "英国のクレジットの構築",
+      "ukCreditDesc": "英国でクレジット スコアを構築する方法",
+      "monzoTitle": "Monzo vs Starling",
+      "monzoDesc": "英国の人気デジタル銀行を比較",
+      "sinTitle": "SIN ガイド",
+      "sinDesc": "社会保険番号の取得方法",
+      "caAccountTitle": "カナダの銀行口座",
+      "caAccountDesc": "国際学生として銀行口座を開設する",
+      "caCreditTitle": "カナダのクレジット構築",
+      "caCreditDesc": "クレジット履歴を確立するためのガイド",
+      "caComparisonTitle": "学生銀行比較",
+      "caComparisonDesc": "カナダの学生銀行口座を比較"
+    },
+    "bankCard": {
+      "openAccount": "口座開設",
+      "branches": "近くの支店",
+      "minDeposit": "最小預金額",
+      "monthlyFee": "月額手数料",
+      "features": "機能"
+    }
+  },
+  "housing": {
+    "title": "住居",
+    "subtitle": "キャンパスの近くに家を探す",
+    "showMap": "地図を表示",
+    "hideMap": "地図を隠す",
+    "filters": {
+      "gym": "ジム",
+      "furnished": "家具付き",
+      "parking": "駐車場",
+      "all": "すべて",
+      "allAreas": "全エリア",
+      "north": "北",
+      "south": "南",
+      "east": "東",
+      "west": "西"
+    },
+    "reassurance": "住居を探すのは大変に感じるかもしれません。 時間をかけてください — ほとんどのリースは入居の 1～2 か月前に始まります。 キャンパスの近くに {count} 件のオプションが見つかりました。",
+    "map": {
+      "apartments": "アパート",
+      "bankBranches": "銀行支店"
+    },
+    "empty": {
+      "noApartments": "アパートが見つかりません。",
+      "adjustFilters": "フィルターを調整してみてください。",
+      "loadError": "アパートの読み込みに失敗しました"
+    },
     "apartment": {
+      "solo": "シングル",
+      "shared": "シェア",
       "perMonth": "/月",
       "beds": "ベッド",
+      "bed": "ベッド",
+      "bath": "バス",
       "baths": "バス",
       "sqft": "平方フィート",
-      "walkingTime": "分徒歩",
-      "bikingTime": "分自転車",
-      "rating": "評価",
+      "minWalk": "分徒歩",
+      "minBike": "分自転車",
+      "minTransit": "分で移動",
+      "minDrive": "分ドライブ",
+      "amenities": "アメニティ",
       "reviews": "レビュー",
+      "rating": "評価",
       "viewDetails": "詳細を見る",
-      "getDirections": "道順を見る",
-      "shared": "シェア"
-    },
-    "map": {
-      "showMap": "地図を表示",
-      "hideMap": "地図を隠す",
-      "apartments": "件のアパート",
-      "bankBranches": "件の銀行支店"
+      "getDirections": "道順を見る"
     }
   },
   "visa": {
-    "title": "ビザ・入国管理",
-    "subtitle": "ビザの状況と期限を追跡",
+    "title": "ビザと移民",
+    "subtitle": "ビザの状態と期限を追跡",
     "status": {
       "active": "有効",
       "expiring": "まもなく期限切れ",
@@ -164,25 +437,25 @@
       "i94": "I-94"
     },
     "work": {
-      "title": "就労許可",
-      "onCampus": "学内勤務",
+      "title": "労働許可",
+      "onCampus": "キャンパス内勤務",
       "cpt": "CPT",
       "opt": "OPT",
       "hoursLimit": "時間/週の制限"
     }
   },
   "grow": {
-    "title": "資産を増やす",
-    "subtitle": "留学中に資産を築く",
+    "title": "お金を増やす",
+    "subtitle": "勉強している間に資産を構築する",
     "tabs": {
       "savings": "貯蓄",
       "invest": "投資",
       "tips": "ヒント"
     },
     "savings": {
-      "title": "高金利貯蓄",
-      "apy": "年利",
-      "minBalance": "最低残高",
+      "title": "高利回り貯蓄",
+      "apy": "APY",
+      "minBalance": "最小残高",
       "fdic": "FDIC保険",
       "openAccount": "口座開設"
     },
@@ -202,10 +475,10 @@
   },
   "deals": {
     "title": "学生割引",
-    "subtitle": "学生限定の特別割引",
+    "subtitle": "学生専用の限定割引",
     "categories": {
       "all": "すべての割引",
-      "food": "フード・外食",
+      "food": "食べ物とダイニング",
       "shopping": "ショッピング",
       "transport": "交通",
       "entertainment": "エンターテイメント",
@@ -215,23 +488,23 @@
     "deal": {
       "discount": "オフ",
       "freeShipping": "送料無料",
-      "verifyStudent": "学生認証",
+      "verifyStudent": "学生ステータスを確認",
       "getCoupon": "クーポンを取得",
       "expires": "有効期限"
     }
   },
   "guides": {
     "title": "ガイド",
-    "subtitle": "留学生のためのステップバイステップガイド",
+    "subtitle": "国際学生向けのステップバイステップガイド",
     "categories": {
       "banking": "銀行・金融",
       "housing": "住居",
-      "visa": "ビザ・入国管理",
-      "work": "アメリカでの就労",
+      "visa": "ビザと移民",
+      "work": "米国での労働",
       "taxes": "税金",
       "credit": "クレジット構築"
     },
-    "readTime": "分で読める",
+    "readTime": "最小読む",
     "updated": "更新"
   },
   "community": {
@@ -279,11 +552,12 @@
     }
   },
   "errors": {
-    "networkError": "ネットワークエラーです。接続を確認してください。",
-    "serverError": "サーバーエラーです。後でもう一度お試しください。",
+    "required": "必須",
+    "networkError": "ネットワークエラー。接続を確認してください。",
+    "serverError": "サーバーエラー。後でもう一度お試しください。",
     "notFound": "ページが見つかりません",
-    "unauthorized": "続けるにはログインしてください",
-    "forbidden": "アクセス権限がありません",
+    "unauthorized": "続行するにはサインインしてください",
+    "forbidden": "このにアクセスする権限がありません",
     "validation": "入力内容を確認してください",
     "timeout": "リクエストがタイムアウトしました。もう一度お試しください。"
   },
@@ -299,7 +573,7 @@
     },
     "register": {
       "title": "アカウント作成",
-      "name": "氏名",
+      "name": "フルネーム",
       "email": "メールアドレス",
       "password": "パスワード",
       "confirmPassword": "パスワード確認",
