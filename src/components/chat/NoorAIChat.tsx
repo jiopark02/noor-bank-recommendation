@@ -14,7 +14,7 @@ interface NoorAIChatProps {
 export function NoorAIChat({ userId: propUserId, userContext: propUserContext }: NoorAIChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [userId, setUserId] = useState<string | null>(propUserId || null);
-  const [userContext, setUserContext] = useState<UserContext>(propUserContext || {});
+  const [userContext] = useState<UserContext>(propUserContext || {});
 
   // Load user data from localStorage if not provided as props
   useEffect(() => {
@@ -25,34 +25,7 @@ export function NoorAIChat({ userId: propUserId, userContext: propUserContext }:
       }
     }
 
-    if (!propUserContext) {
-      const storedProfile = localStorage.getItem('noor_user_profile');
-      if (storedProfile) {
-        try {
-          const profile = JSON.parse(storedProfile);
-          setUserContext({
-            firstName: profile.firstName,
-            lastName: profile.lastName,
-            university: profile.university,
-            institutionType: profile.institutionType,
-            visaType: profile.visaType,
-            hasSSN: profile.hasSSN,
-            hasCreditHistory: profile.hasCreditHistory,
-            monthlyIncome: profile.monthlyIncome,
-            campusSide: profile.campusSide,
-            isTransferStudent: profile.isTransferStudent,
-            targetSchools: profile.targetSchools,
-            visaExpiry: profile.visaExpiry,
-            optStartDate: profile.optStartDate,
-            monthlySpending: profile.monthlySpending,
-            savingsGoal: profile.savingsGoal,
-          });
-        } catch (e) {
-          console.error('Failed to parse user profile:', e);
-        }
-      }
-    }
-  }, [propUserId, propUserContext]);
+  }, [propUserId]);
 
   const handleToggle = () => {
     setIsOpen(!isOpen);

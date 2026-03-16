@@ -11,6 +11,7 @@ import {
   getPasswordStrengthLabel,
   ERROR_MESSAGES,
 } from '@/lib/validation';
+import { supabase } from '@/lib/supabase';
 
 type Step = 'email' | 'sent' | 'reset' | 'success';
 
@@ -27,16 +28,25 @@ export default function ForgotPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [canResend, setCanResend] = useState(false);
-  const [resetToken, setResetToken] = useState<string | null>(null);
 
   // Check for reset token in URL
   useEffect(() => {
-    const token = searchParams.get('token');
+    // Supabase recovery flow can provide query params depending on provider settings.
+    const token = searchParams.get('token') || searchParams.get('access_token');
     if (token) {
-      setResetToken(token);
       setStep('reset');
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setStep('reset');
+      }
+    });
+    return () => subscription.subscription.unsubscribe();
+  }, []);
 
   // Countdown for resend
   useEffect(() => {
@@ -69,17 +79,11 @@ export default function ForgotPasswordPage() {
     }
 
     try {
-      const response = await fetch('/api/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+      if (!supabase) throw new Error('Authentication service unavailable');
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: `${window.location.origin}/forgot-password`,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send reset email');
-      }
+      if (resetError) throw new Error(resetError.message || 'Failed to send reset email');
 
       setStep('sent');
       setCountdown(60);
@@ -98,16 +102,11 @@ export default function ForgotPasswordPage() {
     setCountdown(60);
 
     try {
-      const response = await fetch('/api/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+      if (!supabase) throw new Error('Authentication service unavailable');
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: `${window.location.origin}/forgot-password`,
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to resend email');
-      }
+      if (resetError) throw new Error(resetError.message || 'Failed to resend email');
 
       setError('');
     } catch (err) {
@@ -135,27 +134,12 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    if (!resetToken) {
-      setError('Invalid or expired reset link. Please request a new one.');
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      const response = await fetch('/api/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: resetToken,
-          password: newPassword,
-        }),
+      if (!supabase) throw new Error('Authentication service unavailable');
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to reset password');
-      }
+      if (updateError) throw new Error(updateError.message || 'Failed to reset password');
 
       setStep('success');
     } catch (err) {

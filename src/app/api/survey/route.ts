@@ -18,8 +18,8 @@ export async function POST(request: NextRequest) {
 
     const email = surveyData.email.toLowerCase().trim();
 
-    // Generate a new user ID
-    const userId = uuidv4();
+    // Use Supabase auth user id if provided, otherwise generate one.
+    const userId = surveyData.auth_user_id || uuidv4();
 
     // Hash the password
     const passwordHash = await hashPassword(surveyData.password);
@@ -63,18 +63,25 @@ export async function POST(request: NextRequest) {
           .eq('email', email)
           .single();
 
-        if (existingUser) {
+        if (existingUser && existingUser.id !== userId) {
           return NextResponse.json(
             { success: false, message: 'An account with this email already exists' },
             { status: 409 }
           );
         }
 
-        const { data, error } = await supabase
-          .from('users')
-          .insert(userData)
-          .select()
-          .single();
+        const { data, error } = existingUser
+          ? await supabase
+              .from('users')
+              .update(userData)
+              .eq('id', userId)
+              .select()
+              .single()
+          : await supabase
+              .from('users')
+              .insert(userData)
+              .select()
+              .single();
 
         if (error) {
           console.error('Supabase insert error:', error);

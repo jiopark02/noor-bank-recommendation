@@ -88,7 +88,6 @@ export function useChat({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: apiMessages,
-          userContext,
           userId,
         }),
       });
@@ -123,7 +122,7 @@ export function useChat({
     } finally {
       setIsLoading(false);
     }
-  }, [messages, userContext, userId]);
+  }, [messages, userId]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);

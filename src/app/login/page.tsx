@@ -76,31 +76,59 @@ export default function LoginPage() {
     }
 
     try {
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      if (!supabase) {
+        setError('Authentication service unavailable');
+        return;
+      }
+
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
       });
 
-      const result = await response.json();
-
-      if (result.success) {
-        localStorage.setItem('noor_user_id', result.userId);
-
-        // Load user profile if available
-        if (result.profile) {
-          localStorage.setItem('noor_user_profile', JSON.stringify(result.profile));
-        }
-
-        // Create session
-        createSession(keepSignedIn);
-        updateSessionActivity();
-
-        router.push('/');
-      } else {
-        setError(result.message || ERROR_MESSAGES.INVALID_CREDENTIALS);
+      if (authError || !data.user) {
+        setError(authError?.message || ERROR_MESSAGES.INVALID_CREDENTIALS);
+        return;
       }
-    } catch (err) {
+
+      localStorage.setItem('noor_user_id', data.user.id);
+      localStorage.setItem('noor_onboarding_completed', 'true');
+
+      // Try to load richer profile from users table; fallback to auth profile.
+      let profile: Record<string, unknown> = {
+        id: data.user.id,
+        email: data.user.email,
+        firstName: data.user.user_metadata?.full_name?.split(' ')[0] || '',
+        lastName: data.user.user_metadata?.full_name?.split(' ').slice(1).join(' ') || '',
+      };
+
+      try {
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('first_name, last_name, email, institution_id, university, country_of_origin')
+          .eq('id', data.user.id)
+          .single();
+        if (userRow) {
+          profile = {
+            ...profile,
+            firstName: userRow.first_name || profile.firstName,
+            lastName: userRow.last_name || profile.lastName,
+            email: userRow.email || profile.email,
+            institutionId: userRow.institution_id,
+            university: userRow.university,
+            countryOfOrigin: userRow.country_of_origin,
+          };
+        }
+      } catch {
+        // Keep fallback profile
+      }
+
+      localStorage.setItem('noor_user_profile', JSON.stringify(profile));
+
+      createSession(keepSignedIn);
+      updateSessionActivity();
+      router.push('/');
+    } catch {
       setError(ERROR_MESSAGES.SERVER_ERROR);
     } finally {
       setIsLoading(false);

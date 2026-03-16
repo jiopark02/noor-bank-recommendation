@@ -22,6 +22,7 @@ import {
   getCountryDisplay,
   COUNTRY_DISPLAY,
 } from '@/lib/countryConfig';
+import { supabase } from '@/lib/supabase';
 
 interface SurveyData {
   // Step 1
@@ -608,6 +609,29 @@ export default function SurveyPage() {
     try {
       // Get institution info from selected institution
       const selectedInstitution = filteredInstitutions.find(i => i.id === data.institutionId);
+      let authUserId: string | null = null;
+      let requiresEmailConfirmation = false;
+
+      if (supabase) {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: data.email.trim().toLowerCase(),
+          password: data.password,
+          options: {
+            data: {
+              first_name: data.firstName,
+              last_name: data.lastName,
+            },
+          },
+        });
+
+        if (signUpError) {
+          setSubmitError(signUpError.message || 'Failed to create authentication account.');
+          return;
+        }
+
+        authUserId = signUpData.user?.id || null;
+        requiresEmailConfirmation = Boolean(signUpData.user && !signUpData.session);
+      }
 
       const response = await fetch('/api/survey', {
         method: 'POST',
@@ -649,6 +673,7 @@ export default function SurveyPage() {
           target_universities: data.targetUniversities,
           target_major: data.targetMajor,
           expected_transfer_year: data.expectedTransferYear,
+          auth_user_id: authUserId,
         }),
       });
 
@@ -659,14 +684,21 @@ export default function SurveyPage() {
         return;
       }
 
+      if (requiresEmailConfirmation) {
+        setSubmitError('Account created. Please confirm your email, then sign in.');
+        router.push('/login');
+        return;
+      }
+
       // Save user ID and create session
-      localStorage.setItem('noor_user_id', result.userId);
+      localStorage.setItem('noor_user_id', authUserId || result.userId);
+      localStorage.setItem('noor_onboarding_completed', 'true');
       createSession(data.staySignedIn);
       acceptTerms();
 
       // Save user profile locally (use profile from response if available, otherwise build from form data)
       const userProfile = result.profile ? {
-        id: result.userId,
+        id: authUserId || result.userId,
         ...result.profile,
         destinationCountry: data.destinationCountry,
         institutionType: data.institutionType,
@@ -690,7 +722,7 @@ export default function SurveyPage() {
         targetMajor: data.targetMajor,
         expectedTransferYear: data.expectedTransferYear,
       } : {
-        id: result.userId,
+        id: authUserId || result.userId,
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email,
