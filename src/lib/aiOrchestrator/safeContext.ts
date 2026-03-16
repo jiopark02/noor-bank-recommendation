@@ -42,7 +42,7 @@ export async function fetchSafeContext(
     }
 
     const safe: SafeUserContext = {};
-    const row = data as Record<string, unknown>;
+    const row = data as unknown as Record<string, unknown>;
 
     if (allowedFields.includes('destinationCountry') && typeof row.country_of_origin === 'string') {
       safe.destinationCountry = row.country_of_origin;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSystemPrompt, UserContext } from '@/lib/noorAIPrompt';
-import { orchestrate, ChatMessageInput } from '@/lib/aiOrchestrator';
+import { orchestrate, ChatMessageInput, SafeUserContext } from '@/lib/aiOrchestrator';
 
 export const dynamic = 'force-dynamic';
 
@@ -153,7 +153,7 @@ function getDemoResponse(message: string): string {
   return DEMO_RESPONSES['default'];
 }
 
-function mapSafeContextToPromptContext(safeContext: Record<string, unknown>): UserContext {
+function mapSafeContextToPromptContext(safeContext: SafeUserContext): UserContext {
   return {
     university: typeof safeContext.university === 'string' ? safeContext.university : undefined,
     institutionType:

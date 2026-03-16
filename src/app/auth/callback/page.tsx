@@ -29,24 +29,51 @@ export default function AuthCallbackPage() {
         if (session?.user) {
           // Save user info to localStorage
           const user = session.user;
-          const profile = {
+          let profile: Record<string, unknown> = {
             id: user.id,
             email: user.email,
             firstName: user.user_metadata?.full_name?.split(' ')[0] || user.user_metadata?.name?.split(' ')[0] || '',
             lastName: user.user_metadata?.full_name?.split(' ').slice(1).join(' ') || '',
             avatar: user.user_metadata?.avatar_url || user.user_metadata?.picture || '',
           };
+          let onboardingCompleted = false;
+
+          try {
+            const { data: userRow } = await supabase
+              .from('users')
+              .select('first_name, last_name, email, institution_id, university, country_of_origin, onboarding_completed')
+              .eq('id', user.id)
+              .single();
+
+            if (userRow) {
+              profile = {
+                ...profile,
+                firstName: userRow.first_name || profile.firstName,
+                lastName: userRow.last_name || profile.lastName,
+                email: userRow.email || profile.email,
+                institutionId: userRow.institution_id,
+                university: userRow.university,
+                countryOfOrigin: userRow.country_of_origin,
+              };
+              onboardingCompleted = Boolean(userRow.onboarding_completed);
+            }
+          } catch {
+            // Use fallback auth metadata profile
+          }
 
           localStorage.setItem('noor_user_id', user.id);
           localStorage.setItem('noor_user_profile', JSON.stringify(profile));
+          if (onboardingCompleted) {
+            localStorage.setItem('noor_onboarding_completed', 'true');
+          } else {
+            localStorage.removeItem('noor_onboarding_completed');
+          }
 
           // Create session (keep signed in by default for OAuth)
           createSession(true);
 
           // Check if user has completed onboarding
-          const existingProfile = localStorage.getItem('noor_onboarding_completed');
-
-          if (existingProfile) {
+          if (onboardingCompleted) {
             router.push('/');
           } else {
             // New user - go to survey to complete profile
