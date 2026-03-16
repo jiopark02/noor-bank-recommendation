@@ -39,3 +39,5 @@ next-env.d.ts
 *.pem
 .vercel
 .env*.local
+
+Noor AI Fundamentals.md
