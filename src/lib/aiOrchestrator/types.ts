@@ -27,8 +27,10 @@ export type AllowedSafeField =
   | 'hasSIN'
   | 'institutionType'
   | 'campusSide'
-  | 'incomeBand'
+  | 'monthlyIncome'
   | 'university'
+  | 'monthlyBudget'
+  | 'expectedMonthlySpending'
   | 'checkingBalance'
   | 'upcomingObligationsSummary'
   | 'spendingCategoryTotals';
@@ -49,8 +51,10 @@ export interface SafeUserContext {
   hasSIN?: boolean;
   institutionType?: string;
   campusSide?: string;
-  incomeBand?: string;
+  monthlyIncome?: number;
   university?: string;
+  monthlyBudget?: number;
+  expectedMonthlySpending?: number;
   checkingBalance?: number;
   upcomingObligationsSummary?: string;
   spendingCategoryTotals?: string;

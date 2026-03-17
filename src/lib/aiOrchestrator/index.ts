@@ -11,11 +11,24 @@ function getLastUserMessage(messages: ChatMessageInput[]): string {
 }
 
 function buildProductContext(intent: OrchestratorResult['intent']): string | undefined {
-  if (intent !== 'banking') return undefined;
-  return [
-    'If banking products are discussed, prefer Noor-supported options and give a short comparison.',
-    'Avoid inventing unsupported products or claims.',
-  ].join(' ');
+  if (intent === 'banking') {
+    return [
+      'If banking products are discussed, prefer Noor-supported options and give a short comparison.',
+      'Avoid inventing unsupported products or claims.',
+    ].join(' ');
+  }
+
+  if (intent === 'affordability') {
+    return [
+      'Affordability intent: prioritize concrete numbers over generic budgeting advice.',
+      'Use orchestrator safe context if available to estimate whether the purchase fits budget.',
+      'When safe context values are estimates, clearly label them as estimates.',
+      'If key numbers are missing, ask for only the minimum follow-up data needed (current balance and bills due before next income).',
+      'Answer with: quick verdict, simple math, and one actionable next step.',
+    ].join(' ');
+  }
+
+  return undefined;
 }
 
 export async function orchestrate(

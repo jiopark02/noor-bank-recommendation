@@ -1,35 +1,37 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 // Simple password protection
-const SITE_PASSWORD = process.env.SITE_PASSWORD || 'noor2024';
+const SITE_PASSWORD = process.env.SITE_PASSWORD || "noor2024";
 
 export function middleware(request: NextRequest) {
   // Skip API routes and static files
   if (
-    request.nextUrl.pathname.startsWith('/api') ||
-    request.nextUrl.pathname.startsWith('/_next') ||
-    request.nextUrl.pathname.startsWith('/favicon')
+    request.nextUrl.pathname.startsWith("/api") ||
+    request.nextUrl.pathname.startsWith("/_next") ||
+    request.nextUrl.pathname.startsWith("/favicon")
   ) {
     return NextResponse.next();
   }
 
   // Check for auth cookie
-  const authCookie = request.cookies.get('noor_auth');
+  const authCookie = request.cookies.get("noor_auth");
 
-  if (authCookie?.value === 'authenticated') {
+  if (authCookie?.value === "authenticated") {
     return NextResponse.next();
   }
 
   // Check for password in URL (for initial auth)
-  const password = request.nextUrl.searchParams.get('password');
+  const password = request.nextUrl.searchParams.get("password");
 
   if (password === SITE_PASSWORD) {
-    const response = NextResponse.redirect(new URL(request.nextUrl.pathname, request.url));
-    response.cookies.set('noor_auth', 'authenticated', {
+    const response = NextResponse.redirect(
+      new URL(request.nextUrl.pathname, request.url)
+    );
+    response.cookies.set("noor_auth", "authenticated", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
       maxAge: 60 * 60 * 24 * 7, // 7 days
     });
     return response;
@@ -143,11 +145,11 @@ export function middleware(request: NextRequest) {
   return new NextResponse(html, {
     status: 200,
     headers: {
-      'Content-Type': 'text/html',
+      "Content-Type": "text/html",
     },
   });
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

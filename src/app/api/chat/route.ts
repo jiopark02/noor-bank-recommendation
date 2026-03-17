@@ -29,23 +29,23 @@ function getOpenRouterApiKey(): string | null {
 }
 
 const DEMO_RESPONSES: Record<string, string> = {
-  '안녕': '안녕하세요! 저는 Noor AI예요 🙌 미국 유학 생활과 금융에 대한 질문이 있으시면 언제든 물어보세요!',
-  'hello': "안녕하세요! I'm Noor AI 🙌 I can help you with banking, visa questions, housing, and more for international students in the US!",
-  'hi': "안녕하세요! I'm Noor AI 🙌 How can I help you today?",
-  'ssn 없이 계좌': `SSN 없이 계좌를 개설할 수 있는 은행들이 있어요! 🏦
+  '안녕': "Hi! I'm Noor AI 🙌 Ask me anything about banking, credit, visa basics, housing, and student finance in the US.",
+  'hello': "Hi! I'm Noor AI 🙌 I can help with banking, visa questions, housing, and money tips for international students.",
+  'hi': "Hi! I'm Noor AI 🙌 How can I help today?",
+  'ssn 없이 계좌': `Yes, you can often open a bank account without an SSN. 🏦
 
-**추천 은행:**
-1. **Chase Bank** - 지점 방문 시 여권 + I-20로 개설 가능
-2. **Bank of America** - 학교 근처 지점에서 개설 가능
-3. **Wells Fargo** - 국제학생 친화적
+**Common student-friendly options:**
+1. **Chase** - Often possible in branch with passport + I-20
+2. **Bank of America** - Common choice near many campuses
+3. **Wells Fargo** - Frequently used by international students
 
-**필요한 서류:**
-- 여권
-- I-20 또는 DS-2019
-- 학교 입학허가서
-- 미국 주소 증명 (기숙사 계약서 등)
+**Typical documents:**
+- Passport
+- I-20 or DS-2019
+- School enrollment/admission proof
+- US address proof
 
-Banking 탭에서 나에게 맞는 은행을 찾아보세요!`,
+Check the Banking section for personalized options.`,
   'bank': `Here are the best banks for international students! 🏦
 
 **Top Recommendations:**
@@ -54,59 +54,56 @@ Banking 탭에서 나에게 맞는 은행을 찾아보세요!`,
 3. **Wells Fargo** - No SSN required in-branch
 
 Check out our Banking section for personalized recommendations!`,
-  '크레딧 카드': `신용 기록 없이도 만들 수 있는 카드가 있어요! 💳
+  '크레딧 카드': `You can start building credit even without long credit history. 💳
 
-**Secured Credit Cards (보증금 필요):**
-- Discover it Secured - 캐시백 매칭
-- Capital One Secured - 낮은 보증금
+**Good starter paths:**
+- Secured cards (deposit-backed): Discover it Secured, Capital One Secured
+- Student cards: Discover it Student, Journey Student
 
-**Student Cards:**
-- Discover it Student - 학생 전용, 성적 보너스
-- Journey Student Rewards - 첫 카드로 좋음
+**Tips:**
+- Keep utilization low (under 30%)
+- Pay on time, every month
+- Start with one card only
 
-**SSN 없이 가능:**
-- 일부 secured 카드는 ITIN으로 신청 가능
+See the Funding section for detailed comparisons.`,
+  '비자': `Here are key F-1 basics. 📋
 
-Funding 탭에서 자세히 알아보세요!`,
-  '비자': `F-1 비자 관련 중요 정보입니다! 📋
+**Important reminders:**
+- Maintain full-time enrollment
+- Off-campus work generally needs CPT/OPT authorization
+- Keep travel signatures and school records up to date
 
-**주의사항:**
-- Full-time 등록 유지 필수 (학기당 12학점 이상)
-- 캠퍼스 밖 취업은 CPT/OPT 필요
-- 출국 시 I-20 서명 확인 (6개월 내)
+**Work pathways:**
+- CPT during program (if eligible)
+- OPT after graduation (STEM extension may apply)
 
-**취업 옵션:**
-- CPT: 인턴십/Co-op (학기 중)
-- OPT: 졸업 후 12개월 (STEM은 +24개월)
+Use the Visa section to track your checklist.`,
+  '집': `Here are practical housing tips for international students. 🏠
 
-Visa 탭에서 비자 상태를 관리하세요!`,
-  '집': `미국에서 집 구하기 팁이에요! 🏠
+**Typical order:**
+1. Campus housing for first term
+2. Nearby apartments after settling in
+3. Roommates to reduce costs
 
-**추천 순서:**
-1. 학교 기숙사 - 첫 학기 추천
-2. 학교 주변 아파트 - 2학기부터
-3. 룸메이트 구하기 - 비용 절약
+**Checklist:**
+- Rent + deposit
+- Utilities included or not
+- Commute and safety
 
-**체크리스트:**
-- 렌트비 (월세의 1-2개월 보증금)
-- 유틸리티 포함 여부
-- 학교까지 거리
-- 안전한 동네인지
+Use the Housing section for listings near campus.`,
+  'default': `Hi, I'm Noor AI 🙌
 
-Housing 탭에서 주변 아파트를 찾아보세요!`,
-  'default': `안녕하세요! 저는 Noor AI예요 🙌
+I can help with:
+- 🏦 Opening bank accounts
+- 💳 Building credit
+- 📋 Visa-related basics
+- 🏠 Housing setup
+- 💰 Student financial planning
 
-제가 도와드릴 수 있는 것들:
-- 🏦 **은행 계좌** 개설 방법
-- 💳 **크레딧 카드** 추천
-- 📋 **비자** 관련 정보
-- 🏠 **주거** 찾기 팁
-- 💰 **장학금** 정보
-
-무엇이든 물어보세요!
+Ask me anything.
 
 ---
-*현재 데모 모드로 실행 중입니다. 더 정확한 답변을 위해 관리자에게 API 설정을 요청해주세요.*`,
+*Running in demo mode. For full answers, configure your API key.*`,
 };
 
 function getDemoResponse(message: string): string {
@@ -164,6 +161,17 @@ function mapSafeContextToPromptContext(safeContext: SafeUserContext): UserContex
   };
 }
 
+function buildSafeContextSection(safeContext: SafeUserContext): string {
+  const entries = Object.entries(safeContext).filter(([, value]) => value !== undefined && value !== null);
+  if (entries.length === 0) {
+    return 'No safe financial context available.';
+  }
+
+  return entries
+    .map(([key, value]) => `- ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    .join('\n');
+}
+
 async function callOpenRouter(
   apiKey: string,
   systemPrompt: string,
@@ -214,6 +222,7 @@ export async function POST(request: NextRequest) {
     const orchestratorResult = await orchestrate(userId || null, formattedMessages);
     const promptContext = mapSafeContextToPromptContext(orchestratorResult.safeContext);
     let systemPrompt = generateSystemPrompt(promptContext);
+    systemPrompt = `${systemPrompt}\n\n## Orchestrator Safe Context\n${buildSafeContextSection(orchestratorResult.safeContext)}`;
     if (orchestratorResult.productContext) {
       systemPrompt = `${systemPrompt}\n\n## Product Context\n${orchestratorResult.productContext}`;
     }

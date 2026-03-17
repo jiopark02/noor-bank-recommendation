@@ -16,7 +16,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       'hasITIN',
       'institutionType',
       'campusSide',
-      'incomeBand',
+      'monthlyIncome',
       'university',
     ],
     description: 'Banking recommendations with minimal safe context.',
@@ -24,7 +24,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   credit: {
     id: 'credit',
     dbAccess: 'minimal',
-    allowedFields: ['destinationCountry', 'hasSSN', 'hasITIN', 'institutionType', 'incomeBand'],
+    allowedFields: ['destinationCountry', 'hasSSN', 'hasITIN', 'institutionType', 'monthlyIncome'],
     description: 'Credit guidance with minimal safe context.',
   },
   visa: {
@@ -36,7 +36,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   housing: {
     id: 'housing',
     dbAccess: 'minimal',
-    allowedFields: ['destinationCountry', 'campusSide', 'university', 'incomeBand'],
+    allowedFields: ['destinationCountry', 'campusSide', 'university', 'monthlyIncome'],
     description: 'Housing guidance with minimal safe context.',
   },
   deals: {
@@ -49,9 +49,11 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     id: 'affordability',
     dbAccess: 'minimal',
     allowedFields: [
+      'monthlyBudget',
+      'expectedMonthlySpending',
       'checkingBalance',
       'upcomingObligationsSummary',
-      'incomeBand',
+      'monthlyIncome',
       'spendingCategoryTotals',
     ],
     description: 'Affordability analysis using minimal aggregated data.',

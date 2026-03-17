@@ -10,16 +10,10 @@ const ALLOWED_SELECT_COLUMNS = [
   'institution_type',
   'campus_side',
   'monthly_income',
+  'monthly_budget',
+  'expected_monthly_spending',
   'university',
 ].join(', ');
-
-function toIncomeBand(income: number | null | undefined): string | undefined {
-  if (income == null || income <= 0) return undefined;
-  if (income < 1000) return 'under_1k';
-  if (income < 2000) return 'under_2k';
-  if (income < 3500) return 'under_3_5k';
-  return 'over_3_5k';
-}
 
 export async function fetchSafeContext(
   userId: string,
@@ -62,11 +56,39 @@ export async function fetchSafeContext(
     if (allowedFields.includes('campusSide') && typeof row.campus_side === 'string') {
       safe.campusSide = row.campus_side;
     }
-    if (allowedFields.includes('incomeBand')) {
-      const band = toIncomeBand(
-        typeof row.monthly_income === 'number' ? row.monthly_income : undefined
-      );
-      if (band) safe.incomeBand = band;
+    if (allowedFields.includes('monthlyIncome') && typeof row.monthly_income === 'number') {
+      safe.monthlyIncome = row.monthly_income;
+    }
+    if (allowedFields.includes('monthlyBudget') && typeof row.monthly_budget === 'number') {
+      safe.monthlyBudget = row.monthly_budget;
+    }
+    if (
+      allowedFields.includes('expectedMonthlySpending') &&
+      typeof row.expected_monthly_spending === 'number'
+    ) {
+      safe.expectedMonthlySpending = row.expected_monthly_spending;
+    }
+    if (
+      allowedFields.includes('checkingBalance') &&
+      typeof row.monthly_budget === 'number' &&
+      typeof row.expected_monthly_spending === 'number'
+    ) {
+      // Estimated disposable amount from onboarding budget fields (not live bank balance).
+      safe.checkingBalance = Number((row.monthly_budget - row.expected_monthly_spending).toFixed(2));
+    }
+    if (
+      allowedFields.includes('upcomingObligationsSummary') &&
+      typeof row.monthly_budget === 'number' &&
+      typeof row.expected_monthly_spending === 'number'
+    ) {
+      safe.upcomingObligationsSummary = `Estimated monthly planned spending: $${row.expected_monthly_spending.toFixed(
+        2
+      )} on a budget of $${row.monthly_budget.toFixed(2)}.`;
+    }
+    if (allowedFields.includes('spendingCategoryTotals') && typeof row.expected_monthly_spending === 'number') {
+      safe.spendingCategoryTotals = `Total planned monthly spending (aggregate): $${row.expected_monthly_spending.toFixed(
+        2
+      )}.`;
     }
     if (allowedFields.includes('university') && typeof row.university === 'string') {
       safe.university = row.university;

@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
     }
 
     const email = surveyData.email.toLowerCase().trim();
+    const now = new Date().toISOString();
 
     // Use Supabase auth user id if provided, otherwise generate one.
     const userId = surveyData.auth_user_id || uuidv4();
@@ -34,21 +35,21 @@ export async function POST(request: NextRequest) {
       country_of_origin: surveyData.country_of_origin || null,
       visa_type: surveyData.visa_status,
       university: surveyData.university,
-      institution_id: surveyData.institution_id,
-      institution_type: surveyData.institution_type,
-      has_ssn: surveyData.has_ssn,
-      has_itin: surveyData.has_itin,
+      has_ssn: Boolean(surveyData.has_ssn),
+      has_itin: Boolean(surveyData.has_itin),
       has_us_address: surveyData.has_us_address ?? true,
       monthly_income: surveyData.monthly_income || 0,
+      monthly_budget: surveyData.monthly_budget || 0,
       expected_monthly_spending: surveyData.monthly_budget ? surveyData.monthly_budget * 0.8 : 0,
+      international_transfers: surveyData.international_transfers || surveyData.international_transfer_frequency || null,
       international_transfer_frequency: surveyData.international_transfers,
       avg_transfer_amount: surveyData.avg_transfer_amount || 500,
-      needs_zelle: surveyData.needs_zelle,
+      needs_zelle: Boolean(surveyData.needs_zelle),
       prefers_online_banking: surveyData.digital_preference === 'mobile-first',
       needs_nearby_branch: surveyData.campus_proximity === 'very-important',
-      campus_side: surveyData.campus_side || null,
       onboarding_completed: true,
-      created_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     };
 
     // Try Supabase first if configured
@@ -109,7 +110,7 @@ export async function POST(request: NextRequest) {
               firstName: userData.first_name,
               lastName: userData.last_name,
               email: email,
-              institutionId: userData.institution_id,
+              institutionId: surveyData.institution_id,
               university: userData.university,
               countryOfOrigin: userData.country_of_origin,
             },
@@ -155,7 +156,7 @@ export async function POST(request: NextRequest) {
         firstName: userData.first_name,
         lastName: userData.last_name,
         email: email,
-        institutionId: userData.institution_id,
+        institutionId: surveyData.institution_id,
         university: userData.university,
         countryOfOrigin: userData.country_of_origin,
       },

@@ -114,7 +114,7 @@ export function useChat({
       const errorMessage: ChatMessage = {
         id: generateId(),
         role: 'assistant',
-        content: '죄송해요, 응답을 생성하는 중 오류가 발생했어요. 잠시 후 다시 시도해주세요. 🙏',
+        content: 'Sorry, I ran into an error while generating a response. Please try again in a moment. 🙏',
         timestamp: new Date(),
       };
 

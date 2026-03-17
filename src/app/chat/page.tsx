@@ -2,9 +2,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
-import { UserLevel, getUserFinanceLevel } from '@/lib/financeProTips';
+import { ChatMessage } from '@/components/chat/ChatMessage';
+import { useChat } from '@/hooks/useChat';
+import { UserContext } from '@/lib/noorAIPrompt';
+import { UserLevel } from '@/lib/financeProTips';
 
 interface Message {
   id: string;
@@ -640,185 +643,92 @@ Check **Grow > Pro Tips** for all 80+ tips!`,
 
 export default function ChatPage() {
   const router = useRouter();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userContext, setUserContext] = useState<UserContext>({});
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const {
+    messages,
+    isLoading,
+    error,
+    sendMessage,
+    clearMessages,
+    quickPrompts,
+  } = useChat({
+    userId,
+    userContext,
+    loadHistory: true,
+  });
+
   useEffect(() => {
-    const userId = localStorage.getItem('noor_user_id');
-    if (!userId) {
+    const storedUserId = localStorage.getItem('noor_user_id');
+    if (!storedUserId) {
       router.push('/welcome');
       return;
     }
+    setUserId(storedUserId);
 
-    // Load user profile to determine level
+    // Load user profile for prompt personalization and legacy level badge display.
     const profile = localStorage.getItem('noor_user_profile');
     if (profile) {
       try {
         const parsed = JSON.parse(profile);
-        const level = getUserFinanceLevel({
-          studentLevel: parsed.studentLevel,
-          academicLevel: parsed.academicLevel,
-          year: parsed.graduationYear ? new Date().getFullYear() - (parseInt(parsed.graduationYear) - 4) : undefined,
-          visaStatus: parsed.visaStatus,
+        setUserContext({
+          firstName: parsed.firstName,
+          lastName: parsed.lastName,
+          university: parsed.university,
+          institutionType: parsed.institutionType,
+          visaType: parsed.visaType || parsed.visaStatus,
+          hasSSN: parsed.hasSSN,
+          hasCreditHistory: parsed.hasCreditHistory,
+          monthlyIncome: parsed.monthlyIncome,
+          campusSide: parsed.campusSide,
+          isTransferStudent: parsed.isTransferStudent,
+          targetSchools: parsed.targetSchools,
+          visaExpiry: parsed.visaExpiry,
+          optStartDate: parsed.optStartDate,
+          monthlySpending: parsed.monthlySpending,
+          savingsGoal: parsed.savingsGoal,
         });
-        setUserLevel(level);
-      } catch (e) {
-        // Use default
+
+        const levelText = String(parsed.studentLevel || parsed.financeLevel || '').toLowerCase();
+        if (levelText.includes('advanced')) {
+          setUserLevel('advanced');
+        } else if (levelText.includes('intermediate')) {
+          setUserLevel('intermediate');
+        } else {
+          setUserLevel('beginner');
+        }
+      } catch {
+        // Keep defaults when profile parse fails.
       }
     }
 
-    // Load chat history
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setMessages(parsed.map((m: Message) => ({
-          ...m,
-          timestamp: new Date(m.timestamp),
-        })));
-      } catch (e) {
-        // ignore
-      }
-    }
-
-    // Check for quick prompt from home page
+    // Send one-time quick prompt if navigation set it.
     const quickPrompt = localStorage.getItem('noor_quick_prompt');
     if (quickPrompt) {
       localStorage.removeItem('noor_quick_prompt');
-      setInput(quickPrompt);
-      // Auto-submit after a short delay
-      setTimeout(() => {
-        handleSend(quickPrompt);
-      }, 500);
+      void sendMessage(quickPrompt);
     }
-  }, [router]);
-
-  useEffect(() => {
-    // Save messages to localStorage
-    if (messages.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-    }
-  }, [messages]);
+  }, [router, sendMessage]);
 
   useEffect(() => {
     // Scroll to bottom on new messages
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const generateResponse = (userMessage: string): string => {
-    const lowerMessage = userMessage.toLowerCase();
-
-    // Check for level-specific responses first
-    // Emergency fund (level-specific)
-    if (lowerMessage.includes('emergency fund') || lowerMessage.includes('safety net') || (lowerMessage.includes('how much') && lowerMessage.includes('save'))) {
-      return LEVEL_RESPONSES.emergency?.[userLevel] || AI_RESPONSES.savings;
-    }
-    // Backdoor Roth (level-specific)
-    if (lowerMessage.includes('backdoor') && !lowerMessage.includes('mega')) {
-      return LEVEL_RESPONSES.backdoor?.[userLevel] || AI_RESPONSES.roth;
-    }
-    // Mega backdoor (level-specific)
-    if (lowerMessage.includes('mega') || (lowerMessage.includes('after-tax') && lowerMessage.includes('401'))) {
-      return LEVEL_RESPONSES.mega?.[userLevel] || AI_RESPONSES['401k'];
-    }
-
-    // Check for extra money / what to do questions
-    if (lowerMessage.includes('extra') || lowerMessage.includes('what should i do with') || lowerMessage.includes('what do i do with') || lowerMessage.includes('spare money')) {
-      return AI_RESPONSES.extra_money;
-    }
-    // Flowchart / order questions
-    if (lowerMessage.includes('flowchart') || lowerMessage.includes('order') || lowerMessage.includes('priority') || lowerMessage.includes('what first') || lowerMessage.includes('where to start')) {
-      return AI_RESPONSES.flowchart;
-    }
-    // Warning / caution questions
-    if (lowerMessage.includes('warning') || lowerMessage.includes('mistake') || lowerMessage.includes('avoid') || lowerMessage.includes('careful') || lowerMessage.includes('risk')) {
-      return AI_RESPONSES.warning;
-    }
-    // 401(k) specific
-    if (lowerMessage.includes('401k') || lowerMessage.includes('401(k)') || lowerMessage.includes('employer match') || lowerMessage.includes('matching')) {
-      return AI_RESPONSES['401k'];
-    }
-    // HSA specific
-    if (lowerMessage.includes('hsa') || lowerMessage.includes('health savings') || lowerMessage.includes('triple tax')) {
-      return AI_RESPONSES.hsa;
-    }
-    // Credit
-    if (lowerMessage.includes('credit') || lowerMessage.includes('credit card') || lowerMessage.includes('build credit')) {
-      return AI_RESPONSES.credit;
-    }
-    // SSN
-    if (lowerMessage.includes('ssn') || lowerMessage.includes('social security')) {
-      return AI_RESPONSES.ssn;
-    }
-    // Tax
-    if (lowerMessage.includes('tax') || lowerMessage.includes('1040') || lowerMessage.includes('8843') || lowerMessage.includes('fbar') || lowerMessage.includes('treaty')) {
-      return AI_RESPONSES.tax;
-    }
-    // OPT/CPT
-    if (lowerMessage.includes('opt') || lowerMessage.includes('cpt') || lowerMessage.includes('work authorization')) {
-      return AI_RESPONSES.opt;
-    }
-    // HYSA
-    if (lowerMessage.includes('hysa') || lowerMessage.includes('high yield') || lowerMessage.includes('high-yield') || lowerMessage.includes('savings account')) {
-      return AI_RESPONSES.hysa;
-    }
-    // Roth IRA
-    if (lowerMessage.includes('roth') || lowerMessage.includes('ira') || lowerMessage.includes('retirement')) {
-      return AI_RESPONSES.roth;
-    }
-    // General savings
-    if (lowerMessage.includes('sav')) {
-      return AI_RESPONSES.savings;
-    }
-    // General investing
-    if (lowerMessage.includes('invest') || lowerMessage.includes('stock') || lowerMessage.includes('index fund') || lowerMessage.includes('etf') || lowerMessage.includes('brokerage')) {
-      return AI_RESPONSES.invest;
-    }
-
-    return DEFAULT_RESPONSE_BY_LEVEL[userLevel];
-  };
-
   const handleSend = async (messageText?: string) => {
-    const text = messageText || input.trim();
-    if (!text) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
+    const text = (messageText || input).trim();
+    if (!text || isLoading) return;
     setInput('');
-    setIsTyping(true);
-
-    // Simulate AI response delay
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
-
-    const aiResponse: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      content: generateResponse(text),
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, aiResponse]);
-    setIsTyping(false);
-  };
-
-  const handleQuickPrompt = (prompt: string) => {
-    setInput(prompt);
-    handleSend(prompt);
+    await sendMessage(text);
   };
 
   const clearChat = () => {
-    setMessages([]);
-    localStorage.removeItem(STORAGE_KEY);
+    clearMessages();
   };
 
   return (
@@ -843,7 +753,7 @@ export default function ChatPage() {
                  userLevel === 'intermediate' ? 'Building' : 'Advanced'}
               </span>
             </div>
-            <p className="text-xs text-gray-500">Personalized to your level</p>
+            <p className="text-xs text-gray-500">Same engine as floating chat</p>
           </div>
         </div>
         {messages.length > 0 && (
@@ -874,12 +784,12 @@ export default function ChatPage() {
               I can help with banking, visa questions, taxes, and more.
             </p>
 
-            {/* Quick Prompts - Level Specific */}
+            {/* Quick prompts from shared chat hook */}
             <div className="flex flex-wrap justify-center gap-2">
-              {QUICK_PROMPTS_BY_LEVEL[userLevel].map(prompt => (
+              {quickPrompts.slice(0, 4).map((prompt, index) => (
                 <button
-                  key={prompt.id}
-                  onClick={() => handleQuickPrompt(prompt.label)}
+                  key={`${prompt.label}-${index}`}
+                  onClick={() => handleSend(prompt.prompt)}
                   className="px-4 py-2 bg-white border border-gray-200 rounded-full text-sm text-gray-700 hover:border-gray-400 transition-colors"
                 >
                   {prompt.label}
@@ -889,51 +799,21 @@ export default function ChatPage() {
           </motion.div>
         ) : (
           <div className="space-y-4">
-            <AnimatePresence>
-              {messages.map((message) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                      message.role === 'user'
-                        ? 'bg-black text-white'
-                        : 'bg-white border border-gray-200'
-                    }`}
-                  >
-                    <div
-                      className={`text-sm whitespace-pre-wrap ${
-                        message.role === 'user' ? 'text-white' : 'text-gray-800'
-                      }`}
-                      dangerouslySetInnerHTML={{
-                        __html: message.content
-                          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                          .replace(/\n/g, '<br />')
-                      }}
-                    />
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+            {messages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                role={message.role}
+                content={message.content}
+                timestamp={message.timestamp}
+              />
+            ))}
 
-            {/* Typing indicator */}
-            {isTyping && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex justify-start"
-              >
-                <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </motion.div>
+            {isLoading && (
+              <ChatMessage
+                role="assistant"
+                content=""
+                isTyping={true}
+              />
             )}
             <div ref={messagesEndRef} />
           </div>
@@ -950,11 +830,12 @@ export default function ChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder="Ask about banking, visa, taxes..."
-            className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-gray-300 transition-all"
+            disabled={isLoading}
+            className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-gray-300 transition-all disabled:opacity-60"
           />
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || isTyping}
+            disabled={!input.trim() || isLoading}
             className="p-3 bg-black text-white rounded-xl disabled:opacity-50 transition-all hover:bg-gray-800"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -962,6 +843,9 @@ export default function ChatPage() {
             </svg>
           </button>
         </div>
+        {error && (
+          <p className="mt-2 text-xs text-red-500">{error}</p>
+        )}
       </div>
 
       <BottomNav />

@@ -41,3 +41,5 @@ next-env.d.ts
 .env*.local
 
 Noor AI Fundamentals.md
+AI Orchestration Task Prompts.md
+Supabase Snippet users table columns.csv
