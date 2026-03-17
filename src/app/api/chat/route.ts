@@ -5,7 +5,15 @@ import { generateSystemPrompt, UserContext } from '@/lib/noorAIPrompt';
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
-// Initialize Anthropic client only if API key exists
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_MODEL = 'anthropic/claude-3.5-sonnet'; // Noor-appropriate model via OpenRouter
+
+function hasOpenRouterKey(): boolean {
+  const key = process.env.OPENROUTER_API_KEY;
+  return !!key && key.trim() !== '';
+}
+
+// Initialize Anthropic client only if API key exists (used when OpenRouter not set)
 function getAnthropicClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey || apiKey.trim() === '') {
@@ -150,57 +158,103 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const anthropic = getAnthropicClient();
-
-    // Demo mode - use fallback responses
-    if (!anthropic) {
-      const lastUserMessage = messages[messages.length - 1];
-      const demoResponse = getDemoResponse(lastUserMessage.content);
-
-      // Simulate a small delay for natural feel
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      return NextResponse.json({
-        success: true,
-        message: demoResponse,
-        demo_mode: true,
-      });
-    }
-
-    // Generate the system prompt with user context
     const systemPrompt = generateSystemPrompt(userContext || {});
-
-    // Format messages for Claude API
     const formattedMessages = messages.map((msg: ChatMessage) => ({
       role: msg.role as 'user' | 'assistant',
       content: msg.content,
     }));
 
-    // Call Claude API
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: formattedMessages,
-    });
+    // 1) Prefer OpenRouter when OPENROUTER_API_KEY is set
+    if (hasOpenRouterKey()) {
+      const openRouterMessages = [
+        { role: 'system' as const, content: systemPrompt },
+        ...formattedMessages,
+      ];
 
-    // Extract the assistant's response
-    const assistantMessage = response.content[0].type === 'text'
-      ? response.content[0].text
-      : '';
+      const res = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: OPENROUTER_MODEL,
+          messages: openRouterMessages,
+          max_tokens: 1024,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          return NextResponse.json(
+            { error: 'Invalid OpenRouter API key', demo_available: true },
+            { status: 401 }
+          );
+        }
+        if (res.status === 429) {
+          return NextResponse.json(
+            { error: 'Rate limit exceeded. Please try again later.' },
+            { status: 429 }
+          );
+        }
+        const errMsg = data?.error?.message || data?.message || 'OpenRouter request failed';
+        return NextResponse.json({ error: errMsg }, { status: res.status });
+      }
+
+      const rawContent = data?.choices?.[0]?.message?.content;
+      const assistantContent = typeof rawContent === 'string' ? rawContent : '';
+      const usage = data?.usage;
+
+      return NextResponse.json({
+        success: true,
+        message: assistantContent || 'Sorry, I couldn’t generate a response.',
+        usage: usage
+          ? {
+              input_tokens: usage.prompt_tokens ?? usage.input_tokens,
+              output_tokens: usage.completion_tokens ?? usage.output_tokens,
+            }
+          : undefined,
+      });
+    }
+
+    // 2) Fallback to Anthropic if ANTHROPIC_API_KEY is set
+    const anthropic = getAnthropicClient();
+    if (anthropic) {
+      const response = await anthropic.messages.create({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: formattedMessages,
+      });
+
+      const assistantMessage =
+        response.content[0].type === 'text' ? response.content[0].text : '';
+
+      return NextResponse.json({
+        success: true,
+        message: assistantMessage,
+        usage: {
+          input_tokens: response.usage.input_tokens,
+          output_tokens: response.usage.output_tokens,
+        },
+      });
+    }
+
+    // 3) Demo mode when no API key is configured
+    const lastUserMessage = messages[messages.length - 1];
+    const demoResponse = getDemoResponse(lastUserMessage.content);
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     return NextResponse.json({
       success: true,
-      message: assistantMessage,
-      usage: {
-        input_tokens: response.usage.input_tokens,
-        output_tokens: response.usage.output_tokens,
-      },
+      message: demoResponse,
+      demo_mode: true,
     });
   } catch (error) {
     console.error('Chat API error:', error);
 
-    // Handle specific Anthropic errors
     if (error instanceof Anthropic.APIError) {
       if (error.status === 401) {
         return NextResponse.json(
