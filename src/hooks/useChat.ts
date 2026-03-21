@@ -12,6 +12,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  model?: string;
 }
 
 interface UseChatOptions {
@@ -24,6 +25,7 @@ interface UseChatReturn {
   messages: ChatMessage[];
   isLoading: boolean;
   error: string | null;
+  currentModel: string | null;
   sendMessage: (content: string) => Promise<void>;
   clearMessages: () => void;
   quickPrompts: Array<{ label: string; prompt: string }>;
@@ -34,6 +36,7 @@ interface StoredChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  model?: string;
 }
 
 export function useChat({
@@ -44,6 +47,7 @@ export function useChat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentModel, setCurrentModel] = useState<string | null>(null);
 
   const loadLocalHistory = useCallback((): ChatMessage[] => {
     if (!userId || typeof window === "undefined") {
@@ -64,6 +68,7 @@ export function useChat({
         role: msg.role,
         content: msg.content,
         timestamp: new Date(msg.timestamp),
+        model: msg.model,
       }));
     } catch {
       return [];
@@ -84,6 +89,7 @@ export function useChat({
             role: msg.role,
             content: msg.content || msg.message || "",
             timestamp: new Date(msg.created_at || msg.timestamp || Date.now()),
+            model: typeof msg.model === "string" ? msg.model : undefined,
           })
         );
 
@@ -124,6 +130,7 @@ export function useChat({
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp.toISOString(),
+        model: msg.model,
       }));
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
@@ -178,8 +185,10 @@ export function useChat({
           role: "assistant",
           content: data.message,
           timestamp: new Date(),
+          model: typeof data.model === "string" ? data.model : undefined,
         };
 
+        setCurrentModel(typeof data.model === "string" ? data.model : null);
         setMessages((prev) => [...prev, assistantMessage]);
       } catch (err) {
         setError(err instanceof Error ? err.message : "An error occurred");
@@ -189,7 +198,7 @@ export function useChat({
           id: generateId(),
           role: "assistant",
           content:
-            "죄송해요, 응답을 생성하는 중 오류가 발생했어요. 잠시 후 다시 시도해주세요. 🙏",
+            "Sorry, there was an error generating a response. Please try again in a moment.",
           timestamp: new Date(),
         };
 
@@ -230,6 +239,7 @@ export function useChat({
     messages,
     isLoading,
     error,
+    currentModel,
     sendMessage,
     clearMessages,
     quickPrompts,
