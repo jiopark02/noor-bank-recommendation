@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
-import { v4 as uuidv4 } from 'uuid';
-import { hashPassword, addUser, emailExists } from '@/lib/auth';
-import { sendWelcomeEmail } from '@/lib/email';
+import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
+import { v4 as uuidv4 } from "uuid";
+import { sendWelcomeEmail } from "@/lib/email";
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,153 +10,186 @@ export async function POST(request: NextRequest) {
     // Validate required fields
     if (!surveyData.email || !surveyData.password) {
       return NextResponse.json(
-        { success: false, message: 'Email and password are required' },
+        { success: false, message: "Email and password are required" },
         { status: 400 }
       );
     }
 
     const email = surveyData.email.toLowerCase().trim();
 
-    // Generate a new user ID
-    const userId = uuidv4();
-
-    // Hash the password
-    const passwordHash = await hashPassword(surveyData.password);
-
-    // Map survey data to database schema
-    const userData = {
-      id: userId,
-      first_name: surveyData.first_name || 'User',
-      last_name: surveyData.last_name || '',
-      email: email,
-      password_hash: passwordHash,
-      country_of_origin: surveyData.country_of_origin || null,
-      visa_type: surveyData.visa_status,
-      university: surveyData.university,
-      institution_id: surveyData.institution_id,
-      institution_type: surveyData.institution_type,
-      has_ssn: surveyData.has_ssn,
-      has_itin: surveyData.has_itin,
-      has_us_address: surveyData.has_us_address ?? true,
-      monthly_income: surveyData.monthly_income || 0,
-      expected_monthly_spending: surveyData.monthly_budget ? surveyData.monthly_budget * 0.8 : 0,
-      international_transfer_frequency: surveyData.international_transfers,
-      avg_transfer_amount: surveyData.avg_transfer_amount || 500,
-      needs_zelle: surveyData.needs_zelle,
-      prefers_online_banking: surveyData.digital_preference === 'mobile-first',
-      needs_nearby_branch: surveyData.campus_proximity === 'very-important',
-      campus_side: surveyData.campus_side || null,
-      onboarding_completed: true,
-      created_at: new Date().toISOString(),
-    };
-
-    // Try Supabase first if configured
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = createServerClient();
-
-        // Check if email already exists
-        const { data: existingUser } = await supabase
-          .from('users')
-          .select('id')
-          .eq('email', email)
-          .single();
-
-        if (existingUser) {
-          return NextResponse.json(
-            { success: false, message: 'An account with this email already exists' },
-            { status: 409 }
-          );
-        }
-
-        const { data, error } = await supabase
-          .from('users')
-          .insert(userData)
-          .select()
-          .single();
-
-        if (error) {
-          console.error('Supabase insert error:', error);
-          // Fall through to local store
-        } else {
-          // Also save to local store as backup
-          addUser({
-            id: data.id,
-            email: email,
-            password_hash: passwordHash,
-            first_name: userData.first_name,
-            last_name: userData.last_name,
-            profile: userData,
-          });
-
-          // Send welcome email (don't await - send in background)
-          sendWelcomeEmail(email, userData.first_name).catch(err => {
-            console.error('Failed to send welcome email:', err);
-          });
-
-          return NextResponse.json({
-            success: true,
-            userId: data.id,
-            profile: {
-              firstName: userData.first_name,
-              lastName: userData.last_name,
-              email: email,
-              institutionId: userData.institution_id,
-              university: userData.university,
-              countryOfOrigin: userData.country_of_origin,
-            },
-            message: 'Account created successfully',
-          });
-        }
-      } catch (dbError) {
-        console.error('Database error:', dbError);
-        // Fall through to local store
-      }
-    }
-
-    // Fallback: Use local store for development
-    // Check if email already exists in local store
-    if (emailExists(email)) {
+    if (!isSupabaseAdminConfigured()) {
       return NextResponse.json(
-        { success: false, message: 'An account with this email already exists' },
-        { status: 409 }
+        {
+          success: false,
+          message:
+            "Supabase admin is not configured. Set SUPABASE_SERVICE_ROLE_KEY to enable signup.",
+        },
+        { status: 500 }
       );
     }
 
-    // Save to local store
-    addUser({
+    const supabaseAdmin = createAdminClient();
+    const now = new Date().toISOString();
+    const firstName = surveyData.first_name?.trim() || "User";
+    const lastName = surveyData.last_name?.trim() || null;
+
+    const { data: createdAuthUser, error: createAuthError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: surveyData.password,
+        email_confirm: true,
+        user_metadata: {
+          first_name: firstName,
+          last_name: lastName,
+        },
+      });
+
+    if (createAuthError || !createdAuthUser?.user) {
+      const message = (createAuthError?.message || "").toLowerCase();
+      if (message.includes("already") || message.includes("exists")) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "An account with this email already exists",
+          },
+          { status: 409 }
+        );
+      }
+
+      console.error("Supabase auth signup error:", createAuthError);
+      return NextResponse.json(
+        {
+          success: false,
+          message: createAuthError?.message || "Failed to create auth user",
+        },
+        { status: 500 }
+      );
+    }
+
+    const userId = createdAuthUser.user.id;
+
+    const profileRow = {
       id: userId,
-      email: email,
-      password_hash: passwordHash,
-      first_name: userData.first_name,
-      last_name: userData.last_name,
-      profile: userData,
-    });
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      raw_user_meta_data: {
+        source: "survey_signup",
+        destination_country: surveyData.destination_country || null,
+      },
+      created_at: now,
+      updated_at: now,
+    };
 
-    console.log('User saved to local store:', email);
+    const { error: profileInsertError } = await supabaseAdmin
+      .from("users")
+      .insert(profileRow);
 
-    // Send welcome email (don't await - send in background)
-    sendWelcomeEmail(email, userData.first_name).catch(err => {
-      console.error('Failed to send welcome email:', err);
+    if (profileInsertError) {
+      await supabaseAdmin.auth.admin.deleteUser(userId).catch((err) => {
+        console.error("Rollback delete auth user failed:", err);
+      });
+
+      console.error("Profile insert error:", profileInsertError);
+      return NextResponse.json(
+        { success: false, message: "Failed to create user profile record" },
+        { status: 500 }
+      );
+    }
+
+    const surveyRow = {
+      id: uuidv4(),
+      user_id: userId,
+      country_of_origin: surveyData.country_of_origin || null,
+      destination_country: surveyData.destination_country || null,
+      institution_id: surveyData.institution_id || null,
+      institution_type: surveyData.institution_type || null,
+      university: surveyData.university || null,
+      academic_level: surveyData.academic_level || null,
+      year_in_program: surveyData.year_in_program ?? null,
+      major: surveyData.major || null,
+      gpa: surveyData.gpa ?? null,
+      student_level: surveyData.student_level || null,
+      has_ssn: surveyData.has_ssn ?? null,
+      has_itin: surveyData.has_itin ?? null,
+      has_nin: surveyData.has_nin ?? null,
+      has_sin: surveyData.has_sin ?? null,
+      has_us_credit_history: surveyData.has_us_credit_history ?? null,
+      has_us_address: surveyData.has_local_address ?? null,
+      monthly_income: surveyData.monthly_income ?? null,
+      expected_monthly_spending:
+        surveyData.expected_monthly_spending ??
+        surveyData.monthly_budget ??
+        null,
+      fee_sensitivity: surveyData.fee_sensitivity || null,
+      monthly_budget: surveyData.monthly_budget ?? null,
+      primary_banking_needs: surveyData.banking_needs || null,
+      digital_preference: surveyData.digital_preference || null,
+      international_transfer_frequency:
+        surveyData.international_transfers || null,
+      avg_transfer_amount: surveyData.avg_transfer_amount ?? null,
+      needs_nearby_branch:
+        surveyData.branch_preference === "must"
+          ? true
+          : surveyData.branch_preference === "not-needed"
+          ? false
+          : null,
+      needs_zelle: surveyData.needs_zelle ?? null,
+      prefers_online_banking:
+        surveyData.digital_preference === "mobile-first"
+          ? true
+          : surveyData.digital_preference === "branch-first"
+          ? false
+          : null,
+      preferred_bank_type: surveyData.banking_style || null,
+      campus_proximity: surveyData.campus_proximity || null,
+      campus_side: surveyData.campus_side || null,
+      primary_goals: surveyData.goals || null,
+      credit_goals: surveyData.credit_goals || null,
+      preferred_language: surveyData.preferred_language || null,
+      onboarding_completed: true,
+      created_at: now,
+      updated_at: now,
+    };
+
+    const { error: surveyInsertError } = await supabaseAdmin
+      .from("survey_responses")
+      .insert(surveyRow);
+
+    if (surveyInsertError) {
+      console.error("Survey insert error:", surveyInsertError);
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Account was created, but saving survey data failed. Please contact support.",
+          userId,
+        },
+        { status: 500 }
+      );
+    }
+
+    sendWelcomeEmail(email, firstName).catch((err) => {
+      console.error("Failed to send welcome email:", err);
     });
 
     return NextResponse.json({
       success: true,
-      userId: userId,
+      userId,
       profile: {
-        firstName: userData.first_name,
-        lastName: userData.last_name,
-        email: email,
-        institutionId: userData.institution_id,
-        university: userData.university,
-        countryOfOrigin: userData.country_of_origin,
+        firstName,
+        lastName,
+        email,
+        institutionId: surveyData.institution_id || null,
+        university: surveyData.university || null,
+        countryOfOrigin: surveyData.country_of_origin || null,
       },
-      message: 'Account created successfully',
+      message: "Account created successfully",
     });
   } catch (error) {
-    console.error('Survey API error:', error);
+    console.error("Survey API error:", error);
     return NextResponse.json(
-      { success: false, message: 'Something went wrong. Please try again.' },
+      { success: false, message: "Something went wrong. Please try again." },
       { status: 500 }
     );
   }
