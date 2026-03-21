@@ -9,7 +9,6 @@ interface ChatMessageProps {
   content: string;
   timestamp?: Date;
   isTyping?: boolean;
-  model?: string;
 }
 
 export function ChatMessage({
@@ -17,7 +16,6 @@ export function ChatMessage({
   content,
   timestamp,
   isTyping = false,
-  model,
 }: ChatMessageProps) {
   const { theme, useSchoolTheme } = useTheme();
   const isUser = role === "user";
@@ -77,11 +75,6 @@ export function ChatMessage({
                 }`}
               >
                 {formatTime(timestamp)}
-              </p>
-            )}
-            {!isUser && model && (
-              <p className="text-[10px] mt-1 text-gray-500 font-medium">
-                Model: {model}
               </p>
             )}
           </>

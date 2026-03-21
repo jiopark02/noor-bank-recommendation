@@ -25,14 +25,7 @@ export function ChatModal({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const {
-    messages,
-    isLoading,
-    error,
-    currentModel,
-    sendMessage,
-    quickPrompts,
-  } = useChat({
+  const { messages, isLoading, error, sendMessage, quickPrompts } = useChat({
     userId,
     userContext,
     loadHistory: true,
@@ -118,14 +111,6 @@ export function ChatModal({
                 >
                   Financial assistant for international students
                 </p>
-                {currentModel && (
-                  <p
-                    className="text-[11px] font-medium"
-                    style={{ color: headerTextColor, opacity: 0.85 }}
-                  >
-                    Model: {currentModel}
-                  </p>
-                )}
               </div>
             </div>
             <button
@@ -201,7 +186,6 @@ export function ChatModal({
                     role={msg.role}
                     content={msg.content}
                     timestamp={msg.timestamp}
-                    model={msg.model}
                   />
                 ))}
                 {isLoading && (

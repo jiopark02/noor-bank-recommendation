@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   UserContext,
   getContextualPrompts,
@@ -48,6 +48,7 @@ export function useChat({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
+  const isSendingRef = useRef(false);
 
   const loadLocalHistory = useCallback((): ChatMessage[] => {
     if (!userId || typeof window === "undefined") {
@@ -141,7 +142,9 @@ export function useChat({
 
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!content.trim()) return;
+      if (!content.trim() || isSendingRef.current) return;
+
+      isSendingRef.current = true;
 
       setIsLoading(true);
       setError(null);
@@ -205,6 +208,7 @@ export function useChat({
         setMessages((prev) => [...prev, errorMessage]);
       } finally {
         setIsLoading(false);
+        isSendingRef.current = false;
       }
     },
     [messages, userContext, userId]
