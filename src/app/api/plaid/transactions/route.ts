@@ -12,6 +12,49 @@ import {
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 
+type ApiSubscription = {
+  id: string;
+  name: string;
+  amount: number;
+  monthly_amount: number;
+  iso_currency_code: string;
+  frequency: "weekly" | "monthly" | "yearly" | "unknown";
+  last_charged: string | null;
+  next_charge: string | null;
+  category: string | null;
+  source: "plaid_recurring" | "heuristic";
+};
+
+function normalizeFrequency(
+  rawFrequency: string | undefined
+): ApiSubscription["frequency"] {
+  if (!rawFrequency) return "unknown";
+
+  const normalized = rawFrequency.toUpperCase();
+  if (normalized.includes("WEEK")) return "weekly";
+  if (
+    normalized.includes("MONTH") ||
+    normalized.includes("SEMIMONTH") ||
+    normalized.includes("BIWEEK")
+  ) {
+    return "monthly";
+  }
+  if (normalized.includes("YEAR") || normalized.includes("ANNUAL")) {
+    return "yearly";
+  }
+
+  return "unknown";
+}
+
+function toMonthlyAmount(
+  amount: number,
+  frequency: ApiSubscription["frequency"]
+): number {
+  if (frequency === "weekly") return amount * 4.33;
+  if (frequency === "yearly") return amount / 12;
+  return amount;
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!isPlaidConfigured()) {
@@ -87,20 +130,102 @@ export async function POST(request: NextRequest) {
           created_at: new Date().toISOString(),
         }));
 
-      // Detect subscriptions
-      const subscriptions = transactions
-        .filter((txn) => {
-          const { isSubscription } = detectSubscription(txn);
-          return isSubscription;
-        })
-        .map((txn) => {
-          const { merchant, category } = detectSubscription(txn);
-          return {
-            ...txn,
-            subscription_merchant: merchant,
-            subscription_category: category,
+      let subscriptions: ApiSubscription[] = [];
+
+      try {
+        // Prefer Plaid recurring streams for more accurate subscription detection.
+        const recurringResponse = (await (
+          plaidClient as any
+        ).transactionsRecurringGet({
+          access_token: accessToken,
+        })) as {
+          data?: {
+            outflow_streams?: Array<{
+              stream_id?: string;
+              merchant_name?: string | null;
+              description?: string | null;
+              average_amount?: {
+                amount?: number;
+                iso_currency_code?: string | null;
+              };
+              frequency?: string;
+              last_date?: string | null;
+              predicted_next_date?: string | null;
+              personal_finance_category?: { primary?: string | null };
+            }>;
           };
-        });
+        };
+
+        const outflowStreams = recurringResponse.data?.outflow_streams || [];
+        subscriptions = outflowStreams
+          .map((stream, index) => {
+            const amount = Math.max(0, stream.average_amount?.amount || 0);
+            const frequency = normalizeFrequency(stream.frequency);
+            const name =
+              stream.merchant_name ||
+              stream.description ||
+              `Subscription ${index + 1}`;
+
+            return {
+              id: stream.stream_id || `stream_${index}`,
+              name,
+              amount,
+              monthly_amount: toMonthlyAmount(amount, frequency),
+              iso_currency_code:
+                stream.average_amount?.iso_currency_code || "USD",
+              frequency,
+              last_charged: stream.last_date || null,
+              next_charge: stream.predicted_next_date || null,
+              category: stream.personal_finance_category?.primary || null,
+              source: "plaid_recurring" as const,
+            };
+          })
+          .filter((sub) => sub.amount > 0);
+      } catch (recurringError) {
+        console.warn(
+          "Recurring subscriptions unavailable, using heuristic detection"
+        );
+      }
+
+      if (subscriptions.length === 0) {
+        const fallbackByMerchant = new Map<string, ApiSubscription>();
+
+        transactions
+          .filter((txn) => txn.amount > 0)
+          .forEach((txn) => {
+            const { isSubscription, merchant, category } =
+              detectSubscription(txn);
+            if (!isSubscription) return;
+
+            const name = merchant || txn.merchant_name || txn.name;
+            const key = name.toLowerCase();
+            const existing = fallbackByMerchant.get(key);
+
+            if (!existing) {
+              fallbackByMerchant.set(key, {
+                id: `heuristic_${txn.transaction_id}`,
+                name,
+                amount: txn.amount,
+                monthly_amount: txn.amount,
+                iso_currency_code: txn.iso_currency_code || "USD",
+                frequency: "monthly",
+                last_charged: txn.date,
+                next_charge: null,
+                category: category || txn.category[0] || null,
+                source: "heuristic",
+              });
+              return;
+            }
+
+            if (txn.date > (existing.last_charged || "")) {
+              existing.last_charged = txn.date;
+              existing.amount = txn.amount;
+              existing.monthly_amount = txn.amount;
+            }
+          });
+
+        subscriptions = Array.from(fallbackByMerchant.values());
+      }
 
       // Calculate category totals
       const categoryTotals: Record<string, number> = {};

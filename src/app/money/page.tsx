@@ -16,6 +16,17 @@ import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
 
+type SubscriptionView = {
+  id: string;
+  name: string;
+  amount: number;
+  monthly_amount: number;
+  frequency: "weekly" | "monthly" | "yearly" | "unknown";
+  last_charged: string | null;
+  next_charge: string | null;
+  source: "plaid_recurring" | "heuristic";
+};
+
 export default function MoneyPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -23,6 +34,7 @@ export default function MoneyPage() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [accounts, setAccounts] = useState<PlaidAccount[]>([]);
   const [transactions, setTransactions] = useState<PlaidTransaction[]>([]);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionView[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
@@ -58,6 +70,7 @@ export default function MoneyPage() {
     if (!userId || !plaidConnections.hasActive) {
       setAccounts([]);
       setTransactions([]);
+      setSubscriptions([]);
       return;
     }
 
@@ -111,6 +124,9 @@ export default function MoneyPage() {
       const txnData = await txnRes.json();
       if (txnData.success) {
         setTransactions(txnData.transactions);
+        setSubscriptions(
+          Array.isArray(txnData.subscriptions) ? txnData.subscriptions : []
+        );
       }
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -440,34 +456,8 @@ export default function MoneyPage() {
       .sort((a, b) => b.amount - a.amount);
   }, [transactions]);
 
-  // Detect subscriptions
-  const subscriptions = useMemo(() => {
-    const subs: { name: string; amount: number; date: string }[] = [];
-    const subPatterns = [
-      { pattern: /netflix/i, name: "Netflix" },
-      { pattern: /spotify/i, name: "Spotify" },
-      { pattern: /apple.*music/i, name: "Apple Music" },
-      { pattern: /amazon.*prime/i, name: "Amazon Prime" },
-      { pattern: /hulu/i, name: "Hulu" },
-      { pattern: /disney/i, name: "Disney+" },
-      { pattern: /gym|fitness/i, name: "Gym" },
-    ];
-
-    transactions.forEach((t) => {
-      const name = t.merchant_name || t.name;
-      for (const sub of subPatterns) {
-        if (sub.pattern.test(name)) {
-          subs.push({ name: sub.name, amount: t.amount, date: t.date });
-          break;
-        }
-      }
-    });
-
-    return subs;
-  }, [transactions]);
-
   const totalSubscriptions = subscriptions.reduce(
-    (sum, s) => sum + s.amount,
+    (sum, s) => sum + s.monthly_amount,
     0
   );
 
@@ -669,7 +659,7 @@ export default function MoneyPage() {
                     key={i}
                     className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
                   >
-                    {sub.name} · ${sub.amount}
+                    {sub.name} · {formatCurrency(sub.monthly_amount)}/mo
                   </span>
                 ))}
               </div>
@@ -858,12 +848,22 @@ export default function MoneyPage() {
                       <div>
                         <p className="font-medium text-black">{sub.name}</p>
                         <p className="text-xs text-gray-500">
-                          Last charged {new Date(sub.date).toLocaleDateString()}
+                          {sub.last_charged
+                            ? `Last charged ${new Date(
+                                sub.last_charged
+                              ).toLocaleDateString()}`
+                            : "Recent recurring charge"}
                         </p>
+                        {sub.next_charge && (
+                          <p className="text-xs text-gray-500">
+                            Next expected{" "}
+                            {new Date(sub.next_charge).toLocaleDateString()}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <p className="font-semibold text-black">
-                      {formatCurrency(sub.amount)}/mo
+                      {formatCurrency(sub.monthly_amount)}/mo
                     </p>
                   </motion.div>
                 ))
