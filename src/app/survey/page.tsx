@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useUniversitySearch, University } from '@/hooks/useUniversitySearch';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { LanguageSelector } from '@/components/LanguageSelector';
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { useUniversitySearch, University } from "@/hooks/useUniversitySearch";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { LanguageSelector } from "@/components/LanguageSelector";
 import {
   validatePassword,
   validateEmail,
@@ -13,7 +13,8 @@ import {
   getPasswordStrengthLabel,
   createSession,
   acceptTerms,
-} from '@/lib/validation';
+} from "@/lib/validation";
+import { supabase } from "@/lib/supabase";
 import {
   Country,
   getVisaTypes,
@@ -21,7 +22,7 @@ import {
   getBanks,
   getCountryDisplay,
   COUNTRY_DISPLAY,
-} from '@/lib/countryConfig';
+} from "@/lib/countryConfig";
 
 interface SurveyData {
   // Step 1
@@ -34,7 +35,7 @@ interface SurveyData {
   agreeToTerms: boolean;
   institutionId: string;
   institutionName: string;
-  institutionType: 'university' | 'community_college' | '';
+  institutionType: "university" | "community_college" | "";
   countryOfOrigin: string;
   destinationCountry: string; // US, UK, or CA
   // Step 2
@@ -46,10 +47,10 @@ interface SurveyData {
   targetMajor: string;
   expectedTransferYear: string;
   // Step 3 - ID/Tax Numbers (country-specific)
-  hasSSN: boolean | null;      // US: Social Security Number
-  hasITIN: boolean | null;     // US: Individual Taxpayer Identification Number
-  hasNIN: boolean | null;      // UK: National Insurance Number
-  hasSIN: boolean | null;      // CA: Social Insurance Number
+  hasSSN: boolean | null; // US: Social Security Number
+  hasITIN: boolean | null; // US: Individual Taxpayer Identification Number
+  hasNIN: boolean | null; // UK: National Insurance Number
+  hasSIN: boolean | null; // CA: Social Insurance Number
   hasLocalAddress: boolean | null; // Address in destination country
   // Step 4
   monthlyIncome: number;
@@ -68,24 +69,24 @@ interface SurveyData {
 }
 
 const INITIAL_DATA: SurveyData = {
-  firstName: '',
-  lastName: '',
-  email: '',
-  password: '',
-  confirmPassword: '',
+  firstName: "",
+  lastName: "",
+  email: "",
+  password: "",
+  confirmPassword: "",
   staySignedIn: false,
   agreeToTerms: false,
-  institutionId: '',
-  institutionName: '',
-  institutionType: '',
-  countryOfOrigin: '',
-  destinationCountry: '',
-  academicLevel: '',
-  year: '',
+  institutionId: "",
+  institutionName: "",
+  institutionType: "",
+  countryOfOrigin: "",
+  destinationCountry: "",
+  academicLevel: "",
+  year: "",
   planningToTransfer: null,
   targetUniversities: [],
-  targetMajor: '',
-  expectedTransferYear: '',
+  targetMajor: "",
+  expectedTransferYear: "",
   hasSSN: null,
   hasITIN: null,
   hasNIN: null,
@@ -93,14 +94,14 @@ const INITIAL_DATA: SurveyData = {
   hasLocalAddress: null,
   monthlyIncome: 0,
   monthlyExpenses: 0,
-  feePriority: '',
+  feePriority: "",
   bankingNeeds: [],
-  bankingStyle: '',
-  transferFrequency: '',
-  branchPreference: '',
-  campusSide: '',
+  bankingStyle: "",
+  transferFrequency: "",
+  branchPreference: "",
+  campusSide: "",
   goals: [],
-  creditCardInterest: '',
+  creditCardInterest: "",
 };
 
 // Country-specific configurations - using comprehensive data from countryConfig
@@ -109,71 +110,71 @@ const COUNTRY_CONFIG = {
     name: COUNTRY_DISPLAY.US.name,
     currency: COUNTRY_DISPLAY.US.currencySymbol,
     currencyCode: COUNTRY_DISPLAY.US.currency,
-    taxIdLabel: 'SSN',
-    taxIdFullName: 'Social Security Number',
-    altTaxIdLabel: 'ITIN',
-    altTaxIdFullName: 'Individual Taxpayer Identification Number',
-    addressLabel: 'US address',
-    visaTypes: getVisaTypes('US').map(v => v.code),
-    visaTypesDetailed: getVisaTypes('US'),
-    documents: getRequiredDocuments('US'),
-    banks: getBanks('US'),
+    taxIdLabel: "SSN",
+    taxIdFullName: "Social Security Number",
+    altTaxIdLabel: "ITIN",
+    altTaxIdFullName: "Individual Taxpayer Identification Number",
+    addressLabel: "US address",
+    visaTypes: getVisaTypes("US").map((v) => v.code),
+    visaTypesDetailed: getVisaTypes("US"),
+    documents: getRequiredDocuments("US"),
+    banks: getBanks("US"),
   },
   UK: {
     name: COUNTRY_DISPLAY.UK.name,
     currency: COUNTRY_DISPLAY.UK.currencySymbol,
     currencyCode: COUNTRY_DISPLAY.UK.currency,
-    taxIdLabel: 'NIN',
-    taxIdFullName: 'National Insurance Number',
-    altTaxIdLabel: 'BRP',
-    altTaxIdFullName: 'Biometric Residence Permit',
-    addressLabel: 'UK address',
-    visaTypes: getVisaTypes('UK').map(v => v.code),
-    visaTypesDetailed: getVisaTypes('UK'),
-    documents: getRequiredDocuments('UK'),
-    banks: getBanks('UK'),
+    taxIdLabel: "NIN",
+    taxIdFullName: "National Insurance Number",
+    altTaxIdLabel: "BRP",
+    altTaxIdFullName: "Biometric Residence Permit",
+    addressLabel: "UK address",
+    visaTypes: getVisaTypes("UK").map((v) => v.code),
+    visaTypesDetailed: getVisaTypes("UK"),
+    documents: getRequiredDocuments("UK"),
+    banks: getBanks("UK"),
     requiresNHS: true,
   },
   CA: {
     name: COUNTRY_DISPLAY.CA.name,
     currency: COUNTRY_DISPLAY.CA.currencySymbol,
     currencyCode: COUNTRY_DISPLAY.CA.currency,
-    taxIdLabel: 'SIN',
-    taxIdFullName: 'Social Insurance Number',
+    taxIdLabel: "SIN",
+    taxIdFullName: "Social Insurance Number",
     altTaxIdLabel: null,
     altTaxIdFullName: null,
-    addressLabel: 'Canadian address',
-    visaTypes: getVisaTypes('CA').map(v => v.code),
-    visaTypesDetailed: getVisaTypes('CA'),
-    documents: getRequiredDocuments('CA'),
-    banks: getBanks('CA'),
+    addressLabel: "Canadian address",
+    visaTypes: getVisaTypes("CA").map((v) => v.code),
+    visaTypesDetailed: getVisaTypes("CA"),
+    documents: getRequiredDocuments("CA"),
+    banks: getBanks("CA"),
     requiresProvincialHealth: true,
   },
 };
 
 // Institution type options
 const INSTITUTION_TYPES = [
-  { id: 'university', label: '4-Year University' },
-  { id: 'community_college', label: 'Community College' },
+  { id: "university", label: "4-Year University" },
+  { id: "community_college", label: "Community College" },
 ];
 
 const COUNTRIES = [
-  'Japan',
-  'Korea',
-  'China',
-  'India',
-  'Vietnam',
-  'Canada',
-  'Brazil',
-  'Singapore',
-  'Bangladesh',
-  'Nigeria',
-  'Other',
+  "Japan",
+  "Korea",
+  "China",
+  "India",
+  "Vietnam",
+  "Canada",
+  "Brazil",
+  "Singapore",
+  "Bangladesh",
+  "Nigeria",
+  "Other",
 ];
 
 // Input Component - MUST be outside the main component to prevent re-renders
 const Input = ({
-  type = 'text',
+  type = "text",
   value,
   onChange,
   placeholder,
@@ -192,14 +193,16 @@ const Input = ({
       <input
         type={type}
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={`w-full px-4 py-3.5 border rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400 ${
-          error ? 'border-red-300 bg-red-50' : 'border-gray-200'
+          error ? "border-red-300 bg-red-50" : "border-gray-200"
         }`}
       />
       {required && (
-        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400 text-sm">*</span>
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400 text-sm">
+          *
+        </span>
       )}
     </div>
     {error && <p className="text-xs text-red-500">{error}</p>}
@@ -220,7 +223,11 @@ const PasswordInput = ({
   placeholder?: string;
   error?: string | null;
   showStrength?: boolean;
-  strengthData?: { strength: 'weak' | 'medium' | 'strong'; score: number; checks: Record<string, boolean> };
+  strengthData?: {
+    strength: "weak" | "medium" | "strong";
+    score: number;
+    checks: Record<string, boolean>;
+  };
 }) => {
   const [showPassword, setShowPassword] = useState(false);
 
@@ -228,12 +235,12 @@ const PasswordInput = ({
     <div className="space-y-2">
       <div className="relative">
         <input
-          type={showPassword ? 'text' : 'password'}
+          type={showPassword ? "text" : "password"}
           value={value}
-          onChange={e => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full px-4 py-3.5 pr-12 border rounded-xl text-base outline-none transition-all duration-300 focus:border-black placeholder:text-gray-400 ${
-            error ? 'border-red-300 bg-red-50' : 'border-gray-200'
+            error ? "border-red-300 bg-red-50" : "border-gray-200"
           }`}
         />
         <button
@@ -242,13 +249,38 @@ const PasswordInput = ({
           className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
         >
           {showPassword ? (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+              />
             </svg>
           ) : (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+              />
             </svg>
           )}
         </button>
@@ -261,7 +293,11 @@ const PasswordInput = ({
             <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
               <motion.div
                 className="h-full rounded-full"
-                style={{ backgroundColor: getPasswordStrengthColor(strengthData.strength) }}
+                style={{
+                  backgroundColor: getPasswordStrengthColor(
+                    strengthData.strength
+                  ),
+                }}
                 initial={{ width: 0 }}
                 animate={{ width: `${strengthData.score}%` }}
                 transition={{ duration: 0.3 }}
@@ -277,26 +313,43 @@ const PasswordInput = ({
           {/* Checklist */}
           <div className="grid grid-cols-2 gap-1 text-xs">
             {[
-              { key: 'minLength', label: '8+ characters' },
-              { key: 'hasUppercase', label: 'Uppercase (A-Z)' },
-              { key: 'hasLowercase', label: 'Lowercase (a-z)' },
-              { key: 'hasNumber', label: 'Number (0-9)' },
-              { key: 'hasSpecial', label: 'Special (!@#$%)' },
-            ].map(item => (
+              { key: "minLength", label: "8+ characters" },
+              { key: "hasUppercase", label: "Uppercase (A-Z)" },
+              { key: "hasLowercase", label: "Lowercase (a-z)" },
+              { key: "hasNumber", label: "Number (0-9)" },
+              { key: "hasSpecial", label: "Special (!@#$%)" },
+            ].map((item) => (
               <div
                 key={item.key}
                 className={`flex items-center gap-1 ${
-                  strengthData.checks[item.key as keyof typeof strengthData.checks]
-                    ? 'text-emerald-600'
-                    : 'text-gray-400'
+                  strengthData.checks[
+                    item.key as keyof typeof strengthData.checks
+                  ]
+                    ? "text-emerald-600"
+                    : "text-gray-400"
                 }`}
               >
-                {strengthData.checks[item.key as keyof typeof strengthData.checks] ? (
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                {strengthData.checks[
+                  item.key as keyof typeof strengthData.checks
+                ] ? (
+                  <svg
+                    className="w-3 h-3"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                 ) : (
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <circle cx="12" cy="12" r="10" strokeWidth={2} />
                   </svg>
                 )}
@@ -324,19 +377,23 @@ const Select = ({
 }) => (
   <select
     value={value}
-    onChange={e => onChange(e.target.value)}
+    onChange={(e) => onChange(e.target.value)}
     className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black bg-white appearance-none text-gray-700"
     style={{
       backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239CA3AF'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
-      backgroundRepeat: 'no-repeat',
-      backgroundPosition: 'right 12px center',
-      backgroundSize: '20px',
-      paddingRight: '44px',
+      backgroundRepeat: "no-repeat",
+      backgroundPosition: "right 12px center",
+      backgroundSize: "20px",
+      paddingRight: "44px",
     }}
   >
-    <option value="" className="text-gray-400">{placeholder || 'Select...'}</option>
-    {options.map(opt => (
-      <option key={opt} value={opt}>{opt}</option>
+    <option value="" className="text-gray-400">
+      {placeholder || "Select..."}
+    </option>
+    {options.map((opt) => (
+      <option key={opt} value={opt}>
+        {opt}
+      </option>
     ))}
   </select>
 );
@@ -355,8 +412,8 @@ const OptionButton = ({
     onClick={onClick}
     className={`w-full px-5 py-3.5 rounded-xl border-2 font-medium text-left transition-all duration-300 ${
       selected
-        ? 'border-black bg-black text-white'
-        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+        ? "border-black bg-black text-white"
+        : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
     }`}
   >
     {children}
@@ -376,8 +433,8 @@ const ToggleButtons = ({
       onClick={() => onChange(true)}
       className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
         value === true
-          ? 'border-black bg-black text-white'
-          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+          ? "border-black bg-black text-white"
+          : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
       }`}
     >
       Yes
@@ -386,8 +443,8 @@ const ToggleButtons = ({
       onClick={() => onChange(false)}
       className={`flex-1 py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
         value === false
-          ? 'border-black bg-black text-white'
-          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'
+          ? "border-black bg-black text-white"
+          : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
       }`}
     >
       No
@@ -409,8 +466,8 @@ const ChipButton = ({
     onClick={onClick}
     className={`px-4 py-2.5 rounded-full border-[1.5px] text-sm font-medium transition-all duration-300 ${
       selected
-        ? 'border-black bg-black text-white'
-        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
+        ? "border-black bg-black text-white"
+        : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
     }`}
   >
     {children}
@@ -426,43 +483,52 @@ const Feedback = ({ children }: { children: React.ReactNode }) => (
 const MoneyInput = ({
   value,
   onChange,
-  placeholder = '0',
-  currencySymbol = '$',
+  placeholder = "0",
+  currencySymbol = "$",
 }: {
   value: number;
   onChange: (v: number) => void;
   placeholder?: string;
   currencySymbol?: string;
 }) => {
-  const [text, setText] = React.useState(() => (value > 0 ? String(value) : ''));
+  const [text, setText] = React.useState(() =>
+    value > 0 ? String(value) : ""
+  );
 
   // Sync when parent value changes
   React.useEffect(() => {
-    setText(value > 0 ? String(value) : '');
+    setText(value > 0 ? String(value) : "");
   }, [value]);
 
   return (
     <div className="relative">
-      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">{currencySymbol}</span>
+      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+        {currencySymbol}
+      </span>
       <input
         type="text"
         inputMode="numeric"
         value={text}
         placeholder={placeholder}
-        onKeyDown={e => {
+        onKeyDown={(e) => {
           // Block "0" key when field is empty (prevents leading zeros)
-          if (e.key === '0' && text === '') {
+          if (e.key === "0" && text === "") {
             e.preventDefault();
             return;
           }
           // Only allow digits and control keys
-          if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+          if (
+            !/^\d$/.test(e.key) &&
+            !["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"].includes(
+              e.key
+            )
+          ) {
             e.preventDefault();
           }
         }}
-        onChange={e => {
+        onChange={(e) => {
           // Get raw value and strip any non-digits and leading zeros
-          const raw = e.target.value.replace(/\D/g, '').replace(/^0+/, '');
+          const raw = e.target.value.replace(/\D/g, "").replace(/^0+/, "");
           setText(raw);
           onChange(raw ? parseInt(raw, 10) : 0);
         }}
@@ -473,13 +539,23 @@ const MoneyInput = ({
 };
 
 // Progress Dots
-const ProgressDots = ({ step, totalSteps }: { step: number; totalSteps: number }) => (
+const ProgressDots = ({
+  step,
+  totalSteps,
+}: {
+  step: number;
+  totalSteps: number;
+}) => (
   <div className="flex justify-center gap-2 mb-10">
     {Array.from({ length: totalSteps }).map((_, i) => (
       <div
         key={i}
         className={`h-2 rounded-full transition-all duration-300 ${
-          i + 1 === step ? 'bg-black w-6' : i + 1 < step ? 'bg-black w-2' : 'bg-gray-200 w-2'
+          i + 1 === step
+            ? "bg-black w-6"
+            : i + 1 < step
+            ? "bg-black w-2"
+            : "bg-gray-200 w-2"
         }`}
       />
     ))}
@@ -493,7 +569,7 @@ export default function SurveyPage() {
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [institutionSearch, setInstitutionSearch] = useState('');
+  const [institutionSearch, setInstitutionSearch] = useState("");
   const [showInstitutionList, setShowInstitutionList] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
@@ -505,16 +581,21 @@ export default function SurveyPage() {
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
 
   // Get country config
-  const countryConfig = COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] || COUNTRY_CONFIG.US;
+  const countryConfig =
+    COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] ||
+    COUNTRY_CONFIG.US;
 
   // Load destination country from localStorage
   useEffect(() => {
-    const savedCountry = localStorage.getItem('noor_selected_country');
-    if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
-      setData(prev => ({ ...prev, destinationCountry: savedCountry }));
+    const savedCountry = localStorage.getItem("noor_selected_country");
+    if (
+      savedCountry &&
+      (savedCountry === "US" || savedCountry === "UK" || savedCountry === "CA")
+    ) {
+      setData((prev) => ({ ...prev, destinationCountry: savedCountry }));
     } else {
       // Default to US if not set
-      setData(prev => ({ ...prev, destinationCountry: 'US' }));
+      setData((prev) => ({ ...prev, destinationCountry: "US" }));
     }
   }, []);
 
@@ -529,16 +610,17 @@ export default function SurveyPage() {
   }, [data.email]);
 
   // Check if passwords match
-  const passwordsMatch = data.password === data.confirmPassword && data.confirmPassword.length > 0;
+  const passwordsMatch =
+    data.password === data.confirmPassword && data.confirmPassword.length > 0;
 
   // Update email validation state
   useEffect(() => {
-    if (data.email && touchedFields.has('email')) {
+    if (data.email && touchedFields.has("email")) {
       const validation = validateEmail(data.email);
       if (!validation.isValid) {
-        setErrors(prev => ({ ...prev, email: validation.error }));
+        setErrors((prev) => ({ ...prev, email: validation.error }));
       } else {
-        setErrors(prev => ({ ...prev, email: null }));
+        setErrors((prev) => ({ ...prev, email: null }));
         setEmailSuggestion(validation.suggestion);
         setIsEduEmail(validation.isEdu);
       }
@@ -547,45 +629,54 @@ export default function SurveyPage() {
 
   // Mark field as touched
   const markTouched = (field: string) => {
-    setTouchedFields(prev => new Set(prev).add(field));
+    setTouchedFields((prev) => new Set(prev).add(field));
   };
 
   // Total steps: +1 for language selection at start
   // 9 for CC students with transfer, 8 for others (including step 0)
-  const isCC = data.institutionType === 'community_college';
+  const isCC = data.institutionType === "community_college";
   const showTransferStep = isCC && data.planningToTransfer === true;
   const totalSteps = showTransferStep ? 9 : 8; // Includes step 0 for language
 
   // Use API-based university search
-  const {
-    universities: filteredInstitutions,
-    isLoading: institutionsLoading,
-  } = useUniversitySearch({
-    country: data.destinationCountry || 'US',
-    type: data.institutionType === 'community_college' ? 'community_college' : data.institutionType === 'university' ? 'university' : 'all',
-    enabled: !!data.institutionType && !!data.destinationCountry,
-    searchQuery: institutionSearch,
-  });
+  const { universities: filteredInstitutions, isLoading: institutionsLoading } =
+    useUniversitySearch({
+      country: data.destinationCountry || "US",
+      type:
+        data.institutionType === "community_college"
+          ? "community_college"
+          : data.institutionType === "university"
+          ? "university"
+          : "all",
+      enabled: !!data.institutionType && !!data.destinationCountry,
+      searchQuery: institutionSearch,
+    });
 
   // TAG-eligible universities (simplified - in production would be from API)
   const tagUniversities: University[] = [];
 
-  const updateField = <K extends keyof SurveyData>(field: K, value: SurveyData[K]) => {
-    setData(prev => ({ ...prev, [field]: value }));
+  const updateField = <K extends keyof SurveyData>(
+    field: K,
+    value: SurveyData[K]
+  ) => {
+    setData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const toggleArrayField = (field: 'bankingNeeds' | 'goals' | 'targetUniversities', value: string) => {
-    setData(prev => ({
+  const toggleArrayField = (
+    field: "bankingNeeds" | "goals" | "targetUniversities",
+    value: string
+  ) => {
+    setData((prev) => ({
       ...prev,
       [field]: prev[field].includes(value)
-        ? prev[field].filter(v => v !== value)
+        ? prev[field].filter((v) => v !== value)
         : [...prev[field], value],
     }));
   };
 
   const selectInstitution = (inst: University) => {
-    updateField('institutionId', inst.id);
-    updateField('institutionName', inst.name);
+    updateField("institutionId", inst.id);
+    updateField("institutionName", inst.name);
     setInstitutionSearch(inst.short_name);
     setShowInstitutionList(false);
   };
@@ -607,11 +698,13 @@ export default function SurveyPage() {
     setSubmitError(null);
     try {
       // Get institution info from selected institution
-      const selectedInstitution = filteredInstitutions.find(i => i.id === data.institutionId);
+      const selectedInstitution = filteredInstitutions.find(
+        (i) => i.id === data.institutionId
+      );
 
-      const response = await fetch('/api/survey', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/survey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           first_name: data.firstName,
           last_name: data.lastName,
@@ -619,15 +712,20 @@ export default function SurveyPage() {
           password: data.password,
           country_of_origin: data.countryOfOrigin,
           destination_country: data.destinationCountry,
-          university: selectedInstitution?.short_name || institutionSearch || '',
+          university:
+            selectedInstitution?.short_name || institutionSearch || "",
           institution_id: data.institutionId,
           institution_type: data.institutionType,
           visa_status: countryConfig.visaTypes[0], // Default to first visa type
           // Country-specific ID/Tax numbers
-          has_ssn: data.destinationCountry === 'US' ? (data.hasSSN ?? false) : null,
-          has_itin: data.destinationCountry === 'US' ? (data.hasITIN ?? false) : null,
-          has_nin: data.destinationCountry === 'UK' ? (data.hasNIN ?? false) : null,
-          has_sin: data.destinationCountry === 'CA' ? (data.hasSIN ?? false) : null,
+          has_ssn:
+            data.destinationCountry === "US" ? data.hasSSN ?? false : null,
+          has_itin:
+            data.destinationCountry === "US" ? data.hasITIN ?? false : null,
+          has_nin:
+            data.destinationCountry === "UK" ? data.hasNIN ?? false : null,
+          has_sin:
+            data.destinationCountry === "CA" ? data.hasSIN ?? false : null,
           has_local_address: data.hasLocalAddress ?? false,
           monthly_income: data.monthlyIncome,
           monthly_budget: data.monthlyExpenses,
@@ -636,14 +734,33 @@ export default function SurveyPage() {
           branch_preference: data.branchPreference,
           banking_needs: data.bankingNeeds,
           banking_style: data.bankingStyle,
-          campus_side: data.campusSide !== 'unknown' ? data.campusSide : null,
+          campus_side: data.campusSide !== "unknown" ? data.campusSide : null,
           goals: data.goals,
           credit_card_interest: data.creditCardInterest,
-          needs_zelle: data.destinationCountry === 'US' && data.bankingNeeds.includes('Bill pay'),
-          credit_goals: data.goals.includes('Credit history') ? 'build-credit' : 'basic',
-          fee_sensitivity: data.feePriority === 'budget' ? 'very-sensitive' : data.feePriority === 'premium' ? 'not-sensitive' : 'medium',
-          digital_preference: data.bankingStyle === 'Digital' ? 'mobile-first' : data.bankingStyle === 'Branches' ? 'branch' : 'both',
-          campus_proximity: data.branchPreference === 'must' ? 'very-important' : data.branchPreference === 'preferred' ? 'somewhat-important' : 'not-important',
+          needs_zelle:
+            data.destinationCountry === "US" &&
+            data.bankingNeeds.includes("Bill pay"),
+          credit_goals: data.goals.includes("Credit history")
+            ? "build-credit"
+            : "basic",
+          fee_sensitivity:
+            data.feePriority === "budget"
+              ? "very-sensitive"
+              : data.feePriority === "premium"
+              ? "not-sensitive"
+              : "medium",
+          digital_preference:
+            data.bankingStyle === "Digital"
+              ? "mobile-first"
+              : data.bankingStyle === "Branches"
+              ? "branch"
+              : "both",
+          campus_proximity:
+            data.branchPreference === "must"
+              ? "very-important"
+              : data.branchPreference === "preferred"
+              ? "somewhat-important"
+              : "not-important",
           // Transfer-related fields for CC students
           planning_to_transfer: data.planningToTransfer,
           target_universities: data.targetUniversities,
@@ -655,76 +772,97 @@ export default function SurveyPage() {
       const result = await response.json();
 
       if (!result.success) {
-        setSubmitError(result.message || 'Failed to create account. Please try again.');
+        setSubmitError(
+          result.message || "Failed to create account. Please try again."
+        );
         return;
       }
 
+      // Create a Supabase auth session immediately after successful signup.
+      if (supabase) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: data.email.trim().toLowerCase(),
+          password: data.password,
+        });
+
+        if (signInError) {
+          console.error("Post-signup sign-in error:", signInError);
+          setSubmitError(
+            "Account created, but automatic sign-in failed. Please log in manually."
+          );
+          return;
+        }
+      }
+
       // Save user ID and create session
-      localStorage.setItem('noor_user_id', result.userId);
+      localStorage.setItem("noor_user_id", result.userId);
       createSession(data.staySignedIn);
       acceptTerms();
 
       // Save user profile locally (use profile from response if available, otherwise build from form data)
-      const userProfile = result.profile ? {
-        id: result.userId,
-        ...result.profile,
-        destinationCountry: data.destinationCountry,
-        institutionType: data.institutionType,
-        hasSSN: data.hasSSN,
-        hasITIN: data.hasITIN,
-        hasNIN: data.hasNIN,
-        hasSIN: data.hasSIN,
-        hasLocalAddress: data.hasLocalAddress,
-        monthlyIncome: data.monthlyIncome,
-        monthlyExpenses: data.monthlyExpenses,
-        currency: countryConfig.currencyCode,
-        bankingNeeds: data.bankingNeeds,
-        bankingStyle: data.bankingStyle,
-        transferFrequency: data.transferFrequency,
-        branchPreference: data.branchPreference,
-        campusSide: data.campusSide !== 'unknown' ? data.campusSide : null,
-        goals: data.goals,
-        creditCardInterest: data.creditCardInterest,
-        planningToTransfer: data.planningToTransfer,
-        targetUniversities: data.targetUniversities,
-        targetMajor: data.targetMajor,
-        expectedTransferYear: data.expectedTransferYear,
-      } : {
-        id: result.userId,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email: data.email,
-        institutionId: data.institutionId,
-        institutionType: data.institutionType,
-        university: selectedInstitution?.short_name || institutionSearch || '',
-        countryOfOrigin: data.countryOfOrigin,
-        destinationCountry: data.destinationCountry,
-        hasSSN: data.hasSSN,
-        hasITIN: data.hasITIN,
-        hasNIN: data.hasNIN,
-        hasSIN: data.hasSIN,
-        hasLocalAddress: data.hasLocalAddress,
-        monthlyIncome: data.monthlyIncome,
-        monthlyExpenses: data.monthlyExpenses,
-        currency: countryConfig.currencyCode,
-        bankingNeeds: data.bankingNeeds,
-        bankingStyle: data.bankingStyle,
-        transferFrequency: data.transferFrequency,
-        branchPreference: data.branchPreference,
-        campusSide: data.campusSide !== 'unknown' ? data.campusSide : null,
-        goals: data.goals,
-        creditCardInterest: data.creditCardInterest,
-        planningToTransfer: data.planningToTransfer,
-        targetUniversities: data.targetUniversities,
-        targetMajor: data.targetMajor,
-        expectedTransferYear: data.expectedTransferYear,
-      };
-      localStorage.setItem('noor_user_profile', JSON.stringify(userProfile));
+      const userProfile = result.profile
+        ? {
+            id: result.userId,
+            ...result.profile,
+            destinationCountry: data.destinationCountry,
+            institutionType: data.institutionType,
+            hasSSN: data.hasSSN,
+            hasITIN: data.hasITIN,
+            hasNIN: data.hasNIN,
+            hasSIN: data.hasSIN,
+            hasLocalAddress: data.hasLocalAddress,
+            monthlyIncome: data.monthlyIncome,
+            monthlyExpenses: data.monthlyExpenses,
+            currency: countryConfig.currencyCode,
+            bankingNeeds: data.bankingNeeds,
+            bankingStyle: data.bankingStyle,
+            transferFrequency: data.transferFrequency,
+            branchPreference: data.branchPreference,
+            campusSide: data.campusSide !== "unknown" ? data.campusSide : null,
+            goals: data.goals,
+            creditCardInterest: data.creditCardInterest,
+            planningToTransfer: data.planningToTransfer,
+            targetUniversities: data.targetUniversities,
+            targetMajor: data.targetMajor,
+            expectedTransferYear: data.expectedTransferYear,
+          }
+        : {
+            id: result.userId,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            email: data.email,
+            institutionId: data.institutionId,
+            institutionType: data.institutionType,
+            university:
+              selectedInstitution?.short_name || institutionSearch || "",
+            countryOfOrigin: data.countryOfOrigin,
+            destinationCountry: data.destinationCountry,
+            hasSSN: data.hasSSN,
+            hasITIN: data.hasITIN,
+            hasNIN: data.hasNIN,
+            hasSIN: data.hasSIN,
+            hasLocalAddress: data.hasLocalAddress,
+            monthlyIncome: data.monthlyIncome,
+            monthlyExpenses: data.monthlyExpenses,
+            currency: countryConfig.currencyCode,
+            bankingNeeds: data.bankingNeeds,
+            bankingStyle: data.bankingStyle,
+            transferFrequency: data.transferFrequency,
+            branchPreference: data.branchPreference,
+            campusSide: data.campusSide !== "unknown" ? data.campusSide : null,
+            goals: data.goals,
+            creditCardInterest: data.creditCardInterest,
+            planningToTransfer: data.planningToTransfer,
+            targetUniversities: data.targetUniversities,
+            targetMajor: data.targetMajor,
+            expectedTransferYear: data.expectedTransferYear,
+          };
+      localStorage.setItem("noor_user_profile", JSON.stringify(userProfile));
 
-      router.push('/banking');
+      router.push("/banking");
     } catch (error) {
-      console.error('Survey submission error:', error);
-      setSubmitError('Something went wrong. Please try again.');
+      console.error("Survey submission error:", error);
+      setSubmitError("Something went wrong. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -739,7 +877,9 @@ export default function SurveyPage() {
     <div className="min-h-screen bg-white">
       {/* Header */}
       <header className="pt-8 pb-4 text-center">
-        <span className="text-xs tracking-[0.3em] font-medium text-gray-400">NOOR</span>
+        <span className="text-xs tracking-[0.3em] font-medium text-gray-400">
+          NOOR
+        </span>
       </header>
 
       <div className="max-w-md mx-auto px-6 pb-32">
@@ -748,23 +888,33 @@ export default function SurveyPage() {
         {/* Step 1: First, you. */}
         {step === 1 && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step1.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step1.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step1.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step1.subtitle")}</p>
 
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <Input
-                  placeholder={t('survey.step1.firstName')}
+                  placeholder={t("survey.step1.firstName")}
                   value={data.firstName}
-                  onChange={v => updateField('firstName', v)}
-                  error={touchedFields.has('firstName') && !data.firstName ? t('errors.required') : null}
+                  onChange={(v) => updateField("firstName", v)}
+                  error={
+                    touchedFields.has("firstName") && !data.firstName
+                      ? t("errors.required")
+                      : null
+                  }
                   required
                 />
                 <Input
-                  placeholder={t('survey.step1.lastName')}
+                  placeholder={t("survey.step1.lastName")}
                   value={data.lastName}
-                  onChange={v => updateField('lastName', v)}
-                  error={touchedFields.has('lastName') && !data.lastName ? t('errors.required') : null}
+                  onChange={(v) => updateField("lastName", v)}
+                  error={
+                    touchedFields.has("lastName") && !data.lastName
+                      ? t("errors.required")
+                      : null
+                  }
                   required
                 />
               </div>
@@ -773,20 +923,22 @@ export default function SurveyPage() {
               <div className="space-y-1">
                 <Input
                   type="email"
-                  placeholder={t('survey.step1.email')}
+                  placeholder={t("survey.step1.email")}
                   value={data.email}
-                  onChange={v => {
-                    updateField('email', v);
-                    markTouched('email');
+                  onChange={(v) => {
+                    updateField("email", v);
+                    markTouched("email");
                   }}
-                  error={touchedFields.has('email') ? errors.email : null}
+                  error={touchedFields.has("email") ? errors.email : null}
                   required
                 />
                 {emailSuggestion && (
                   <button
                     onClick={() => {
-                      const corrected = emailSuggestion.replace('Did you mean ', '').replace('?', '');
-                      updateField('email', corrected);
+                      const corrected = emailSuggestion
+                        .replace("Did you mean ", "")
+                        .replace("?", "");
+                      updateField("email", corrected);
                       setEmailSuggestion(null);
                     }}
                     className="text-xs text-blue-600 hover:underline"
@@ -796,21 +948,29 @@ export default function SurveyPage() {
                 )}
                 {isEduEmail && (
                   <div className="flex items-center gap-1 text-xs text-emerald-600">
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    <svg
+                      className="w-3 h-3"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        clipRule="evenodd"
+                      />
                     </svg>
-                    {t('survey.step1.eduVerified')}
+                    {t("survey.step1.eduVerified")}
                   </div>
                 )}
               </div>
 
               {/* Password with strength indicator */}
               <PasswordInput
-                placeholder={t('survey.password.placeholder')}
+                placeholder={t("survey.password.placeholder")}
                 value={data.password}
-                onChange={v => {
-                  updateField('password', v);
-                  markTouched('password');
+                onChange={(v) => {
+                  updateField("password", v);
+                  markTouched("password");
                 }}
                 showStrength={true}
                 strengthData={passwordValidation}
@@ -819,81 +979,134 @@ export default function SurveyPage() {
               {/* Confirm password with match indicator */}
               <div className="space-y-1">
                 <PasswordInput
-                  placeholder={t('survey.password.confirm')}
+                  placeholder={t("survey.password.confirm")}
                   value={data.confirmPassword}
-                  onChange={v => {
-                    updateField('confirmPassword', v);
-                    markTouched('confirmPassword');
+                  onChange={(v) => {
+                    updateField("confirmPassword", v);
+                    markTouched("confirmPassword");
                   }}
                 />
-                {touchedFields.has('confirmPassword') && data.confirmPassword && (
-                  <div className={`flex items-center gap-1 text-xs ${passwordsMatch ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {passwordsMatch ? (
-                      <>
-                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                        {t('survey.password.match')}
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                        {t('survey.password.noMatch')}
-                      </>
-                    )}
-                  </div>
-                )}
+                {touchedFields.has("confirmPassword") &&
+                  data.confirmPassword && (
+                    <div
+                      className={`flex items-center gap-1 text-xs ${
+                        passwordsMatch ? "text-emerald-600" : "text-red-500"
+                      }`}
+                    >
+                      {passwordsMatch ? (
+                        <>
+                          <svg
+                            className="w-3 h-3"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          {t("survey.password.match")}
+                        </>
+                      ) : (
+                        <>
+                          <svg
+                            className="w-3 h-3"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          {t("survey.password.noMatch")}
+                        </>
+                      )}
+                    </div>
+                  )}
               </div>
 
               {/* Stay signed in */}
               <label className="flex items-center gap-3 py-2 cursor-pointer">
                 <div
-                  onClick={() => updateField('staySignedIn', !data.staySignedIn)}
+                  onClick={() =>
+                    updateField("staySignedIn", !data.staySignedIn)
+                  }
                   className={`w-5 h-5 rounded border-[1.5px] flex items-center justify-center transition-all duration-300 ${
-                    data.staySignedIn ? 'bg-black border-black' : 'border-gray-300'
+                    data.staySignedIn
+                      ? "bg-black border-black"
+                      : "border-gray-300"
                   }`}
                 >
                   {data.staySignedIn && (
-                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    <svg
+                      className="w-3 h-3 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                   )}
                 </div>
-                <span className="text-sm text-gray-600">{t('survey.step1.staySignedIn')}</span>
+                <span className="text-sm text-gray-600">
+                  {t("survey.step1.staySignedIn")}
+                </span>
               </label>
 
               {/* Terms & Privacy */}
               <label className="flex items-start gap-3 py-2 cursor-pointer">
                 <div
-                  onClick={() => updateField('agreeToTerms', !data.agreeToTerms)}
+                  onClick={() =>
+                    updateField("agreeToTerms", !data.agreeToTerms)
+                  }
                   className={`w-5 h-5 mt-0.5 rounded border-[1.5px] flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
-                    data.agreeToTerms ? 'bg-black border-black' : 'border-gray-300'
+                    data.agreeToTerms
+                      ? "bg-black border-black"
+                      : "border-gray-300"
                   }`}
                 >
                   {data.agreeToTerms && (
-                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    <svg
+                      className="w-3 h-3 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                   )}
                 </div>
                 <span className="text-sm text-gray-600">
-                  {t('survey.step1.agreeToTerms')}{' '}
+                  {t("survey.step1.agreeToTerms")}{" "}
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); setShowTermsModal(true); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTermsModal(true);
+                    }}
                     className="text-black underline hover:opacity-70"
                   >
-                    {t('survey.terms.title')}
-                  </button>
-                  {' '}{t('common.and')}{' '}
+                    {t("survey.terms.title")}
+                  </button>{" "}
+                  {t("common.and")}{" "}
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); setShowPrivacyModal(true); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowPrivacyModal(true);
+                    }}
                     className="text-black underline hover:opacity-70"
                   >
-                    {t('survey.privacy.title')}
+                    {t("survey.privacy.title")}
                   </button>
                   <span className="text-red-400 ml-1">*</span>
                 </span>
@@ -901,23 +1114,30 @@ export default function SurveyPage() {
 
               {/* Institution Type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step1.schoolType')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t("survey.step1.schoolType")}
+                </label>
                 <div className="grid grid-cols-2 gap-3">
-                  {INSTITUTION_TYPES.map(type => (
+                  {INSTITUTION_TYPES.map((type) => (
                     <button
                       key={type.id}
                       onClick={() => {
-                        updateField('institutionType', type.id as 'university' | 'community_college');
-                        updateField('institutionId', '');
-                        setInstitutionSearch('');
+                        updateField(
+                          "institutionType",
+                          type.id as "university" | "community_college"
+                        );
+                        updateField("institutionId", "");
+                        setInstitutionSearch("");
                       }}
                       className={`py-3 rounded-xl border-2 font-medium text-sm transition-all duration-300 ${
                         data.institutionType === type.id
-                          ? 'border-black bg-black text-white'
-                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                          ? "border-black bg-black text-white"
+                          : "border-gray-200 text-gray-700 hover:border-gray-400"
                       }`}
                     >
-                      {type.id === 'university' ? t('survey.step1.university') : t('survey.step1.communityCollege')}
+                      {type.id === "university"
+                        ? t("survey.step1.university")
+                        : t("survey.step1.communityCollege")}
                     </button>
                   ))}
                 </div>
@@ -927,54 +1147,66 @@ export default function SurveyPage() {
               {data.institutionType && (
                 <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {data.institutionType === 'community_college' ? t('survey.step1.communityCollege') : t('survey.step1.university')}
+                    {data.institutionType === "community_college"
+                      ? t("survey.step1.communityCollege")
+                      : t("survey.step1.university")}
                   </label>
                   <input
                     type="text"
                     value={institutionSearch}
-                    onChange={e => {
+                    onChange={(e) => {
                       setInstitutionSearch(e.target.value);
                       setShowInstitutionList(true);
                     }}
                     onFocus={() => setShowInstitutionList(true)}
-                    placeholder={data.institutionType === 'community_college' ? t('survey.step1.searchCC') : t('survey.step1.searchUni')}
+                    placeholder={
+                      data.institutionType === "community_college"
+                        ? t("survey.step1.searchCC")
+                        : t("survey.step1.searchUni")
+                    }
                     className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
                   />
                   {showInstitutionList && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                       {filteredInstitutions.length > 0 ? (
                         <>
-                          {filteredInstitutions.map(inst => (
+                          {filteredInstitutions.map((inst) => (
                             <button
                               key={inst.id}
                               onClick={() => selectInstitution(inst)}
                               className={`w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 ${
-                                data.institutionId === inst.id ? 'bg-gray-50' : ''
+                                data.institutionId === inst.id
+                                  ? "bg-gray-50"
+                                  : ""
                               }`}
                             >
-                              <p className="font-medium text-sm text-gray-900">{inst.short_name}</p>
-                              <p className="text-xs text-gray-500">{inst.name} · {inst.city}, {inst.state}</p>
+                              <p className="font-medium text-sm text-gray-900">
+                                {inst.short_name}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {inst.name} · {inst.city}, {inst.state}
+                              </p>
                             </button>
                           ))}
                           <button
                             onClick={() => {
-                              updateField('institutionId', 'other');
+                              updateField("institutionId", "other");
                               setShowInstitutionList(false);
                             }}
                             className="w-full px-4 py-3 text-left hover:bg-gray-50 text-gray-500 text-sm"
                           >
-                            {t('survey.step1.cantFindSchool')}
+                            {t("survey.step1.cantFindSchool")}
                           </button>
                         </>
                       ) : institutionSearch.length >= 2 ? (
                         <button
                           onClick={() => {
-                            updateField('institutionId', 'other');
+                            updateField("institutionId", "other");
                             setShowInstitutionList(false);
                           }}
                           className="w-full px-4 py-3 text-left text-gray-500 text-sm"
                         >
-                          {t('survey.step1.noResults')}
+                          {t("survey.step1.noResults")}
                         </button>
                       ) : null}
                     </div>
@@ -988,9 +1220,9 @@ export default function SurveyPage() {
               )}
 
               <Select
-                placeholder={t('survey.step1.countryOfOrigin')}
+                placeholder={t("survey.step1.countryOfOrigin")}
                 value={data.countryOfOrigin}
-                onChange={v => updateField('countryOfOrigin', v)}
+                onChange={(v) => updateField("countryOfOrigin", v)}
                 options={COUNTRIES}
               />
             </div>
@@ -1000,71 +1232,88 @@ export default function SurveyPage() {
         {/* Step 2: Where you are. */}
         {step === 2 && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step2.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step2.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step2.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step2.subtitle")}</p>
 
             <div className="space-y-6">
               <div className="space-y-2">
-                {isCC ? (
-                  // CC-specific options
-                  ["Associate's", 'Certificate Program', 'ESL/Language', 'Undecided'].map(level => (
-                    <OptionButton
-                      key={level}
-                      selected={data.academicLevel === level}
-                      onClick={() => updateField('academicLevel', level)}
-                    >
-                      {level}
-                    </OptionButton>
-                  ))
-                ) : (
-                  // University options
-                  ["Bachelor's", "Master's", 'PhD', 'Postdoc', 'Exchange/Visiting'].map(level => (
-                    <OptionButton
-                      key={level}
-                      selected={data.academicLevel === level}
-                      onClick={() => updateField('academicLevel', level)}
-                    >
-                      {level}
-                    </OptionButton>
-                  ))
-                )}
+                {isCC
+                  ? // CC-specific options
+                    [
+                      "Associate's",
+                      "Certificate Program",
+                      "ESL/Language",
+                      "Undecided",
+                    ].map((level) => (
+                      <OptionButton
+                        key={level}
+                        selected={data.academicLevel === level}
+                        onClick={() => updateField("academicLevel", level)}
+                      >
+                        {level}
+                      </OptionButton>
+                    ))
+                  : // University options
+                    [
+                      "Bachelor's",
+                      "Master's",
+                      "PhD",
+                      "Postdoc",
+                      "Exchange/Visiting",
+                    ].map((level) => (
+                      <OptionButton
+                        key={level}
+                        selected={data.academicLevel === level}
+                        onClick={() => updateField("academicLevel", level)}
+                      >
+                        {level}
+                      </OptionButton>
+                    ))}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step2.year')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step2.year")}
+                </label>
                 <div className="flex gap-2">
-                  {(isCC ? ['1', '2', '3+'] : ['1', '2', '3', '4', '5+']).map(year => (
-                    <button
-                      key={year}
-                      onClick={() => updateField('year', year)}
-                      className={`flex-1 py-3 rounded-xl border-2 font-medium transition-all duration-300 ${
-                        data.year === year
-                          ? 'border-black bg-black text-white'
-                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
-                      }`}
-                    >
-                      {year}
-                    </button>
-                  ))}
+                  {(isCC ? ["1", "2", "3+"] : ["1", "2", "3", "4", "5+"]).map(
+                    (year) => (
+                      <button
+                        key={year}
+                        onClick={() => updateField("year", year)}
+                        className={`flex-1 py-3 rounded-xl border-2 font-medium transition-all duration-300 ${
+                          data.year === year
+                            ? "border-black bg-black text-white"
+                            : "border-gray-200 text-gray-700 hover:border-gray-400"
+                        }`}
+                      >
+                        {year}
+                      </button>
+                    )
+                  )}
                 </div>
               </div>
 
               {/* Transfer question for CC students */}
               {isCC && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step2.planningTransfer')}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    {t("survey.step2.planningTransfer")}
+                  </label>
                   <ToggleButtons
                     value={data.planningToTransfer}
-                    onChange={v => updateField('planningToTransfer', v)}
+                    onChange={(v) => updateField("planningToTransfer", v)}
                   />
                   {data.planningToTransfer === true && (
-                    <Feedback>{t('survey.step2.transferFeedback')}</Feedback>
+                    <Feedback>{t("survey.step2.transferFeedback")}</Feedback>
                   )}
                 </div>
               )}
 
               {data.academicLevel && data.year && (
-                <Feedback>{t('survey.step2.tailorFeedback')}</Feedback>
+                <Feedback>{t("survey.step2.tailorFeedback")}</Feedback>
               )}
             </div>
           </div>
@@ -1073,30 +1322,42 @@ export default function SurveyPage() {
         {/* Step 2.5: Transfer Goals (CC students only) */}
         {step === 3 && isCC && data.planningToTransfer && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step2_5.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step2_5.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step2_5.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step2_5.subtitle")}</p>
 
             <div className="space-y-6">
               {/* TAG Eligible Universities */}
               {tagUniversities.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {t('survey.step2_5.tagEligible')}
-                    <span className="text-xs text-emerald-600 ml-2">{t('survey.step2_5.guaranteed')}</span>
+                    {t("survey.step2_5.tagEligible")}
+                    <span className="text-xs text-emerald-600 ml-2">
+                      {t("survey.step2_5.guaranteed")}
+                    </span>
                   </label>
                   <div className="space-y-2">
-                    {tagUniversities.map(uni => (
+                    {tagUniversities.map((uni) => (
                       <button
                         key={uni.id}
-                        onClick={() => toggleArrayField('targetUniversities', uni.id)}
+                        onClick={() =>
+                          toggleArrayField("targetUniversities", uni.id)
+                        }
                         className={`w-full p-3 rounded-xl border-2 text-left transition-all duration-300 ${
                           data.targetUniversities.includes(uni.id)
-                            ? 'border-black bg-black text-white'
-                            : 'border-gray-200 hover:border-gray-400'
+                            ? "border-black bg-black text-white"
+                            : "border-gray-200 hover:border-gray-400"
                         }`}
                       >
                         <p className="font-medium text-sm">{uni.short_name}</p>
-                        <p className={`text-xs ${data.targetUniversities.includes(uni.id) ? 'text-gray-300' : 'text-gray-500'}`}>
+                        <p
+                          className={`text-xs ${
+                            data.targetUniversities.includes(uni.id)
+                              ? "text-gray-300"
+                              : "text-gray-500"
+                          }`}
+                        >
                           {uni.name}
                         </p>
                       </button>
@@ -1107,20 +1368,24 @@ export default function SurveyPage() {
 
               {/* Other UC options */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step2_5.otherTargets')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t("survey.step2_5.otherTargets")}
+                </label>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { id: 'ucla', name: 'UCLA' },
-                    { id: 'ucb', name: 'UC Berkeley' },
-                    { id: 'usc', name: 'USC' },
-                    { id: 'stanford', name: 'Stanford' },
-                  ].map(uni => {
+                    { id: "ucla", name: "UCLA" },
+                    { id: "ucb", name: "UC Berkeley" },
+                    { id: "usc", name: "USC" },
+                    { id: "stanford", name: "Stanford" },
+                  ].map((uni) => {
                     if (data.targetUniversities.includes(uni.id)) return null;
                     return (
                       <ChipButton
                         key={uni.id}
                         selected={data.targetUniversities.includes(uni.id)}
-                        onClick={() => toggleArrayField('targetUniversities', uni.id)}
+                        onClick={() =>
+                          toggleArrayField("targetUniversities", uni.id)
+                        }
                       >
                         {uni.name}
                       </ChipButton>
@@ -1131,37 +1396,48 @@ export default function SurveyPage() {
 
               {/* Target Major */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step2_5.targetMajor')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t("survey.step2_5.targetMajor")}
+                </label>
                 <Input
-                  placeholder={t('survey.step2_5.majorPlaceholder')}
+                  placeholder={t("survey.step2_5.majorPlaceholder")}
                   value={data.targetMajor}
-                  onChange={v => updateField('targetMajor', v)}
+                  onChange={(v) => updateField("targetMajor", v)}
                 />
               </div>
 
               {/* Expected Transfer Year */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step2_5.expectedTransfer')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step2_5.expectedTransfer")}
+                </label>
                 <div className="flex gap-2">
-                  {['Fall 2026', 'Spring 2027', 'Fall 2027', 'Later'].map(term => (
-                    <button
-                      key={term}
-                      onClick={() => updateField('expectedTransferYear', term)}
-                      className={`flex-1 py-3 rounded-xl border-2 font-medium text-sm transition-all duration-300 ${
-                        data.expectedTransferYear === term
-                          ? 'border-black bg-black text-white'
-                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
-                      }`}
-                    >
-                      {term}
-                    </button>
-                  ))}
+                  {["Fall 2026", "Spring 2027", "Fall 2027", "Later"].map(
+                    (term) => (
+                      <button
+                        key={term}
+                        onClick={() =>
+                          updateField("expectedTransferYear", term)
+                        }
+                        className={`flex-1 py-3 rounded-xl border-2 font-medium text-sm transition-all duration-300 ${
+                          data.expectedTransferYear === term
+                            ? "border-black bg-black text-white"
+                            : "border-gray-200 text-gray-700 hover:border-gray-400"
+                        }`}
+                      >
+                        {term}
+                      </button>
+                    )
+                  )}
                 </div>
               </div>
 
               {data.targetUniversities.length > 0 && (
                 <Feedback>
-                  {t('survey.step2_5.targetsFeedback').replace('{count}', String(data.targetUniversities.length))}
+                  {t("survey.step2_5.targetsFeedback").replace(
+                    "{count}",
+                    String(data.targetUniversities.length)
+                  )}
                 </Feedback>
               )}
             </div>
@@ -1169,72 +1445,85 @@ export default function SurveyPage() {
         )}
 
         {/* Step 3 or 4: What We're Working With. */}
-        {((step === 3 && !showTransferStep) || (step === 4 && showTransferStep)) && (
+        {((step === 3 && !showTransferStep) ||
+          (step === 4 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step3.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step3.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step3.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step3.subtitle")}</p>
 
             <div className="space-y-6">
               {/* US-specific: SSN and ITIN */}
-              {data.destinationCountry === 'US' && (
+              {data.destinationCountry === "US" && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.ssn')}</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      {t("survey.step3.ssn")}
+                    </label>
                     <ToggleButtons
                       value={data.hasSSN}
-                      onChange={v => updateField('hasSSN', v)}
+                      onChange={(v) => updateField("hasSSN", v)}
                     />
                     {data.hasSSN === false && (
-                      <Feedback>{t('survey.step3.noSsnFeedback')}</Feedback>
+                      <Feedback>{t("survey.step3.noSsnFeedback")}</Feedback>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.itin')}</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      {t("survey.step3.itin")}
+                    </label>
                     <ToggleButtons
                       value={data.hasITIN}
-                      onChange={v => updateField('hasITIN', v)}
+                      onChange={(v) => updateField("hasITIN", v)}
                     />
                   </div>
                 </>
               )}
 
               {/* UK-specific: NIN */}
-              {data.destinationCountry === 'UK' && (
+              {data.destinationCountry === "UK" && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.nin')}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    {t("survey.step3.nin")}
+                  </label>
                   <ToggleButtons
                     value={data.hasNIN}
-                    onChange={v => updateField('hasNIN', v)}
+                    onChange={(v) => updateField("hasNIN", v)}
                   />
                   {data.hasNIN === false && (
-                    <Feedback>{t('survey.step3.noNinFeedback')}</Feedback>
+                    <Feedback>{t("survey.step3.noNinFeedback")}</Feedback>
                   )}
                 </div>
               )}
 
               {/* Canada-specific: SIN */}
-              {data.destinationCountry === 'CA' && (
+              {data.destinationCountry === "CA" && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.sin')}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    {t("survey.step3.sin")}
+                  </label>
                   <ToggleButtons
                     value={data.hasSIN}
-                    onChange={v => updateField('hasSIN', v)}
+                    onChange={(v) => updateField("hasSIN", v)}
                   />
                   {data.hasSIN === false && (
-                    <Feedback>{t('survey.step3.noSinFeedback')}</Feedback>
+                    <Feedback>{t("survey.step3.noSinFeedback")}</Feedback>
                   )}
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step3.localAddress')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step3.localAddress")}
+                </label>
                 <ToggleButtons
                   value={data.hasLocalAddress}
-                  onChange={v => updateField('hasLocalAddress', v)}
+                  onChange={(v) => updateField("hasLocalAddress", v)}
                 />
                 {data.hasLocalAddress === true && (
-                  <Feedback>{t('survey.step3.addressFeedback')}</Feedback>
+                  <Feedback>{t("survey.step3.addressFeedback")}</Feedback>
                 )}
               </div>
             </div>
@@ -1242,44 +1531,63 @@ export default function SurveyPage() {
         )}
 
         {/* Step 4 or 5: Your Finances. */}
-        {((step === 4 && !showTransferStep) || (step === 5 && showTransferStep)) && (
+        {((step === 4 && !showTransferStep) ||
+          (step === 5 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step4.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step4.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step4.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step4.subtitle")}</p>
 
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step4.income')} <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t("survey.step4.income")}{" "}
+                  <span className="text-gray-400">
+                    ({countryConfig.currencyCode})
+                  </span>
+                </label>
                 <MoneyInput
                   value={data.monthlyIncome}
-                  onChange={v => updateField('monthlyIncome', v)}
+                  onChange={(v) => updateField("monthlyIncome", v)}
                   currencySymbol={countryConfig.currency}
                 />
-                <p className="text-gray-400 text-xs mt-1.5">{t('survey.step4.incomeHint')}</p>
+                <p className="text-gray-400 text-xs mt-1.5">
+                  {t("survey.step4.incomeHint")}
+                </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('survey.step4.expenses')} <span className="text-gray-400">({countryConfig.currencyCode})</span></label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t("survey.step4.expenses")}{" "}
+                  <span className="text-gray-400">
+                    ({countryConfig.currencyCode})
+                  </span>
+                </label>
                 <MoneyInput
                   value={data.monthlyExpenses}
-                  onChange={v => updateField('monthlyExpenses', v)}
+                  onChange={(v) => updateField("monthlyExpenses", v)}
                   currencySymbol={countryConfig.currency}
                 />
-                <p className="text-gray-400 text-xs mt-1.5">{t('survey.step4.expensesHint')}</p>
+                <p className="text-gray-400 text-xs mt-1.5">
+                  {t("survey.step4.expensesHint")}
+                </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step4.priority')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step4.priority")}
+                </label>
                 <div className="space-y-2">
                   {[
-                    { id: 'budget', labelKey: 'survey.step4.budget' },
-                    { id: 'balance', labelKey: 'survey.step4.balance' },
-                    { id: 'premium', labelKey: 'survey.step4.premium' },
-                  ].map(opt => (
+                    { id: "budget", labelKey: "survey.step4.budget" },
+                    { id: "balance", labelKey: "survey.step4.balance" },
+                    { id: "premium", labelKey: "survey.step4.premium" },
+                  ].map((opt) => (
                     <OptionButton
                       key={opt.id}
                       selected={data.feePriority === opt.id}
-                      onClick={() => updateField('feePriority', opt.id)}
+                      onClick={() => updateField("feePriority", opt.id)}
                     >
                       {t(opt.labelKey)}
                     </OptionButton>
@@ -1291,27 +1599,33 @@ export default function SurveyPage() {
         )}
 
         {/* Step 5 or 6: How you bank. */}
-        {((step === 5 && !showTransferStep) || (step === 6 && showTransferStep)) && (
+        {((step === 5 && !showTransferStep) ||
+          (step === 6 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step5.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step5.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step5.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step5.subtitle")}</p>
 
             <div className="space-y-6">
               <div className="flex flex-wrap gap-2">
                 {[
-                  { id: 'Everyday spending', key: 'survey.step5.everyday' },
-                  { id: 'Family transfers', key: 'survey.step5.family' },
-                  { id: 'Tuition', key: 'survey.step5.tuition' },
-                  { id: 'International wires', key: 'survey.step5.international' },
-                  { id: 'Campus ATM', key: 'survey.step5.atm' },
-                  { id: 'Mobile deposit', key: 'survey.step5.mobile' },
-                  { id: 'Bill pay', key: 'survey.step5.billPay' },
-                  { id: 'Savings', key: 'survey.step5.savings' },
-                ].map(need => (
+                  { id: "Everyday spending", key: "survey.step5.everyday" },
+                  { id: "Family transfers", key: "survey.step5.family" },
+                  { id: "Tuition", key: "survey.step5.tuition" },
+                  {
+                    id: "International wires",
+                    key: "survey.step5.international",
+                  },
+                  { id: "Campus ATM", key: "survey.step5.atm" },
+                  { id: "Mobile deposit", key: "survey.step5.mobile" },
+                  { id: "Bill pay", key: "survey.step5.billPay" },
+                  { id: "Savings", key: "survey.step5.savings" },
+                ].map((need) => (
                   <ChipButton
                     key={need.id}
                     selected={data.bankingNeeds.includes(need.id)}
-                    onClick={() => toggleArrayField('bankingNeeds', need.id)}
+                    onClick={() => toggleArrayField("bankingNeeds", need.id)}
                   >
                     {t(need.key)}
                   </ChipButton>
@@ -1319,20 +1633,22 @@ export default function SurveyPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step5.style')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step5.style")}
+                </label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { id: 'Branches', key: 'survey.step5.branches' },
-                    { id: 'Digital', key: 'survey.step5.digital' },
-                    { id: 'Either', key: 'survey.step5.either' },
-                  ].map(style => (
+                    { id: "Branches", key: "survey.step5.branches" },
+                    { id: "Digital", key: "survey.step5.digital" },
+                    { id: "Either", key: "survey.step5.either" },
+                  ].map((style) => (
                     <button
                       key={style.id}
-                      onClick={() => updateField('bankingStyle', style.id)}
+                      onClick={() => updateField("bankingStyle", style.id)}
                       className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
                         data.bankingStyle === style.id
-                          ? 'border-black bg-black text-white'
-                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                          ? "border-black bg-black text-white"
+                          : "border-gray-200 text-gray-700 hover:border-gray-400"
                       }`}
                     >
                       {t(style.key)}
@@ -1345,24 +1661,29 @@ export default function SurveyPage() {
         )}
 
         {/* Step 6 or 7: Global. */}
-        {((step === 6 && !showTransferStep) || (step === 7 && showTransferStep)) && (
+        {((step === 6 && !showTransferStep) ||
+          (step === 7 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step6.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step6.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step6.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step6.subtitle")}</p>
 
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step6.transfers')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step6.transfers")}
+                </label>
                 <div className="space-y-2">
                   {[
-                    { id: 'never', key: 'survey.step6.never' },
-                    { id: 'few', key: 'survey.step6.fewTimes' },
-                    { id: 'monthly', key: 'survey.step6.monthly' },
-                  ].map(opt => (
+                    { id: "never", key: "survey.step6.never" },
+                    { id: "few", key: "survey.step6.fewTimes" },
+                    { id: "monthly", key: "survey.step6.monthly" },
+                  ].map((opt) => (
                     <OptionButton
                       key={opt.id}
                       selected={data.transferFrequency === opt.id}
-                      onClick={() => updateField('transferFrequency', opt.id)}
+                      onClick={() => updateField("transferFrequency", opt.id)}
                     >
                       {t(opt.key)}
                     </OptionButton>
@@ -1371,17 +1692,19 @@ export default function SurveyPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step6.branchNearby')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step6.branchNearby")}
+                </label>
                 <div className="space-y-2">
                   {[
-                    { id: 'must', key: 'survey.step6.mustHave' },
-                    { id: 'preferred', key: 'survey.step6.preferred' },
-                    { id: 'dont', key: 'survey.step6.dontNeed' },
-                  ].map(opt => (
+                    { id: "must", key: "survey.step6.mustHave" },
+                    { id: "preferred", key: "survey.step6.preferred" },
+                    { id: "dont", key: "survey.step6.dontNeed" },
+                  ].map((opt) => (
                     <OptionButton
                       key={opt.id}
                       selected={data.branchPreference === opt.id}
-                      onClick={() => updateField('branchPreference', opt.id)}
+                      onClick={() => updateField("branchPreference", opt.id)}
                     >
                       {t(opt.key)}
                     </OptionButton>
@@ -1390,56 +1713,63 @@ export default function SurveyPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step6.campusSide')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step6.campusSide")}
+                </label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { id: 'north', key: 'survey.step6.north' },
-                    { id: 'south', key: 'survey.step6.south' },
-                    { id: 'east', key: 'survey.step6.east' },
-                    { id: 'west', key: 'survey.step6.west' },
-                    { id: 'center', key: 'survey.step6.center' },
-                    { id: 'unknown', key: 'survey.step6.notSure' },
-                  ].map(opt => (
+                    { id: "north", key: "survey.step6.north" },
+                    { id: "south", key: "survey.step6.south" },
+                    { id: "east", key: "survey.step6.east" },
+                    { id: "west", key: "survey.step6.west" },
+                    { id: "center", key: "survey.step6.center" },
+                    { id: "unknown", key: "survey.step6.notSure" },
+                  ].map((opt) => (
                     <button
                       key={opt.id}
-                      onClick={() => updateField('campusSide', opt.id)}
+                      onClick={() => updateField("campusSide", opt.id)}
                       className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
                         data.campusSide === opt.id
-                          ? 'border-black bg-black text-white'
-                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                          ? "border-black bg-black text-white"
+                          : "border-gray-200 text-gray-700 hover:border-gray-400"
                       }`}
                     >
                       {t(opt.key)}
                     </button>
                   ))}
                 </div>
-                <p className="text-gray-400 text-xs mt-2">{t('survey.step6.campusHint')}</p>
+                <p className="text-gray-400 text-xs mt-2">
+                  {t("survey.step6.campusHint")}
+                </p>
               </div>
             </div>
           </div>
         )}
 
         {/* Step 7 or 8: Your goals. */}
-        {((step === 7 && !showTransferStep) || (step === 8 && showTransferStep)) && (
+        {((step === 7 && !showTransferStep) ||
+          (step === 8 && showTransferStep)) && (
           <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">{t('survey.step7.title')}</h1>
-            <p className="text-gray-500 mb-8">{t('survey.step7.subtitle')}</p>
+            <h1 className="text-3xl font-semibold tracking-tight mb-2">
+              {t("survey.step7.title")}
+            </h1>
+            <p className="text-gray-500 mb-8">{t("survey.step7.subtitle")}</p>
 
             <div className="space-y-6">
               <div className="flex flex-wrap gap-2">
                 {[
-                  { id: 'Bank account', key: 'survey.step7.bankAccount' },
-                  { id: 'Credit history', key: 'survey.step7.creditHistory' },
-                  { id: 'Housing', key: 'survey.step7.housing' },
-                  { id: 'Student loans', key: 'survey.step7.studentLoans' },
-                  { id: 'Campus jobs', key: 'survey.step7.campusJobs' },
-                  { id: 'Investing', key: 'survey.step7.investing' },
-                  { id: 'Post-grad planning', key: 'survey.step7.postGrad' },
-                ].map(goal => (
+                  { id: "Bank account", key: "survey.step7.bankAccount" },
+                  { id: "Credit history", key: "survey.step7.creditHistory" },
+                  { id: "Housing", key: "survey.step7.housing" },
+                  { id: "Student loans", key: "survey.step7.studentLoans" },
+                  { id: "Campus jobs", key: "survey.step7.campusJobs" },
+                  { id: "Investing", key: "survey.step7.investing" },
+                  { id: "Post-grad planning", key: "survey.step7.postGrad" },
+                ].map((goal) => (
                   <ChipButton
                     key={goal.id}
                     selected={data.goals.includes(goal.id)}
-                    onClick={() => toggleArrayField('goals', goal.id)}
+                    onClick={() => toggleArrayField("goals", goal.id)}
                   >
                     {t(goal.key)}
                   </ChipButton>
@@ -1447,20 +1777,22 @@ export default function SurveyPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">{t('survey.step7.creditCards')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  {t("survey.step7.creditCards")}
+                </label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { id: 'Start now', key: 'survey.step7.startNow' },
-                    { id: 'Later', key: 'survey.step7.later' },
-                    { id: 'Skip', key: 'survey.step7.skip' },
-                  ].map(opt => (
+                    { id: "Start now", key: "survey.step7.startNow" },
+                    { id: "Later", key: "survey.step7.later" },
+                    { id: "Skip", key: "survey.step7.skip" },
+                  ].map((opt) => (
                     <button
                       key={opt.id}
-                      onClick={() => updateField('creditCardInterest', opt.id)}
+                      onClick={() => updateField("creditCardInterest", opt.id)}
                       className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
                         data.creditCardInterest === opt.id
-                          ? 'border-black bg-black text-white'
-                          : 'border-gray-200 text-gray-700 hover:border-gray-400'
+                          ? "border-black bg-black text-white"
+                          : "border-gray-200 text-gray-700 hover:border-gray-400"
                       }`}
                     >
                       {t(opt.key)}
@@ -1490,10 +1822,25 @@ export default function SurveyPage() {
             >
               <div className="p-6 border-b border-gray-100">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold">{t('survey.terms.title')}</h2>
-                  <button onClick={() => setShowTermsModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <h2 className="text-xl font-semibold">
+                    {t("survey.terms.title")}
+                  </h2>
+                  <button
+                    onClick={() => setShowTermsModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <svg
+                      className="w-6 h-6"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
@@ -1501,16 +1848,48 @@ export default function SurveyPage() {
               <div className="p-6 overflow-y-auto max-h-[60vh]">
                 <div className="prose prose-sm text-gray-600">
                   <p className="mb-4">Last updated: January 2026</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">1. Acceptance of Terms</h3>
-                  <p className="mb-4">By accessing and using Noor, you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use our service.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">2. Description of Service</h3>
-                  <p className="mb-4">Noor provides financial guidance, banking recommendations, and tools specifically designed for international students in the United States. Our recommendations are for informational purposes only and do not constitute financial advice.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">3. User Responsibilities</h3>
-                  <p className="mb-4">You are responsible for maintaining the confidentiality of your account and password. You agree to provide accurate information and to update your information as necessary.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">4. Privacy</h3>
-                  <p className="mb-4">Your privacy is important to us. Please review our Privacy Policy to understand how we collect, use, and protect your information.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">5. Limitation of Liability</h3>
-                  <p className="mb-4">Noor is not liable for any financial decisions made based on our recommendations. Always consult with a qualified financial advisor for personalized advice.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    1. Acceptance of Terms
+                  </h3>
+                  <p className="mb-4">
+                    By accessing and using Noor, you accept and agree to be
+                    bound by these Terms of Service. If you do not agree to
+                    these terms, please do not use our service.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    2. Description of Service
+                  </h3>
+                  <p className="mb-4">
+                    Noor provides financial guidance, banking recommendations,
+                    and tools specifically designed for international students
+                    in the United States. Our recommendations are for
+                    informational purposes only and do not constitute financial
+                    advice.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    3. User Responsibilities
+                  </h3>
+                  <p className="mb-4">
+                    You are responsible for maintaining the confidentiality of
+                    your account and password. You agree to provide accurate
+                    information and to update your information as necessary.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    4. Privacy
+                  </h3>
+                  <p className="mb-4">
+                    Your privacy is important to us. Please review our Privacy
+                    Policy to understand how we collect, use, and protect your
+                    information.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    5. Limitation of Liability
+                  </h3>
+                  <p className="mb-4">
+                    Noor is not liable for any financial decisions made based on
+                    our recommendations. Always consult with a qualified
+                    financial advisor for personalized advice.
+                  </p>
                 </div>
               </div>
               <div className="p-6 border-t border-gray-100">
@@ -1518,7 +1897,7 @@ export default function SurveyPage() {
                   onClick={() => setShowTermsModal(false)}
                   className="w-full py-3 bg-black text-white rounded-xl font-medium"
                 >
-                  {t('common.close')}
+                  {t("common.close")}
                 </button>
               </div>
             </motion.div>
@@ -1543,10 +1922,25 @@ export default function SurveyPage() {
             >
               <div className="p-6 border-b border-gray-100">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold">{t('survey.privacy.title')}</h2>
-                  <button onClick={() => setShowPrivacyModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <h2 className="text-xl font-semibold">
+                    {t("survey.privacy.title")}
+                  </h2>
+                  <button
+                    onClick={() => setShowPrivacyModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <svg
+                      className="w-6 h-6"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
@@ -1554,16 +1948,45 @@ export default function SurveyPage() {
               <div className="p-6 overflow-y-auto max-h-[60vh]">
                 <div className="prose prose-sm text-gray-600">
                   <p className="mb-4">Last updated: January 2026</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">What We Collect</h3>
-                  <p className="mb-4">We collect information you provide directly to us, including your name, email address, university, visa status, and financial preferences.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">How We Use Your Information</h3>
-                  <p className="mb-4">We use your information to provide personalized banking recommendations, send relevant updates and notifications, and improve our services.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">Data Storage</h3>
-                  <p className="mb-4">Your data is stored securely using industry-standard encryption. We never sell your personal information to third parties.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">Your Rights</h3>
-                  <p className="mb-4">You have the right to access, correct, or delete your personal data at any time. You can export your data or request account deletion from the Settings page.</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">Contact Us</h3>
-                  <p className="mb-4">If you have questions about this Privacy Policy, please contact us at privacy@noorapp.com.</p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    What We Collect
+                  </h3>
+                  <p className="mb-4">
+                    We collect information you provide directly to us, including
+                    your name, email address, university, visa status, and
+                    financial preferences.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    How We Use Your Information
+                  </h3>
+                  <p className="mb-4">
+                    We use your information to provide personalized banking
+                    recommendations, send relevant updates and notifications,
+                    and improve our services.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    Data Storage
+                  </h3>
+                  <p className="mb-4">
+                    Your data is stored securely using industry-standard
+                    encryption. We never sell your personal information to third
+                    parties.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    Your Rights
+                  </h3>
+                  <p className="mb-4">
+                    You have the right to access, correct, or delete your
+                    personal data at any time. You can export your data or
+                    request account deletion from the Settings page.
+                  </p>
+                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                    Contact Us
+                  </h3>
+                  <p className="mb-4">
+                    If you have questions about this Privacy Policy, please
+                    contact us at privacy@noorapp.com.
+                  </p>
                 </div>
               </div>
               <div className="p-6 border-t border-gray-100">
@@ -1571,7 +1994,7 @@ export default function SurveyPage() {
                   onClick={() => setShowPrivacyModal(false)}
                   className="w-full py-3 bg-black text-white rounded-xl font-medium"
                 >
-                  {t('common.close')}
+                  {t("common.close")}
                 </button>
               </div>
             </motion.div>
@@ -1593,39 +2016,66 @@ export default function SurveyPage() {
             </motion.div>
           )}
           <div className="flex gap-3">
-          {step >= 1 && (
-            <button
-              onClick={handleBack}
-              className="px-6 py-3.5 border-[1.5px] border-gray-300 rounded-xl font-medium transition-all duration-300 hover:border-black"
-            >
-              {t('common.back')}
-            </button>
-          )}
-          {step < totalSteps - 1 ? (
-            <button
-              onClick={handleNext}
-              disabled={step === 1 && (!data.firstName || !data.lastName || !data.email || !passwordValidation.isValid || !passwordsMatch || !data.agreeToTerms || !data.institutionId || !data.countryOfOrigin)}
-              className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
-            >
-              {t('common.continue')}
-            </button>
-          ) : (
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300"
-            >
-              {isSubmitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  {t('survey.submit.creating')}
-                </span>
-              ) : t('survey.submit.complete')}
-            </button>
-          )}
+            {step >= 1 && (
+              <button
+                onClick={handleBack}
+                className="px-6 py-3.5 border-[1.5px] border-gray-300 rounded-xl font-medium transition-all duration-300 hover:border-black"
+              >
+                {t("common.back")}
+              </button>
+            )}
+            {step < totalSteps - 1 ? (
+              <button
+                onClick={handleNext}
+                disabled={
+                  step === 1 &&
+                  (!data.firstName ||
+                    !data.lastName ||
+                    !data.email ||
+                    !passwordValidation.isValid ||
+                    !passwordsMatch ||
+                    !data.agreeToTerms ||
+                    !data.institutionId ||
+                    !data.countryOfOrigin)
+                }
+                className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                {t("common.continue")}
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300"
+              >
+                {isSubmitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg
+                      className="animate-spin w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
+                    </svg>
+                    {t("survey.submit.creating")}
+                  </span>
+                ) : (
+                  t("survey.submit.complete")
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
