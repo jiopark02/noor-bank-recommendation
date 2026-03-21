@@ -29,7 +29,7 @@ export const PLAID_PRODUCTS: Products[] = [
   Products.Transactions,
   // Products.Auth,    // Requires additional Plaid dashboard configuration
   // Products.Identity, // Requires additional Plaid dashboard configuration
-  Products.Liabilities,
+  //Products.Liabilities,
 ];
 
 // Country codes we support
