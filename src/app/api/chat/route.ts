@@ -138,12 +138,32 @@ interface PlaidTransactionSummary {
   name?: string;
 }
 
+interface PlaidSubscriptionSummary {
+  id?: string;
+  name?: string;
+  amount?: number;
+  monthly_amount?: number;
+  iso_currency_code?: string;
+  frequency?: "weekly" | "monthly" | "yearly" | "unknown" | string;
+  last_charged?: string | null;
+  next_charge?: string | null;
+}
+
 interface FinancialSnapshot {
   balanceSummary: string;
   monthlySpendingEstimate: number;
   monthlyIncomeEstimate: number;
   netMonthlyEstimate: number;
   monthlySubscriptionEstimate: number;
+  subscriptions: Array<{
+    name: string;
+    monthlyAmount: number;
+    amount: number;
+    currency: string;
+    frequency: string;
+    lastCharged: string | null;
+    nextCharge: string | null;
+  }>;
   diningMonthlyEstimate: number;
   topSpendingCategory: string;
   incomeRegularityScore: number;
@@ -197,6 +217,21 @@ function isFinancialPlanningQuestion(message: string): boolean {
     "rent due",
     "tax refund",
     "unexpected expense",
+  ];
+
+  return signals.some((signal) => normalized.includes(signal));
+}
+
+function isSubscriptionQuestion(message: string): boolean {
+  const normalized = message.toLowerCase();
+
+  const signals = [
+    "subscription",
+    "subscriptions",
+    "recurring",
+    "what am i paying",
+    "what are my bills",
+    "monthly charges",
   ];
 
   return signals.some((signal) => normalized.includes(signal));
@@ -291,7 +326,7 @@ function calculateRiskLevel(
 function buildFinancialSnapshot(
   accounts: PlaidAccountSummary[],
   transactions: PlaidTransactionSummary[],
-  subscriptions: Array<{ amount?: number }>,
+  subscriptions: PlaidSubscriptionSummary[],
   categoryTotals: Record<string, number>,
   summary: {
     totalSpending?: number;
@@ -328,11 +363,36 @@ function buildFinancialSnapshot(
   const monthlyIncomeEstimate = (totalIncome / rangeDays) * 30;
   const netMonthlyEstimate = monthlyIncomeEstimate - monthlySpendingEstimate;
 
-  const totalSubscriptionSpend = subscriptions.reduce(
-    (sum, sub) => sum + Math.max(0, sub.amount || 0),
+  const normalizedSubscriptions = subscriptions
+    .map((sub, index) => {
+      const recurringMonthly =
+        typeof sub.monthly_amount === "number" &&
+        Number.isFinite(sub.monthly_amount)
+          ? sub.monthly_amount
+          : undefined;
+      const fallbackAmount =
+        typeof sub.amount === "number" && Number.isFinite(sub.amount)
+          ? sub.amount
+          : 0;
+      const monthlyAmount = Math.max(0, recurringMonthly ?? fallbackAmount);
+
+      return {
+        name: sub.name?.trim() || `Subscription ${index + 1}`,
+        monthlyAmount,
+        amount: Math.max(0, fallbackAmount),
+        currency: sub.iso_currency_code || currency,
+        frequency: sub.frequency || "unknown",
+        lastCharged: sub.last_charged || null,
+        nextCharge: sub.next_charge || null,
+      };
+    })
+    .filter((sub) => sub.monthlyAmount > 0)
+    .sort((a, b) => b.monthlyAmount - a.monthlyAmount);
+
+  const monthlySubscriptionEstimate = normalizedSubscriptions.reduce(
+    (sum, sub) => sum + sub.monthlyAmount,
     0
   );
-  const monthlySubscriptionEstimate = (totalSubscriptionSpend / rangeDays) * 30;
 
   const diningSpend = transactions
     .filter((txn) => txn.amount > 0)
@@ -362,6 +422,7 @@ function buildFinancialSnapshot(
     monthlyIncomeEstimate,
     netMonthlyEstimate,
     monthlySubscriptionEstimate,
+    subscriptions: normalizedSubscriptions,
     diningMonthlyEstimate,
     topSpendingCategory,
     incomeRegularityScore,
@@ -671,6 +732,8 @@ export async function POST(request: NextRequest) {
     const wantsBalance = isBalanceQuestion(lastUserMessageText);
     const wantsFinancialAnalysis =
       isFinancialPlanningQuestion(lastUserMessageText);
+    const wantsSubscriptionDetails =
+      isSubscriptionQuestion(lastUserMessageText);
 
     let systemPrompt = generateSystemPrompt(mergedUserContext);
 
@@ -703,6 +766,20 @@ export async function POST(request: NextRequest) {
       );
 
       if (snapshot) {
+        const subscriptionBreakdown =
+          snapshot.subscriptions.length > 0
+            ? snapshot.subscriptions
+                .slice(0, 8)
+                .map(
+                  (sub) =>
+                    `  - ${sub.name}: ${formatAmount(
+                      sub.monthlyAmount,
+                      sub.currency
+                    )}/mo (${sub.frequency})`
+                )
+                .join("\n")
+            : "  - No active recurring subscriptions detected in the selected date range.";
+
         systemPrompt += `\n\n## Verified Financial Snapshot\n- ${
           snapshot.balanceSummary
         }\n- Estimated monthly income: ${formatAmount(
@@ -717,7 +794,7 @@ export async function POST(request: NextRequest) {
         )}\n- Estimated monthly subscription cost: ${formatAmount(
           snapshot.monthlySubscriptionEstimate,
           snapshot.currency
-        )}\n- Estimated monthly dining spend: ${formatAmount(
+        )}\n- Active subscriptions (monthly):\n${subscriptionBreakdown}\n- Estimated monthly dining spend: ${formatAmount(
           snapshot.diningMonthlyEstimate,
           snapshot.currency
         )}\n- Top spending category: ${
@@ -730,6 +807,11 @@ export async function POST(request: NextRequest) {
           snapshot.safeBuffer,
           snapshot.currency
         )}\n\n## Required Output Format For Money Decisions\nWhen the user asks affordability, budgeting, subscriptions, savings progress, or purchase timing:\n1) Start with one empathy sentence if the user sounds stressed.\n2) Show a compact math line using real numbers from snapshot + user-stated obligations (rent, bills, planned purchase).\n3) Provide Risk Level: Low, Medium, or High.\n4) Provide one clear recommendation: go, wait, or capped spend.\n5) Provide one practical alternative if risk is Medium/High.\n6) If data is incomplete, ask exactly one follow-up question needed for better precision.\n\nDo not give generic advice without numbers.`;
+
+        if (wantsSubscriptionDetails) {
+          systemPrompt +=
+            "\n\nIf the user asks for subscriptions, list each verified subscription with monthly amount first, then give one concise total monthly subscription cost line. Keep the answer plain and avoid generic budget advice unless requested.";
+        }
       } else {
         systemPrompt +=
           "\n\nIf the user asks affordability or planning questions and verified banking data is unavailable, state that you need a connected bank account and then provide a conservative estimate framework.";

@@ -44,7 +44,6 @@ export default function ChatPage() {
     messages,
     isLoading,
     error,
-    currentModel,
     sendMessage,
     clearMessages,
     quickPrompts,
@@ -166,9 +165,6 @@ export default function ChatPage() {
               </span>
             </div>
             <p className="text-xs text-gray-500">Personalized to your level</p>
-            {currentModel && (
-              <p className="text-[11px] text-gray-500">Model: {currentModel}</p>
-            )}
           </div>
         </div>
         {messages.length > 0 && (
@@ -248,11 +244,6 @@ export default function ChatPage() {
                     >
                       {message.content}
                     </p>
-                    {message.role === "assistant" && message.model && (
-                      <p className="mt-2 text-[10px] font-medium text-gray-500">
-                        Model: {message.model}
-                      </p>
-                    )}
                   </div>
                 </motion.div>
               ))}
