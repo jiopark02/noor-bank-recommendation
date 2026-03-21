@@ -25,7 +25,14 @@ export function ChatModal({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { messages, isLoading, error, sendMessage, quickPrompts } = useChat({
+  const {
+    messages,
+    isLoading,
+    error,
+    currentModel,
+    sendMessage,
+    quickPrompts,
+  } = useChat({
     userId,
     userContext,
     loadHistory: true,
@@ -109,8 +116,16 @@ export function ChatModal({
                   className="text-xs"
                   style={{ color: headerTextColor, opacity: 0.7 }}
                 >
-                  유학생 금융 어시스턴트
+                  Financial assistant for international students
                 </p>
+                {currentModel && (
+                  <p
+                    className="text-[11px] font-medium"
+                    style={{ color: headerTextColor, opacity: 0.85 }}
+                  >
+                    Model: {currentModel}
+                  </p>
+                )}
               </div>
             </div>
             <button
@@ -186,6 +201,7 @@ export function ChatModal({
                     role={msg.role}
                     content={msg.content}
                     timestamp={msg.timestamp}
+                    model={msg.model}
                   />
                 ))}
                 {isLoading && (
@@ -228,7 +244,7 @@ export function ChatModal({
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="메시지를 입력하세요..."
+                placeholder="Type your message..."
                 disabled={isLoading}
                 className="flex-1 px-4 py-3 bg-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-gray-200 disabled:opacity-50"
               />

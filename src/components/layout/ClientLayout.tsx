@@ -1,15 +1,15 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { usePathname } from 'next/navigation';
-import { NoorAIChat } from '@/components/chat';
+import React, { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
+import { NoorAIChat } from "@/components/chat";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
 }
 
 // Pages where the chat button should not appear
-const HIDDEN_CHAT_PAGES = ['/welcome', '/survey', '/login'];
+const HIDDEN_CHAT_PAGES = ["/welcome", "/survey", "/login", "/chat"];
 
 export function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
@@ -17,7 +17,7 @@ export function ClientLayout({ children }: ClientLayoutProps) {
 
   useEffect(() => {
     // Check if user has completed onboarding
-    const userId = localStorage.getItem('noor_user_id');
+    const userId = localStorage.getItem("noor_user_id");
     setIsOnboarded(!!userId);
   }, []);
 
