@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useChat, ChatMessage as ChatMessageType } from '@/hooks/useChat';
-import { ChatMessage } from './ChatMessage';
-import { UserContext } from '@/lib/noorAIPrompt';
+import React, { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useTheme } from "@/contexts/ThemeContext";
+import { useChat } from "@/hooks/useChat";
+import { ChatMessage } from "./ChatMessage";
+import { UserContext } from "@/lib/noorAIPrompt";
 
 interface ChatModalProps {
   isOpen: boolean;
@@ -14,32 +14,33 @@ interface ChatModalProps {
   userContext?: UserContext;
 }
 
-export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalProps) {
+export function ChatModal({
+  isOpen,
+  onClose,
+  userId,
+  userContext,
+}: ChatModalProps) {
   const { theme, useSchoolTheme } = useTheme();
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const {
-    messages,
-    isLoading,
-    error,
-    sendMessage,
-    quickPrompts,
-  } = useChat({
+  const { messages, isLoading, error, sendMessage, quickPrompts } = useChat({
     userId,
     userContext,
     loadHistory: true,
   });
 
-  const headerColor = useSchoolTheme ? theme.primary_color : '#000000';
+  const headerColor = useSchoolTheme ? theme.primary_color : "#000000";
   const headerTextColor = useSchoolTheme
-    ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-    : '#FFFFFF';
+    ? theme.text_on_primary === "white"
+      ? "#FFFFFF"
+      : "#000000"
+    : "#FFFFFF";
 
   // Scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   // Focus input when modal opens
@@ -54,7 +55,7 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
     if (!inputValue.trim() || isLoading) return;
 
     const message = inputValue;
-    setInputValue('');
+    setInputValue("");
     await sendMessage(message);
   };
 
@@ -70,9 +71,9 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
           initial={{ opacity: 0, y: 20, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 20, scale: 0.95 }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
           className="fixed bottom-28 right-4 z-50 w-[calc(100%-2rem)] max-w-md h-[70vh] max-h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-          style={{ border: '1px solid #E5E5E5' }}
+          style={{ border: "1px solid #E5E5E5" }}
         >
           {/* Header */}
           <div
@@ -83,18 +84,25 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
               <div
                 className="w-10 h-10 rounded-full flex items-center justify-center"
                 style={{
-                  backgroundColor: useSchoolTheme ? theme.secondary_color : '#FFFFFF',
+                  backgroundColor: useSchoolTheme
+                    ? theme.secondary_color
+                    : "#FFFFFF",
                 }}
               >
                 <span
                   className="text-sm font-semibold"
-                  style={{ color: useSchoolTheme ? theme.primary_color : '#000000' }}
+                  style={{
+                    color: useSchoolTheme ? theme.primary_color : "#000000",
+                  }}
                 >
                   N
                 </span>
               </div>
               <div>
-                <h3 className="font-medium text-sm" style={{ color: headerTextColor }}>
+                <h3
+                  className="font-medium text-sm"
+                  style={{ color: headerTextColor }}
+                >
                   Noor AI
                 </h3>
                 <p
@@ -117,7 +125,11 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
                 stroke={headerTextColor}
                 strokeWidth="2"
               >
-                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M18 6L6 18M6 6l12 12"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             </button>
           </div>
@@ -129,21 +141,24 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
                 <div
                   className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
                   style={{
-                    backgroundColor: useSchoolTheme ? `${theme.primary_color}15` : '#F5F5F5',
+                    backgroundColor: useSchoolTheme
+                      ? `${theme.primary_color}15`
+                      : "#F5F5F5",
                   }}
                 >
                   <span
                     className="text-2xl font-semibold"
-                    style={{ color: useSchoolTheme ? theme.primary_color : '#000000' }}
+                    style={{
+                      color: useSchoolTheme ? theme.primary_color : "#000000",
+                    }}
                   >
                     N
                   </span>
                 </div>
-                <h4 className="font-medium text-gray-900 mb-1">
-                  Hi! I'm Noor
-                </h4>
+                <h4 className="font-medium text-gray-900 mb-1">Hi! I'm Noor</h4>
                 <p className="text-sm text-gray-500 mb-2">
-                  I'm here to help with banking, housing, visa questions, and more.
+                  I'm here to help with banking, housing, visa questions, and
+                  more.
                 </p>
                 <p className="text-xs text-gray-400 mb-6">
                   No question is too small. Take your time.
@@ -174,11 +189,7 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
                   />
                 ))}
                 {isLoading && (
-                  <ChatMessage
-                    role="assistant"
-                    content=""
-                    isTyping={true}
-                  />
+                  <ChatMessage role="assistant" content="" isTyping={true} />
                 )}
                 <div ref={messagesEndRef} />
               </>
@@ -206,6 +217,11 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
             onSubmit={handleSubmit}
             className="p-4 border-t border-gray-100 flex-shrink-0"
           >
+            {error && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {error}
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <input
                 ref={inputRef}
@@ -221,7 +237,9 @@ export function ChatModal({ isOpen, onClose, userId, userContext }: ChatModalPro
                 disabled={!inputValue.trim() || isLoading}
                 className="p-3 rounded-xl transition-all disabled:opacity-30"
                 style={{
-                  backgroundColor: useSchoolTheme ? theme.primary_color : '#000000',
+                  backgroundColor: useSchoolTheme
+                    ? theme.primary_color
+                    : "#000000",
                 }}
               >
                 <svg

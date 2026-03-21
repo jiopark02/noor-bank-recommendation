@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
-import { ConnectBankCard } from "@/components/plaid";
+import { ConnectBankCard, PlaidLinkButton } from "@/components/plaid";
 import {
   PlaidAccount,
   PlaidTransaction,
@@ -26,6 +26,8 @@ export default function MoneyPage() {
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
+  const [relinkToken, setRelinkToken] = useState<string | null>(null);
+  const [isPreparingRelink, setIsPreparingRelink] = useState(false);
 
   // Date range for transactions
   const [startDate, setStartDate] = useState<string>(() => {
@@ -145,6 +147,7 @@ export default function MoneyPage() {
   // Handle new bank connection
   const handleBankConnected = useCallback(() => {
     setRelinkItemId(null);
+    setRelinkToken(null);
     setError(null);
     plaidConnections.refetch();
   }, [plaidConnections]);
@@ -153,15 +156,52 @@ export default function MoneyPage() {
   const handleRelink = useCallback(async () => {
     if (!relinkItemId) return;
     try {
+      setIsPreparingRelink(true);
       const linkToken = await plaidConnections.relink(relinkItemId);
-      // The frontend component will handle opening Plaid Link with this token
-      // For now, we'll just clear the error
-      setError(null);
-      setRelinkItemId(null);
+      if (linkToken) {
+        setRelinkToken(linkToken);
+      }
     } catch (err) {
       console.error("Relink failed:", err);
+    } finally {
+      setIsPreparingRelink(false);
     }
   }, [relinkItemId, plaidConnections]);
+
+  const handleRelinkSuccess = useCallback(
+    async (
+      publicToken: string,
+      metadata: { institution: { name: string; institution_id: string } }
+    ) => {
+      if (!userId) return;
+
+      try {
+        const response = await fetch("/api/plaid/exchange-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            publicToken,
+            institutionId: metadata.institution.institution_id,
+            institutionName: metadata.institution.name,
+          }),
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || "Failed to complete re-link");
+        }
+
+        setRelinkToken(null);
+        handleBankConnected();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to complete re-link";
+        setError(message);
+      }
+    },
+    [handleBankConnected, userId]
+  );
 
   // Demo data for when Plaid is not configured
   const DEMO_ACCOUNTS: PlaidAccount[] = [
@@ -495,6 +535,39 @@ export default function MoneyPage() {
         ))}
       </div>
 
+      {isLoadingData && (
+        <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+          Syncing your latest bank data...
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-700">{error}</p>
+          {relinkItemId && !relinkToken && (
+            <button
+              onClick={handleRelink}
+              disabled={isPreparingRelink}
+              className="mt-3 rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isPreparingRelink ? "Preparing re-link..." : "Re-link bank"}
+            </button>
+          )}
+          {relinkToken && userId && (
+            <div className="mt-3">
+              <PlaidLinkButton
+                userId={userId}
+                linkTokenOverride={relinkToken}
+                onSuccess={handleRelinkSuccess}
+                className="rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white"
+              >
+                Complete bank re-link
+              </PlaidLinkButton>
+            </div>
+          )}
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
         {/* Overview Tab */}
         {activeTab === "overview" && (
@@ -689,7 +762,7 @@ export default function MoneyPage() {
               ))}
             </div>
 
-            {userId && (
+            {!plaidConnections.hasActive && userId && (
               <div className="mt-6">
                 <ConnectBankCard
                   userId={userId}

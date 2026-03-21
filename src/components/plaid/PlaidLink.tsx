@@ -17,6 +17,7 @@ interface PlaidLinkButtonProps {
   onExit?: () => void;
   className?: string;
   children?: React.ReactNode;
+  linkTokenOverride?: string;
 }
 
 export function PlaidLinkButton({
@@ -25,6 +26,7 @@ export function PlaidLinkButton({
   onExit,
   className,
   children,
+  linkTokenOverride,
 }: PlaidLinkButtonProps) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -32,6 +34,12 @@ export function PlaidLinkButton({
 
   // Fetch link token on mount
   useEffect(() => {
+    if (linkTokenOverride) {
+      setLinkToken(linkTokenOverride);
+      setError(null);
+      return;
+    }
+
     const fetchLinkToken = async () => {
       try {
         setIsLoading(true);
@@ -59,7 +67,7 @@ export function PlaidLinkButton({
     if (userId) {
       fetchLinkToken();
     }
-  }, [userId]);
+  }, [userId, linkTokenOverride]);
 
   const handleSuccess = useCallback<PlaidLinkOnSuccess>(
     (publicToken, metadata) => {
@@ -160,6 +168,38 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
         const data = await response.json();
 
         if (data.success) {
+          const stored = localStorage.getItem("noor_plaid_connections") || "[]";
+          const existing = JSON.parse(stored) as Array<{
+            itemId: string;
+            institutionName: string;
+            institutionId?: string;
+            status: "active" | "error";
+            createdAt?: string;
+          }>;
+
+          const nextConnection = {
+            itemId: data.itemId,
+            institutionName:
+              data.institutionName ||
+              metadata.institution.name ||
+              "Unknown Bank",
+            institutionId:
+              data.institutionId ||
+              metadata.institution.institution_id ||
+              undefined,
+            status: "active" as const,
+            createdAt: new Date().toISOString(),
+          };
+
+          const deduped = existing.filter(
+            (c) => c.itemId !== nextConnection.itemId
+          );
+          deduped.push(nextConnection);
+          localStorage.setItem(
+            "noor_plaid_connections",
+            JSON.stringify(deduped)
+          );
+
           // Refresh parent component
           onConnected?.();
         } else {
