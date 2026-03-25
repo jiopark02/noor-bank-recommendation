@@ -1,23 +1,23 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import { PageLayout } from '@/components/layout';
-import { useTheme } from '@/contexts/ThemeContext';
+import React, { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { PageLayout } from "@/components/layout";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   generateNotifications,
   getReadNotifications,
   formatReminderDate,
   Notification,
-} from '@/lib/notificationsData';
+} from "@/lib/notificationsData";
 
 // Financial setup items
 interface SetupItem {
   id: string;
   title: string;
-  status: 'done' | 'in_progress' | 'upcoming' | 'not_started';
+  status: "done" | "in_progress" | "upcoming" | "not_started";
   href: string;
   description?: string;
 }
@@ -26,7 +26,7 @@ interface SetupItem {
 interface JourneyStep {
   id: string;
   title: string;
-  status: 'completed' | 'current' | 'upcoming';
+  status: "completed" | "current" | "upcoming";
   description: string;
 }
 
@@ -37,58 +37,125 @@ interface QuickAction {
   prompt: string;
 }
 
-const STORAGE_KEY_SETUP = 'noor_financial_setup';
-const STORAGE_KEY_BUDGET = 'noor_budget';
+const STORAGE_KEY_SETUP = "noor_financial_setup";
+const STORAGE_KEY_BUDGET = "noor_budget";
 
 // Default setup items
 const DEFAULT_SETUP_ITEMS: SetupItem[] = [
-  { id: 'bank', title: 'Bank Account', status: 'not_started', href: '/banking' },
-  { id: 'phone', title: 'Phone Plan', status: 'not_started', href: '/guides/phone' },
-  { id: 'credit', title: 'Credit Card', status: 'not_started', href: '/funding' },
-  { id: 'tax', title: 'Tax Filing', status: 'upcoming', href: '/guides/tax' },
-  { id: 'visa', title: 'Visa Renewal', status: 'not_started', href: '/visa' },
+  {
+    id: "bank",
+    title: "Bank Account",
+    status: "not_started",
+    href: "/banking",
+  },
+  {
+    id: "phone",
+    title: "Phone Plan",
+    status: "not_started",
+    href: "/guides/phone",
+  },
+  {
+    id: "credit",
+    title: "Credit Card",
+    status: "not_started",
+    href: "/funding",
+  },
+  { id: "tax", title: "Tax Filing", status: "upcoming", href: "/guides/tax" },
+  { id: "visa", title: "Visa Renewal", status: "not_started", href: "/visa" },
 ];
 
 // Journey steps
 const JOURNEY_STEPS: JourneyStep[] = [
-  { id: 'arrived', title: 'Arrived', status: 'completed', description: 'Welcome to the US!' },
-  { id: 'bank', title: 'Bank Account', status: 'completed', description: 'Financial foundation set' },
-  { id: 'housing', title: 'Housing', status: 'completed', description: 'Found your home' },
-  { id: 'credit', title: 'Credit Building', status: 'current', description: 'Building your credit score' },
-  { id: 'tax', title: 'Tax Ready', status: 'upcoming', description: 'Prepared for tax season' },
+  {
+    id: "arrived",
+    title: "Arrived",
+    status: "completed",
+    description: "Welcome to the US!",
+  },
+  {
+    id: "bank",
+    title: "Bank Account",
+    status: "completed",
+    description: "Financial foundation set",
+  },
+  {
+    id: "housing",
+    title: "Housing",
+    status: "completed",
+    description: "Found your home",
+  },
+  {
+    id: "credit",
+    title: "Credit Building",
+    status: "current",
+    description: "Building your credit score",
+  },
+  {
+    id: "tax",
+    title: "Tax Ready",
+    status: "upcoming",
+    description: "Prepared for tax season",
+  },
 ];
 
 // Quick AI prompts
 const AI_QUICK_ACTIONS: QuickAction[] = [
-  { id: 'credit', label: 'How do I build credit?', prompt: 'How do I build credit as an international student?' },
-  { id: 'tax', label: 'When is tax season?', prompt: 'When is tax season and what forms do I need as an F-1 student?' },
-  { id: 'ssn', label: 'Do I need SSN?', prompt: 'Do I need an SSN for a bank account?' },
-  { id: 'opt', label: 'OPT explained', prompt: 'Explain OPT and when should I apply?' },
+  {
+    id: "credit",
+    label: "How do I build credit?",
+    prompt: "How do I build credit as an international student?",
+  },
+  {
+    id: "tax",
+    label: "When is tax season?",
+    prompt: "When is tax season and what forms do I need as an F-1 student?",
+  },
+  {
+    id: "ssn",
+    label: "Do I need SSN?",
+    prompt: "Do I need an SSN for a bank account?",
+  },
+  {
+    id: "opt",
+    label: "OPT explained",
+    prompt: "Explain OPT and when should I apply?",
+  },
 ];
 
 export default function HomePage() {
   const router = useRouter();
   const { theme, useSchoolTheme } = useTheme();
-  const [userName, setUserName] = useState('there');
+  const [userName, setUserName] = useState("there");
   const [isLoading, setIsLoading] = useState(true);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [readNotifications, setReadNotifications] = useState<string[]>([]);
-  const [setupItems, setSetupItems] = useState<SetupItem[]>(DEFAULT_SETUP_ITEMS);
-  const [journeySteps, setJourneySteps] = useState<JourneyStep[]>(JOURNEY_STEPS);
+  const [setupItems, setSetupItems] =
+    useState<SetupItem[]>(DEFAULT_SETUP_ITEMS);
+  const [journeySteps, setJourneySteps] =
+    useState<JourneyStep[]>(JOURNEY_STEPS);
   const [budget, setBudget] = useState({ total: 2000, spent: 1247 });
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showAIChat, setShowAIChat] = useState(false);
-  const [userProfile, setUserProfile] = useState<Record<string, unknown> | null>(null);
+  const [userProfile, setUserProfile] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   useEffect(() => {
-    const userId = localStorage.getItem('noor_user_id');
+    const userId = localStorage.getItem("noor_user_id");
     if (!userId) {
-      router.push('/welcome');
+      router.replace("/welcome");
+      // Fallback hard redirect in case client navigation is blocked.
+      window.setTimeout(() => {
+        if (window.location.pathname === "/") {
+          window.location.href = "/welcome";
+        }
+      }, 400);
       return;
     }
 
     // Load user profile
-    const profileData = localStorage.getItem('noor_user_profile');
+    const profileData = localStorage.getItem("noor_user_profile");
     if (profileData) {
       try {
         const profile = JSON.parse(profileData);
@@ -100,16 +167,16 @@ export default function HomePage() {
         // Update setup items based on profile
         const updatedSetup = [...DEFAULT_SETUP_ITEMS];
         if (profile.has_bank_account) {
-          const bankItem = updatedSetup.find(i => i.id === 'bank');
-          if (bankItem) bankItem.status = 'done';
+          const bankItem = updatedSetup.find((i) => i.id === "bank");
+          if (bankItem) bankItem.status = "done";
         }
         if (profile.has_phone) {
-          const phoneItem = updatedSetup.find(i => i.id === 'phone');
-          if (phoneItem) phoneItem.status = 'done';
+          const phoneItem = updatedSetup.find((i) => i.id === "phone");
+          if (phoneItem) phoneItem.status = "done";
         }
         if (profile.has_credit_card) {
-          const creditItem = updatedSetup.find(i => i.id === 'credit');
-          if (creditItem) creditItem.status = 'done';
+          const creditItem = updatedSetup.find((i) => i.id === "credit");
+          if (creditItem) creditItem.status = "done";
         }
         setSetupItems(updatedSetup);
       } catch (e) {
@@ -155,66 +222,76 @@ export default function HomePage() {
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
   };
 
   // Calculate financial health percentage
   const healthPercentage = useMemo(() => {
-    const completed = setupItems.filter(i => i.status === 'done').length;
+    const completed = setupItems.filter((i) => i.status === "done").length;
     return Math.round((completed / setupItems.length) * 100);
   }, [setupItems]);
 
   // Get status icon
-  const getStatusIcon = (status: SetupItem['status']) => {
+  const getStatusIcon = (status: SetupItem["status"]) => {
     switch (status) {
-      case 'done': return '✓';
-      case 'in_progress': return '↻';
-      case 'upcoming': return '◷';
-      default: return '○';
+      case "done":
+        return "✓";
+      case "in_progress":
+        return "↻";
+      case "upcoming":
+        return "◷";
+      default:
+        return "○";
     }
   };
 
   // Get status color
-  const getStatusColor = (status: SetupItem['status']) => {
+  const getStatusColor = (status: SetupItem["status"]) => {
     switch (status) {
-      case 'done': return 'text-green-500 bg-green-50';
-      case 'in_progress': return 'text-blue-500 bg-blue-50';
-      case 'upcoming': return 'text-amber-500 bg-amber-50';
-      default: return 'text-gray-400 bg-gray-50';
+      case "done":
+        return "text-green-500 bg-green-50";
+      case "in_progress":
+        return "text-blue-500 bg-blue-50";
+      case "upcoming":
+        return "text-amber-500 bg-amber-50";
+      default:
+        return "text-gray-400 bg-gray-50";
     }
   };
 
   // Toggle setup item status
   const toggleSetupItem = (id: string) => {
-    setSetupItems(prev => prev.map(item => {
-      if (item.id === id) {
-        const nextStatus: Record<SetupItem['status'], SetupItem['status']> = {
-          'not_started': 'in_progress',
-          'in_progress': 'done',
-          'done': 'not_started',
-          'upcoming': 'in_progress',
-        };
-        return { ...item, status: nextStatus[item.status] };
-      }
-      return item;
-    }));
+    setSetupItems((prev) =>
+      prev.map((item) => {
+        if (item.id === id) {
+          const nextStatus: Record<SetupItem["status"], SetupItem["status"]> = {
+            not_started: "in_progress",
+            in_progress: "done",
+            done: "not_started",
+            upcoming: "in_progress",
+          };
+          return { ...item, status: nextStatus[item.status] };
+        }
+        return item;
+      })
+    );
   };
 
   // Get urgent notifications (Don't Miss)
   const dontMissItems = useMemo(() => {
     return notifications
-      .filter(n => !readNotifications.includes(n.id))
-      .filter(n => n.severity === 'urgent' || n.severity === 'warning')
+      .filter((n) => !readNotifications.includes(n.id))
+      .filter((n) => n.severity === "urgent" || n.severity === "warning")
       .slice(0, 3);
   }, [notifications, readNotifications]);
 
   // This week items
   const thisWeekItems = useMemo(() => {
     return notifications
-      .filter(n => !readNotifications.includes(n.id))
-      .filter(n => n.days_until <= 7 && n.days_until > 0)
+      .filter((n) => !readNotifications.includes(n.id))
+      .filter((n) => n.days_until <= 7 && n.days_until > 0)
       .slice(0, 4);
   }, [notifications, readNotifications]);
 
@@ -225,11 +302,14 @@ export default function HomePage() {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
-        <motion.div
-          className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full"
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-        />
+        <div className="flex flex-col items-center gap-3">
+          <motion.div
+            className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full"
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          />
+          <p className="text-sm text-gray-500">Loading your dashboard...</p>
+        </div>
       </div>
     );
   }
@@ -271,12 +351,14 @@ export default function HomePage() {
       >
         <motion.div
           className="noor-card p-6 cursor-pointer"
-          onClick={() => setExpandedCard(expandedCard === 'health' ? null : 'health')}
+          onClick={() =>
+            setExpandedCard(expandedCard === "health" ? null : "health")
+          }
           whileTap={{ scale: 0.98 }}
           style={{
             background: useSchoolTheme
               ? `linear-gradient(135deg, ${theme.primary_color}10 0%, white 100%)`
-              : 'linear-gradient(135deg, #f8f9fa 0%, white 100%)',
+              : "linear-gradient(135deg, #f8f9fa 0%, white 100%)",
           }}
         >
           <div className="flex items-center justify-between">
@@ -287,7 +369,9 @@ export default function HomePage() {
               <p className="text-sm text-gray-600">
                 {healthPercentage === 100
                   ? "You're all set! Great job."
-                  : `${setupItems.filter(i => i.status === 'done').length} of ${setupItems.length} tasks completed`}
+                  : `${
+                      setupItems.filter((i) => i.status === "done").length
+                    } of ${setupItems.length} tasks completed`}
               </p>
             </div>
 
@@ -306,13 +390,15 @@ export default function HomePage() {
                   cx="40"
                   cy="40"
                   r="34"
-                  stroke={useSchoolTheme ? theme.primary_color : '#000000'}
+                  stroke={useSchoolTheme ? theme.primary_color : "#000000"}
                   strokeWidth="6"
                   fill="none"
                   strokeLinecap="round"
-                  initial={{ strokeDasharray: '0 214' }}
-                  animate={{ strokeDasharray: `${(healthPercentage / 100) * 214} 214` }}
-                  transition={{ duration: 1, ease: 'easeOut', delay: 0.3 }}
+                  initial={{ strokeDasharray: "0 214" }}
+                  animate={{
+                    strokeDasharray: `${(healthPercentage / 100) * 214} 214`,
+                  }}
+                  transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
                 />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
@@ -330,10 +416,10 @@ export default function HomePage() {
 
           {/* Expanded Setup Items */}
           <AnimatePresence>
-            {expandedCard === 'health' && (
+            {expandedCard === "health" && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
+                animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.3 }}
                 className="mt-5 pt-5 border-t border-gray-100 overflow-hidden"
@@ -353,11 +439,19 @@ export default function HomePage() {
                             e.stopPropagation();
                             toggleSetupItem(item.id);
                           }}
-                          className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium transition-all ${getStatusColor(item.status)}`}
+                          className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium transition-all ${getStatusColor(
+                            item.status
+                          )}`}
                         >
                           {getStatusIcon(item.status)}
                         </button>
-                        <span className={`text-sm ${item.status === 'done' ? 'text-gray-400 line-through' : 'text-black'}`}>
+                        <span
+                          className={`text-sm ${
+                            item.status === "done"
+                              ? "text-gray-400 line-through"
+                              : "text-black"
+                          }`}
+                        >
                           {item.title}
                         </span>
                       </div>
@@ -366,7 +460,7 @@ export default function HomePage() {
                         onClick={(e) => e.stopPropagation()}
                         className="text-xs text-gray-400 hover:text-black transition-colors"
                       >
-                        {item.status === 'done' ? 'View' : 'Start'} →
+                        {item.status === "done" ? "View" : "Start"} →
                       </Link>
                     </motion.div>
                   ))}
@@ -378,11 +472,21 @@ export default function HomePage() {
           {/* Expand indicator */}
           <div className="flex justify-center mt-4">
             <motion.div
-              animate={{ rotate: expandedCard === 'health' ? 180 : 0 }}
+              animate={{ rotate: expandedCard === "health" ? 180 : 0 }}
               transition={{ duration: 0.3 }}
             >
-              <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <svg
+                className="w-5 h-5 text-gray-300"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
               </svg>
             </motion.div>
           </div>
@@ -398,7 +502,9 @@ export default function HomePage() {
       >
         <motion.div
           className="noor-card p-5 cursor-pointer"
-          onClick={() => setExpandedCard(expandedCard === 'budget' ? null : 'budget')}
+          onClick={() =>
+            setExpandedCard(expandedCard === "budget" ? null : "budget")
+          }
           whileTap={{ scale: 0.98 }}
         >
           <div className="flex items-center justify-between mb-4">
@@ -406,7 +512,10 @@ export default function HomePage() {
               This Month's Budget
             </h2>
             <span className="text-xs text-gray-400">
-              {new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+              {new Date().toLocaleDateString("en-US", {
+                month: "short",
+                year: "numeric",
+              })}
             </span>
           </div>
 
@@ -419,7 +528,10 @@ export default function HomePage() {
             </div>
             <div className="text-right">
               <p className="text-sm text-gray-600">
-                <span className="text-black font-medium">${budget.spent.toLocaleString()}</span> of ${budget.total.toLocaleString()}
+                <span className="text-black font-medium">
+                  ${budget.spent.toLocaleString()}
+                </span>{" "}
+                of ${budget.total.toLocaleString()}
               </p>
             </div>
           </div>
@@ -427,32 +539,44 @@ export default function HomePage() {
           {/* Progress Bar */}
           <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
             <motion.div
-              className={`h-full rounded-full ${budgetPercentUsed > 90 ? 'bg-red-500' : budgetPercentUsed > 70 ? 'bg-amber-500' : 'bg-green-500'}`}
+              className={`h-full rounded-full ${
+                budgetPercentUsed > 90
+                  ? "bg-red-500"
+                  : budgetPercentUsed > 70
+                  ? "bg-amber-500"
+                  : "bg-green-500"
+              }`}
               initial={{ width: 0 }}
               animate={{ width: `${budgetPercentUsed}%` }}
-              transition={{ duration: 0.8, ease: 'easeOut', delay: 0.4 }}
+              transition={{ duration: 0.8, ease: "easeOut", delay: 0.4 }}
             />
           </div>
 
           <AnimatePresence>
-            {expandedCard === 'budget' && (
+            {expandedCard === "budget" && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
+                animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
                 className="mt-4 pt-4 border-t border-gray-100 overflow-hidden"
               >
                 <div className="grid grid-cols-3 gap-4">
                   <div className="text-center p-3 bg-gray-50 rounded-xl">
-                    <p className="text-lg font-semibold text-black">${budget.total.toLocaleString()}</p>
+                    <p className="text-lg font-semibold text-black">
+                      ${budget.total.toLocaleString()}
+                    </p>
                     <p className="text-xs text-gray-500">Budget</p>
                   </div>
                   <div className="text-center p-3 bg-gray-50 rounded-xl">
-                    <p className="text-lg font-semibold text-black">${budget.spent.toLocaleString()}</p>
+                    <p className="text-lg font-semibold text-black">
+                      ${budget.spent.toLocaleString()}
+                    </p>
                     <p className="text-xs text-gray-500">Spent</p>
                   </div>
                   <div className="text-center p-3 bg-green-50 rounded-xl">
-                    <p className="text-lg font-semibold text-green-600">${budgetRemaining.toLocaleString()}</p>
+                    <p className="text-lg font-semibold text-green-600">
+                      ${budgetRemaining.toLocaleString()}
+                    </p>
                     <p className="text-xs text-gray-500">Left</p>
                   </div>
                 </div>
@@ -489,21 +613,31 @@ export default function HomePage() {
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.3 + index * 0.1 }}
                   className={`noor-card px-4 py-3 flex items-center justify-between ${
-                    item.severity === 'urgent' ? 'bg-red-50 border-red-100' : 'bg-amber-50 border-amber-100'
+                    item.severity === "urgent"
+                      ? "bg-red-50 border-red-100"
+                      : "bg-amber-50 border-amber-100"
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      item.severity === 'urgent' ? 'bg-red-500 text-white' : 'bg-amber-500 text-white'
-                    }`}>
-                      {item.severity === 'urgent' ? 'URGENT' : 'SOON'}
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        item.severity === "urgent"
+                          ? "bg-red-500 text-white"
+                          : "bg-amber-500 text-white"
+                      }`}
+                    >
+                      {item.severity === "urgent" ? "URGENT" : "SOON"}
                     </span>
                     <div>
-                      <p className="text-sm font-medium text-black">{item.title}</p>
+                      <p className="text-sm font-medium text-black">
+                        {item.title}
+                      </p>
                       <p className="text-xs text-gray-500">{item.message}</p>
                     </div>
                   </div>
-                  <span className="text-xs text-gray-400">{item.days_until}d</span>
+                  <span className="text-xs text-gray-400">
+                    {item.days_until}d
+                  </span>
                 </motion.div>
               ))}
             </div>
@@ -533,17 +667,28 @@ export default function HomePage() {
                   className="flex items-start gap-3"
                 >
                   <div className="flex flex-col items-center">
-                    <div className={`w-3 h-3 rounded-full ${
-                      item.days_until <= 1 ? 'bg-red-500' : item.days_until <= 3 ? 'bg-amber-500' : 'bg-gray-300'
-                    }`} />
+                    <div
+                      className={`w-3 h-3 rounded-full ${
+                        item.days_until <= 1
+                          ? "bg-red-500"
+                          : item.days_until <= 3
+                          ? "bg-amber-500"
+                          : "bg-gray-300"
+                      }`}
+                    />
                     {index < thisWeekItems.length - 1 && (
                       <div className="w-0.5 h-8 bg-gray-200 mt-1" />
                     )}
                   </div>
                   <div className="flex-1 pb-2">
-                    <p className="text-sm font-medium text-black">{item.title}</p>
+                    <p className="text-sm font-medium text-black">
+                      {item.title}
+                    </p>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {item.days_until === 1 ? 'Tomorrow' : `In ${item.days_until} days`} · {formatReminderDate(item.due_date)}
+                      {item.days_until === 1
+                        ? "Tomorrow"
+                        : `In ${item.days_until} days`}{" "}
+                      · {formatReminderDate(item.due_date)}
                     </p>
                   </div>
                 </motion.div>
@@ -570,7 +715,13 @@ export default function HomePage() {
             <motion.div
               className="absolute left-[11px] top-3 w-0.5 bg-black"
               initial={{ height: 0 }}
-              animate={{ height: `${(journeySteps.filter(s => s.status === 'completed').length / journeySteps.length) * 100}%` }}
+              animate={{
+                height: `${
+                  (journeySteps.filter((s) => s.status === "completed").length /
+                    journeySteps.length) *
+                  100
+                }%`,
+              }}
               transition={{ duration: 1, delay: 0.6 }}
             />
 
@@ -584,33 +735,53 @@ export default function HomePage() {
                   transition={{ delay: 0.6 + index * 0.1 }}
                   className="flex items-start gap-4 relative"
                 >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
-                    step.status === 'completed'
-                      ? 'bg-black text-white'
-                      : step.status === 'current'
-                      ? 'bg-blue-500 text-white animate-pulse'
-                      : 'bg-gray-200 text-gray-400'
-                  }`}>
-                    {step.status === 'completed' ? (
-                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  <div
+                    className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
+                      step.status === "completed"
+                        ? "bg-black text-white"
+                        : step.status === "current"
+                        ? "bg-blue-500 text-white animate-pulse"
+                        : "bg-gray-200 text-gray-400"
+                    }`}
+                  >
+                    {step.status === "completed" ? (
+                      <svg
+                        className="w-3 h-3"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clipRule="evenodd"
+                        />
                       </svg>
-                    ) : step.status === 'current' ? (
+                    ) : step.status === "current" ? (
                       <div className="w-2 h-2 bg-white rounded-full" />
                     ) : (
                       <span className="text-xs">{index + 1}</span>
                     )}
                   </div>
                   <div className="flex-1 pt-0.5">
-                    <p className={`text-sm font-medium ${
-                      step.status === 'completed' ? 'text-black' : step.status === 'current' ? 'text-blue-600' : 'text-gray-400'
-                    }`}>
+                    <p
+                      className={`text-sm font-medium ${
+                        step.status === "completed"
+                          ? "text-black"
+                          : step.status === "current"
+                          ? "text-blue-600"
+                          : "text-gray-400"
+                      }`}
+                    >
                       {step.title}
                     </p>
-                    <p className="text-xs text-gray-500 mt-0.5">{step.description}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {step.description}
+                    </p>
                   </div>
-                  {step.status === 'completed' && (
-                    <span className="text-green-500 text-xs font-medium">✓</span>
+                  {step.status === "completed" && (
+                    <span className="text-green-500 text-xs font-medium">
+                      ✓
+                    </span>
                   )}
                 </motion.div>
               ))}
@@ -630,7 +801,10 @@ export default function HomePage() {
           <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide">
             Ask Noor AI
           </h2>
-          <Link href="/chat" className="text-xs text-gray-400 hover:text-black transition-colors">
+          <Link
+            href="/chat"
+            className="text-xs text-gray-400 hover:text-black transition-colors"
+          >
             Open chat →
           </Link>
         </div>
@@ -645,8 +819,8 @@ export default function HomePage() {
               whileTap={{ scale: 0.98 }}
               onClick={() => {
                 // Store the prompt and open chat
-                localStorage.setItem('noor_quick_prompt', action.prompt);
-                router.push('/chat');
+                localStorage.setItem("noor_quick_prompt", action.prompt);
+                router.push("/chat");
               }}
               className="noor-card p-4 text-left hover:shadow-md transition-shadow"
             >

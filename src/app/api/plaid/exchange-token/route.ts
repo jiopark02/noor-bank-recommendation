@@ -1,20 +1,32 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { plaidClient, isPlaidConfigured } from '@/lib/plaid';
+import { NextRequest, NextResponse } from "next/server";
+import { plaidClient, isPlaidConfigured } from "@/lib/plaid";
+import {
+  authenticate,
+  storePlaidConnection,
+  handlePlaidError,
+} from "@/lib/plaidApiUtils";
 
 export async function POST(request: NextRequest) {
   try {
     if (!isPlaidConfigured()) {
       return NextResponse.json(
-        { error: 'Plaid is not configured' },
+        { error: "Plaid is not configured" },
         { status: 503 }
       );
     }
 
-    const { publicToken, userId, institutionId, institutionName } = await request.json();
+    // Authenticate user
+    const auth = await authenticate(request);
+    if (!auth) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!publicToken || !userId) {
+    const { userId, body } = auth;
+    const { publicToken, institutionId, institutionName } = body;
+
+    if (!publicToken) {
       return NextResponse.json(
-        { error: 'Public token and user ID are required' },
+        { error: "Public token is required" },
         { status: 400 }
       );
     }
@@ -26,25 +38,31 @@ export async function POST(request: NextRequest) {
 
     const { access_token, item_id } = exchangeResponse.data;
 
-    // Store connection in localStorage for demo (in production, save to Supabase)
-    // The frontend will handle saving this
+    // Store connection securely in database (NOT returned to client)
+    const connection = await storePlaidConnection(
+      userId,
+      access_token,
+      item_id,
+      institutionName || "Unknown Institution"
+    );
 
+    if (!connection) {
+      return NextResponse.json(
+        { error: "Failed to save connection. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    // Return safe metadata only (never return access_token to client)
     return NextResponse.json({
       success: true,
       itemId: item_id,
-      // Don't send access_token to client in production
-      // Store it server-side only
-      accessToken: access_token, // For demo only
       institutionId,
-      institutionName,
+      institutionName: institutionName || "Unknown Institution",
+      message: "Bank account connected successfully",
     });
   } catch (error: unknown) {
-    console.error('Error exchanging token:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Failed to exchange token';
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
-    );
+    console.error("Error exchanging token:", error);
+    return handlePlaidError(error);
   }
 }
