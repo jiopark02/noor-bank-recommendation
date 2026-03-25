@@ -66,7 +66,7 @@ export function ChatMessage({
         ) : (
           <>
             <p className="text-sm whitespace-pre-wrap leading-relaxed">
-              {formatContent(content)}
+              {formatContent(content, !isUser)}
             </p>
             {timestamp && (
               <p
@@ -103,9 +103,15 @@ function TypingIndicator() {
   );
 }
 
-function formatContent(content: string): React.ReactNode {
+function formatContent(
+  content: string,
+  normalizeCurrencyEscapes = false
+): React.ReactNode {
   // Simple markdown-like formatting
-  const lines = content.split("\n");
+  const normalizedContent = normalizeCurrencyEscapes
+    ? content.replace(/\\\$/g, "$")
+    : content;
+  const lines = normalizedContent.split("\n");
 
   return lines.map((line, i) => {
     // Handle bullet points
