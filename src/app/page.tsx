@@ -1,151 +1,105 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { useTheme } from "@/contexts/ThemeContext";
-import {
-  generateNotifications,
-  getReadNotifications,
-  formatReminderDate,
-  Notification,
-} from "@/lib/notificationsData";
 
-// Financial setup items
-interface SetupItem {
-  id: string;
-  title: string;
-  status: "done" | "in_progress" | "upcoming" | "not_started";
-  href: string;
-  description?: string;
+interface StoredBudget {
+  total?: number;
+  spent?: number;
 }
 
-// Journey steps
-interface JourneyStep {
-  id: string;
-  title: string;
-  status: "completed" | "current" | "upcoming";
-  description: string;
+interface StoredPlaidAccount {
+  type?: string;
+  current_balance?: number;
 }
 
-// Quick action
-interface QuickAction {
-  id: string;
-  label: string;
-  prompt: string;
+interface StoredPlaidTransaction {
+  amount?: number;
+  category?: string[];
+  name?: string;
 }
 
-const STORAGE_KEY_SETUP = "noor_financial_setup";
+interface StoredPlaidSubscription {
+  name?: string;
+  amount?: number;
+  monthly_amount?: number;
+}
+
 const STORAGE_KEY_BUDGET = "noor_budget";
+const STORAGE_KEY_ACCOUNTS = "noor_plaid_accounts";
+const STORAGE_KEY_TRANSACTIONS = "noor_plaid_transactions";
 
-// Default setup items
-const DEFAULT_SETUP_ITEMS: SetupItem[] = [
-  {
-    id: "bank",
-    title: "Bank Account",
-    status: "not_started",
-    href: "/banking",
-  },
-  {
-    id: "phone",
-    title: "Phone Plan",
-    status: "not_started",
-    href: "/guides/phone",
-  },
-  {
-    id: "credit",
-    title: "Credit Card",
-    status: "not_started",
-    href: "/funding",
-  },
-  { id: "tax", title: "Tax Filing", status: "upcoming", href: "/guides/tax" },
-  { id: "visa", title: "Visa Renewal", status: "not_started", href: "/visa" },
+const QUICK_PROMPTS = [
+  "How much can I spend on travel this month?",
+  "Am I on track to save this month?",
+  "How should I cut my monthly subscriptions?",
+  "Can I afford a $250 unexpected expense?",
 ];
 
-// Journey steps
-const JOURNEY_STEPS: JourneyStep[] = [
-  {
-    id: "arrived",
-    title: "Arrived",
-    status: "completed",
-    description: "Welcome to the US!",
-  },
-  {
-    id: "bank",
-    title: "Bank Account",
-    status: "completed",
-    description: "Financial foundation set",
-  },
-  {
-    id: "housing",
-    title: "Housing",
-    status: "completed",
-    description: "Found your home",
-  },
-  {
-    id: "credit",
-    title: "Credit Building",
-    status: "current",
-    description: "Building your credit score",
-  },
-  {
-    id: "tax",
-    title: "Tax Ready",
-    status: "upcoming",
-    description: "Prepared for tax season",
-  },
-];
+function hexToRgba(hex: string, alpha: number): string {
+  const safeHex = hex.replace("#", "").trim();
+  if (safeHex.length !== 3 && safeHex.length !== 6) {
+    return `rgba(0, 0, 0, ${alpha})`;
+  }
 
-// Quick AI prompts
-const AI_QUICK_ACTIONS: QuickAction[] = [
-  {
-    id: "credit",
-    label: "How do I build credit?",
-    prompt: "How do I build credit as an international student?",
-  },
-  {
-    id: "tax",
-    label: "When is tax season?",
-    prompt: "When is tax season and what forms do I need as an F-1 student?",
-  },
-  {
-    id: "ssn",
-    label: "Do I need SSN?",
-    prompt: "Do I need an SSN for a bank account?",
-  },
-  {
-    id: "opt",
-    label: "OPT explained",
-    prompt: "Explain OPT and when should I apply?",
-  },
-];
+  const fullHex =
+    safeHex.length === 3
+      ? `${safeHex[0]}${safeHex[0]}${safeHex[1]}${safeHex[1]}${safeHex[2]}${safeHex[2]}`
+      : safeHex;
+
+  const int = Number.parseInt(fullHex, 16);
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  }).format(value);
+}
+
+function readLocalArray<T>(key: string): T[] | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function HomePage() {
   const router = useRouter();
   const { theme, useSchoolTheme } = useTheme();
-  const [userName, setUserName] = useState("there");
+  const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [readNotifications, setReadNotifications] = useState<string[]>([]);
-  const [setupItems, setSetupItems] =
-    useState<SetupItem[]>(DEFAULT_SETUP_ITEMS);
-  const [journeySteps, setJourneySteps] =
-    useState<JourneyStep[]>(JOURNEY_STEPS);
-  const [budget, setBudget] = useState({ total: 2000, spent: 1247 });
-  const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [showAIChat, setShowAIChat] = useState(false);
-  const [userProfile, setUserProfile] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [moneyError, setMoneyError] = useState<string | null>(null);
+  const [hasBankConnection, setHasBankConnection] = useState(false);
+  const [userName, setUserName] = useState("there");
+  const [promptDraft, setPromptDraft] = useState("");
+  const [budget, setBudget] = useState<StoredBudget>({ total: 0, spent: 0 });
+  const [accounts, setAccounts] = useState<StoredPlaidAccount[]>([]);
+  const [transactions, setTransactions] = useState<StoredPlaidTransaction[]>(
+    []
+  );
+  const [subscriptions, setSubscriptions] = useState<StoredPlaidSubscription[]>(
+    []
+  );
 
   useEffect(() => {
-    const userId = localStorage.getItem("noor_user_id");
-    if (!userId) {
+    const storedUserId = localStorage.getItem("noor_user_id");
+    if (!storedUserId) {
       router.replace("/welcome");
-      // Fallback hard redirect in case client navigation is blocked.
       window.setTimeout(() => {
         if (window.location.pathname === "/") {
           window.location.href = "/welcome";
@@ -153,151 +107,324 @@ export default function HomePage() {
       }, 400);
       return;
     }
+    setUserId(storedUserId);
 
-    // Load user profile
-    const profileData = localStorage.getItem("noor_user_profile");
-    if (profileData) {
-      try {
-        const profile = JSON.parse(profileData);
-        setUserProfile(profile);
-        if (profile.firstName) {
-          setUserName(profile.firstName);
+    try {
+      const profileRaw = localStorage.getItem("noor_user_profile");
+      if (profileRaw) {
+        const parsed = JSON.parse(profileRaw) as { firstName?: string };
+        if (parsed.firstName?.trim()) {
+          setUserName(parsed.firstName.trim());
         }
-
-        // Update setup items based on profile
-        const updatedSetup = [...DEFAULT_SETUP_ITEMS];
-        if (profile.has_bank_account) {
-          const bankItem = updatedSetup.find((i) => i.id === "bank");
-          if (bankItem) bankItem.status = "done";
-        }
-        if (profile.has_phone) {
-          const phoneItem = updatedSetup.find((i) => i.id === "phone");
-          if (phoneItem) phoneItem.status = "done";
-        }
-        if (profile.has_credit_card) {
-          const creditItem = updatedSetup.find((i) => i.id === "credit");
-          if (creditItem) creditItem.status = "done";
-        }
-        setSetupItems(updatedSetup);
-      } catch (e) {
-        // ignore parse errors
       }
+    } catch {
+      // Ignore profile parse errors.
     }
 
-    // Load saved setup state
-    const savedSetup = localStorage.getItem(STORAGE_KEY_SETUP);
-    if (savedSetup) {
-      try {
-        setSetupItems(JSON.parse(savedSetup));
-      } catch (e) {
-        // ignore
+    try {
+      const budgetRaw = localStorage.getItem(STORAGE_KEY_BUDGET);
+      if (budgetRaw) {
+        const parsed = JSON.parse(budgetRaw) as StoredBudget;
+        if (typeof parsed.total === "number" && parsed.total > 0) {
+          setBudget({
+            total: parsed.total,
+            spent: typeof parsed.spent === "number" ? parsed.spent : 0,
+          });
+        }
       }
+    } catch {
+      // Ignore budget parse errors.
     }
 
-    // Load budget
-    const savedBudget = localStorage.getItem(STORAGE_KEY_BUDGET);
-    if (savedBudget) {
-      try {
-        setBudget(JSON.parse(savedBudget));
-      } catch (e) {
-        // ignore
-      }
+    const storedAccounts =
+      readLocalArray<StoredPlaidAccount>(STORAGE_KEY_ACCOUNTS);
+    if (storedAccounts && storedAccounts.length > 0) {
+      setAccounts(storedAccounts);
     }
 
-    // Load notifications
-    const notifs = generateNotifications();
-    const read = getReadNotifications();
-    setNotifications(notifs);
-    setReadNotifications(read);
+    const storedTx = readLocalArray<StoredPlaidTransaction>(
+      STORAGE_KEY_TRANSACTIONS
+    );
+    if (storedTx && storedTx.length > 0) {
+      setTransactions(storedTx);
+    }
+
+    try {
+      const storedConnections = localStorage.getItem("noor_plaid_connections");
+      if (storedConnections) {
+        const parsed = JSON.parse(storedConnections) as Array<{
+          status?: string;
+        }>;
+        setHasBankConnection(
+          parsed.some((connection) => connection.status === "active")
+        );
+      }
+    } catch {
+      // Ignore connection parse errors.
+    }
 
     setIsLoading(false);
   }, [router]);
 
-  // Save setup items
+  const fetchLiveMoneyData = useCallback(async () => {
+    if (!userId || !hasBankConnection) return;
+
+    setIsLoadingData(true);
+    setMoneyError(null);
+
+    try {
+      const endDate = new Date().toISOString().split("T")[0];
+      const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+
+      const [accountsRes, transactionsRes] = await Promise.all([
+        fetch("/api/plaid/accounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId }),
+        }),
+        fetch("/api/plaid/transactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, startDate, endDate }),
+        }),
+      ]);
+
+      if (!accountsRes.ok) {
+        const data = await accountsRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to fetch accounts");
+      }
+
+      if (!transactionsRes.ok) {
+        const data = await transactionsRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to fetch transactions");
+      }
+
+      const accountsData = await accountsRes.json();
+      const transactionsData = await transactionsRes.json();
+
+      const nextAccounts = Array.isArray(accountsData.accounts)
+        ? accountsData.accounts
+        : [];
+      const nextTransactions = Array.isArray(transactionsData.transactions)
+        ? transactionsData.transactions
+        : [];
+      const nextSubscriptions = Array.isArray(transactionsData.subscriptions)
+        ? transactionsData.subscriptions
+        : [];
+
+      setAccounts(nextAccounts);
+      setTransactions(nextTransactions);
+      setSubscriptions(nextSubscriptions);
+
+      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(nextAccounts));
+      localStorage.setItem(
+        STORAGE_KEY_TRANSACTIONS,
+        JSON.stringify(nextTransactions)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to sync bank data";
+      setMoneyError(message);
+    } finally {
+      setIsLoadingData(false);
+    }
+  }, [userId, hasBankConnection]);
+
   useEffect(() => {
-    if (setupItems !== DEFAULT_SETUP_ITEMS) {
-      localStorage.setItem(STORAGE_KEY_SETUP, JSON.stringify(setupItems));
+    if (!isLoading) {
+      fetchLiveMoneyData();
     }
-  }, [setupItems]);
+  }, [isLoading, fetchLiveMoneyData]);
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Good morning";
-    if (hour < 18) return "Good afternoon";
-    return "Good evening";
-  };
+  const metrics = useMemo(() => {
+    const cash = accounts
+      .filter(
+        (account) => account.type === "checking" || account.type === "savings"
+      )
+      .reduce((sum, account) => sum + (account.current_balance || 0), 0);
 
-  // Calculate financial health percentage
-  const healthPercentage = useMemo(() => {
-    const completed = setupItems.filter((i) => i.status === "done").length;
-    return Math.round((completed / setupItems.length) * 100);
-  }, [setupItems]);
+    const creditUsed = accounts
+      .filter((account) => account.type === "credit")
+      .reduce((sum, account) => sum + (account.current_balance || 0), 0);
 
-  // Get status icon
-  const getStatusIcon = (status: SetupItem["status"]) => {
-    switch (status) {
-      case "done":
-        return "✓";
-      case "in_progress":
-        return "↻";
-      case "upcoming":
-        return "◷";
-      default:
-        return "○";
-    }
-  };
+    const spending = transactions
+      .filter((txn) => (txn.amount || 0) > 0)
+      .reduce((sum, txn) => sum + (txn.amount || 0), 0);
 
-  // Get status color
-  const getStatusColor = (status: SetupItem["status"]) => {
-    switch (status) {
-      case "done":
-        return "text-green-500 bg-green-50";
-      case "in_progress":
-        return "text-blue-500 bg-blue-50";
-      case "upcoming":
-        return "text-amber-500 bg-amber-50";
-      default:
-        return "text-gray-400 bg-gray-50";
-    }
-  };
+    const income = transactions
+      .filter((txn) => (txn.amount || 0) < 0)
+      .reduce((sum, txn) => sum + Math.abs(txn.amount || 0), 0);
 
-  // Toggle setup item status
-  const toggleSetupItem = (id: string) => {
-    setSetupItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const nextStatus: Record<SetupItem["status"], SetupItem["status"]> = {
-            not_started: "in_progress",
-            in_progress: "done",
-            done: "not_started",
-            upcoming: "in_progress",
-          };
-          return { ...item, status: nextStatus[item.status] };
-        }
-        return item;
-      })
+    const netWorth = cash - creditUsed;
+    const totalBudget = budget.total && budget.total > 0 ? budget.total : 0;
+    const budgetSpent =
+      typeof budget.spent === "number" && budget.spent > 0
+        ? budget.spent
+        : spending;
+    const budgetRemaining =
+      totalBudget > 0 ? Math.max(0, totalBudget - budgetSpent) : 0;
+
+    const categoryMap: Record<string, number> = {};
+    transactions
+      .filter((txn) => (txn.amount || 0) > 0)
+      .forEach((txn) => {
+        const category = txn.category?.[0] || "Other";
+        categoryMap[category] =
+          (categoryMap[category] || 0) + (txn.amount || 0);
+      });
+
+    const categorySpending = Object.entries(categoryMap)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const inferredSubscriptions = transactions.filter((txn) => {
+      const amount = txn.amount || 0;
+      if (amount <= 0) return false;
+
+      const categoryText = (txn.category || []).join(" ").toLowerCase();
+      const nameText = (txn.name || "").toLowerCase();
+      return (
+        categoryText.includes("subscription") ||
+        /netflix|spotify|apple|prime|adobe|hulu|youtube|google/i.test(nameText)
+      );
+    });
+
+    const normalizedSubscriptions =
+      subscriptions.length > 0
+        ? subscriptions
+            .map((sub) => ({
+              name: sub.name || "Subscription",
+              amount:
+                typeof sub.monthly_amount === "number"
+                  ? sub.monthly_amount
+                  : sub.amount || 0,
+            }))
+            .filter((sub) => sub.amount > 0)
+        : inferredSubscriptions.map((txn) => ({
+            name: txn.name || "Subscription",
+            amount: txn.amount || 0,
+          }));
+
+    const totalSubscriptions = normalizedSubscriptions.reduce(
+      (sum, sub) => sum + sub.amount,
+      0
     );
+
+    return {
+      cash,
+      creditUsed,
+      netWorth,
+      spending,
+      income,
+      budgetRemaining,
+      categorySpending,
+      subscriptions: normalizedSubscriptions,
+      totalSubscriptions,
+    };
+  }, [accounts, transactions, budget, subscriptions]);
+
+  const aiSummary = useMemo(() => {
+    if (isLoadingData) {
+      return {
+        opening:
+          "Syncing your Plaid data now. I will calculate your safe cap in a moment.",
+        question: "Can you show me a safe spending cap for this week?",
+        answer:
+          "I am updating your balances and recent transactions before giving a number.",
+      };
+    }
+
+    if (moneyError) {
+      return {
+        opening: "I could not read your latest Plaid data due to a sync error.",
+        question: "Can you show me a safe spending cap for this week?",
+        answer:
+          "Please reconnect or refresh your bank data in Money page and I will recalculate instantly.",
+      };
+    }
+
+    if (!hasBankConnection) {
+      return {
+        opening:
+          "Connect your bank account in Money page and I will calculate your spending cap from live Plaid data.",
+        question: "Can you show me a safe spending cap for this week?",
+        answer:
+          "I need a connected account before I can estimate a safe weekly cap.",
+      };
+    }
+
+    if (transactions.length === 0 && accounts.length === 0) {
+      return {
+        opening:
+          "Your bank is connected, but there is not enough transaction history yet to compute a reliable cap.",
+        question: "Can you show me a safe spending cap for this week?",
+        answer:
+          "Once Plaid returns recent activity, I will calculate this using your real cash flow.",
+      };
+    }
+
+    const now = new Date();
+    const daysInMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0
+    ).getDate();
+    const dayOfMonth = now.getDate();
+    const daysRemaining = Math.max(1, daysInMonth - dayOfMonth + 1);
+    const weeksRemaining = Math.max(1, Math.ceil(daysRemaining / 7));
+
+    const averageDailySpending = metrics.spending / 30;
+    const projectedRemainingSpend = averageDailySpending * daysRemaining;
+    const subscriptionReserve = metrics.totalSubscriptions;
+    const safetyReserve = Math.max(150, metrics.cash * 0.2);
+    const spendableThisMonth = Math.max(
+      0,
+      metrics.cash -
+        projectedRemainingSpend -
+        subscriptionReserve -
+        safetyReserve
+    );
+    const weeklyCap = Math.max(0, spendableThisMonth / weeksRemaining);
+
+    return {
+      opening: `Good day, ${userName}. Based on your balances and recent spending, you can safely spend ${formatMoney(
+        spendableThisMonth
+      )} for the rest of this month while keeping a reserve of ${formatMoney(
+        safetyReserve
+      )}.`,
+      question: "Can you show me a safe spending cap for this week?",
+      answer: `Using your recent run rate (${formatMoney(
+        averageDailySpending
+      )}/day) and ${daysRemaining} day(s) left this month, a safe weekly cap is about ${formatMoney(
+        weeklyCap
+      )}.`,
+    };
+  }, [
+    isLoadingData,
+    moneyError,
+    hasBankConnection,
+    transactions,
+    accounts,
+    metrics,
+    userName,
+  ]);
+
+  const accentColor = useSchoolTheme ? theme.primary_color : "#111111";
+  const accentTextColor =
+    useSchoolTheme && theme.text_on_primary === "black" ? "#111111" : "#FFFFFF";
+  const accentSoftBg = useMemo(
+    () => hexToRgba(accentColor, 0.1),
+    [accentColor]
+  );
+
+  const submitPrompt = (rawPrompt?: string) => {
+    const text = (rawPrompt ?? promptDraft).trim();
+    if (!text) return;
+    localStorage.setItem("noor_quick_prompt", text);
+    router.push("/chat");
   };
-
-  // Get urgent notifications (Don't Miss)
-  const dontMissItems = useMemo(() => {
-    return notifications
-      .filter((n) => !readNotifications.includes(n.id))
-      .filter((n) => n.severity === "urgent" || n.severity === "warning")
-      .slice(0, 3);
-  }, [notifications, readNotifications]);
-
-  // This week items
-  const thisWeekItems = useMemo(() => {
-    return notifications
-      .filter((n) => !readNotifications.includes(n.id))
-      .filter((n) => n.days_until <= 7 && n.days_until > 0)
-      .slice(0, 4);
-  }, [notifications, readNotifications]);
-
-  // Budget calculations
-  const budgetRemaining = budget.total - budget.spent;
-  const budgetPercentUsed = Math.round((budget.spent / budget.total) * 100);
 
   if (isLoading) {
     return (
@@ -316,531 +443,279 @@ export default function HomePage() {
 
   return (
     <PageLayout userName={userName}>
-      {/* Header with greeting and school logo */}
-      <header className="mb-6 flex items-center justify-between">
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <h1 className="text-2xl font-semibold text-black">
-            {getGreeting()}, {userName}
-          </h1>
-          <p className="text-gray-500 text-sm mt-0.5">
-            Let's check your progress
-          </p>
-        </motion.div>
-        {useSchoolTheme && theme.logo_url && (
-          <motion.img
-            src={theme.logo_url}
-            alt="School"
-            className="w-10 h-10 object-contain rounded-lg"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.2 }}
-          />
-        )}
-      </header>
-
-      {/* Financial Health Tracker - Main Card */}
-      <motion.section
+      <motion.header
         className="mb-6"
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
       >
+        <h1 className="text-2xl font-semibold text-black">Dashboard</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          A minimal view of your assistant and money overview.
+        </p>
+      </motion.header>
+
+      <section className="grid gap-6 xl:grid-cols-2">
         <motion.div
-          className="noor-card p-6 cursor-pointer"
-          onClick={() =>
-            setExpandedCard(expandedCard === "health" ? null : "health")
-          }
-          whileTap={{ scale: 0.98 }}
-          style={{
-            background: useSchoolTheme
-              ? `linear-gradient(135deg, ${theme.primary_color}10 0%, white 100%)`
-              : "linear-gradient(135deg, #f8f9fa 0%, white 100%)",
-          }}
+          className="noor-card p-6 flex flex-col min-h-[640px]"
+          initial={{ opacity: 0, x: -16 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.35 }}
         >
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">
-                Your Financial Health
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold text-black">
+                AI Assistant
               </h2>
-              <p className="text-sm text-gray-600">
-                {healthPercentage === 100
-                  ? "You're all set! Great job."
-                  : `${
-                      setupItems.filter((i) => i.status === "done").length
-                    } of ${setupItems.length} tasks completed`}
+            </div>
+          </div>
+
+          <div className="mt-6 flex-1 space-y-4">
+            <div className="rounded-2xl bg-gray-100 px-4 py-3 max-w-[92%]">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {aiSummary.opening}
               </p>
             </div>
 
-            {/* Circular Progress */}
-            <div className="relative w-20 h-20">
-              <svg className="w-20 h-20 transform -rotate-90">
-                <circle
-                  cx="40"
-                  cy="40"
-                  r="34"
-                  stroke="#E5E7EB"
-                  strokeWidth="6"
-                  fill="none"
-                />
-                <motion.circle
-                  cx="40"
-                  cy="40"
-                  r="34"
-                  stroke={useSchoolTheme ? theme.primary_color : "#000000"}
-                  strokeWidth="6"
-                  fill="none"
-                  strokeLinecap="round"
-                  initial={{ strokeDasharray: "0 214" }}
-                  animate={{
-                    strokeDasharray: `${(healthPercentage / 100) * 214} 214`,
-                  }}
-                  transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
-                />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <motion.span
-                  className="text-xl font-semibold text-black"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.5 }}
+            <div
+              className="rounded-2xl px-4 py-3 ml-auto max-w-[92%]"
+              style={{ backgroundColor: accentColor }}
+            >
+              <p
+                className="text-sm leading-relaxed"
+                style={{ color: accentTextColor }}
+              >
+                {aiSummary.question}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-gray-100 px-4 py-3 max-w-[92%]">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {aiSummary.answer}
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-5 border-t border-gray-100">
+            <div className="flex flex-wrap gap-2 mb-4">
+              {QUICK_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => submitPrompt(prompt)}
+                  className="px-3 py-1.5 rounded-full text-xs border border-gray-200 text-gray-700 hover:border-gray-300 transition-colors"
                 >
-                  {healthPercentage}%
-                </motion.span>
+                  {prompt}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                value={promptDraft}
+                onChange={(event) => setPromptDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    submitPrompt();
+                  }
+                }}
+                placeholder="Ask about your budget, subscriptions, or savings..."
+                className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-black"
+              />
+              <button
+                onClick={() => submitPrompt()}
+                className="w-11 h-11 rounded-xl text-white flex items-center justify-center transition-colors"
+                style={{ backgroundColor: accentColor, color: accentTextColor }}
+                aria-label="Open chat"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 12h14m-6-6 6 6-6 6"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="space-y-5"
+          initial={{ opacity: 0, x: 16 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.35, delay: 0.05 }}
+        >
+          <div>
+            <div className="mb-4">
+              <h2 className="text-2xl font-semibold text-black">Money</h2>
+              <p className="text-gray-500 text-sm">
+                All your finances in one place
+              </p>
+            </div>
+
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-3">
+              <button className="px-4 py-2 rounded-full text-sm font-medium bg-black text-white whitespace-nowrap">
+                Overview
+              </button>
+              <Link
+                href="/money"
+                className="px-4 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 whitespace-nowrap"
+              >
+                Accounts
+              </Link>
+              <Link
+                href="/money"
+                className="px-4 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 whitespace-nowrap"
+              >
+                Transactions
+              </Link>
+              <Link
+                href="/money"
+                className="px-4 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 whitespace-nowrap"
+              >
+                Subscriptions
+              </Link>
+            </div>
+
+            {isLoadingData && (
+              <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+                Syncing your latest bank data...
+              </div>
+            )}
+
+            {!isLoadingData && moneyError && (
+              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {moneyError}
+              </div>
+            )}
+
+            {!isLoadingData && !moneyError && !hasBankConnection && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                No active bank connection found. Connect your bank in Money page
+                to show live data.
+              </div>
+            )}
+
+            <div className="noor-card p-6 mb-4">
+              <p className="text-gray-500 text-sm mb-1">Net Worth</p>
+              <p className="text-4xl font-semibold text-black mb-4">
+                {formatMoney(metrics.netWorth)}
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-gray-500 text-xs">Cash</p>
+                  <p
+                    className="text-lg font-medium"
+                    style={{ color: accentColor }}
+                  >
+                    {formatMoney(metrics.cash)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500 text-xs">Credit Used</p>
+                  <p className="text-lg font-medium text-red-600">
+                    -{formatMoney(metrics.creditUsed)}
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Expanded Setup Items */}
-          <AnimatePresence>
-            {expandedCard === "health" && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3 }}
-                className="mt-5 pt-5 border-t border-gray-100 overflow-hidden"
-              >
-                <div className="space-y-3">
-                  {setupItems.map((item, index) => (
-                    <motion.div
-                      key={item.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleSetupItem(item.id);
-                          }}
-                          className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium transition-all ${getStatusColor(
-                            item.status
-                          )}`}
-                        >
-                          {getStatusIcon(item.status)}
-                        </button>
-                        <span
-                          className={`text-sm ${
-                            item.status === "done"
-                              ? "text-gray-400 line-through"
-                              : "text-black"
-                          }`}
-                        >
-                          {item.title}
-                        </span>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="noor-card p-4">
+                <p className="text-gray-500 text-xs mb-1">Income</p>
+                <p
+                  className="text-xl font-semibold"
+                  style={{ color: accentColor }}
+                >
+                  +{formatMoney(metrics.income)}
+                </p>
+              </div>
+              <div className="noor-card p-4">
+                <p className="text-gray-500 text-xs mb-1">Spending</p>
+                <p className="text-xl font-semibold text-red-600">
+                  -{formatMoney(metrics.spending)}
+                </p>
+              </div>
+            </div>
+
+            <div className="noor-card p-5 mb-4">
+              <h3 className="font-medium text-black mb-4">
+                Spending by Category
+              </h3>
+              <div className="space-y-3">
+                {metrics.categorySpending.slice(0, 4).map((cat) => {
+                  const percent =
+                    metrics.spending > 0
+                      ? Math.min(100, (cat.amount / metrics.spending) * 100)
+                      : 0;
+
+                  return (
+                    <div key={cat.name} className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <div className="flex justify-between mb-1">
+                          <span className="text-sm text-black">{cat.name}</span>
+                          <span className="text-sm font-medium text-black">
+                            {formatMoney(cat.amount)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${percent}%`,
+                              backgroundColor: accentColor,
+                            }}
+                          />
+                        </div>
                       </div>
-                      <Link
-                        href={item.href}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-xs text-gray-400 hover:text-black transition-colors"
-                      >
-                        {item.status === "done" ? "View" : "Start"} →
-                      </Link>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Expand indicator */}
-          <div className="flex justify-center mt-4">
-            <motion.div
-              animate={{ rotate: expandedCard === "health" ? 180 : 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <svg
-                className="w-5 h-5 text-gray-300"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-            </motion.div>
-          </div>
-        </motion.div>
-      </motion.section>
-
-      {/* Quick Glance - Budget Card */}
-      <motion.section
-        className="mb-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
-        <motion.div
-          className="noor-card p-5 cursor-pointer"
-          onClick={() =>
-            setExpandedCard(expandedCard === "budget" ? null : "budget")
-          }
-          whileTap={{ scale: 0.98 }}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide">
-              This Month's Budget
-            </h2>
-            <span className="text-xs text-gray-400">
-              {new Date().toLocaleDateString("en-US", {
-                month: "short",
-                year: "numeric",
-              })}
-            </span>
-          </div>
-
-          <div className="flex items-end justify-between mb-4">
-            <div>
-              <p className="text-3xl font-semibold text-black">
-                ${budgetRemaining.toLocaleString()}
-              </p>
-              <p className="text-sm text-gray-500 mt-1">remaining</p>
-            </div>
-            <div className="text-right">
-              <p className="text-sm text-gray-600">
-                <span className="text-black font-medium">
-                  ${budget.spent.toLocaleString()}
-                </span>{" "}
-                of ${budget.total.toLocaleString()}
-              </p>
-            </div>
-          </div>
-
-          {/* Progress Bar */}
-          <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-            <motion.div
-              className={`h-full rounded-full ${
-                budgetPercentUsed > 90
-                  ? "bg-red-500"
-                  : budgetPercentUsed > 70
-                  ? "bg-amber-500"
-                  : "bg-green-500"
-              }`}
-              initial={{ width: 0 }}
-              animate={{ width: `${budgetPercentUsed}%` }}
-              transition={{ duration: 0.8, ease: "easeOut", delay: 0.4 }}
-            />
-          </div>
-
-          <AnimatePresence>
-            {expandedCard === "budget" && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="mt-4 pt-4 border-t border-gray-100 overflow-hidden"
-              >
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="text-center p-3 bg-gray-50 rounded-xl">
-                    <p className="text-lg font-semibold text-black">
-                      ${budget.total.toLocaleString()}
-                    </p>
-                    <p className="text-xs text-gray-500">Budget</p>
-                  </div>
-                  <div className="text-center p-3 bg-gray-50 rounded-xl">
-                    <p className="text-lg font-semibold text-black">
-                      ${budget.spent.toLocaleString()}
-                    </p>
-                    <p className="text-xs text-gray-500">Spent</p>
-                  </div>
-                  <div className="text-center p-3 bg-green-50 rounded-xl">
-                    <p className="text-lg font-semibold text-green-600">
-                      ${budgetRemaining.toLocaleString()}
-                    </p>
-                    <p className="text-xs text-gray-500">Left</p>
-                  </div>
-                </div>
-                <Link
-                  href="/money"
-                  className="block w-full mt-4 py-2 text-center text-sm font-medium text-gray-600 hover:text-black transition-colors"
-                >
-                  Manage Budget →
-                </Link>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      </motion.section>
-
-      {/* Don't Miss - Urgent Alerts */}
-      <AnimatePresence>
-        {dontMissItems.length > 0 && (
-          <motion.section
-            className="mb-6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-              Don't Miss
-            </h2>
-            <div className="space-y-2">
-              {dontMissItems.map((item, index) => (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 + index * 0.1 }}
-                  className={`noor-card px-4 py-3 flex items-center justify-between ${
-                    item.severity === "urgent"
-                      ? "bg-red-50 border-red-100"
-                      : "bg-amber-50 border-amber-100"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        item.severity === "urgent"
-                          ? "bg-red-500 text-white"
-                          : "bg-amber-500 text-white"
-                      }`}
-                    >
-                      {item.severity === "urgent" ? "URGENT" : "SOON"}
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium text-black">
-                        {item.title}
-                      </p>
-                      <p className="text-xs text-gray-500">{item.message}</p>
                     </div>
-                  </div>
-                  <span className="text-xs text-gray-400">
-                    {item.days_until}d
-                  </span>
-                </motion.div>
-              ))}
+                  );
+                })}
+              </div>
             </div>
-          </motion.section>
-        )}
-      </AnimatePresence>
 
-      {/* This Week Timeline */}
-      {thisWeekItems.length > 0 && (
-        <motion.section
-          className="mb-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-        >
-          <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-            This Week
-          </h2>
-          <div className="noor-card p-4">
-            <div className="space-y-4">
-              {thisWeekItems.map((item, index) => (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.4 + index * 0.1 }}
-                  className="flex items-start gap-3"
-                >
-                  <div className="flex flex-col items-center">
-                    <div
-                      className={`w-3 h-3 rounded-full ${
-                        item.days_until <= 1
-                          ? "bg-red-500"
-                          : item.days_until <= 3
-                          ? "bg-amber-500"
-                          : "bg-gray-300"
-                      }`}
-                    />
-                    {index < thisWeekItems.length - 1 && (
-                      <div className="w-0.5 h-8 bg-gray-200 mt-1" />
-                    )}
-                  </div>
-                  <div className="flex-1 pb-2">
-                    <p className="text-sm font-medium text-black">
-                      {item.title}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {item.days_until === 1
-                        ? "Tomorrow"
-                        : `In ${item.days_until} days`}{" "}
-                      · {formatReminderDate(item.due_date)}
-                    </p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </motion.section>
-      )}
-
-      {/* Your Journey Progress */}
-      <motion.section
-        className="mb-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-      >
-        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
-          Your Journey
-        </h2>
-        <div className="noor-card p-5">
-          <div className="relative">
-            {/* Progress line */}
-            <div className="absolute left-[11px] top-3 bottom-3 w-0.5 bg-gray-200" />
-            <motion.div
-              className="absolute left-[11px] top-3 w-0.5 bg-black"
-              initial={{ height: 0 }}
-              animate={{
-                height: `${
-                  (journeySteps.filter((s) => s.status === "completed").length /
-                    journeySteps.length) *
-                  100
-                }%`,
-              }}
-              transition={{ duration: 1, delay: 0.6 }}
-            />
-
-            {/* Steps */}
-            <div className="space-y-5">
-              {journeySteps.map((step, index) => (
-                <motion.div
-                  key={step.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.6 + index * 0.1 }}
-                  className="flex items-start gap-4 relative"
-                >
-                  <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
-                      step.status === "completed"
-                        ? "bg-black text-white"
-                        : step.status === "current"
-                        ? "bg-blue-500 text-white animate-pulse"
-                        : "bg-gray-200 text-gray-400"
-                    }`}
-                  >
-                    {step.status === "completed" ? (
-                      <svg
-                        className="w-3 h-3"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    ) : step.status === "current" ? (
-                      <div className="w-2 h-2 bg-white rounded-full" />
-                    ) : (
-                      <span className="text-xs">{index + 1}</span>
-                    )}
-                  </div>
-                  <div className="flex-1 pt-0.5">
-                    <p
-                      className={`text-sm font-medium ${
-                        step.status === "completed"
-                          ? "text-black"
-                          : step.status === "current"
-                          ? "text-blue-600"
-                          : "text-gray-400"
-                      }`}
+            <div className="noor-card p-5 mb-2">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-black">
+                  Monthly Subscriptions
+                </h3>
+                <span className="text-lg font-semibold text-black">
+                  {formatMoney(metrics.totalSubscriptions)}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {metrics.subscriptions.length > 0 ? (
+                  metrics.subscriptions.slice(0, 4).map((sub, idx) => (
+                    <span
+                      key={`${sub.name || "subscription"}-${idx}`}
+                      className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
                     >
-                      {step.title}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {step.description}
-                    </p>
-                  </div>
-                  {step.status === "completed" && (
-                    <span className="text-green-500 text-xs font-medium">
-                      ✓
+                      {sub.name || "Subscription"} ·{" "}
+                      {formatMoney(sub.amount || 0)}/mo
                     </span>
-                  )}
-                </motion.div>
-              ))}
+                  ))
+                ) : (
+                  <span className="text-sm text-gray-500">
+                    No subscriptions detected
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      </motion.section>
 
-      {/* AI Quick Actions */}
-      <motion.section
-        className="mb-8"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.6 }}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wide">
-            Ask Noor AI
-          </h2>
-          <Link
-            href="/chat"
-            className="text-xs text-gray-400 hover:text-black transition-colors"
-          >
-            Open chat →
-          </Link>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {AI_QUICK_ACTIONS.map((action, index) => (
-            <motion.button
-              key={action.id}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.7 + index * 0.05 }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => {
-                // Store the prompt and open chat
-                localStorage.setItem("noor_quick_prompt", action.prompt);
-                router.push("/chat");
-              }}
-              className="noor-card p-4 text-left hover:shadow-md transition-shadow"
+            <Link
+              href="/money"
+              className="text-sm font-medium text-black hover:underline"
             >
-              <span className="text-sm text-black">{action.label}</span>
-            </motion.button>
-          ))}
-        </div>
-      </motion.section>
-
-      {/* Bottom reassurance */}
-      <motion.div
-        className="text-center pb-8"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.8 }}
-      >
-        <p className="text-xs text-gray-400">
-          You're doing great. One step at a time.
-        </p>
-      </motion.div>
+              Open full Money page
+            </Link>
+          </div>
+        </motion.div>
+      </section>
     </PageLayout>
   );
 }
