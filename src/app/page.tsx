@@ -347,6 +347,24 @@ export default function HomePage() {
     };
   }, [accounts, transactions, budget, subscriptions]);
 
+  const displayMetrics = useMemo(() => {
+    if (!hasBankConnection) {
+      return {
+        cash: 0,
+        creditUsed: 0,
+        netWorth: 0,
+        spending: 0,
+        income: 0,
+        budgetRemaining: 0,
+        categorySpending: [] as Array<{ name: string; amount: number }>,
+        subscriptions: [] as Array<{ name: string; amount: number }>,
+        totalSubscriptions: 0,
+      };
+    }
+
+    return metrics;
+  }, [hasBankConnection, metrics]);
+
   const aiSummary = useMemo(() => {
     if (isLoadingData) {
       return {
@@ -602,7 +620,7 @@ export default function HomePage() {
             <div className="noor-card p-6 mb-5">
               <p className="text-gray-500 text-sm mb-1">Net Worth</p>
               <p className="text-4xl font-semibold text-black mb-4">
-                {formatMoney(metrics.netWorth)}
+                {formatMoney(displayMetrics.netWorth)}
               </p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -611,13 +629,13 @@ export default function HomePage() {
                     className="text-lg font-medium"
                     style={{ color: accentColor }}
                   >
-                    {formatMoney(metrics.cash)}
+                    {formatMoney(displayMetrics.cash)}
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-500 text-xs">Credit Used</p>
                   <p className="text-lg font-medium text-red-600">
-                    -{formatMoney(metrics.creditUsed)}
+                    -{formatMoney(displayMetrics.creditUsed)}
                   </p>
                 </div>
               </div>
@@ -630,13 +648,13 @@ export default function HomePage() {
                   className="text-xl font-semibold"
                   style={{ color: accentColor }}
                 >
-                  +{formatMoney(metrics.income)}
+                  +{formatMoney(displayMetrics.income)}
                 </p>
               </div>
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Spending</p>
                 <p className="text-xl font-semibold text-red-600">
-                  -{formatMoney(metrics.spending)}
+                  -{formatMoney(displayMetrics.spending)}
                 </p>
               </div>
             </div>
@@ -647,12 +665,12 @@ export default function HomePage() {
                   Monthly Subscriptions
                 </h3>
                 <span className="text-lg font-semibold text-black">
-                  {formatMoney(metrics.totalSubscriptions)}
+                  {formatMoney(displayMetrics.totalSubscriptions)}
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {metrics.subscriptions.length > 0 ? (
-                  metrics.subscriptions.slice(0, 2).map((sub, idx) => (
+                {displayMetrics.subscriptions.length > 0 ? (
+                  displayMetrics.subscriptions.slice(0, 2).map((sub, idx) => (
                     <span
                       key={`${sub.name || "subscription"}-${idx}`}
                       className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
