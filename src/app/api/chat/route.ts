@@ -664,81 +664,6 @@ async function callOpenRouter(
   };
 }
 
-// Demo mode responses when no API key is configured
-const DEMO_RESPONSES: Record<string, string> = {
-  // Greetings
-  hello:
-    "Hello! I am Noor AI. I can help with banking, visa questions, housing, and more for international students in the US.",
-  hi: "Hello! I am Noor AI. How can I help you today?",
-
-  // Banking
-  no_ssn_account: `You can open a US bank account without an SSN.\n\n**Recommended banks:**\n1. **Chase Bank** - Often possible in branch with passport and I-20\n2. **Bank of America** - Common choice for international students\n3. **Wells Fargo** - Widely available and student-friendly\n\n**Documents you may need:**\n- Passport\n- I-20 or DS-2019\n- School admission or enrollment proof\n- US address proof (such as a lease)\n\nCheck the Banking section in Noor for personalized options.`,
-
-  bank: `Here are the best banks for international students! 🏦
-
-**Top Recommendations:**
-1. **Chase Bank** - Can open with passport + I-20
-2. **Bank of America** - International student friendly
-3. **Wells Fargo** - No SSN required in-branch
-
-Check out our Banking section for personalized recommendations!`,
-
-  // Credit cards
-  credit_card: `You can start building credit even without a US credit history.\n\n**Secured cards (deposit required):**\n- Discover it Secured\n- Capital One Secured\n\n**Student cards:**\n- Discover it Student\n- Journey Student Rewards\n\n**Without SSN:**\n- Some cards can be applied for using ITIN depending on issuer policy\n\nSee the Funding section for details and next steps.`,
-
-  // Visa
-  visa: `Key F-1 reminders:\n\n**Important rules:**\n- Maintain full-time enrollment\n- Off-campus work usually requires CPT or OPT authorization\n- Make sure your I-20 travel signature is valid before travel\n\n**Work options:**\n- CPT: Internship or co-op during studies\n- OPT: Up to 12 months after graduation (plus STEM extension if eligible)\n\nUse the Visa section to track your timeline.`,
-
-  // Housing
-  housing: `Tips for finding housing in the US:\n\n**Suggested order:**\n1. Campus housing for your first term\n2. Nearby apartments after you settle in\n3. Roommates to reduce costs\n\n**Checklist:**\n- Security deposit amount\n- Whether utilities are included\n- Commute distance to campus\n- Neighborhood safety\n\nUse the Housing section to explore options near your school.`,
-
-  // Default
-  default: `Hello! I am Noor AI.\n\nI can help with:\n- Bank account setup\n- Credit card choices\n- Visa and status questions\n- Housing decisions\n- Scholarship and budgeting guidance\n\nAsk anything.\n\n---\n*You are currently in demo mode. For richer responses, configure an API provider key.*`,
-};
-
-function getDemoResponse(message: string): string {
-  const lowerMessage = message.toLowerCase();
-
-  // Check for keyword matches
-  if (lowerMessage === "hi" || lowerMessage === "hello") {
-    return DEMO_RESPONSES.hello;
-  }
-  if (
-    lowerMessage.includes("ssn") &&
-    (lowerMessage.includes("account") || lowerMessage.includes("bank"))
-  ) {
-    return DEMO_RESPONSES.no_ssn_account;
-  }
-  if (lowerMessage.includes("bank") || lowerMessage.includes("account")) {
-    return DEMO_RESPONSES["bank"];
-  }
-  if (
-    lowerMessage.includes("credit") ||
-    lowerMessage.includes("card") ||
-    lowerMessage.includes("fico")
-  ) {
-    return DEMO_RESPONSES.credit_card;
-  }
-  if (
-    lowerMessage.includes("visa") ||
-    lowerMessage.includes("f-1") ||
-    lowerMessage.includes("opt") ||
-    lowerMessage.includes("cpt")
-  ) {
-    return DEMO_RESPONSES.visa;
-  }
-  if (
-    lowerMessage.includes("house") ||
-    lowerMessage.includes("housing") ||
-    lowerMessage.includes("rent") ||
-    lowerMessage.includes("apartment")
-  ) {
-    return DEMO_RESPONSES.housing;
-  }
-
-  return DEMO_RESPONSES.default;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const authUserId = await getAuthenticatedUserId(request);
@@ -874,7 +799,7 @@ export async function POST(request: NextRequest) {
         // Auth errors should fail fast rather than retrying other models.
         if (result.status === 401) {
           return NextResponse.json(
-            { error: "Invalid OpenRouter API key", demo_available: true },
+            { error: "Invalid OpenRouter API key" },
             { status: 401 }
           );
         }
@@ -919,26 +844,19 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 3) Demo mode when no API key is configured
-    const lastUserMessage = messages[messages.length - 1];
-    const demoResponse = getDemoResponse(lastUserMessage?.content || "");
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    return NextResponse.json({
-      success: true,
-      message: demoResponse,
-      demo_mode: true,
-      model: "demo-mode",
-    });
+    return NextResponse.json(
+      {
+        error:
+          "AI provider is not configured. Set OPENROUTER_API_KEY or ANTHROPIC_API_KEY.",
+      },
+      { status: 503 }
+    );
   } catch (error) {
     console.error("Chat API error:", error);
 
     if (error instanceof Anthropic.APIError) {
       if (error.status === 401) {
-        return NextResponse.json(
-          { error: "Invalid API key", demo_available: true },
-          { status: 401 }
-        );
+        return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
       }
       if (error.status === 429) {
         return NextResponse.json(
