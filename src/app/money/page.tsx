@@ -87,6 +87,13 @@ export default function MoneyPage() {
 
       if (!accountsRes.ok) {
         const data = await accountsRes.json();
+        if (
+          typeof data.error === "string" &&
+          /no active bank connections/i.test(data.error)
+        ) {
+          localStorage.removeItem("noor_plaid_connections");
+          plaidConnections.refetch();
+        }
         if (data.errorType === "ITEM_LOGIN_REQUIRED") {
           setError(
             "Your bank connection has expired. Please re-link your account."
@@ -218,6 +225,11 @@ export default function MoneyPage() {
     },
     [handleBankConnected, userId]
   );
+
+  const shouldShowConnectCard =
+    !!userId &&
+    (!plaidConnections.hasActive ||
+      !!(error && /no active bank connections/i.test(error)));
 
   // Calculate totals
   const totals = useMemo(() => {
@@ -464,7 +476,7 @@ export default function MoneyPage() {
             </div>
 
             {/* Connect Bank Account */}
-            {!plaidConnections.hasActive && userId && (
+            {shouldShowConnectCard && (
               <ConnectBankCard
                 userId={userId}
                 onConnected={handleBankConnected}
@@ -550,7 +562,7 @@ export default function MoneyPage() {
               ))}
             </div>
 
-            {!plaidConnections.hasActive && userId && (
+            {shouldShowConnectCard && (
               <div className="mt-6">
                 <ConnectBankCard
                   userId={userId}
