@@ -859,7 +859,7 @@ export default function SurveyPage() {
           };
       localStorage.setItem("noor_user_profile", JSON.stringify(userProfile));
 
-      router.push("/banking");
+      router.push("/");
     } catch (error) {
       console.error("Survey submission error:", error);
       setSubmitError("Something went wrong. Please try again.");
