@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { generateSystemPrompt, UserContext } from "@/lib/noorAIPrompt";
-import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
+import {
+  createAdminClient,
+  createServerClient,
+  isSupabaseAdminConfigured,
+  isSupabaseConfigured,
+} from "@/lib/supabase";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -147,6 +152,39 @@ interface PlaidSubscriptionSummary {
   frequency?: "weekly" | "monthly" | "yearly" | "unknown" | string;
   last_charged?: string | null;
   next_charge?: string | null;
+}
+
+async function getAuthenticatedUserId(
+  request: NextRequest
+): Promise<string | null> {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  const authHeader = request.headers.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : "";
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const supabase = createServerClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      return null;
+    }
+
+    return user.id;
+  } catch {
+    return null;
+  }
 }
 
 interface FinancialSnapshot {
@@ -703,7 +741,12 @@ function getDemoResponse(message: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, userContext, userId } = await request.json();
+    const authUserId = await getAuthenticatedUserId(request);
+    if (!authUserId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { messages, userContext } = await request.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
@@ -714,15 +757,11 @@ export async function POST(request: NextRequest) {
 
     let mergedUserContext: UserContext = userContext || {};
 
-    if (typeof userId === "string" && userId.trim().length > 0) {
-      const dbContext = await loadReadOnlyUserContextFromSupabase(
-        userId.trim()
-      );
-      mergedUserContext = {
-        ...dbContext,
-        ...(userContext || {}),
-      };
-    }
+    const dbContext = await loadReadOnlyUserContextFromSupabase(authUserId);
+    mergedUserContext = {
+      ...dbContext,
+      ...(userContext || {}),
+    };
 
     const formattedMessages = messages.map((msg: ChatMessage) => ({
       role: msg.role as "user" | "assistant",
@@ -737,14 +776,10 @@ export async function POST(request: NextRequest) {
 
     let systemPrompt = generateSystemPrompt(mergedUserContext);
 
-    if (
-      wantsBalance &&
-      typeof userId === "string" &&
-      userId.trim().length > 0
-    ) {
+    if (wantsBalance) {
       const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(
         request,
-        userId.trim()
+        authUserId
       );
 
       if (balanceSummary) {
@@ -755,14 +790,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (
-      wantsFinancialAnalysis &&
-      typeof userId === "string" &&
-      userId.trim().length > 0
-    ) {
+    if (wantsFinancialAnalysis) {
       const snapshot = await fetchFinancialSnapshotFromPlaidRoutes(
         request,
-        userId.trim()
+        authUserId
       );
 
       if (snapshot) {
@@ -927,11 +958,9 @@ export async function POST(request: NextRequest) {
 // GET endpoint to fetch chat history
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get("userId");
-
-    if (!userId) {
-      return NextResponse.json({ messages: [] });
+    const authUserId = await getAuthenticatedUserId(request);
+    if (!authUserId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Return empty history for now (Supabase integration optional)

@@ -568,21 +568,21 @@ export default function MoneyPage() {
             exit={{ opacity: 0, y: -10 }}
           >
             {/* Net Worth Card */}
-            <div className="noor-card p-6 mb-4 bg-gradient-to-br from-gray-900 to-black text-white">
-              <p className="text-gray-400 text-sm mb-1">Net Worth</p>
+            <div className="noor-card p-6 mb-4 bg-gradient-to-br from-gray-900 to-black text-black">
+              <p className="text-gray-600 text-sm mb-1">Net Worth</p>
               <p className="text-4xl font-semibold mb-4">
                 {formatCurrency(totals.netWorth)}
               </p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-gray-400 text-xs">Cash</p>
-                  <p className="text-lg font-medium text-green-400">
+                  <p className="text-gray-600 text-xs">Cash</p>
+                  <p className="text-lg font-medium text-green-700">
                     {formatCurrency(totals.checking)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-400 text-xs">Credit Used</p>
-                  <p className="text-lg font-medium text-red-400">
+                  <p className="text-gray-600 text-xs">Credit Used</p>
+                  <p className="text-lg font-medium text-red-700">
                     -{formatCurrency(totals.credit)}
                   </p>
                 </div>
@@ -818,14 +818,14 @@ export default function MoneyPage() {
             exit={{ opacity: 0, y: -10 }}
           >
             {/* Total */}
-            <div className="noor-card p-5 mb-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-              <p className="text-white/80 text-sm mb-1">
+            <div className="noor-card p-5 mb-4 bg-gradient-to-r from-purple-500 to-pink-500 text-black">
+              <p className="text-black/80 text-sm mb-1">
                 Monthly Subscriptions
               </p>
               <p className="text-3xl font-semibold">
                 {formatCurrency(totalSubscriptions)}/mo
               </p>
-              <p className="text-white/70 text-sm mt-2">
+              <p className="text-black/70 text-sm mt-2">
                 {formatCurrency(totalSubscriptions * 12)}/year
               </p>
             </div>

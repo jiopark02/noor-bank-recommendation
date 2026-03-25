@@ -4,6 +4,7 @@ import {
   getContextualPrompts,
   QUICK_PROMPTS,
 } from "@/lib/noorAIPrompt";
+import { supabase } from "@/lib/supabase";
 
 const STORAGE_KEY = "noor_chat_history";
 
@@ -50,6 +51,27 @@ export function useChat({
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const isSendingRef = useRef(false);
 
+  const getAuthHeaders = useCallback(async (): Promise<
+    Record<string, string>
+  > => {
+    if (!supabase) {
+      return {};
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const token = session?.access_token;
+    if (!token) {
+      return {};
+    }
+
+    return {
+      Authorization: `Bearer ${token}`,
+    };
+  }, []);
+
   const loadLocalHistory = useCallback((): ChatMessage[] => {
     if (!userId || typeof window === "undefined") {
       return [];
@@ -80,7 +102,12 @@ export function useChat({
     if (!userId) return;
 
     try {
-      const response = await fetch(`/api/chat?userId=${userId}`);
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(`/api/chat`, {
+        headers: {
+          ...authHeaders,
+        },
+      });
       const data = await response.json();
 
       if (data.messages && Array.isArray(data.messages)) {
@@ -105,7 +132,7 @@ export function useChat({
       console.error("Failed to load chat history:", err);
       setMessages(loadLocalHistory());
     }
-  }, [loadLocalHistory, userId]);
+  }, [getAuthHeaders, loadLocalHistory, userId]);
 
   // Load chat history on mount
   useEffect(() => {
@@ -166,13 +193,17 @@ export function useChat({
           content: msg.content,
         }));
 
+        const authHeaders = await getAuthHeaders();
+
         const response = await fetch("/api/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
           body: JSON.stringify({
             messages: apiMessages,
             userContext,
-            userId,
           }),
         });
 
@@ -211,7 +242,7 @@ export function useChat({
         isSendingRef.current = false;
       }
     },
-    [messages, userContext, userId]
+    [getAuthHeaders, messages, userContext]
   );
 
   const clearMessages = useCallback(() => {
