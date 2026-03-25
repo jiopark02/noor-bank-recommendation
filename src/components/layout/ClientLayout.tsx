@@ -14,6 +14,7 @@ const HIDDEN_CHAT_PAGES = ["/welcome", "/survey", "/login", "/chat"];
 
 export function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
+  const safePathname = pathname ?? "";
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
 
@@ -56,7 +57,7 @@ export function ClientLayout({ children }: ClientLayoutProps) {
   }, []);
 
   const shouldShowChat =
-    isAuthReady && isAuthenticated && !HIDDEN_CHAT_PAGES.includes(pathname);
+    isAuthReady && isAuthenticated && !HIDDEN_CHAT_PAGES.includes(safePathname);
 
   return (
     <>
