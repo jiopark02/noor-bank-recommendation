@@ -7,6 +7,7 @@ import { BottomNav } from "@/components/layout";
 import { UserLevel, getUserFinanceLevel } from "@/lib/financeProTips";
 import { useChat } from "@/hooks/useChat";
 import { UserContext } from "@/lib/noorAIPrompt";
+import { supabase } from "@/lib/supabase";
 
 function buildUserContext(profile: Record<string, unknown>): UserContext {
   return {
@@ -54,18 +55,63 @@ export default function ChatPage() {
   });
 
   useEffect(() => {
-    const storedUserId = localStorage.getItem("noor_user_id");
-    if (!storedUserId) {
-      router.replace("/welcome");
-      return;
-    }
+    let isMounted = true;
 
-    setUserId(storedUserId);
+    const hydrateFromSession = async () => {
+      if (!supabase) {
+        if (isMounted) {
+          router.replace("/welcome");
+        }
+        return;
+      }
 
-    const profileRaw = localStorage.getItem("noor_user_profile");
-    if (profileRaw) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user) {
+        if (isMounted) {
+          router.replace("/welcome");
+        }
+        return;
+      }
+
+      const resolvedUserId = session.user.id;
+      if (!isMounted) return;
+      setUserId(resolvedUserId);
+
       try {
-        const profile = JSON.parse(profileRaw) as Record<string, unknown>;
+        const [{ data: userRow }, { data: surveyRow }] = await Promise.all([
+          supabase
+            .from("users")
+            .select("first_name,last_name")
+            .eq("id", resolvedUserId)
+            .maybeSingle(),
+          supabase
+            .from("survey_responses")
+            .select(
+              "university,institution_type,has_ssn,has_us_credit_history,monthly_income,campus_side,expected_monthly_spending"
+            )
+            .eq("user_id", resolvedUserId)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+
+        if (!isMounted) return;
+
+        const profile = {
+          firstName: userRow?.first_name,
+          lastName: userRow?.last_name,
+          university: surveyRow?.university,
+          institutionType: surveyRow?.institution_type,
+          hasSSN: surveyRow?.has_ssn,
+          hasCreditHistory: surveyRow?.has_us_credit_history,
+          monthlyIncome: surveyRow?.monthly_income,
+          campusSide: surveyRow?.campus_side,
+          monthlySpending: surveyRow?.expected_monthly_spending,
+        } as Record<string, unknown>;
+
         setUserContext(buildUserContext(profile));
 
         const level = getUserFinanceLevel({
@@ -79,11 +125,19 @@ export default function ChatPage() {
         });
         setUserLevel(level);
       } catch {
-        // Keep defaults if profile parsing fails.
+        // Keep defaults if profile query fails.
+      } finally {
+        if (isMounted) {
+          setIsBooting(false);
+        }
       }
-    }
+    };
 
-    setIsBooting(false);
+    hydrateFromSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   useEffect(() => {
