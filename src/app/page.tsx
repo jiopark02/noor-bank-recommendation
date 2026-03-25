@@ -34,10 +34,8 @@ const STORAGE_KEY_ACCOUNTS = "noor_plaid_accounts";
 const STORAGE_KEY_TRANSACTIONS = "noor_plaid_transactions";
 
 const QUICK_PROMPTS = [
-  "How much can I spend on travel this month?",
-  "Am I on track to save this month?",
-  "How should I cut my monthly subscriptions?",
-  "Can I afford a $250 unexpected expense?",
+  "How much can I spend this week?",
+  "Am I on track this month?",
 ];
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -64,17 +62,6 @@ function formatMoney(value: number): string {
     currency: "USD",
     minimumFractionDigits: 2,
   }).format(value);
-}
-
-function readLocalArray<T>(key: string): T[] | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as T[]) : null;
-  } catch {
-    return null;
-  }
 }
 
 export default function HomePage() {
@@ -136,38 +123,62 @@ export default function HomePage() {
       // Ignore budget parse errors.
     }
 
-    const storedAccounts =
-      readLocalArray<StoredPlaidAccount>(STORAGE_KEY_ACCOUNTS);
-    if (storedAccounts && storedAccounts.length > 0) {
-      setAccounts(storedAccounts);
-    }
-
-    const storedTx = readLocalArray<StoredPlaidTransaction>(
-      STORAGE_KEY_TRANSACTIONS
-    );
-    if (storedTx && storedTx.length > 0) {
-      setTransactions(storedTx);
-    }
-
+    let hasActiveConnection = false;
     try {
       const storedConnections = localStorage.getItem("noor_plaid_connections");
       if (storedConnections) {
         const parsed = JSON.parse(storedConnections) as Array<{
           status?: string;
         }>;
-        setHasBankConnection(
-          parsed.some((connection) => connection.status === "active")
+        hasActiveConnection = parsed.some(
+          (connection) => connection.status === "active"
         );
       }
     } catch {
       // Ignore connection parse errors.
     }
 
+    setHasBankConnection(hasActiveConnection);
+
+    if (hasActiveConnection) {
+      try {
+        const storedAccountsRaw = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+        const storedTxRaw = localStorage.getItem(STORAGE_KEY_TRANSACTIONS);
+
+        if (storedAccountsRaw) {
+          const parsedAccounts = JSON.parse(storedAccountsRaw) as unknown;
+          if (Array.isArray(parsedAccounts)) {
+            setAccounts(parsedAccounts as StoredPlaidAccount[]);
+          }
+        }
+
+        if (storedTxRaw) {
+          const parsedTx = JSON.parse(storedTxRaw) as unknown;
+          if (Array.isArray(parsedTx)) {
+            setTransactions(parsedTx as StoredPlaidTransaction[]);
+          }
+        }
+      } catch {
+        // Ignore cache parse errors.
+      }
+    } else {
+      setAccounts([]);
+      setTransactions([]);
+      setSubscriptions([]);
+      localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
+      localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
+    }
+
     setIsLoading(false);
   }, [router]);
 
   const fetchLiveMoneyData = useCallback(async () => {
-    if (!userId || !hasBankConnection) return;
+    if (!userId || !hasBankConnection) {
+      setAccounts([]);
+      setTransactions([]);
+      setSubscriptions([]);
+      return;
+    }
 
     setIsLoadingData(true);
     setMoneyError(null);
@@ -227,6 +238,17 @@ export default function HomePage() {
       const message =
         err instanceof Error ? err.message : "Failed to sync bank data";
       setMoneyError(message);
+
+      // If backend reports no active bank connections, clear stale local data.
+      if (/no active bank connection/i.test(message)) {
+        setHasBankConnection(false);
+        setAccounts([]);
+        setTransactions([]);
+        setSubscriptions([]);
+        localStorage.removeItem("noor_plaid_connections");
+        localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
+        localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
+      }
     } finally {
       setIsLoadingData(false);
     }
@@ -444,7 +466,7 @@ export default function HomePage() {
   return (
     <PageLayout userName={userName}>
       <motion.header
-        className="mb-6"
+        className="mb-10"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
       >
@@ -454,9 +476,9 @@ export default function HomePage() {
         </p>
       </motion.header>
 
-      <section className="grid gap-6 xl:grid-cols-2">
+      <section className="grid gap-8 xl:grid-cols-2">
         <motion.div
-          className="noor-card p-6 flex flex-col min-h-[640px]"
+          className="noor-card p-8 flex flex-col min-h-[620px]"
           initial={{ opacity: 0, x: -16 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.35 }}
@@ -469,7 +491,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="mt-6 flex-1 space-y-4">
+          <div className="mt-8 flex-1 space-y-5">
             <div className="rounded-2xl bg-gray-100 px-4 py-3 max-w-[92%]">
               <p className="text-sm text-gray-700 leading-relaxed">
                 {aiSummary.opening}
@@ -495,13 +517,13 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="pt-5 border-t border-gray-100">
-            <div className="flex flex-wrap gap-2 mb-4">
+          <div className="pt-6 border-t border-gray-100">
+            <div className="flex flex-wrap gap-2 mb-5">
               {QUICK_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
                   onClick={() => submitPrompt(prompt)}
-                  className="px-3 py-1.5 rounded-full text-xs border border-gray-200 text-gray-700 hover:border-gray-300 transition-colors"
+                  className="px-4 py-2 rounded-full text-xs border border-gray-200 text-gray-700 hover:border-gray-300 transition-colors"
                 >
                   {prompt}
                 </button>
@@ -517,7 +539,7 @@ export default function HomePage() {
                     submitPrompt();
                   }
                 }}
-                placeholder="Ask about your budget, subscriptions, or savings..."
+                placeholder="Ask about your money..."
                 className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-black"
               />
               <button
@@ -551,35 +573,11 @@ export default function HomePage() {
           transition={{ duration: 0.35, delay: 0.05 }}
         >
           <div>
-            <div className="mb-4">
+            <div className="mb-6">
               <h2 className="text-2xl font-semibold text-black">Money</h2>
               <p className="text-gray-500 text-sm">
                 All your finances in one place
               </p>
-            </div>
-
-            <div className="flex gap-2 mb-4 overflow-x-auto pb-3">
-              <button className="px-4 py-2 rounded-full text-sm font-medium bg-black text-white whitespace-nowrap">
-                Overview
-              </button>
-              <Link
-                href="/money"
-                className="px-4 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 whitespace-nowrap"
-              >
-                Accounts
-              </Link>
-              <Link
-                href="/money"
-                className="px-4 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 whitespace-nowrap"
-              >
-                Transactions
-              </Link>
-              <Link
-                href="/money"
-                className="px-4 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 whitespace-nowrap"
-              >
-                Subscriptions
-              </Link>
             </div>
 
             {isLoadingData && (
@@ -601,7 +599,7 @@ export default function HomePage() {
               </div>
             )}
 
-            <div className="noor-card p-6 mb-4">
+            <div className="noor-card p-6 mb-5">
               <p className="text-gray-500 text-sm mb-1">Net Worth</p>
               <p className="text-4xl font-semibold text-black mb-4">
                 {formatMoney(metrics.netWorth)}
@@ -625,7 +623,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Income</p>
                 <p
@@ -643,43 +641,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="noor-card p-5 mb-4">
-              <h3 className="font-medium text-black mb-4">
-                Spending by Category
-              </h3>
-              <div className="space-y-3">
-                {metrics.categorySpending.slice(0, 4).map((cat) => {
-                  const percent =
-                    metrics.spending > 0
-                      ? Math.min(100, (cat.amount / metrics.spending) * 100)
-                      : 0;
-
-                  return (
-                    <div key={cat.name} className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <div className="flex justify-between mb-1">
-                          <span className="text-sm text-black">{cat.name}</span>
-                          <span className="text-sm font-medium text-black">
-                            {formatMoney(cat.amount)}
-                          </span>
-                        </div>
-                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${percent}%`,
-                              backgroundColor: accentColor,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="noor-card p-5 mb-2">
+            <div className="noor-card p-5 mb-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-medium text-black">
                   Monthly Subscriptions
@@ -690,7 +652,7 @@ export default function HomePage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {metrics.subscriptions.length > 0 ? (
-                  metrics.subscriptions.slice(0, 4).map((sub, idx) => (
+                  metrics.subscriptions.slice(0, 2).map((sub, idx) => (
                     <span
                       key={`${sub.name || "subscription"}-${idx}`}
                       className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
@@ -709,9 +671,9 @@ export default function HomePage() {
 
             <Link
               href="/money"
-              className="text-sm font-medium text-black hover:underline"
+              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium border border-gray-200 text-black hover:border-gray-300"
             >
-              Open full Money page
+              Open Money
             </Link>
           </div>
         </motion.div>
