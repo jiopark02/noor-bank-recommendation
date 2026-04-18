@@ -13,6 +13,7 @@ import {
   CATEGORY_COLORS,
 } from "@/lib/plaid";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
+import { getSupabaseBearerHeaders } from "@/lib/supabaseAuthHeaders";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
 
@@ -78,11 +79,13 @@ export default function MoneyPage() {
     setError(null);
 
     try {
+      const authHeaders = await getSupabaseBearerHeaders();
+
       // Fetch accounts
       const accountsRes = await fetch("/api/plaid/accounts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({}),
       });
 
       if (!accountsRes.ok) {
@@ -112,8 +115,8 @@ export default function MoneyPage() {
       // Fetch transactions
       const txnRes = await fetch("/api/plaid/transactions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, startDate, endDate }),
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ startDate, endDate }),
       });
 
       if (!txnRes.ok) {
@@ -199,11 +202,11 @@ export default function MoneyPage() {
       if (!userId) return;
 
       try {
+        const authHeaders = await getSupabaseBearerHeaders();
         const response = await fetch("/api/plaid/exchange-token", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({
-            userId,
             publicToken,
             institutionId: metadata.institution.institution_id,
             institutionName: metadata.institution.name,

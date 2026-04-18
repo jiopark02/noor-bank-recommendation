@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { getSupabaseBearerHeaders } from "@/lib/supabaseAuthHeaders";
 
 export interface PlaidConnection {
   itemId: string;
@@ -55,10 +56,11 @@ export function usePlaidConnections(userId: string | null) {
 
     try {
       // Request link token from backend
+      const authHeaders = await getSupabaseBearerHeaders();
       const response = await fetch("/api/plaid/create-link-token", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({}),
       });
 
       if (!response.ok) {
@@ -85,10 +87,11 @@ export function usePlaidConnections(userId: string | null) {
       }
 
       try {
+        const authHeaders = await getSupabaseBearerHeaders();
         const response = await fetch("/api/plaid/disconnect", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, itemId }),
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ itemId }),
         });
 
         if (!response.ok) {
@@ -128,10 +131,11 @@ export function usePlaidConnections(userId: string | null) {
       }
 
       try {
+        const authHeaders = await getSupabaseBearerHeaders();
         const response = await fetch("/api/plaid/relink", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, itemId }),
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ itemId }),
         });
 
         if (!response.ok) {
@@ -161,11 +165,11 @@ export function usePlaidConnections(userId: string | null) {
     }) => {
       try {
         // Exchange public token for access token
+        const authHeaders = await getSupabaseBearerHeaders();
         const response = await fetch("/api/plaid/exchange-token", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({
-            userId,
             publicToken: data.accessToken, // In real flow, this would be exchanged client-side or server-side
             itemId: data.itemId,
             institutionName: data.institutionName,

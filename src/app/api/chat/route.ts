@@ -3,10 +3,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { generateSystemPrompt, UserContext } from "@/lib/noorAIPrompt";
 import {
   createAdminClient,
-  createServerClient,
   isSupabaseAdminConfigured,
   isSupabaseConfigured,
 } from "@/lib/supabase";
+import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -152,39 +152,6 @@ interface PlaidSubscriptionSummary {
   frequency?: "weekly" | "monthly" | "yearly" | "unknown" | string;
   last_charged?: string | null;
   next_charge?: string | null;
-}
-
-async function getAuthenticatedUserId(
-  request: NextRequest
-): Promise<string | null> {
-  if (!isSupabaseConfigured()) {
-    return null;
-  }
-
-  const authHeader = request.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ")
-    ? authHeader.slice(7).trim()
-    : "";
-
-  if (!token) {
-    return null;
-  }
-
-  try {
-    const supabase = createServerClient();
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      return null;
-    }
-
-    return user.id;
-  } catch {
-    return null;
-  }
 }
 
 interface FinancialSnapshot {
@@ -471,18 +438,18 @@ function buildFinancialSnapshot(
 }
 
 async function fetchBalanceSummaryFromPlaidRoute(
-  request: NextRequest,
-  userId: string
+  request: NextRequest
 ): Promise<string | null> {
   try {
+    const auth = request.headers.get("authorization");
     const accountsUrl = new URL("/api/plaid/accounts", request.url);
     const response = await fetch(accountsUrl.toString(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        cookie: request.headers.get("cookie") || "",
+        ...(auth ? { Authorization: auth } : {}),
       },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({}),
       cache: "no-store",
     });
 
@@ -498,8 +465,7 @@ async function fetchBalanceSummaryFromPlaidRoute(
 }
 
 async function fetchFinancialSnapshotFromPlaidRoutes(
-  request: NextRequest,
-  userId: string
+  request: NextRequest
 ): Promise<FinancialSnapshot | null> {
   try {
     const accountsUrl = new URL("/api/plaid/accounts", request.url);
@@ -510,23 +476,26 @@ async function fetchFinancialSnapshotFromPlaidRoutes(
       .toISOString()
       .split("T")[0];
 
+    const auth = request.headers.get("authorization");
+    const authHeaders = auth ? { Authorization: auth } : {};
+
     const [accountsRes, transactionsRes] = await Promise.all([
       fetch(accountsUrl.toString(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          cookie: request.headers.get("cookie") || "",
+          ...authHeaders,
         },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({}),
         cache: "no-store",
       }),
       fetch(transactionsUrl.toString(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          cookie: request.headers.get("cookie") || "",
+          ...authHeaders,
         },
-        body: JSON.stringify({ userId, startDate, endDate }),
+        body: JSON.stringify({ startDate, endDate }),
         cache: "no-store",
       }),
     ]);
@@ -666,7 +635,7 @@ async function callOpenRouter(
 
 export async function POST(request: NextRequest) {
   try {
-    const authUserId = await getAuthenticatedUserId(request);
+    const authUserId = await getAuthenticatedUserIdFromRequest(request);
     if (!authUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -702,10 +671,7 @@ export async function POST(request: NextRequest) {
     let systemPrompt = generateSystemPrompt(mergedUserContext);
 
     if (wantsBalance) {
-      const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(
-        request,
-        authUserId
-      );
+      const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(request);
 
       if (balanceSummary) {
         systemPrompt += `\n\n## Verified Balance Snapshot\n${balanceSummary}\n\nIf the user asks about their balance, respond in one sentence using exactly this verified snapshot. Do not change the amounts and do not add other accounts unless asked.`;
@@ -716,10 +682,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (wantsFinancialAnalysis) {
-      const snapshot = await fetchFinancialSnapshotFromPlaidRoutes(
-        request,
-        authUserId
-      );
+      const snapshot = await fetchFinancialSnapshotFromPlaidRoutes(request);
 
       if (snapshot) {
         const subscriptionBreakdown =
@@ -876,7 +839,7 @@ export async function POST(request: NextRequest) {
 // GET endpoint to fetch chat history
 export async function GET(request: NextRequest) {
   try {
-    const authUserId = await getAuthenticatedUserId(request);
+    const authUserId = await getAuthenticatedUserIdFromRequest(request);
     if (!authUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

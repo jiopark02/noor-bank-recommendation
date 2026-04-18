@@ -1,33 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "./supabase";
+import { getAuthenticatedUserIdFromRequest } from "./apiAuth";
 
 /**
- * Extract user_id from API request and return parsed body
- *
- * ⚠️ SECURITY NOTE: In production, extract user_id from authenticated session/JWT,
- * never from client-provided parameters. This function currently accepts userId from
- * request body for development. Upgrade to session-based auth before production.
- *
- * Returns both userId and the full parsed body to avoid reading the body twice.
+ * Authenticate Plaid API requests via Supabase Bearer JWT.
+ * userId comes only from the token; any client-supplied userId in the body is ignored.
  */
 export async function authenticate(
   request: NextRequest
-): Promise<{ userId: string; body: Record<string, any> } | null> {
+): Promise<{ userId: string; body: Record<string, unknown> } | null> {
   try {
-    const body = await request.json().catch(() => ({}));
-    const userId = body.userId;
-
-    if (!userId || typeof userId !== "string" || !userId.trim()) {
+    const userId = await getAuthenticatedUserIdFromRequest(request);
+    if (!userId) {
       return null;
     }
 
-    // Basic validation - ensure it looks like a user ID
-    if (userId.length < 2 || userId.length > 255) {
-      return null;
-    }
+    const raw = await request.json().catch(() => ({}));
+    const body = { ...(typeof raw === "object" && raw !== null ? raw : {}) };
+    delete (body as { userId?: unknown }).userId;
 
-    return { userId: userId.trim(), body };
-  } catch (error) {
+    return { userId, body };
+  } catch {
     return null;
   }
 }

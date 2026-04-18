@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { getSupabaseBearerHeaders } from '@/lib/supabaseAuthHeaders';
 
 // Types from bankRecommendation.ts v2
 export interface MatchReason {
@@ -117,12 +118,23 @@ export function useBankRecommendations({
     setError(null);
 
     try {
-      const response = await fetch(
-        `/api/recommendations/bank?userId=${userId}&limit=${limit}&country=${country}`
-      );
+      const authHeaders = await getSupabaseBearerHeaders();
+      if (!authHeaders.Authorization) {
+        throw new Error('Sign in to view bank recommendations.');
+      }
+
+      const params = new URLSearchParams({
+        limit: String(limit),
+        country,
+      });
+      const response = await fetch(`/api/recommendations/bank?${params}`, {
+        headers: {
+          ...authHeaders,
+        },
+      });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Failed to fetch recommendations');
       }
 
@@ -146,11 +158,13 @@ export function useBankRecommendations({
     if (!userId) return;
 
     try {
+      const authHeaders = await getSupabaseBearerHeaders();
+      if (!authHeaders.Authorization) return;
+
       await fetch('/api/recommendations/bank', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
-          userId,
           recommendationId: bankId,
           action: 'save',
         }),
@@ -164,11 +178,13 @@ export function useBankRecommendations({
     if (!userId) return;
 
     try {
+      const authHeaders = await getSupabaseBearerHeaders();
+      if (!authHeaders.Authorization) return;
+
       await fetch('/api/recommendations/bank', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
-          userId,
           recommendationId: bankId,
           action: 'dismiss',
         }),

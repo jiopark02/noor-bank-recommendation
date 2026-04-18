@@ -1,12 +1,44 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { BankRecommendationList } from '@/components/bank';
-
-// TODO: Replace with authenticated user ID
-const MOCK_USER_ID = 'demo-user-id';
+import { supabase } from '@/lib/supabase';
 
 export default function BanksPage() {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveUser() {
+      if (typeof window === 'undefined') return;
+
+      if (supabase) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!cancelled && session?.user?.id) {
+          setUserId(session.user.id);
+          setReady(true);
+          return;
+        }
+      }
+
+      const stored = localStorage.getItem('noor_user_id');
+      if (!cancelled) {
+        setUserId(stored);
+        setReady(true);
+      }
+    }
+
+    resolveUser();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -53,7 +85,21 @@ export default function BanksPage() {
         </div>
 
         {/* Recommendations */}
-        <BankRecommendationList userId={MOCK_USER_ID} limit={5} />
+        {!ready ? (
+          <div className="noor-card p-8 text-center text-gray-500 text-sm">Loading…</div>
+        ) : !userId ? (
+          <div className="noor-card p-8 text-center space-y-4">
+            <p className="text-gray-600">Sign in to see bank recommendations tailored to your profile.</p>
+            <Link
+              href="/login"
+              className="inline-block py-3 px-6 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors"
+            >
+              Sign in
+            </Link>
+          </div>
+        ) : (
+          <BankRecommendationList userId={userId} limit={5} />
+        )}
 
         {/* Help Section */}
         <div className="mt-8 bg-white rounded-2xl p-6 border border-gray-100">

@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const auth = await authenticate(request);
     if (!auth) {
       return NextResponse.json(
-        { error: "User ID is required" },
+        { error: "Unauthorized" },
         { status: 401 }
       );
     }

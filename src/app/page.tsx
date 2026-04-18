@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { useTheme } from "@/contexts/ThemeContext";
+import { getSupabaseBearerHeaders } from "@/lib/supabaseAuthHeaders";
 
 interface StoredBudget {
   total?: number;
@@ -189,16 +190,17 @@ export default function HomePage() {
         .toISOString()
         .split("T")[0];
 
+      const authHeaders = await getSupabaseBearerHeaders();
       const [accountsRes, transactionsRes] = await Promise.all([
         fetch("/api/plaid/accounts", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId }),
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({}),
         }),
         fetch("/api/plaid/transactions", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, startDate, endDate }),
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ startDate, endDate }),
         }),
       ]);
 

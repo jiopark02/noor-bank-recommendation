@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
+import { getAuthenticatedUserIdFromRequest } from '@/lib/apiAuth';
 import { getRecommendations, saveRecommendations, BankRecommendation } from '@/lib/bankRecommendation';
 
 // Mock data for development - US Banks
@@ -714,17 +715,14 @@ function getMockBanksByCountry(country: string): BankRecommendation[] {
 
 export async function GET(request: NextRequest) {
   try {
+    const userId = await getAuthenticatedUserIdFromRequest(request);
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
-    const userId = searchParams.get('userId');
     const limit = parseInt(searchParams.get('limit') || '5');
     const country = searchParams.get('country') || 'US';
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'userId is required' },
-        { status: 400 }
-      );
-    }
 
     // Get country-specific mock data
     const mockBanks = getMockBanksByCountry(country);
@@ -782,12 +780,17 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { userId, recommendationId, action, data } = body;
+    const userId = await getAuthenticatedUserIdFromRequest(request);
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    if (!userId || !recommendationId || !action) {
+    const body = await request.json();
+    const { recommendationId, action, data } = body;
+
+    if (!recommendationId || !action) {
       return NextResponse.json(
-        { error: 'userId, recommendationId, and action are required' },
+        { error: 'recommendationId and action are required' },
         { status: 400 }
       );
     }
