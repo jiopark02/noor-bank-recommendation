@@ -191,15 +191,22 @@ export default function HomePage() {
         .split("T")[0];
 
       const authHeaders = await getSupabaseBearerHeaders();
+      const plaidHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (authHeaders.Authorization) {
+        plaidHeaders.Authorization = authHeaders.Authorization;
+      }
+
       const [accountsRes, transactionsRes] = await Promise.all([
         fetch("/api/plaid/accounts", {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: plaidHeaders,
           body: JSON.stringify({}),
         }),
         fetch("/api/plaid/transactions", {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: plaidHeaders,
           body: JSON.stringify({ startDate, endDate }),
         }),
       ]);
