@@ -7,6 +7,7 @@ import {
   isSupabaseConfigured,
 } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -442,13 +443,13 @@ async function fetchBalanceSummaryFromPlaidRoute(
 ): Promise<string | null> {
   try {
     const auth = request.headers.get("authorization");
+    const plaidHeaders = buildJsonAuthorizedHeaders(
+      auth ? { Authorization: auth } : {}
+    );
     const accountsUrl = new URL("/api/plaid/accounts", request.url);
     const response = await fetch(accountsUrl.toString(), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(auth ? { Authorization: auth } : {}),
-      },
+      headers: plaidHeaders,
       body: JSON.stringify({}),
       cache: "no-store",
     });
@@ -477,24 +478,20 @@ async function fetchFinancialSnapshotFromPlaidRoutes(
       .split("T")[0];
 
     const auth = request.headers.get("authorization");
-    const authHeaders = auth ? { Authorization: auth } : {};
+    const plaidHeaders = buildJsonAuthorizedHeaders(
+      auth ? { Authorization: auth } : {}
+    );
 
     const [accountsRes, transactionsRes] = await Promise.all([
       fetch(accountsUrl.toString(), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
+        headers: plaidHeaders,
         body: JSON.stringify({}),
         cache: "no-store",
       }),
       fetch(transactionsUrl.toString(), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
+        headers: plaidHeaders,
         body: JSON.stringify({ startDate, endDate }),
         cache: "no-store",
       }),
