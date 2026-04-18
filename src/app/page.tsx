@@ -6,7 +6,10 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { useTheme } from "@/contexts/ThemeContext";
-import { getSupabaseBearerHeaders } from "@/lib/supabaseAuthHeaders";
+import {
+  buildJsonAuthorizedHeaders,
+  getSupabaseBearerHeaders,
+} from "@/lib/supabaseAuthHeaders";
 
 interface StoredBudget {
   total?: number;
@@ -190,13 +193,9 @@ export default function HomePage() {
         .toISOString()
         .split("T")[0];
 
-      const authHeaders = await getSupabaseBearerHeaders();
-      const plaidHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (authHeaders.Authorization) {
-        plaidHeaders.Authorization = authHeaders.Authorization;
-      }
+      const plaidHeaders = buildJsonAuthorizedHeaders(
+        await getSupabaseBearerHeaders()
+      );
 
       const [accountsRes, transactionsRes] = await Promise.all([
         fetch("/api/plaid/accounts", {

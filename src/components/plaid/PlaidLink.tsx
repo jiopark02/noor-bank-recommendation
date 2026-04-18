@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { getSupabaseBearerHeaders } from "@/lib/supabaseAuthHeaders";
+import {
+  buildJsonAuthorizedHeaders,
+  getSupabaseBearerHeaders,
+} from "@/lib/supabaseAuthHeaders";
 import {
   usePlaidLink,
   PlaidLinkOptions,
@@ -44,10 +47,12 @@ export function PlaidLinkButton({
     const fetchLinkToken = async () => {
       try {
         setIsLoading(true);
-        const authHeaders = await getSupabaseBearerHeaders();
+        const plaidHeaders = buildJsonAuthorizedHeaders(
+          await getSupabaseBearerHeaders()
+        );
         const response = await fetch("/api/plaid/create-link-token", {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: plaidHeaders,
           body: JSON.stringify({}),
         });
 
@@ -156,10 +161,12 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
     ) => {
       try {
         // Exchange public token for access token
-        const authHeaders = await getSupabaseBearerHeaders();
+        const plaidHeaders = buildJsonAuthorizedHeaders(
+          await getSupabaseBearerHeaders()
+        );
         const response = await fetch("/api/plaid/exchange-token", {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: plaidHeaders,
           body: JSON.stringify({
             publicToken,
             institutionId: metadata.institution.institution_id,

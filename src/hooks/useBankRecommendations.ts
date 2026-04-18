@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getSupabaseBearerHeaders } from '@/lib/supabaseAuthHeaders';
+import {
+  buildBearerOnlyHeaders,
+  buildJsonAuthorizedHeaders,
+  getSupabaseBearerHeaders,
+} from '@/lib/supabaseAuthHeaders';
 
 // Types from bankRecommendation.ts v2
 export interface MatchReason {
@@ -118,8 +122,8 @@ export function useBankRecommendations({
     setError(null);
 
     try {
-      const authHeaders = await getSupabaseBearerHeaders();
-      if (!authHeaders.Authorization) {
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) {
         throw new Error('Sign in to view bank recommendations.');
       }
 
@@ -128,9 +132,7 @@ export function useBankRecommendations({
         country,
       });
       const response = await fetch(`/api/recommendations/bank?${params}`, {
-        headers: {
-          ...authHeaders,
-        },
+        headers: buildBearerOnlyHeaders(rawAuth),
       });
 
       if (!response.ok) {
@@ -158,12 +160,12 @@ export function useBankRecommendations({
     if (!userId) return;
 
     try {
-      const authHeaders = await getSupabaseBearerHeaders();
-      if (!authHeaders.Authorization) return;
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) return;
 
       await fetch('/api/recommendations/bank', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: buildJsonAuthorizedHeaders(rawAuth),
         body: JSON.stringify({
           recommendationId: bankId,
           action: 'save',
@@ -178,12 +180,12 @@ export function useBankRecommendations({
     if (!userId) return;
 
     try {
-      const authHeaders = await getSupabaseBearerHeaders();
-      if (!authHeaders.Authorization) return;
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) return;
 
       await fetch('/api/recommendations/bank', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: buildJsonAuthorizedHeaders(rawAuth),
         body: JSON.stringify({
           recommendationId: bankId,
           action: 'dismiss',

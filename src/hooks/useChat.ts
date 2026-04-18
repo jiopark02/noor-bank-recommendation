@@ -4,7 +4,11 @@ import {
   getContextualPrompts,
   QUICK_PROMPTS,
 } from "@/lib/noorAIPrompt";
-import { getSupabaseBearerHeaders } from "@/lib/supabaseAuthHeaders";
+import {
+  buildBearerOnlyHeaders,
+  buildJsonAuthorizedHeaders,
+  getSupabaseBearerHeaders,
+} from "@/lib/supabaseAuthHeaders";
 
 const STORAGE_KEY = "noor_chat_history";
 
@@ -81,11 +85,8 @@ export function useChat({
     if (!userId) return;
 
     try {
-      const authHeaders = await getSupabaseBearerHeaders();
       const response = await fetch(`/api/chat`, {
-        headers: {
-          ...authHeaders,
-        },
+        headers: buildBearerOnlyHeaders(await getSupabaseBearerHeaders()),
       });
       const data = await response.json();
 
@@ -172,14 +173,11 @@ export function useChat({
           content: msg.content,
         }));
 
-        const authHeaders = await getSupabaseBearerHeaders();
-
         const response = await fetch("/api/chat", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...authHeaders,
-          },
+          headers: buildJsonAuthorizedHeaders(
+            await getSupabaseBearerHeaders()
+          ),
           body: JSON.stringify({
             messages: apiMessages,
             userContext,
