@@ -5,6 +5,7 @@ import {
   PLAID_COUNTRY_CODES,
   isPlaidConfigured,
 } from "@/lib/plaid";
+import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
   getPlaidConnection,
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { userId, body } = auth;
-    const { itemId } = body;
+    const itemId = readNonEmptyString(body, "itemId");
 
     if (!itemId) {
       return NextResponse.json(

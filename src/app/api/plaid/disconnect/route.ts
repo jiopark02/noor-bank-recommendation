@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { plaidClient, isPlaidConfigured } from "@/lib/plaid";
+import { isPlaidConfigured } from "@/lib/plaid";
+import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
   deletePlaidConnection,
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { userId, body } = auth;
-    const { itemId } = body;
+    const itemId = readNonEmptyString(body, "itemId");
 
     if (!itemId) {
       return NextResponse.json(

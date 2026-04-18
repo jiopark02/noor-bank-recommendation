@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { plaidClient, isPlaidConfigured } from "@/lib/plaid";
+import { readNonEmptyString, readString } from "@/lib/requestJson";
 import {
   authenticate,
   storePlaidConnection,
@@ -22,7 +23,10 @@ export async function POST(request: NextRequest) {
     }
 
     const { userId, body } = auth;
-    const { publicToken, institutionId, institutionName } = body;
+    const publicToken = readNonEmptyString(body, "publicToken");
+    const institutionId = readString(body, "institutionId");
+    const institutionName =
+      readString(body, "institutionName")?.trim() || undefined;
 
     if (!publicToken) {
       return NextResponse.json(
@@ -43,7 +47,7 @@ export async function POST(request: NextRequest) {
       userId,
       access_token,
       item_id,
-      institutionName || "Unknown Institution"
+      institutionName ?? "Unknown Institution"
     );
 
     if (!connection) {
@@ -58,7 +62,7 @@ export async function POST(request: NextRequest) {
       success: true,
       itemId: item_id,
       institutionId,
-      institutionName: institutionName || "Unknown Institution",
+      institutionName: institutionName ?? "Unknown Institution",
       message: "Bank account connected successfully",
     });
   } catch (error: unknown) {

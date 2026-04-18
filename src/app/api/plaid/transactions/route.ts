@@ -5,6 +5,7 @@ import {
   PlaidTransaction,
   detectSubscription,
 } from "@/lib/plaid";
+import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
   getAllPlaidConnections,
@@ -88,7 +89,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { userId, body } = auth;
-    const { startDate, endDate } = body;
+    const startDate = readNonEmptyString(body, "startDate");
+    const endDate = readNonEmptyString(body, "endDate");
 
     // Get active connections from database (all linked institutions)
     const allConnections = await getAllPlaidConnections(userId);
@@ -103,10 +105,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Default to last 30 days if no dates provided
-    const end = endDate || new Date().toISOString().split("T")[0];
+    // Default to last 30 days if no valid date strings provided
+    const end = endDate ?? new Date().toISOString().split("T")[0];
     const start =
-      startDate ||
+      startDate ??
       new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
         .toISOString()
         .split("T")[0];
