@@ -20,6 +20,7 @@ import {
   calculateProfileCompletion,
   clearSession,
 } from '@/lib/validation';
+import { supabase } from '@/lib/supabase';
 
 interface UserProfile {
   firstName?: string;
@@ -272,7 +273,10 @@ export default function SettingsPage() {
   };
 
   // Logout
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
     clearSession();
     localStorage.removeItem('noor_user_id');
     localStorage.removeItem('noor_user_profile');
