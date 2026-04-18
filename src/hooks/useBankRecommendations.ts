@@ -4,6 +4,7 @@ import {
   buildJsonAuthorizedHeaders,
   getSupabaseBearerHeaders,
 } from '@/lib/supabaseAuthHeaders';
+import { asPlainObject, readErrorMessage } from '@/lib/requestJson';
 
 // Types from bankRecommendation.ts v2
 export interface MatchReason {
@@ -136,12 +137,20 @@ export function useBankRecommendations({
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to fetch recommendations');
+        const errorData = asPlainObject(
+          await response.json().catch(() => ({}))
+        );
+        throw new Error(
+          readErrorMessage(errorData) || 'Failed to fetch recommendations'
+        );
       }
 
-      const data = await response.json();
-      setRecommendations(data.data);
+      const data = asPlainObject(await response.json());
+      const list = data.data;
+      if (!Array.isArray(list)) {
+        throw new Error('Invalid response');
+      }
+      setRecommendations(list as BankRecommendation[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
       setRecommendations([]);

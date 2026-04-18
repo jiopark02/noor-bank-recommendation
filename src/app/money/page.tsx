@@ -17,6 +17,11 @@ import {
   buildJsonAuthorizedHeaders,
   getSupabaseBearerHeaders,
 } from "@/lib/supabaseAuthHeaders";
+import {
+  asPlainObject,
+  readErrorMessage,
+  readString,
+} from "@/lib/requestJson";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
 
@@ -94,27 +99,27 @@ export default function MoneyPage() {
       });
 
       if (!accountsRes.ok) {
-        const data = await accountsRes.json();
-        if (
-          typeof data.error === "string" &&
-          /no active bank connections/i.test(data.error)
-        ) {
+        const data = asPlainObject(await accountsRes.json());
+        const errText = readString(data, "error");
+        if (errText && /no active bank connections/i.test(errText)) {
           localStorage.removeItem("noor_plaid_connections");
           plaidConnections.refetch();
         }
-        if (data.errorType === "ITEM_LOGIN_REQUIRED") {
+        if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {
           setError(
             "Your bank connection has expired. Please re-link your account."
           );
           setRelinkItemId(plaidConnections.connections[0]?.itemId || null);
           return;
         }
-        throw new Error(data.error || "Failed to fetch accounts");
+        throw new Error(readErrorMessage(data) || "Failed to fetch accounts");
       }
 
-      const accountsData = await accountsRes.json();
-      if (accountsData.success) {
-        setAccounts(accountsData.accounts);
+      const accountsData = asPlainObject(await accountsRes.json());
+      if (accountsData.success === true) {
+        setAccounts(
+          Array.isArray(accountsData.accounts) ? accountsData.accounts : []
+        );
       }
 
       // Fetch transactions
@@ -125,20 +130,24 @@ export default function MoneyPage() {
       });
 
       if (!txnRes.ok) {
-        const data = await txnRes.json();
-        if (data.errorType === "ITEM_LOGIN_REQUIRED") {
+        const data = asPlainObject(await txnRes.json());
+        if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {
           setError(
             "Your bank connection has expired. Please re-link your account."
           );
           setRelinkItemId(plaidConnections.connections[0]?.itemId || null);
           return;
         }
-        throw new Error(data.error || "Failed to fetch transactions");
+        throw new Error(
+          readErrorMessage(data) || "Failed to fetch transactions"
+        );
       }
 
-      const txnData = await txnRes.json();
-      if (txnData.success) {
-        setTransactions(txnData.transactions);
+      const txnData = asPlainObject(await txnRes.json());
+      if (txnData.success === true) {
+        setTransactions(
+          Array.isArray(txnData.transactions) ? txnData.transactions : []
+        );
         setSubscriptions(
           Array.isArray(txnData.subscriptions) ? txnData.subscriptions : []
         );
@@ -220,9 +229,11 @@ export default function MoneyPage() {
           }),
         });
 
-        const data = await response.json();
-        if (!data.success) {
-          throw new Error(data.error || "Failed to complete re-link");
+        const data = asPlainObject(await response.json());
+        if (data.success !== true) {
+          throw new Error(
+            readErrorMessage(data) || "Failed to complete re-link"
+          );
         }
 
         setRelinkToken(null);

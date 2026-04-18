@@ -7,7 +7,15 @@ import {
   isSupabaseConfigured,
 } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
-import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
+import {
+  asPlainObject,
+  readFiniteNumber,
+  readRequestJson,
+} from "@/lib/requestJson";
+import {
+  buildJsonAuthorizedHeaders,
+  extrasFromAuthorizationValue,
+} from "@/lib/supabaseAuthHeaders";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -97,9 +105,12 @@ function normalizeOpenRouterModelId(model: string): string {
   return trimmed;
 }
 
-function hasOpenRouterKey(): boolean {
+function resolveOpenRouterApiKey(): string | null {
   const key = process.env.OPENROUTER_API_KEY;
-  return !!key && key.trim() !== "";
+  if (!key || key.trim() === "") {
+    return null;
+  }
+  return key.trim();
 }
 
 // Initialize Anthropic client only if API key exists (used when OpenRouter not set)
@@ -114,6 +125,24 @@ function getAnthropicClient() {
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+function parseChatMessages(raw: unknown): ChatMessage[] | null {
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+  const out: ChatMessage[] = [];
+  for (const item of raw) {
+    const o = asPlainObject(item);
+    if (o.role !== "user" && o.role !== "assistant") {
+      return null;
+    }
+    if (typeof o.content !== "string") {
+      return null;
+    }
+    out.push({ role: o.role, content: o.content });
+  }
+  return out.length > 0 ? out : null;
 }
 
 interface OpenRouterResult {
@@ -442,9 +471,8 @@ async function fetchBalanceSummaryFromPlaidRoute(
   request: NextRequest
 ): Promise<string | null> {
   try {
-    const auth = request.headers.get("authorization");
     const plaidHeaders = buildJsonAuthorizedHeaders(
-      auth ? { Authorization: auth } : {}
+      extrasFromAuthorizationValue(request.headers.get("authorization"))
     );
     const accountsUrl = new URL("/api/plaid/accounts", request.url);
     const response = await fetch(accountsUrl.toString(), {
@@ -477,9 +505,8 @@ async function fetchFinancialSnapshotFromPlaidRoutes(
       .toISOString()
       .split("T")[0];
 
-    const auth = request.headers.get("authorization");
     const plaidHeaders = buildJsonAuthorizedHeaders(
-      auth ? { Authorization: auth } : {}
+      extrasFromAuthorizationValue(request.headers.get("authorization"))
     );
 
     const [accountsRes, transactionsRes] = await Promise.all([
@@ -583,6 +610,7 @@ function selectOpenRouterModels(messages: ChatMessage[]): string[] {
 }
 
 async function callOpenRouter(
+  apiKey: string,
   model: string,
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
 ): Promise<OpenRouterResult> {
@@ -590,7 +618,7 @@ async function callOpenRouter(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model,
@@ -599,11 +627,18 @@ async function callOpenRouter(
     }),
   });
 
-  const data = await res.json().catch(() => ({}));
+  const data = asPlainObject(await res.json().catch(() => ({})));
 
   if (!res.ok) {
+    const errNested = data.error;
+    const errObj =
+      typeof errNested === "object" && errNested !== null
+        ? asPlainObject(errNested)
+        : {};
     const errMsg =
-      data?.error?.message || data?.message || "OpenRouter request failed";
+      (typeof errObj.message === "string" ? errObj.message : undefined) ||
+      (typeof data.message === "string" ? data.message : undefined) ||
+      "OpenRouter request failed";
     return {
       ok: false,
       status: res.status,
@@ -612,19 +647,33 @@ async function callOpenRouter(
     };
   }
 
-  const rawContent = data?.choices?.[0]?.message?.content;
+  const choices = data.choices;
+  const firstChoice =
+    Array.isArray(choices) && choices.length > 0
+      ? asPlainObject(choices[0])
+      : {};
+  const messageObj = asPlainObject(firstChoice.message);
+  const rawContent = messageObj.content;
   const assistantContent = typeof rawContent === "string" ? rawContent : "";
-  const usage = data?.usage;
+  const usageRaw = data.usage;
+  const usageObj =
+    typeof usageRaw === "object" && usageRaw !== null
+      ? asPlainObject(usageRaw)
+      : null;
 
   return {
     ok: true,
     status: 200,
     model,
     message: assistantContent || "Sorry, I could not generate a response.",
-    usage: usage
+    usage: usageObj
       ? {
-          input_tokens: usage.prompt_tokens ?? usage.input_tokens,
-          output_tokens: usage.completion_tokens ?? usage.output_tokens,
+          input_tokens:
+            readFiniteNumber(usageObj, "prompt_tokens") ??
+            readFiniteNumber(usageObj, "input_tokens"),
+          output_tokens:
+            readFiniteNumber(usageObj, "completion_tokens") ??
+            readFiniteNumber(usageObj, "output_tokens"),
         }
       : undefined,
   };
@@ -637,25 +686,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { messages, userContext } = await request.json();
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    const rawBody = await readRequestJson(request);
+    const bodyObj = asPlainObject(rawBody);
+    const parsedMessages = parseChatMessages(bodyObj.messages);
+    if (!parsedMessages) {
       return NextResponse.json(
         { error: "Messages are required" },
         { status: 400 }
       );
     }
 
-    let mergedUserContext: UserContext = userContext || {};
+    const userContextRaw = bodyObj.userContext;
+    const userContextPatch: Partial<UserContext> =
+      userContextRaw === undefined
+        ? {}
+        : (asPlainObject(userContextRaw) as Partial<UserContext>);
 
     const dbContext = await loadReadOnlyUserContextFromSupabase(authUserId);
-    mergedUserContext = {
+    const mergedUserContext: UserContext = {
       ...dbContext,
-      ...(userContext || {}),
+      ...userContextPatch,
     };
 
-    const formattedMessages = messages.map((msg: ChatMessage) => ({
-      role: msg.role as "user" | "assistant",
+    const formattedMessages = parsedMessages.map((msg) => ({
+      role: msg.role,
       content: msg.content,
     }));
     const lastUserMessageText = getLastUserMessage(formattedMessages);
@@ -735,7 +789,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 1) Prefer OpenRouter when OPENROUTER_API_KEY is set
-    if (hasOpenRouterKey()) {
+    const openRouterApiKey = resolveOpenRouterApiKey();
+    if (openRouterApiKey) {
       const openRouterMessages = [
         { role: "system" as const, content: systemPrompt },
         ...formattedMessages,
@@ -745,7 +800,11 @@ export async function POST(request: NextRequest) {
       let lastFailure: OpenRouterResult | null = null;
 
       for (const model of modelsToTry) {
-        const result = await callOpenRouter(model, openRouterMessages);
+        const result = await callOpenRouter(
+          openRouterApiKey,
+          model,
+          openRouterMessages
+        );
 
         if (result.ok) {
           return NextResponse.json({

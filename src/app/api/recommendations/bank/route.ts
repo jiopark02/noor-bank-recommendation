@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { getAuthenticatedUserIdFromRequest } from '@/lib/apiAuth';
+import {
+  asPlainObject,
+  readFiniteNumber,
+  readNonEmptyString,
+  readRecord,
+  readRequestJson,
+  readString,
+} from '@/lib/requestJson';
 import { getRecommendations, saveRecommendations, BankRecommendation } from '@/lib/bankRecommendation';
 
 // Mock data for development - US Banks
@@ -785,8 +793,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { recommendationId, action, data } = body;
+    const rawBody = await readRequestJson(request);
+    const body = asPlainObject(rawBody);
+    const recommendationId = readNonEmptyString(body, 'recommendationId');
+    const action = readNonEmptyString(body, 'action');
+    const data = readRecord(body, 'data');
 
     if (!recommendationId || !action) {
       return NextResponse.json(
@@ -822,22 +833,25 @@ export async function POST(request: NextRequest) {
           .eq('user_id', userId);
         break;
 
-      case 'rate':
-        if (!data?.rating) {
+      case 'rate': {
+        const rating = data ? readFiniteNumber(data, 'rating') : undefined;
+        if (rating === undefined) {
           return NextResponse.json(
             { error: 'rating is required for rate action' },
             { status: 400 }
           );
         }
+        const feedback = data ? readString(data, 'feedback') : undefined;
         await supabase
           .from('recommendations_new')
           .update({
-            user_rating: data.rating,
-            user_feedback: data.feedback || null,
+            user_rating: rating,
+            user_feedback: feedback ?? null,
           })
           .eq('id', recommendationId)
           .eq('user_id', userId);
         break;
+      }
 
       default:
         return NextResponse.json(

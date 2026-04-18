@@ -1,10 +1,22 @@
 import { supabase } from "@/lib/supabase";
 
+/** String-valued header map — assignable to `fetch` `HeadersInit`. */
+export type FetchStringHeaders = Record<string, string>;
+
+/**
+ * Forward a browser or upstream `Authorization` header value for internal fetches.
+ */
+export function extrasFromAuthorizationValue(
+  authorization: string | null
+): FetchStringHeaders {
+  return authorization ? { Authorization: authorization } : {};
+}
+
 /**
  * Authorization header for API routes that validate the Supabase access token.
  */
 export async function getSupabaseBearerHeaders(): Promise<
-  Record<string, string>
+  FetchStringHeaders
 > {
   if (!supabase) {
     return {};
@@ -25,12 +37,12 @@ export async function getSupabaseBearerHeaders(): Promise<
 }
 
 /**
- * JSON POST/PUT fetch — explicit Record so `headers` satisfies HeadersInit.
+ * JSON POST/PUT fetch — explicit string map so `headers` satisfies `HeadersInit`.
  */
 export function buildJsonAuthorizedHeaders(
-  authExtras: Record<string, string>
-): Record<string, string> {
-  const plaidHeaders: Record<string, string> = {
+  authExtras: FetchStringHeaders
+): FetchStringHeaders {
+  const plaidHeaders: FetchStringHeaders = {
     "Content-Type": "application/json",
   };
   if (authExtras.Authorization) {
@@ -43,9 +55,9 @@ export function buildJsonAuthorizedHeaders(
  * GET (or body-less) fetch — only Bearer when present.
  */
 export function buildBearerOnlyHeaders(
-  authExtras: Record<string, string>
-): Record<string, string> {
-  const headers: Record<string, string> = {};
+  authExtras: FetchStringHeaders
+): FetchStringHeaders {
+  const headers: FetchStringHeaders = {};
   if (authExtras.Authorization) {
     headers.Authorization = authExtras.Authorization;
   }

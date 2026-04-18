@@ -3,6 +3,7 @@ import {
   buildJsonAuthorizedHeaders,
   getSupabaseBearerHeaders,
 } from "@/lib/supabaseAuthHeaders";
+import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 
 export interface PlaidConnection {
   itemId: string;
@@ -68,13 +69,18 @@ export function usePlaidConnections(userId: string | null) {
         body: JSON.stringify({}),
       });
 
+      const payload = asPlainObject(await response.json());
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to create link token");
+        throw new Error(
+          readErrorMessage(payload) || "Failed to create link token"
+        );
       }
 
-      const { linkToken } = await response.json();
-      return linkToken; // Return link token so component can open Plaid Link
+      const linkToken = readString(payload, "linkToken");
+      if (!linkToken) {
+        throw new Error("Failed to create link token");
+      }
+      return linkToken;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to connect bank";
@@ -101,9 +107,9 @@ export function usePlaidConnections(userId: string | null) {
           body: JSON.stringify({ itemId }),
         });
 
+        const payload = asPlainObject(await response.json());
         if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.error || "Failed to disconnect");
+          throw new Error(readErrorMessage(payload) || "Failed to disconnect");
         }
 
         // Update local state
@@ -147,13 +153,18 @@ export function usePlaidConnections(userId: string | null) {
           body: JSON.stringify({ itemId }),
         });
 
+        const payload = asPlainObject(await response.json());
         if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.error || "Failed to create relink token");
+          throw new Error(
+            readErrorMessage(payload) || "Failed to create relink token"
+          );
         }
 
-        const { linkToken } = await response.json();
-        return linkToken; // Return link token so component can open Plaid Link
+        const linkToken = readString(payload, "linkToken");
+        if (!linkToken) {
+          throw new Error("Failed to create relink token");
+        }
+        return linkToken;
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to relink bank";
@@ -188,9 +199,11 @@ export function usePlaidConnections(userId: string | null) {
           }),
         });
 
+        const payload = asPlainObject(await response.json());
         if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || "Failed to save connection");
+          throw new Error(
+            readErrorMessage(payload) || "Failed to save connection"
+          );
         }
 
         // Update local connections

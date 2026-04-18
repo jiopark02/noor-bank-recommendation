@@ -10,6 +10,7 @@ import {
   buildJsonAuthorizedHeaders,
   getSupabaseBearerHeaders,
 } from "@/lib/supabaseAuthHeaders";
+import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 interface StoredBudget {
   total?: number;
@@ -211,17 +212,23 @@ export default function HomePage() {
       ]);
 
       if (!accountsRes.ok) {
-        const data = await accountsRes.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to fetch accounts");
+        const data = asPlainObject(
+          await accountsRes.json().catch(() => ({}))
+        );
+        throw new Error(readErrorMessage(data) || "Failed to fetch accounts");
       }
 
       if (!transactionsRes.ok) {
-        const data = await transactionsRes.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to fetch transactions");
+        const data = asPlainObject(
+          await transactionsRes.json().catch(() => ({}))
+        );
+        throw new Error(
+          readErrorMessage(data) || "Failed to fetch transactions"
+        );
       }
 
-      const accountsData = await accountsRes.json();
-      const transactionsData = await transactionsRes.json();
+      const accountsData = asPlainObject(await accountsRes.json());
+      const transactionsData = asPlainObject(await transactionsRes.json());
 
       const nextAccounts = Array.isArray(accountsData.accounts)
         ? accountsData.accounts

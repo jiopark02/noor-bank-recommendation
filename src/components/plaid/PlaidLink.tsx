@@ -5,6 +5,7 @@ import {
   buildJsonAuthorizedHeaders,
   getSupabaseBearerHeaders,
 } from "@/lib/supabaseAuthHeaders";
+import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 import {
   usePlaidLink,
   PlaidLinkOptions,
@@ -56,12 +57,19 @@ export function PlaidLinkButton({
           body: JSON.stringify({}),
         });
 
-        const data = await response.json();
+        const data = asPlainObject(await response.json());
 
-        if (data.success) {
-          setLinkToken(data.linkToken);
+        if (data.success === true) {
+          const token = readString(data, "linkToken");
+          if (token) {
+            setLinkToken(token);
+          } else {
+            setError(
+              readErrorMessage(data) || "Failed to create link token"
+            );
+          }
         } else {
-          setError(data.error || "Failed to create link token");
+          setError(readErrorMessage(data) || "Failed to create link token");
         }
       } catch (err) {
         setError("Failed to initialize Plaid");
@@ -174,9 +182,14 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
           }),
         });
 
-        const data = await response.json();
+        const data = asPlainObject(await response.json());
 
-        if (data.success) {
+        if (data.success === true) {
+          const itemId = readString(data, "itemId");
+          if (!itemId) {
+            console.error("Failed to exchange token:", readErrorMessage(data));
+            return;
+          }
           const stored = localStorage.getItem("noor_plaid_connections") || "[]";
           const existing = JSON.parse(stored) as Array<{
             itemId: string;
@@ -187,13 +200,13 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
           }>;
 
           const nextConnection = {
-            itemId: data.itemId,
+            itemId,
             institutionName:
-              data.institutionName ||
+              readString(data, "institutionName") ||
               metadata.institution.name ||
               "Unknown Bank",
             institutionId:
-              data.institutionId ||
+              readString(data, "institutionId") ||
               metadata.institution.institution_id ||
               undefined,
             status: "active" as const,
@@ -212,7 +225,10 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
           // Refresh parent component
           onConnected?.();
         } else {
-          console.error("Failed to exchange token:", data.error);
+          console.error(
+            "Failed to exchange token:",
+            readErrorMessage(data) ?? data
+          );
         }
       } catch (err) {
         console.error("Error exchanging token:", err);

@@ -9,6 +9,7 @@ import {
   buildJsonAuthorizedHeaders,
   getSupabaseBearerHeaders,
 } from "@/lib/supabaseAuthHeaders";
+import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 const STORAGE_KEY = "noor_chat_history";
 
@@ -88,17 +89,35 @@ export function useChat({
       const response = await fetch(`/api/chat`, {
         headers: buildBearerOnlyHeaders(await getSupabaseBearerHeaders()),
       });
-      const data = await response.json();
+      const data = asPlainObject(await response.json());
 
-      if (data.messages && Array.isArray(data.messages)) {
+      if (Array.isArray(data.messages)) {
         const formattedMessages: ChatMessage[] = data.messages.map(
-          (msg: any) => ({
-            id: msg.id || generateId(),
-            role: msg.role,
-            content: msg.content || msg.message || "",
-            timestamp: new Date(msg.created_at || msg.timestamp || Date.now()),
-            model: typeof msg.model === "string" ? msg.model : undefined,
-          })
+          (msg: unknown) => {
+            const m = asPlainObject(msg);
+            const role =
+              m.role === "assistant" || m.role === "user" ? m.role : "user";
+            const content =
+              typeof m.content === "string"
+                ? m.content
+                : typeof m.message === "string"
+                  ? m.message
+                  : "";
+            const ts =
+              typeof m.created_at === "string"
+                ? m.created_at
+                : typeof m.timestamp === "string" ||
+                    typeof m.timestamp === "number"
+                  ? m.timestamp
+                  : Date.now();
+            return {
+              id: typeof m.id === "string" ? m.id : generateId(),
+              role,
+              content,
+              timestamp: new Date(ts),
+              model: typeof m.model === "string" ? m.model : undefined,
+            };
+          }
         );
 
         if (formattedMessages.length > 0) {
@@ -184,17 +203,22 @@ export function useChat({
           }),
         });
 
-        const data = await response.json();
+        const data = asPlainObject(await response.json());
 
         if (!response.ok) {
-          throw new Error(data.error || "Failed to get response");
+          throw new Error(readErrorMessage(data) || "Failed to get response");
         }
+
+        const assistantText =
+          typeof data.message === "string"
+            ? data.message
+            : "Sorry, I could not generate a response.";
 
         // Add assistant message
         const assistantMessage: ChatMessage = {
           id: generateId(),
           role: "assistant",
-          content: data.message,
+          content: assistantText,
           timestamp: new Date(),
           model: typeof data.model === "string" ? data.model : undefined,
         };

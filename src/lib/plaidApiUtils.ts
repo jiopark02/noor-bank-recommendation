@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "./supabase";
 import { getAuthenticatedUserIdFromRequest } from "./apiAuth";
+import { asPlainObject, readRequestJson } from "@/lib/requestJson";
 
 /**
  * Authenticate Plaid API requests via Supabase Bearer JWT.
@@ -15,9 +16,9 @@ export async function authenticate(
       return null;
     }
 
-    const raw = await request.json().catch(() => ({}));
-    const body = { ...(typeof raw === "object" && raw !== null ? raw : {}) };
-    delete (body as { userId?: unknown }).userId;
+    const raw = await readRequestJson(request);
+    const body: Record<string, unknown> = { ...asPlainObject(raw) };
+    delete body.userId;
 
     return { userId, body };
   } catch {
