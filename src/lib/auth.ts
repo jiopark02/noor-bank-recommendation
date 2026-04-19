@@ -1,12 +1,11 @@
 // Shared authentication utilities
 
-// Simple hash function for password (in production, use bcrypt)
+import bcrypt from "bcrypt";
+
+const BCRYPT_SALT_ROUNDS = 12;
+
 export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + 'noor_salt_2024');
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 }
 
 // User type for local store
@@ -54,6 +53,5 @@ export function emailExists(email: string): boolean {
 
 // Verify password
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const passwordHash = await hashPassword(password);
-  return passwordHash === hash;
+  return bcrypt.compare(password, hash);
 }
