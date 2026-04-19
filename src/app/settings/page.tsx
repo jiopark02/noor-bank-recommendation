@@ -20,13 +20,20 @@ import {
   calculateProfileCompletion,
   clearSession,
 } from '@/lib/validation';
-import { supabase } from '@/lib/supabase-browser';
+import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
+import { buildJsonAuthorizedHeaders } from '@/lib/supabaseAuthHeaders';
+import {
+  UniversitySearchField,
+  type UniversitySearchInstitutionType,
+} from '@/components/survey/UniversitySearchField';
 
 interface UserProfile {
   firstName?: string;
   lastName?: string;
   email?: string;
   institutionId?: string;
+  institutionType?: string;
+  destinationCountry?: string;
   university?: string;
   countryOfOrigin?: string;
   phone?: string;
@@ -80,6 +87,7 @@ export default function SettingsPage() {
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
   const [editUniversity, setEditUniversity] = useState('');
+  const [editInstitutionId, setEditInstitutionId] = useState('');
   const [editPhone, setEditPhone] = useState('');
 
   useEffect(() => {
@@ -90,6 +98,7 @@ export default function SettingsPage() {
       setEditFirstName(parsed.firstName || '');
       setEditLastName(parsed.lastName || '');
       setEditUniversity(parsed.university || '');
+      setEditInstitutionId(parsed.institutionId || '');
       setEditPhone(parsed.phone || '');
     }
 
@@ -119,6 +128,24 @@ export default function SettingsPage() {
   const hasTheme = userProfile?.institutionId
     ? hasCustomTheme(userProfile.institutionId)
     : false;
+
+  /** Same sources as survey: profile destination or app country chip */
+  const surveySearchCountry = useMemo(() => {
+    const fromProfile = userProfile?.destinationCountry;
+    if (fromProfile === 'US' || fromProfile === 'UK' || fromProfile === 'CA') {
+      return fromProfile;
+    }
+    if (typeof window === 'undefined') return 'US';
+    const fromLs = localStorage.getItem('noor_selected_country');
+    if (fromLs === 'US' || fromLs === 'UK' || fromLs === 'CA') return fromLs;
+    return 'US';
+  }, [userProfile?.destinationCountry]);
+
+  const surveyInstitutionSearchType = useMemo((): UniversitySearchInstitutionType => {
+    if (userProfile?.institutionType === 'community_college') return 'community_college';
+    if (userProfile?.institutionType === 'university') return 'university';
+    return 'all';
+  }, [userProfile?.institutionType]);
 
   // Show success message with auto-dismiss
   const showSuccess = (message: string) => {
@@ -226,17 +253,42 @@ export default function SettingsPage() {
     setError(null);
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-
+      const uniLabel = editUniversity.trim();
       const updated = {
         ...userProfile,
         firstName: editFirstName,
         lastName: editLastName,
-        university: editUniversity.trim() || undefined,
+        university: uniLabel || undefined,
+        institutionId: editInstitutionId || undefined,
         phone: editPhone,
       };
       localStorage.setItem('noor_user_profile', JSON.stringify(updated));
       setUserProfile(updated);
+
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (rawAuth.Authorization && uniLabel) {
+        const res = await fetch('/api/profile/survey-response', {
+          method: 'PATCH',
+          headers: buildJsonAuthorizedHeaders(rawAuth),
+          body: JSON.stringify({
+            university: uniLabel,
+            institution_id: editInstitutionId || null,
+          }),
+        });
+        if (res.status === 401) {
+          setError('Sign in again to sync your school to the server.');
+          setIsLoading(false);
+          return;
+        }
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+          if (res.status !== 404) {
+            setError(errBody.error || 'Could not sync school to database');
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
 
       setActiveModal(null);
       showSuccess('Profile updated successfully');
@@ -386,6 +438,7 @@ export default function SettingsPage() {
                   setEditFirstName(userProfile.firstName || '');
                   setEditLastName(userProfile.lastName || '');
                   setEditUniversity(userProfile.university || '');
+                  setEditInstitutionId(userProfile.institutionId || '');
                   setEditPhone(userProfile.phone || '');
                 }
                 setActiveModal('editProfile');
@@ -838,12 +891,23 @@ export default function SettingsPage() {
 
               <div>
                 <label className="text-xs text-[#6B6B6B]">University</label>
-                <input
-                  type="text"
-                  value={editUniversity}
-                  onChange={(e) => setEditUniversity(e.target.value)}
-                  placeholder="Your school or institution"
-                  className="w-full px-3 py-2 mt-1 border border-gray-200 rounded-lg text-sm"
+                <UniversitySearchField
+                  country={surveySearchCountry}
+                  institutionType={surveyInstitutionSearchType}
+                  selectedInstitutionId={editInstitutionId}
+                  searchQuery={editUniversity}
+                  onSearchQueryChange={setEditUniversity}
+                  onSelect={(inst) => {
+                    setEditInstitutionId(inst.id);
+                    setEditUniversity(inst.short_name);
+                  }}
+                  onCantFind={(typed) => {
+                    setEditInstitutionId('other');
+                    setEditUniversity(typed || 'Other');
+                  }}
+                  searchPlaceholder="Search by school name…"
+                  cantFindLabel="Can't find my school"
+                  noResultsLabel="No schools found — use my text as school name"
                 />
               </div>
 
