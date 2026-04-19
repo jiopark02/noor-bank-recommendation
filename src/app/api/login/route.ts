@@ -30,17 +30,41 @@ export async function POST(request: NextRequest) {
           .single();
 
         if (!error && user) {
+          const profile: Record<string, unknown> = {
+            firstName: user.first_name,
+            lastName: user.last_name,
+            email: user.email,
+            institutionId: (user as { institution_id?: string | null })
+              .institution_id,
+            university: (user as { university?: string | null }).university,
+            countryOfOrigin: (user as { country_of_origin?: string | null })
+              .country_of_origin,
+          };
+
+          const { data: surveyRows } = await supabase
+            .from('survey_responses')
+            .select('university, institution_id')
+            .eq('user_id', user.id)
+            .order('updated_at', { ascending: false })
+            .limit(1);
+
+          const surveyRow = surveyRows?.[0] as
+            | { university: string | null; institution_id: string | null }
+            | undefined;
+          if (surveyRow?.university != null && surveyRow.university !== '') {
+            profile.university = surveyRow.university;
+          }
+          if (
+            surveyRow?.institution_id != null &&
+            surveyRow.institution_id !== ''
+          ) {
+            profile.institutionId = surveyRow.institution_id;
+          }
+
           return NextResponse.json({
             success: true,
             userId: user.id,
-            profile: {
-              firstName: user.first_name,
-              lastName: user.last_name,
-              email: user.email,
-              institutionId: user.institution_id,
-              university: user.university,
-              countryOfOrigin: user.country_of_origin,
-            },
+            profile,
             message: 'Login successful',
           });
         }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
+import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 import { createSession } from "@/lib/validation";
 
 export default function AuthCallbackPage() {
@@ -38,7 +39,7 @@ export default function AuthCallbackPage() {
           const lastNameFromFull = fullName
             ? fullName.split(" ").slice(1).join(" ")
             : "";
-          const profile = {
+          let profile: Record<string, unknown> = {
             id: user.id,
             email: user.email,
             firstName: user.user_metadata?.first_name || firstNameFromFull,
@@ -48,6 +49,12 @@ export default function AuthCallbackPage() {
               user.user_metadata?.picture ||
               "",
           };
+
+          const surveyFields = await getSurveyFieldsForUserProfile(
+            supabase,
+            user.id
+          );
+          profile = { ...profile, ...surveyFields };
 
           // Best-effort sync to public.users so OAuth users get a profile row.
           await fetch("/api/auth/sync-profile", {

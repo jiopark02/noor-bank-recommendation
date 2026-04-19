@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserIdFromRequest } from '@/lib/apiAuth';
 import { createServerClient } from '@/lib/supabase';
@@ -6,6 +7,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * PATCH authenticated user's survey_responses row (university + institution).
+ * Updates an existing row; if none exists, inserts a minimal row (upsert).
  */
 export async function PATCH(request: NextRequest) {
   try {
@@ -49,10 +51,40 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (!data || data.length === 0) {
-      return NextResponse.json(
-        { error: 'No survey response found for this account' },
-        { status: 404 }
-      );
+      const insertRow: {
+        id: string;
+        user_id: string;
+        university: string;
+        institution_id: string | null;
+        onboarding_completed: boolean;
+      } = {
+        id: randomUUID(),
+        user_id: userId,
+        university: updatePayload.university,
+        institution_id:
+          updatePayload.institution_id !== undefined
+            ? updatePayload.institution_id
+            : null,
+        onboarding_completed: false,
+      };
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('survey_responses')
+        .insert(insertRow)
+        .select('id');
+
+      if (insertError) {
+        console.error('survey_responses insert error:', insertError);
+        return NextResponse.json(
+          { error: insertError.message },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        inserted: inserted?.length ?? 0,
+      });
     }
 
     return NextResponse.json({ success: true, updated: data.length });

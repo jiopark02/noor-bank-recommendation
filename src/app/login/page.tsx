@@ -11,6 +11,7 @@ import {
   ERROR_MESSAGES,
 } from "@/lib/validation";
 import { supabase } from "@/lib/supabase-browser";
+import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -120,8 +121,17 @@ export default function LoginPage() {
           };
         }
 
+        const surveyFields = await getSurveyFieldsForUserProfile(
+          supabase,
+          user.id
+        );
+        const profileWithSurvey = { ...profile, ...surveyFields };
+
         localStorage.setItem("noor_user_id", user.id);
-        localStorage.setItem("noor_user_profile", JSON.stringify(profile));
+        localStorage.setItem(
+          "noor_user_profile",
+          JSON.stringify(profileWithSurvey)
+        );
 
         createSession(keepSignedIn);
         updateSessionActivity();

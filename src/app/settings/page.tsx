@@ -282,11 +282,9 @@ export default function SettingsPage() {
         }
         if (!res.ok) {
           const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-          if (res.status !== 404) {
-            setError(errBody.error || 'Could not sync school to database');
-            setIsLoading(false);
-            return;
-          }
+          setError(errBody.error || 'Could not sync school to database');
+          setIsLoading(false);
+          return;
         }
       }
 
