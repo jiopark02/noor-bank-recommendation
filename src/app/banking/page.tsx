@@ -6,6 +6,7 @@ import { PageLayout, PageHeader, Tabs, FilterChips, LoadingSpinner } from '@/com
 import { BankRecommendationList, BranchLocator } from '@/components/bank';
 import { CampusSide } from '@/lib/universityData';
 import { useCreditCards, CreditCard } from '@/hooks/useCreditCards';
+import { supabase } from '@/lib/supabase';
 
 const TABS = [
   { id: 'banks', label: 'Banks' },
@@ -100,35 +101,60 @@ export default function BankingPage() {
   const CARD_FILTERS = getCardFilters(destinationCountry);
 
   useEffect(() => {
-    const storedUserId = localStorage.getItem('noor_user_id');
-    if (!storedUserId) {
-      router.push('/survey');
-      return;
-    }
-    setUserId(storedUserId);
+    let cancelled = false;
 
-    // Load user profile for university and campus side
-    try {
-      const profile = localStorage.getItem('noor_user_profile');
-      if (profile) {
-        const parsed = JSON.parse(profile);
-        if (parsed.university) {
-          setUserUniversity(parsed.university);
-        }
-        if (parsed.campusSide && parsed.campusSide !== 'unknown') {
-          setUserCampusSide(parsed.campusSide as CampusSide);
+    async function resolveUserAndProfile() {
+      let resolvedId: string | null = null;
+
+      if (supabase) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!cancelled && session?.user?.id) {
+          resolvedId = session.user.id;
         }
       }
-    } catch (e) {
-      // Use defaults
+
+      if (!resolvedId && typeof window !== 'undefined') {
+        resolvedId = localStorage.getItem('noor_user_id');
+      }
+
+      if (cancelled) return;
+
+      if (!resolvedId) {
+        router.push('/login');
+        return;
+      }
+
+      setUserId(resolvedId);
+
+      // Load user profile for university and campus side
+      try {
+        const profile = localStorage.getItem('noor_user_profile');
+        if (profile) {
+          const parsed = JSON.parse(profile);
+          if (parsed.university) {
+            setUserUniversity(parsed.university);
+          }
+          if (parsed.campusSide && parsed.campusSide !== 'unknown') {
+            setUserCampusSide(parsed.campusSide as CampusSide);
+          }
+        }
+      } catch {
+        // Use defaults
+      }
+
+      // Load destination country - noor_selected_country is the source of truth
+      const savedCountry = localStorage.getItem('noor_selected_country');
+      if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
+        setDestinationCountry(savedCountry);
+      }
     }
 
-    // Load destination country - noor_selected_country is the source of truth
-    // This should be checked LAST to override any profile country
-    const savedCountry = localStorage.getItem('noor_selected_country');
-    if (savedCountry && (savedCountry === 'US' || savedCountry === 'UK' || savedCountry === 'CA')) {
-      setDestinationCountry(savedCountry);
-    }
+    resolveUserAndProfile();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   const { cards, isLoading: cardsLoading, error: cardsError, total: cardTotal, refetch: refetchCards } = useCreditCards({

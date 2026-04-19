@@ -2,10 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { BankRecommendationList } from '@/components/bank';
 import { supabase } from '@/lib/supabase';
 
 export default function BanksPage() {
+  const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -15,29 +17,37 @@ export default function BanksPage() {
     async function resolveUser() {
       if (typeof window === 'undefined') return;
 
+      let resolvedId: string | null = null;
+
       if (supabase) {
         const {
           data: { session },
         } = await supabase.auth.getSession();
         if (!cancelled && session?.user?.id) {
-          setUserId(session.user.id);
-          setReady(true);
-          return;
+          resolvedId = session.user.id;
         }
       }
 
-      const stored = localStorage.getItem('noor_user_id');
-      if (!cancelled) {
-        setUserId(stored);
-        setReady(true);
+      if (!resolvedId) {
+        resolvedId = localStorage.getItem('noor_user_id');
       }
+
+      if (cancelled) return;
+
+      if (!resolvedId) {
+        router.push('/login');
+        return;
+      }
+
+      setUserId(resolvedId);
+      setReady(true);
     }
 
     resolveUser();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   return (
     <div className="min-h-screen bg-gray-50">
