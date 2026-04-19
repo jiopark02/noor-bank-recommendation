@@ -71,8 +71,16 @@ export function useUniversitySearch({
     }
   }, [country, type, enabled]);
 
-  // Debounce search
+  // Debounce search — no request (and no list) until the user types a real query (API matches on 2+ chars)
   useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setUniversities([]);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+
     const timer = setTimeout(() => {
       fetchUniversities(query);
     }, 300);

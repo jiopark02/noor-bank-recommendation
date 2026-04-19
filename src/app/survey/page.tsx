@@ -1166,7 +1166,7 @@ export default function SurveyPage() {
                     }
                     className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
                   />
-                  {showInstitutionList && (
+                  {showInstitutionList && institutionSearch.trim().length >= 2 && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                       {filteredInstitutions.length > 0 ? (
                         <>
@@ -1198,7 +1198,7 @@ export default function SurveyPage() {
                             {t("survey.step1.cantFindSchool")}
                           </button>
                         </>
-                      ) : institutionSearch.length >= 2 ? (
+                      ) : institutionSearch.trim().length >= 2 ? (
                         <button
                           onClick={() => {
                             updateField("institutionId", "other");

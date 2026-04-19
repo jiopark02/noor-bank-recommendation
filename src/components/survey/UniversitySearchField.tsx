@@ -62,7 +62,7 @@ export function UniversitySearchField({
         className="w-full px-3 py-2 mt-1 border border-gray-200 rounded-lg text-sm outline-none focus:border-black"
         autoComplete="off"
       />
-      {showList && (
+      {showList && searchQuery.trim().length >= 2 && (
         <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
           {isLoading && (
             <div className="px-3 py-2 text-xs text-gray-500">Searching…</div>
@@ -99,7 +99,9 @@ export function UniversitySearchField({
               </button>
             </>
           )}
-          {!isLoading && universities.length === 0 && searchQuery.length >= 2 && (
+          {!isLoading &&
+            universities.length === 0 &&
+            searchQuery.trim().length >= 2 && (
             <button
               type="button"
               onClick={() => {
