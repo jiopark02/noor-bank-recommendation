@@ -36,6 +36,19 @@ interface UserProfile {
 
 type ModalType = 'delete' | 'changePassword' | 'changeEmail' | 'editProfile' | 'resetChecklist' | null;
 
+/** Keys from `calculateProfileCompletion` → user-facing labels for "Missing:" line */
+const PROFILE_FIELD_LABELS: Record<string, string> = {
+  firstName: 'First name',
+  lastName: 'Last name',
+  email: 'Email',
+  university: 'University',
+  countryOfOrigin: 'Country of Origin',
+};
+
+function formatMissingProfileFields(fields: string[]): string {
+  return fields.map((key) => PROFILE_FIELD_LABELS[key] ?? key).join(', ');
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, useSchoolTheme, toggleSchoolTheme, setTheme } = useTheme();
@@ -66,6 +79,7 @@ export default function SettingsPage() {
   // Profile edit form
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
+  const [editUniversity, setEditUniversity] = useState('');
   const [editPhone, setEditPhone] = useState('');
 
   useEffect(() => {
@@ -75,6 +89,7 @@ export default function SettingsPage() {
       setUserProfile(parsed);
       setEditFirstName(parsed.firstName || '');
       setEditLastName(parsed.lastName || '');
+      setEditUniversity(parsed.university || '');
       setEditPhone(parsed.phone || '');
     }
 
@@ -217,6 +232,7 @@ export default function SettingsPage() {
         ...userProfile,
         firstName: editFirstName,
         lastName: editLastName,
+        university: editUniversity.trim() || undefined,
         phone: editPhone,
       };
       localStorage.setItem('noor_user_profile', JSON.stringify(updated));
@@ -349,7 +365,7 @@ export default function SettingsPage() {
             </div>
             {profileCompletion.requiredFields.length > 0 && (
               <p className="text-xs text-blue-700 mt-2">
-                Missing: {profileCompletion.requiredFields.join(', ')}
+                Missing: {formatMissingProfileFields(profileCompletion.requiredFields)}
               </p>
             )}
           </motion.div>
@@ -364,7 +380,16 @@ export default function SettingsPage() {
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-sm font-medium text-[#1A1A1A]">Profile</h3>
             <button
-              onClick={() => setActiveModal('editProfile')}
+              type="button"
+              onClick={() => {
+                if (userProfile) {
+                  setEditFirstName(userProfile.firstName || '');
+                  setEditLastName(userProfile.lastName || '');
+                  setEditUniversity(userProfile.university || '');
+                  setEditPhone(userProfile.phone || '');
+                }
+                setActiveModal('editProfile');
+              }}
               className="text-xs text-blue-600 hover:underline"
             >
               Edit
@@ -809,6 +834,17 @@ export default function SettingsPage() {
                     className="w-full px-3 py-2 mt-1 border border-gray-200 rounded-lg text-sm"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-[#6B6B6B]">University</label>
+                <input
+                  type="text"
+                  value={editUniversity}
+                  onChange={(e) => setEditUniversity(e.target.value)}
+                  placeholder="Your school or institution"
+                  className="w-full px-3 py-2 mt-1 border border-gray-200 rounded-lg text-sm"
+                />
               </div>
 
               <div>
