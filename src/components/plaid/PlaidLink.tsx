@@ -1,10 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  buildJsonAuthorizedHeaders,
-  getSupabaseBearerHeaders,
-} from "@/lib/supabaseAuthHeaders";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
+import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 import {
   usePlaidLink,

@@ -14,7 +14,7 @@ import {
   createSession,
   acceptTerms,
 } from "@/lib/validation";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 import {
   Country,
   getVisaTypes,

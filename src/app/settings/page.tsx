@@ -20,7 +20,7 @@ import {
   calculateProfileCompletion,
   clearSession,
 } from '@/lib/validation';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser';
 
 interface UserProfile {
   firstName?: string;

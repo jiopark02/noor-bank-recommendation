@@ -6,7 +6,7 @@ import { PageLayout, PageHeader, Tabs, FilterChips, LoadingSpinner } from '@/com
 import { BankRecommendationList, BranchLocator } from '@/components/bank';
 import { CampusSide } from '@/lib/universityData';
 import { useCreditCards, CreditCard } from '@/hooks/useCreditCards';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser';
 
 const TABS = [
   { id: 'banks', label: 'Banks' },

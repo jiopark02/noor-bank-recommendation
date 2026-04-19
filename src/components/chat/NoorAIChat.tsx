@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { ChatButton } from "./ChatButton";
 import { ChatModal } from "./ChatModal";
 import { UserContext } from "@/lib/noorAIPrompt";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 
 interface NoorAIChatProps {
   userId?: string;

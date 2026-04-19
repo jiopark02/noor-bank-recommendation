@@ -6,10 +6,8 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { useTheme } from "@/contexts/ThemeContext";
-import {
-  buildJsonAuthorizedHeaders,
-  getSupabaseBearerHeaders,
-} from "@/lib/supabaseAuthHeaders";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
+import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 interface StoredBudget {

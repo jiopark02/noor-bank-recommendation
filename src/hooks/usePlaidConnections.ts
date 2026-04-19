@@ -1,8 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
-import {
-  buildJsonAuthorizedHeaders,
-  getSupabaseBearerHeaders,
-} from "@/lib/supabaseAuthHeaders";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
+import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 
 export interface PlaidConnection {

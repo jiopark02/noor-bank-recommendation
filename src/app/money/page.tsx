@@ -13,10 +13,8 @@ import {
   CATEGORY_COLORS,
 } from "@/lib/plaid";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
-import {
-  buildJsonAuthorizedHeaders,
-  getSupabaseBearerHeaders,
-} from "@/lib/supabaseAuthHeaders";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
+import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import {
   asPlainObject,
   readErrorMessage,

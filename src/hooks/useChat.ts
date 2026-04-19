@@ -7,8 +7,8 @@ import {
 import {
   buildBearerOnlyHeaders,
   buildJsonAuthorizedHeaders,
-  getSupabaseBearerHeaders,
 } from "@/lib/supabaseAuthHeaders";
+import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 const STORAGE_KEY = "noor_chat_history";

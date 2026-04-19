@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   buildBearerOnlyHeaders,
   buildJsonAuthorizedHeaders,
-  getSupabaseBearerHeaders,
 } from '@/lib/supabaseAuthHeaders';
+import { getSupabaseBearerHeaders } from '@/lib/supabase-browser';
 import { asPlainObject, readErrorMessage } from '@/lib/requestJson';
 
 // Types from bankRecommendation.ts v2

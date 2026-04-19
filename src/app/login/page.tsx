@@ -10,7 +10,7 @@ import {
   updateSessionActivity,
   ERROR_MESSAGES,
 } from "@/lib/validation";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 
 export default function LoginPage() {
   const router = useRouter();

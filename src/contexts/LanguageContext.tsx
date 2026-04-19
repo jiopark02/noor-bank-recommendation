@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Locale, locales, defaultLocale, isRTL } from '@/i18n/config';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser';
 
 // Import all messages statically
 import en from '../../messages/en.json';

@@ -1,5 +1,3 @@
-import { supabase } from "@/lib/supabase";
-
 /** String-valued header map — assignable to `fetch` `HeadersInit`. */
 export type FetchStringHeaders = Record<string, string>;
 
@@ -10,30 +8,6 @@ export function extrasFromAuthorizationValue(
   authorization: string | null
 ): FetchStringHeaders {
   return authorization ? { Authorization: authorization } : {};
-}
-
-/**
- * Authorization header for API routes that validate the Supabase access token.
- */
-export async function getSupabaseBearerHeaders(): Promise<
-  FetchStringHeaders
-> {
-  if (!supabase) {
-    return {};
-  }
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  const token = session?.access_token;
-  if (!token) {
-    return {};
-  }
-
-  return {
-    Authorization: `Bearer ${token}`,
-  };
 }
 
 /**
