@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getAuthenticatedUserIdFromRequest } from '@/lib/apiAuth';
 import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
 import {
   VISA_TYPES,
@@ -15,6 +16,10 @@ export async function POST(request: NextRequest) {
         { error: 'Supabase is not configured' },
         { status: 500 }
       );
+    }
+
+    if (!(await getAuthenticatedUserIdFromRequest(request))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const supabase = createServerClient();

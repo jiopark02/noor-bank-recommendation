@@ -1,15 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { getAuthenticatedUserIdFromRequest } from '@/lib/apiAuth';
 import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
 import { ALL_UNIVERSITIES } from '@/lib/universities';
 
 export const maxDuration = 60; // Allow up to 60 seconds for this endpoint
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
       { error: 'Supabase not configured' },
       { status: 503 }
     );
+  }
+
+  if (!(await getAuthenticatedUserIdFromRequest(request))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const supabase = createServerClient();
@@ -99,12 +104,16 @@ export async function POST() {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
       { error: 'Supabase not configured' },
       { status: 503 }
     );
+  }
+
+  if (!(await getAuthenticatedUserIdFromRequest(request))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const supabase = createServerClient();
