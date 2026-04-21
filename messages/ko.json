@@ -43,6 +43,8 @@
   },
   "nav": {
     "home": "홈",
+    "ai": "AI",
+    "chat": "채팅",
     "banking": "뱅킹",
     "housing": "주거",
     "visa": "비자",

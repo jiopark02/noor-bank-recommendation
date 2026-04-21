@@ -497,19 +497,21 @@ export default function HomePage() {
   return (
     <PageLayout userName={userName}>
       <motion.header
-        className="mb-10"
+        className="mb-8 md:mb-10"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <h1 className="text-2xl font-semibold text-black">Dashboard</h1>
+        <h1 className="text-2xl font-semibold text-black tracking-tight">
+          Dashboard
+        </h1>
         <p className="text-sm text-gray-500 mt-1">
-          A minimal view of your assistant and money overview.
+          Your assistant and money overview in one place.
         </p>
       </motion.header>
 
-      <section className="grid gap-8 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-8 md:grid-cols-2 md:gap-10">
         <motion.div
-          className="noor-card p-8 flex flex-col min-h-[620px]"
+          className="noor-card p-6 md:p-8 flex flex-col min-h-[min(520px,70vh)] md:min-h-[620px]"
           initial={{ opacity: 0, x: -16 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.35 }}
@@ -618,15 +620,14 @@ export default function HomePage() {
             )}
 
             {!isLoadingData && moneyError && (
-              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="mb-4 rounded-xl border border-red-200 bg-rose-50 px-4 py-3 text-sm text-red-800">
                 {moneyError}
               </div>
             )}
 
             {!isLoadingData && !moneyError && !hasBankConnection && (
-              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                No active bank connection found. Connect your bank in Money page
-                to show live data.
+              <div className="mb-4 rounded-xl border border-red-200 bg-rose-50 px-4 py-3 text-sm text-red-800">
+                No active bank connections found. Please connect a bank first.
               </div>
             )}
 
@@ -702,7 +703,7 @@ export default function HomePage() {
 
             <Link
               href="/money"
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium border border-gray-200 text-black hover:border-gray-300"
+              className="inline-flex items-center rounded-full px-5 py-2.5 text-sm font-medium border-[1.5px] border-black text-black bg-white hover:bg-black hover:text-white transition-colors"
             >
               Open Money
             </Link>

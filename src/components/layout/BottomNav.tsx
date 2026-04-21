@@ -15,18 +15,19 @@ interface NavItem {
   descriptionKey?: string;
 }
 
-// Main navigation items (shown in bottom bar)
+// Primary tab: dashboard (AI preview); full chat lives in More
 const MAIN_NAV_ITEMS: NavItem[] = [
-  { href: "/", labelKey: "nav.home", icon: HomeIcon },
+  { href: "/", labelKey: "nav.ai", icon: AiTabIcon },
+];
+
+// Former primary nav + all “More” destinations (scrollable sheet)
+const MORE_NAV_ITEMS: NavItem[] = [
   { href: "/banking", labelKey: "nav.banking", icon: BankingIcon },
   { href: "/grow", labelKey: "nav.grow", icon: GrowIcon },
   { href: "/visa", labelKey: "nav.visa", icon: VisaIcon },
-];
-
-// More menu items (shown in slide-up panel)
-const MORE_NAV_ITEMS: NavItem[] = [
-  { href: "/housing", labelKey: "nav.housing", icon: HousingIcon },
   { href: "/money", labelKey: "nav.money", icon: MoneyIcon },
+  { href: "/chat", labelKey: "nav.chat", icon: ChatSheetIcon },
+  { href: "/housing", labelKey: "nav.housing", icon: HousingIcon },
   { href: "/jobs", labelKey: "nav.jobs", icon: JobsIcon },
   { href: "/funding", labelKey: "nav.funding", icon: FundingIcon },
   { href: "/forum", labelKey: "nav.community", icon: ForumIcon },
@@ -34,6 +35,15 @@ const MORE_NAV_ITEMS: NavItem[] = [
   { href: "/guides", labelKey: "nav.guides", icon: GuidesIcon },
   { href: "/settings", labelKey: "common.settings", icon: SettingsIcon },
 ];
+
+function pathMatchesNavItem(safePathname: string, href: string): boolean {
+  if (href === "/") {
+    return safePathname === "/";
+  }
+  return (
+    safePathname === href || safePathname.startsWith(`${href}/`)
+  );
+}
 
 export function BottomNav() {
   const pathname = usePathname();
@@ -45,11 +55,8 @@ export function BottomNav() {
   const activeColor = useSchoolTheme ? theme.primary_color : "#000000";
   const inactiveColor = "#9CA3AF";
 
-  // Check if current path is in the "More" menu
-  const isMoreActive = MORE_NAV_ITEMS.some(
-    (item) =>
-      safePathname === item.href ||
-      (item.href !== "/" && safePathname.startsWith(item.href))
+  const isMoreActive = MORE_NAV_ITEMS.some((item) =>
+    pathMatchesNavItem(safePathname, item.href)
   );
 
   return (
@@ -77,14 +84,14 @@ export function BottomNav() {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 pb-24"
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 max-h-[85vh] flex flex-col pb-24"
             >
-              <div className="p-4">
+              <div className="p-4 flex flex-col flex-1 min-h-0">
                 {/* Handle */}
-                <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+                <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4 shrink-0" />
 
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4 px-2">
+                <div className="flex items-center justify-between mb-4 px-2 shrink-0">
                   <h3 className="text-lg font-medium text-gray-900">More</h3>
                   <button
                     onClick={() => setIsMoreOpen(false)}
@@ -108,11 +115,9 @@ export function BottomNav() {
                 </div>
 
                 {/* Grid of items */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-3 overflow-y-auto max-h-[min(60vh,calc(85vh-8rem))] pb-2">
                   {MORE_NAV_ITEMS.map((item) => {
-                    const isActive =
-                      safePathname === item.href ||
-                      (item.href !== "/" && safePathname.startsWith(item.href));
+                    const isActive = pathMatchesNavItem(safePathname, item.href);
                     const Icon = item.icon;
 
                     return (
@@ -151,9 +156,7 @@ export function BottomNav() {
         <div className="max-w-2xl mx-auto px-4">
           <div className="flex items-center justify-around h-20">
             {MAIN_NAV_ITEMS.map((item) => {
-              const isActive =
-                safePathname === item.href ||
-                (item.href !== "/" && safePathname.startsWith(item.href));
+              const isActive = pathMatchesNavItem(safePathname, item.href);
               const Icon = item.icon;
 
               return (
@@ -210,7 +213,7 @@ interface IconProps {
   activeColor?: string;
 }
 
-function HomeIcon({ active }: IconProps) {
+function AiTabIcon({ active }: IconProps) {
   return (
     <svg
       width="22"
@@ -221,11 +224,34 @@ function HomeIcon({ active }: IconProps) {
       strokeWidth={active ? 1.75 : 1.25}
     >
       <path
-        d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <path d="M9 22V12h6v10" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ChatSheetIcon({ active }: IconProps) {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={active ? 1.75 : 1.25}
+    >
+      <path
+        d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 10h6M9 14h4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -438,82 +464,6 @@ function DealsIcon({ active }: IconProps) {
         strokeLinejoin="round"
       />
       <circle cx="7" cy="7" r="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-function DashboardIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <rect
-        x="3"
-        y="3"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="14"
-        y="3"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="3"
-        y="14"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="14"
-        y="14"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function TransferIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path d="M17 1l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-      <path
-        d="M3 11V9a4 4 0 014-4h14"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M7 23l-4-4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-      <path
-        d="M21 13v2a4 4 0 01-4 4H3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }

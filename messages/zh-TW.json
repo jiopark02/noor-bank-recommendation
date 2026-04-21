@@ -43,6 +43,8 @@
   },
   "nav": {
     "home": "首頁",
+    "ai": "AI",
+    "chat": "聊天",
     "banking": "銀行",
     "housing": "住房",
     "visa": "簽證",

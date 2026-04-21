@@ -43,6 +43,8 @@
   },
   "nav": {
     "home": "Início",
+    "ai": "IA",
+    "chat": "Chat",
     "banking": "Banco",
     "housing": "Moradia",
     "visa": "Visto",
