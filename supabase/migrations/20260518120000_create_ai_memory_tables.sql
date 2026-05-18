@@ -15,6 +15,19 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
+-- 0) Ensure helper function exists (defensive — may already exist from prior migration)
+-- ---------------------------------------------------------------------------
+create or replace function public.set_current_timestamp_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- 1) chat_sessions
 -- ---------------------------------------------------------------------------
 create table if not exists public.chat_sessions (
