@@ -414,5 +414,192 @@ export async function endSession(
 }
 
 // -----------------------------------------------------------------------------
-// SECTION 3+ will be added in the next step
+// SECTION 3: Message Storage & Retrieval
 // -----------------------------------------------------------------------------
+//
+// Uses types and helpers already defined in earlier sections:
+//   - getAdmin(), wrapDbError(), assertSessionBelongsToUser(), getActiveSession()
+//   - DbChatMessage, MessagePairToSave
+// -----------------------------------------------------------------------------
+
+/**
+ * Options for retrieving messages from a session.
+ */
+export interface GetSessionMessagesOptions {
+  /** Maximum number of messages to return. Defaults to 50. */
+  limit?: number;
+  /**
+   * Sort order by created_at. Defaults to "asc" (oldest first) which matches
+   * how the client renders conversation history. Use "desc" when fetching
+   * just the most-recent N messages for context-window trimming.
+   */
+  order?: "asc" | "desc";
+}
+
+const DEFAULT_MESSAGES_LIMIT = 50;
+
+/**
+ * Persists a user message and the assistant reply that followed it. Always
+ * called as a pair so the conversation order is preserved.
+ *
+ * SECURITY:
+ *   - Verifies session ownership before inserting (admin client bypasses RLS).
+ *   - The user_id stored on both rows is the authenticated userId passed in,
+ *     not anything from the request body. Never accept user_id from client.
+ *
+ * DB SIDE EFFECTS:
+ *   - The bump_chat_session_on_message trigger automatically increments
+ *     chat_sessions.message_count and updates last_message_at for each row
+ *     inserted. Do NOT update these columns here.
+ *
+ * @param sessionId   Target session id (must belong to userId).
+ * @param userId      Authenticated user id.
+ * @param pair        User content + assistant content + optional model/usage.
+ * @returns           The two inserted rows ({ userMessage, assistantMessage }).
+ *                    Returned rows are matched by `role` (not array index) so
+ *                    this is robust to any ordering surprises from PostgREST.
+ *                    The ids on the returned rows are useful as
+ *                    source_message_id for facts.
+ *
+ * @throws Error when the session does not belong to the user, the user/
+ *   assistant content is empty, the insert returns an unexpected shape, or
+ *   the database insert fails.
+ */
+export async function saveMessages(
+  sessionId: string,
+  userId: string,
+  pair: MessagePairToSave
+): Promise<{
+  userMessage: DbChatMessage;
+  assistantMessage: DbChatMessage;
+}> {
+  // Validate inputs early — empty content is almost always a caller bug.
+  if (!pair.userContent || pair.userContent.trim() === "") {
+    throw new Error("saveMessages: userContent must be a non-empty string");
+  }
+  if (!pair.assistantContent || pair.assistantContent.trim() === "") {
+    throw new Error("saveMessages: assistantContent must be a non-empty string");
+  }
+
+  // SECURITY: verify ownership before any insert.
+  await assertSessionBelongsToUser(sessionId, userId);
+
+  const supabase = getAdmin();
+
+  // Insert both rows in one statement. PostgreSQL guarantees atomicity for a
+  // multi-row INSERT, so we either get both rows or neither.
+  //
+  // Note: input_tokens/output_tokens/model live ONLY on the assistant row.
+  // The trigger bump_chat_session_on_message will fire twice (once per row)
+  // and bump message_count by 2, which is the intended per-turn behavior.
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .insert([
+      {
+        session_id: sessionId,
+        user_id: userId,
+        role: "user",
+        content: pair.userContent,
+      },
+      {
+        session_id: sessionId,
+        user_id: userId,
+        role: "assistant",
+        content: pair.assistantContent,
+        model: pair.assistantModel ?? null,
+        input_tokens: pair.inputTokens ?? null,
+        output_tokens: pair.outputTokens ?? null,
+      },
+    ])
+    .select("*");
+
+  if (error) {
+    throw wrapDbError(`Failed to save messages: ${error.message}`, error);
+  }
+  if (!data || data.length !== 2) {
+    throw new Error(
+      `saveMessages: expected 2 inserted rows, got ${data?.length ?? 0}`
+    );
+  }
+
+  // Match returned rows by role rather than relying on array index. PostgREST
+  // generally preserves input order, but matching by role is more defensive
+  // and survives any version/config differences.
+  const rows = data as DbChatMessage[];
+  const userMessage = rows.find((r) => r.role === "user");
+  const assistantMessage = rows.find((r) => r.role === "assistant");
+  if (!userMessage || !assistantMessage) {
+    throw new Error(
+      "saveMessages: inserted rows missing expected user/assistant roles"
+    );
+  }
+
+  return { userMessage, assistantMessage };
+}
+
+/**
+ * Returns messages for a session, ordered by created_at.
+ *
+ * SECURITY: Filters by both session_id AND user_id to defend against the case
+ * where a caller passes another user's sessionId. We don't call
+ * assertSessionBelongsToUser here because (a) this is a read, and (b) the
+ * combined filter naturally returns [] for unauthorized requests — which is
+ * the same behavior as a session that simply has no messages yet.
+ *
+ * @param sessionId  Session to read messages from.
+ * @param userId     Authenticated user id (used as an authorization filter).
+ * @param options    Optional limit and sort order. See GetSessionMessagesOptions.
+ * @returns          Array of messages. Empty when the session does not exist,
+ *                   does not belong to userId, or has no messages.
+ *
+ * @throws Error when the database query fails.
+ */
+export async function getSessionMessages(
+  sessionId: string,
+  userId: string,
+  options: GetSessionMessagesOptions = {}
+): Promise<DbChatMessage[]> {
+  const limit = options.limit ?? DEFAULT_MESSAGES_LIMIT;
+  const order = options.order ?? "asc";
+
+  const supabase = getAdmin();
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .select("*")
+    .eq("session_id", sessionId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: order === "asc" })
+    .limit(limit);
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to fetch session messages: ${error.message}`,
+      error
+    );
+  }
+  return (data ?? []) as DbChatMessage[];
+}
+
+/**
+ * Returns the most recent N messages for a user's active session, in
+ * chronological order (oldest first). Convenience wrapper used by route.ts
+ * when building the LLM context window without sending the entire history.
+ *
+ * Returns an empty array if the user has no active session.
+ *
+ * @throws Error when the database query fails.
+ */
+export async function getRecentMessagesForActiveSession(
+  userId: string,
+  limit: number = DEFAULT_MESSAGES_LIMIT
+): Promise<DbChatMessage[]> {
+  const session = await getActiveSession(userId);
+  if (!session) return [];
+
+  // Fetch the most-recent N messages (desc), then reverse to chronological.
+  const recent = await getSessionMessages(session.id, userId, {
+    limit,
+    order: "desc",
+  });
+  return recent.reverse();
+}
