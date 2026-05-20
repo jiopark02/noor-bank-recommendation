@@ -16,6 +16,17 @@ import {
   buildJsonAuthorizedHeaders,
   extrasFromAuthorizationValue,
 } from "@/lib/supabaseAuthHeaders";
+import {
+  isAiMemoryEnabled,
+  getOrCreateActiveSession,
+  getActiveSession,
+  buildMemoryContext,
+  formatMemoryForPrompt,
+  saveMessages,
+  getSessionMessages,
+  type DbChatMessage,
+  type ChatSession,
+} from "@/lib/aiMemory";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -679,12 +690,161 @@ async function callOpenRouter(
   };
 }
 
+/**
+ * Identifies errors that are temporary and likely to succeed on retry.
+ *
+ * Retryable (returns true):
+ *   - Postgres SQLSTATE class 08 (Connection Exception)
+ *   - Postgres SQLSTATE class 53 (Insufficient Resources)
+ *   - Postgres SQLSTATE class 57 (Operator Intervention)
+ *   - Network errors: ETIMEDOUT, ECONNRESET
+ *   - HTTP gateway errors: 502, 503, 504
+ *
+ * NOT retryable: 23xxx constraint violations, auth errors, 4xx HTTP.
+ *
+ * Checks both error itself and Error.cause (one level) to support
+ * wrapDbError-style wrapped errors.
+ */
+function isRetryableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const candidates: Array<{ code?: string; message?: string; status?: number }> =
+    [error as { code?: string; message?: string; status?: number }];
+  if (error instanceof Error && error.cause && typeof error.cause === "object") {
+    candidates.push(
+      error.cause as { code?: string; message?: string; status?: number }
+    );
+  }
+
+  for (const c of candidates) {
+    if (c.code && /^(08|53|57)/.test(c.code)) return true;
+    if (c.code === "ETIMEDOUT" || c.code === "ECONNRESET") return true;
+    if (typeof c.status === "number" && c.status >= 502 && c.status <= 504) {
+      return true;
+    }
+    if (typeof c.message === "string") {
+      if (
+        c.message.includes("fetch failed") ||
+        c.message.includes("network") ||
+        c.message.includes("timeout")
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Runs an async operation with one retry on transient failures.
+ * Adds ~250ms delay before retry.
+ *
+ * ⚠️ DO NOT use this around non-idempotent writes such as saveMessages.
+ * The first call may have committed before timeout; retry would duplicate.
+ * Use only for reads and idempotent writes (e.g., getOrCreateActiveSession).
+ */
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  context: string
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isRetryableError(error)) throw error;
+
+    console.warn(
+      `[retry] ${context}: transient error, retrying once:`,
+      error instanceof Error ? error.message : error
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    try {
+      const result = await operation();
+      console.info(`[retry] ${context}: recovered after retry`);
+      return result;
+    } catch (retryError) {
+      console.error(
+        `[retry] ${context}: failed after retry:`,
+        retryError instanceof Error ? retryError.message : retryError
+      );
+      throw retryError;
+    }
+  }
+}
+
+interface ClientChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  model?: string;
+}
+
+function toClientChatMessage(row: DbChatMessage): ClientChatMessage {
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    timestamp: row.created_at,
+    model: row.model ?? undefined,
+  };
+}
+
+/**
+ * Persists a user+assistant turn to chat history if AI memory is enabled
+ * and an active session exists.
+ *
+ * Skip vs throw policy:
+ *   - Memory disabled OR no active session → silent skip (no-op)
+ *   - Memory enabled AND session exists AND content empty → throw
+ *   - Memory enabled AND session exists AND content non-empty → saveMessages
+ *
+ * The "empty content throws" rule prevents silent "200 OK but DB has 0 turns"
+ * which would break the data-consistency guarantee.
+ *
+ * Does NOT retry (saveMessages is non-idempotent). Callers should catch
+ * and translate to an HTTP error response.
+ *
+ * @throws Error when persistence is expected but content is empty, or
+ *   when the underlying saveMessages call fails.
+ */
+async function persistTurnIfEnabled(params: {
+  activeSession: ChatSession | null;
+  authUserId: string;
+  userContent: string;
+  assistantContent: string;
+  assistantModel: string;
+  inputTokens?: number;
+  outputTokens?: number;
+}): Promise<void> {
+  if (!isAiMemoryEnabled()) return;
+  if (!params.activeSession) return;
+
+  if (!params.userContent.trim() || !params.assistantContent.trim()) {
+    throw new Error(
+      "persistTurnIfEnabled: cannot persist empty user or assistant content " +
+        "(memory is enabled but content is missing)"
+    );
+  }
+
+  await saveMessages(params.activeSession.id, params.authUserId, {
+    userContent: params.userContent,
+    assistantContent: params.assistantContent,
+    assistantModel: params.assistantModel,
+    inputTokens: params.inputTokens,
+    outputTokens: params.outputTokens,
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
     if (!authUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    let activeSession: ChatSession | null = null;
+    let memoryBlock = "";
 
     const rawBody = await readRequestJson(request);
     const bodyObj = asPlainObject(rawBody);
@@ -703,6 +863,32 @@ export async function POST(request: NextRequest) {
         : (asPlainObject(userContextRaw) as Partial<UserContext>);
 
     const dbContext = await loadReadOnlyUserContextFromSupabase(authUserId);
+
+    if (isAiMemoryEnabled()) {
+      try {
+        activeSession = await withRetry(
+          () => getOrCreateActiveSession(authUserId),
+          "getOrCreateActiveSession"
+        );
+
+        const memoryContext = await withRetry(
+          () => buildMemoryContext(authUserId, { activeSession }),
+          "buildMemoryContext"
+        );
+
+        memoryBlock = formatMemoryForPrompt(memoryContext);
+      } catch (error) {
+        console.error("AI memory load failed:", error);
+        return NextResponse.json(
+          {
+            error: "Memory system temporarily unavailable. Please try again.",
+            code: "MEMORY_LOAD_FAILED",
+          },
+          { status: 503 }
+        );
+      }
+    }
+
     const mergedUserContext: UserContext = {
       ...dbContext,
       ...userContextPatch,
@@ -720,6 +906,7 @@ export async function POST(request: NextRequest) {
       isSubscriptionQuestion(lastUserMessageText);
 
     let systemPrompt = generateSystemPrompt(mergedUserContext);
+    systemPrompt += memoryBlock;
 
     if (wantsBalance) {
       const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(request);
@@ -807,10 +994,33 @@ export async function POST(request: NextRequest) {
         );
 
         if (result.ok) {
+          try {
+            await persistTurnIfEnabled({
+              activeSession,
+              authUserId,
+              userContent: lastUserMessageText,
+              assistantContent: result.message ?? "",
+              assistantModel: result.model,
+              inputTokens: result.usage?.input_tokens,
+              outputTokens: result.usage?.output_tokens,
+            });
+          } catch (error) {
+            console.error("Failed to save messages (OpenRouter branch):", error);
+            return NextResponse.json(
+              {
+                error:
+                  "Could not save your conversation. Please try sending your message again.",
+                code: "SAVE_FAILED",
+              },
+              { status: 500 }
+            );
+          }
+
           return NextResponse.json({
             success: true,
             message: result.message,
             model: result.model,
+            sessionId: activeSession?.id ?? null,
             usage: result.usage,
           });
         }
@@ -852,10 +1062,33 @@ export async function POST(request: NextRequest) {
       const assistantMessage =
         response.content[0].type === "text" ? response.content[0].text : "";
 
+      try {
+        await persistTurnIfEnabled({
+          activeSession,
+          authUserId,
+          userContent: lastUserMessageText,
+          assistantContent: assistantMessage,
+          assistantModel: "claude-sonnet-4-5-20250929",
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+        });
+      } catch (error) {
+        console.error("Failed to save messages (Anthropic branch):", error);
+        return NextResponse.json(
+          {
+            error:
+              "Could not save your conversation. Please try sending your message again.",
+            code: "SAVE_FAILED",
+          },
+          { status: 500 }
+        );
+      }
+
       return NextResponse.json({
         success: true,
         message: assistantMessage,
         model: "claude-sonnet-4-5-20250929",
+        sessionId: activeSession?.id ?? null,
         usage: {
           input_tokens: response.usage.input_tokens,
           output_tokens: response.usage.output_tokens,
@@ -900,13 +1133,55 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Return empty history for now (Supabase integration optional)
-    return NextResponse.json({
-      success: true,
-      messages: [],
-    });
+    if (!isAiMemoryEnabled()) {
+      return NextResponse.json({ success: true, messages: [] });
+    }
+
+    try {
+      const activeSession = await withRetry(
+        () => getActiveSession(authUserId),
+        "GET getActiveSession"
+      );
+
+      if (!activeSession) {
+        return NextResponse.json({
+          success: true,
+          messages: [],
+          sessionId: null,
+        });
+      }
+
+      const dbMessages = await withRetry(
+        () =>
+          getSessionMessages(activeSession.id, authUserId, {
+            limit: 50,
+            order: "desc",
+          }),
+        "GET getSessionMessages"
+      );
+
+      const messages = dbMessages.reverse().map(toClientChatMessage);
+
+      return NextResponse.json({
+        success: true,
+        messages,
+        sessionId: activeSession.id,
+      });
+    } catch (memoryError) {
+      console.error("AI memory load failed (GET):", memoryError);
+      return NextResponse.json(
+        {
+          error: "Memory system temporarily unavailable. Please try again.",
+          code: "MEMORY_LOAD_FAILED",
+        },
+        { status: 503 }
+      );
+    }
   } catch (error) {
-    console.error("Error fetching chat history:", error);
-    return NextResponse.json({ messages: [] });
+    console.error("Failed to fetch chat history:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch chat history" },
+      { status: 500 }
+    );
   }
 }
