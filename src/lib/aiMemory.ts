@@ -486,6 +486,12 @@ export async function saveMessages(
 
   const supabase = getAdmin();
 
+  // Stagger timestamps so user always sorts before assistant when created_at
+  // ties (same INSERT batch used to default both rows to now()).
+  const now = Date.now();
+  const userCreatedAt = new Date(now).toISOString();
+  const assistantCreatedAt = new Date(now + 100).toISOString();
+
   // Insert both rows in one statement. PostgreSQL guarantees atomicity for a
   // multi-row INSERT, so we either get both rows or neither.
   //
@@ -500,6 +506,7 @@ export async function saveMessages(
         user_id: userId,
         role: "user",
         content: pair.userContent,
+        created_at: userCreatedAt,
       },
       {
         session_id: sessionId,
@@ -509,6 +516,7 @@ export async function saveMessages(
         model: pair.assistantModel ?? null,
         input_tokens: pair.inputTokens ?? null,
         output_tokens: pair.outputTokens ?? null,
+        created_at: assistantCreatedAt,
       },
     ])
     .select("*");
@@ -569,6 +577,7 @@ export async function getSessionMessages(
     .eq("session_id", sessionId)
     .eq("user_id", userId)
     .order("created_at", { ascending: order === "asc" })
+    .order("id", { ascending: order === "asc" })
     .limit(limit);
 
   if (error) {
