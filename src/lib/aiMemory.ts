@@ -577,6 +577,9 @@ export async function getSessionMessages(
     .eq("session_id", sessionId)
     .eq("user_id", userId)
     .order("created_at", { ascending: order === "asc" })
+    // Same created_at: user before assistant when asc; assistant before user when
+    // desc so reverse() (getRecentMessages / GET history) still ends user-first.
+    .order("role", { ascending: order !== "asc" })
     .order("id", { ascending: order === "asc" })
     .limit(limit);
 
