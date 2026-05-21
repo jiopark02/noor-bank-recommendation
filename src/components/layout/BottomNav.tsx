@@ -1,39 +1,89 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 
-// Navigation item type
 interface NavItem {
   href: string;
   labelKey: string;
   icon: React.ComponentType<IconProps>;
-  descriptionKey?: string;
 }
 
-// Main navigation items (shown in bottom bar)
-const MAIN_NAV_ITEMS: NavItem[] = [
-  { href: "/", labelKey: "nav.home", icon: HomeIcon },
-  { href: "/banking", labelKey: "nav.banking", icon: BankingIcon },
-  { href: "/grow", labelKey: "nav.grow", icon: GrowIcon },
-  { href: "/visa", labelKey: "nav.visa", icon: VisaIcon },
-];
+const INTL_VISA_PATTERNS = ["F-1", "F1", "J-1", "J1", "M-1", "M1", "F-2", "J-2"];
 
-// More menu items (shown in slide-up panel)
-const MORE_NAV_ITEMS: NavItem[] = [
-  { href: "/housing", labelKey: "nav.housing", icon: HousingIcon },
-  { href: "/money", labelKey: "nav.money", icon: MoneyIcon },
-  { href: "/jobs", labelKey: "nav.jobs", icon: JobsIcon },
-  { href: "/funding", labelKey: "nav.funding", icon: FundingIcon },
-  { href: "/forum", labelKey: "nav.community", icon: ForumIcon },
-  { href: "/deals", labelKey: "nav.deals", icon: DealsIcon },
-  { href: "/guides", labelKey: "nav.guides", icon: GuidesIcon },
-  { href: "/settings", labelKey: "common.settings", icon: SettingsIcon },
-];
+function resolveVisaTypeFromStorage(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("noor_user_profile");
+    if (!raw) return null;
+    const profile = JSON.parse(raw) as Record<string, unknown>;
+    const candidate =
+      profile.visaType ??
+      profile.visa_type ??
+      profile.visa_status ??
+      profile.visaStatus;
+    return typeof candidate === "string" && candidate.trim()
+      ? candidate.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isInternationalVisa(visaType: string | null): boolean {
+  if (!visaType) return false;
+  const upper = visaType.toUpperCase();
+  return INTL_VISA_PATTERNS.some(
+    (pattern) =>
+      upper.includes(pattern.toUpperCase()) ||
+      upper.replace(/\s/g, "").includes(pattern.replace(/-/g, "").toUpperCase())
+  );
+}
+
+function buildMoreMenuGroups(showIntlOnly: boolean): {
+  title: string;
+  items: NavItem[];
+}[] {
+  const finance: NavItem[] = [
+    { href: "/banking", labelKey: "nav.banking", icon: BankingIcon },
+    { href: "/grow", labelKey: "nav.grow", icon: GrowIcon },
+    ...(showIntlOnly
+      ? [{ href: "/visa", labelKey: "nav.visa", icon: VisaIcon }]
+      : []),
+    { href: "/money", labelKey: "nav.money", icon: MoneyIcon },
+  ];
+
+  const life: NavItem[] = [
+    { href: "/housing", labelKey: "nav.housing", icon: HousingIcon },
+    { href: "/jobs", labelKey: "nav.jobs", icon: JobsIcon },
+    { href: "/funding", labelKey: "nav.funding", icon: FundingIcon },
+    { href: "/deals", labelKey: "nav.deals", icon: DealsIcon },
+    ...(showIntlOnly
+      ? [{ href: "/guides", labelKey: "nav.guides", icon: GuidesIcon }]
+      : []),
+  ];
+
+  const settings: NavItem[] = [
+    { href: "/settings", labelKey: "common.settings", icon: SettingsIcon },
+  ];
+
+  return [
+    { title: "Finance", items: finance },
+    { title: "Life", items: life },
+    { title: "Settings", items: settings },
+  ];
+}
+
+function isPathActive(pathname: string, href: string): boolean {
+  return (
+    pathname === href ||
+    (href !== "/" && pathname.startsWith(`${href}/`))
+  );
+}
 
 export function BottomNav() {
   const pathname = usePathname();
@@ -41,27 +91,39 @@ export function BottomNav() {
   const { theme, useSchoolTheme } = useTheme();
   const { t } = useLanguage();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [visaType, setVisaType] = useState<string | null>(null);
+
+  useEffect(() => {
+    setVisaType(resolveVisaTypeFromStorage());
+  }, [safePathname, isMoreOpen]);
+
+  const showIntlMenu = isInternationalVisa(visaType);
+  const moreMenuGroups = useMemo(
+    () => buildMoreMenuGroups(showIntlMenu),
+    [showIntlMenu]
+  );
+
+  const allMoreItems = useMemo(
+    () => moreMenuGroups.flatMap((g) => g.items),
+    [moreMenuGroups]
+  );
 
   const activeColor = useSchoolTheme ? theme.primary_color : "#000000";
   const inactiveColor = "#9CA3AF";
 
-  // Check if current path is in the "More" menu
-  const isMoreActive = MORE_NAV_ITEMS.some(
-    (item) =>
-      safePathname === item.href ||
-      (item.href !== "/" && safePathname.startsWith(item.href))
-  );
+  const isMoreActive =
+    allMoreItems.some((item) => isPathActive(safePathname, item.href)) ||
+    isMoreOpen;
+
+  const isHomeActive = isPathActive(safePathname, "/");
 
   return (
     <>
-      {/* Spacer for fixed bottom nav */}
       <div className="h-24" />
 
-      {/* More Menu Overlay */}
       <AnimatePresence>
         {isMoreOpen && (
           <>
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -71,24 +133,23 @@ export function BottomNav() {
               onClick={() => setIsMoreOpen(false)}
             />
 
-            {/* Slide-up Panel */}
             <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 pb-24"
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 pb-24 max-h-[85vh] overflow-y-auto"
             >
               <div className="p-4">
-                {/* Handle */}
                 <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
 
-                {/* Header */}
                 <div className="flex items-center justify-between mb-4 px-2">
                   <h3 className="text-lg font-medium text-gray-900">More</h3>
                   <button
+                    type="button"
                     onClick={() => setIsMoreOpen(false)}
                     className="p-2 rounded-full hover:bg-gray-100"
+                    aria-label="Close menu"
                   >
                     <svg
                       width="20"
@@ -107,38 +168,47 @@ export function BottomNav() {
                   </button>
                 </div>
 
-                {/* Grid of items */}
-                <div className="grid grid-cols-3 gap-3">
-                  {MORE_NAV_ITEMS.map((item) => {
-                    const isActive =
-                      safePathname === item.href ||
-                      (item.href !== "/" && safePathname.startsWith(item.href));
-                    const Icon = item.icon;
+                <div className="space-y-6">
+                  {moreMenuGroups.map((group) => (
+                    <div key={group.title}>
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider px-2 mb-2">
+                        {group.title}
+                      </p>
+                      <div className="grid grid-cols-3 gap-3">
+                        {group.items.map((item) => {
+                          const isActive = isPathActive(safePathname, item.href);
+                          const Icon = item.icon;
 
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setIsMoreOpen(false)}
-                        className="flex flex-col items-center justify-center p-4 rounded-2xl transition-all"
-                        style={{
-                          backgroundColor: isActive
-                            ? `${activeColor}10`
-                            : "#F9FAFB",
-                          color: isActive ? activeColor : "#4B5563",
-                        }}
-                      >
-                        <Icon active={isActive} activeColor={activeColor} />
-                        <span
-                          className={`text-xs mt-2 ${
-                            isActive ? "font-medium" : ""
-                          }`}
-                        >
-                          {t(item.labelKey)}
-                        </span>
-                      </Link>
-                    );
-                  })}
+                          return (
+                            <Link
+                              key={item.href}
+                              href={item.href}
+                              onClick={() => setIsMoreOpen(false)}
+                              className="flex flex-col items-center justify-center p-4 rounded-2xl transition-all"
+                              style={{
+                                backgroundColor: isActive
+                                  ? `${activeColor}10`
+                                  : "#F9FAFB",
+                                color: isActive ? activeColor : "#4B5563",
+                              }}
+                            >
+                              <Icon
+                                active={isActive}
+                                activeColor={activeColor}
+                              />
+                              <span
+                                className={`text-xs mt-2 text-center ${
+                                  isActive ? "font-medium" : ""
+                                }`}
+                              >
+                                {t(item.labelKey)}
+                              </span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </motion.div>
@@ -146,50 +216,41 @@ export function BottomNav() {
         )}
       </AnimatePresence>
 
-      {/* Fixed bottom navigation */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50">
-        <div className="max-w-2xl mx-auto px-4">
-          <div className="flex items-center justify-around h-20">
-            {MAIN_NAV_ITEMS.map((item) => {
-              const isActive =
-                safePathname === item.href ||
-                (item.href !== "/" && safePathname.startsWith(item.href));
-              const Icon = item.icon;
+        <div className="max-w-2xl mx-auto px-6">
+          <div className="flex items-center justify-between h-20">
+            <Link
+              href="/"
+              className="flex flex-col items-center justify-center gap-1.5 px-4 py-2 rounded-xl transition-all duration-300 min-w-[72px]"
+              style={{ color: isHomeActive ? activeColor : inactiveColor }}
+            >
+              <HomeIcon active={isHomeActive} activeColor={activeColor} />
+              <span
+                className={`text-[10px] tracking-wide ${
+                  isHomeActive ? "font-medium" : ""
+                }`}
+              >
+                {t("nav.home")}
+              </span>
+            </Link>
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="flex flex-col items-center justify-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300"
-                  style={{ color: isActive ? activeColor : inactiveColor }}
-                >
-                  <Icon active={isActive} activeColor={activeColor} />
-                  <span
-                    className={`text-[10px] tracking-wide ${
-                      isActive ? "font-medium" : ""
-                    }`}
-                  >
-                    {t(item.labelKey)}
-                  </span>
-                </Link>
-              );
-            })}
-
-            {/* More Button */}
             <button
+              type="button"
               onClick={() => setIsMoreOpen(!isMoreOpen)}
-              className="flex flex-col items-center justify-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300"
+              className="flex flex-col items-center justify-center gap-1.5 px-4 py-2 rounded-xl transition-all duration-300 min-w-[72px]"
               style={{
-                color: isMoreActive || isMoreOpen ? activeColor : inactiveColor,
+                color: isMoreActive ? activeColor : inactiveColor,
               }}
+              aria-expanded={isMoreOpen}
+              aria-label="Open more menu"
             >
               <MoreIcon
-                active={isMoreActive || isMoreOpen}
+                active={isMoreActive}
                 activeColor={activeColor}
               />
               <span
                 className={`text-[10px] tracking-wide ${
-                  isMoreActive || isMoreOpen ? "font-medium" : ""
+                  isMoreActive ? "font-medium" : ""
                 }`}
               >
                 More
@@ -198,7 +259,6 @@ export function BottomNav() {
           </div>
         </div>
 
-        {/* Safe area padding for iOS */}
         <div className="h-safe-bottom bg-white" />
       </nav>
     </>
@@ -403,25 +463,6 @@ function FundingIcon({ active }: IconProps) {
   );
 }
 
-function ForumIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function DealsIcon({ active }: IconProps) {
   return (
     <svg
@@ -438,82 +479,6 @@ function DealsIcon({ active }: IconProps) {
         strokeLinejoin="round"
       />
       <circle cx="7" cy="7" r="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-function DashboardIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <rect
-        x="3"
-        y="3"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="14"
-        y="3"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="3"
-        y="14"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect
-        x="14"
-        y="14"
-        width="7"
-        height="7"
-        rx="1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function TransferIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path d="M17 1l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-      <path
-        d="M3 11V9a4 4 0 014-4h14"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M7 23l-4-4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-      <path
-        d="M21 13v2a4 4 0 01-4 4H3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }

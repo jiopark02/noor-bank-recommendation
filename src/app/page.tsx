@@ -41,24 +41,6 @@ const QUICK_PROMPTS = [
   "Am I on track this month?",
 ];
 
-function hexToRgba(hex: string, alpha: number): string {
-  const safeHex = hex.replace("#", "").trim();
-  if (safeHex.length !== 3 && safeHex.length !== 6) {
-    return `rgba(0, 0, 0, ${alpha})`;
-  }
-
-  const fullHex =
-    safeHex.length === 3
-      ? `${safeHex[0]}${safeHex[0]}${safeHex[1]}${safeHex[1]}${safeHex[2]}${safeHex[2]}`
-      : safeHex;
-
-  const int = Number.parseInt(fullHex, 16);
-  const r = (int >> 16) & 255;
-  const g = (int >> 8) & 255;
-  const b = int & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
 function formatMoney(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -467,10 +449,9 @@ export default function HomePage() {
   const accentColor = useSchoolTheme ? theme.primary_color : "#111111";
   const accentTextColor =
     useSchoolTheme && theme.text_on_primary === "black" ? "#111111" : "#FFFFFF";
-  const accentSoftBg = useMemo(
-    () => hexToRgba(accentColor, 0.1),
-    [accentColor]
-  );
+  const openFullChat = () => {
+    router.push("/chat");
+  };
 
   const submitPrompt = (rawPrompt?: string) => {
     const text = (rawPrompt ?? promptDraft).trim();
@@ -507,22 +488,38 @@ export default function HomePage() {
         </p>
       </motion.header>
 
-      <section className="grid gap-8 xl:grid-cols-2">
+      <section className="flex flex-col gap-6">
         <motion.div
-          className="noor-card p-8 flex flex-col min-h-[620px]"
-          initial={{ opacity: 0, x: -16 }}
-          animate={{ opacity: 1, x: 0 }}
+          className="noor-card p-6 sm:p-8 flex flex-col w-full min-h-[420px]"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35 }}
         >
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold text-black">
-                AI Assistant
-              </h2>
-            </div>
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-2xl font-semibold text-black">AI Assistant</h2>
+            <button
+              type="button"
+              onClick={openFullChat}
+              aria-label="Open full chat"
+              className="p-2 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors shrink-0"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.75}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"
+                />
+              </svg>
+            </button>
           </div>
 
-          <div className="mt-8 flex-1 space-y-5">
+          <div className="mt-6 flex-1 space-y-5 min-h-[240px] overflow-y-auto">
             <div className="rounded-2xl bg-gray-100 px-4 py-3 max-w-[92%]">
               <p className="text-sm text-gray-700 leading-relaxed">
                 {aiSummary.opening}
@@ -598,114 +595,70 @@ export default function HomePage() {
         </motion.div>
 
         <motion.div
-          className="space-y-5"
-          initial={{ opacity: 0, x: 16 }}
-          animate={{ opacity: 1, x: 0 }}
+          className="noor-card p-5 sm:p-6 w-full"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, delay: 0.05 }}
         >
-          <div>
-            <div className="mb-6">
-              <h2 className="text-2xl font-semibold text-black">Money</h2>
-              <p className="text-gray-500 text-sm">
-                All your finances in one place
-              </p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-black">Money</h2>
+              <p className="text-gray-500 text-xs mt-0.5">Quick overview</p>
             </div>
-
-            {isLoadingData && (
-              <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
-                Syncing your latest bank data...
-              </div>
-            )}
-
-            {!isLoadingData && moneyError && (
-              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {moneyError}
-              </div>
-            )}
-
-            {!isLoadingData && !moneyError && !hasBankConnection && (
-              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                No active bank connection found. Connect your bank in Money page
-                to show live data.
-              </div>
-            )}
-
-            <div className="noor-card p-6 mb-5">
-              <p className="text-gray-500 text-sm mb-1">Net Worth</p>
-              <p className="text-4xl font-semibold text-black mb-4">
-                {formatMoney(displayMetrics.netWorth)}
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-gray-500 text-xs">Cash</p>
-                  <p
-                    className="text-lg font-medium"
-                    style={{ color: accentColor }}
-                  >
-                    {formatMoney(displayMetrics.cash)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-xs">Credit Used</p>
-                  <p className="text-lg font-medium text-red-600">
-                    -{formatMoney(displayMetrics.creditUsed)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-5">
-              <div className="noor-card p-4">
-                <p className="text-gray-500 text-xs mb-1">Income</p>
-                <p
-                  className="text-xl font-semibold"
-                  style={{ color: accentColor }}
-                >
-                  +{formatMoney(displayMetrics.income)}
-                </p>
-              </div>
-              <div className="noor-card p-4">
-                <p className="text-gray-500 text-xs mb-1">Spending</p>
-                <p className="text-xl font-semibold text-red-600">
-                  -{formatMoney(displayMetrics.spending)}
-                </p>
-              </div>
-            </div>
-
-            <div className="noor-card p-5 mb-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-black">
-                  Monthly Subscriptions
-                </h3>
-                <span className="text-lg font-semibold text-black">
-                  {formatMoney(displayMetrics.totalSubscriptions)}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {displayMetrics.subscriptions.length > 0 ? (
-                  displayMetrics.subscriptions.slice(0, 2).map((sub, idx) => (
-                    <span
-                      key={`${sub.name || "subscription"}-${idx}`}
-                      className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
-                    >
-                      {sub.name || "Subscription"} ·{" "}
-                      {formatMoney(sub.amount || 0)}/mo
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-sm text-gray-500">
-                    No subscriptions detected
-                  </span>
-                )}
-              </div>
-            </div>
-
             <Link
               href="/money"
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium border border-gray-200 text-black hover:border-gray-300"
+              className="text-xs font-medium text-gray-600 hover:text-black"
             >
-              Open Money
+              Open →
             </Link>
+          </div>
+
+          {isLoadingData && (
+            <div className="mb-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+              Syncing bank data...
+            </div>
+          )}
+
+          {!isLoadingData && moneyError && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {moneyError}
+            </div>
+          )}
+
+          {!isLoadingData && !moneyError && !hasBankConnection && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              Connect a bank in Money for live balances.
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl bg-gray-50 px-3 py-3">
+              <p className="text-gray-500 text-[10px] uppercase tracking-wide">
+                Net Worth
+              </p>
+              <p className="text-lg font-semibold text-black mt-1">
+                {formatMoney(displayMetrics.netWorth)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-gray-50 px-3 py-3">
+              <p className="text-gray-500 text-[10px] uppercase tracking-wide">
+                Cash
+              </p>
+              <p
+                className="text-lg font-semibold mt-1"
+                style={{ color: accentColor }}
+              >
+                {formatMoney(displayMetrics.cash)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-gray-50 px-3 py-3">
+              <p className="text-gray-500 text-[10px] uppercase tracking-wide">
+                Credit Used
+              </p>
+              <p className="text-lg font-semibold text-red-600 mt-1">
+                -{formatMoney(displayMetrics.creditUsed)}
+              </p>
+            </div>
           </div>
         </motion.div>
       </section>
