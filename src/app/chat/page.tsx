@@ -146,7 +146,17 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!quickPromptHandledRef.current && userId) {
-      const quickPrompt = localStorage.getItem("noor_quick_prompt");
+      const source =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("source")
+          : null;
+
+      if (source !== "quickprompt") {
+        localStorage.removeItem("noor_quick_prompt");
+        return;
+      }
+
+      const quickPrompt = localStorage.getItem("noor_quick_prompt")?.trim();
       if (quickPrompt) {
         quickPromptHandledRef.current = true;
         localStorage.removeItem("noor_quick_prompt");

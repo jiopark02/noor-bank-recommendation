@@ -227,6 +227,45 @@ function getLastUserMessage(messages: ChatMessage[]): string {
   return "";
 }
 
+function isSimpleGreetingOrSmallTalk(message: string): boolean {
+  const normalized = message
+    .trim()
+    .toLowerCase()
+    .replace(/[!.,?]+/g, "")
+    .replace(/\s+/g, " ");
+
+  if (!normalized) return false;
+
+  const exactGreetings = new Set([
+    "hi",
+    "hello",
+    "hey",
+    "hiya",
+    "howdy",
+    "yo",
+    "sup",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "how are you",
+    "how are you doing",
+    "whats up",
+    "what's up",
+    "thanks",
+    "thank you",
+    "ok",
+    "okay",
+  ]);
+
+  if (exactGreetings.has(normalized)) return true;
+
+  if (normalized.length <= 20) {
+    return /^(hi|hello|hey|good (morning|afternoon|evening))\b/.test(normalized);
+  }
+
+  return false;
+}
+
 function isBalanceQuestion(message: string): boolean {
   const normalized = message.toLowerCase();
 
@@ -899,14 +938,21 @@ export async function POST(request: NextRequest) {
       content: msg.content,
     }));
     const lastUserMessageText = getLastUserMessage(formattedMessages);
-    const wantsBalance = isBalanceQuestion(lastUserMessageText);
+    const isGreeting = isSimpleGreetingOrSmallTalk(lastUserMessageText);
+    const wantsBalance =
+      !isGreeting && isBalanceQuestion(lastUserMessageText);
     const wantsFinancialAnalysis =
-      isFinancialPlanningQuestion(lastUserMessageText);
+      !isGreeting && isFinancialPlanningQuestion(lastUserMessageText);
     const wantsSubscriptionDetails =
-      isSubscriptionQuestion(lastUserMessageText);
+      !isGreeting && isSubscriptionQuestion(lastUserMessageText);
 
     let systemPrompt = generateSystemPrompt(mergedUserContext);
     systemPrompt += memoryBlock;
+
+    if (isGreeting) {
+      systemPrompt +=
+        "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, friendly sentences. Do NOT mention their income, spending, budget, bank balance, visa, or profile details unless they explicitly asked.";
+    }
 
     if (wantsBalance) {
       const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(request);

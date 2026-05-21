@@ -450,6 +450,7 @@ export default function HomePage() {
   const accentTextColor =
     useSchoolTheme && theme.text_on_primary === "black" ? "#111111" : "#FFFFFF";
   const openFullChat = () => {
+    localStorage.removeItem("noor_quick_prompt");
     router.push("/chat");
   };
 
@@ -457,7 +458,7 @@ export default function HomePage() {
     const text = (rawPrompt ?? promptDraft).trim();
     if (!text) return;
     localStorage.setItem("noor_quick_prompt", text);
-    router.push("/chat");
+    router.push("/chat?source=quickprompt");
   };
 
   if (isLoading) {
