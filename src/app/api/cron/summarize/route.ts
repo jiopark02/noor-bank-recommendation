@@ -67,14 +67,19 @@ function parseSummaryOutput(raw: string): {
   topics: string[];
 } {
   const text = raw.trim();
+  const pattern = /^TOPICS:\s*(.+)$/gim;
 
-  const matches = [...text.matchAll(/^TOPICS:\s*(.+)$/gim)];
+  let lastMatch: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
 
-  if (matches.length === 0) {
+  while ((match = pattern.exec(text)) !== null) {
+    lastMatch = match;
+  }
+
+  if (!lastMatch) {
     return { summary: text, topics: [] };
   }
 
-  const lastMatch = matches[matches.length - 1];
   const matchIndex = lastMatch.index ?? text.length;
 
   const summary = text.slice(0, matchIndex).trim();
