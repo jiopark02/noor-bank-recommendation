@@ -1113,6 +1113,93 @@ export async function markSessionSummarized(
   }
 }
 
+// ---------------------------------------------------------------------------
+// SECTION 5b: Cron maintenance (server-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default number of minutes of inactivity before a session is considered
+ * stale and eligible for closing.
+ *
+ * 60 minutes: cross-session continuity is preserved via summaries (Layer 3),
+ * so closing a session does not lose context for the user.
+ */
+const SESSION_STALE_MINUTES = 60;
+
+/**
+ * Default cap on how many sessions a query returns. Callers (the cron) can
+ * pass a smaller limit.
+ */
+const DEFAULT_CRON_BATCH_LIMIT = 50;
+
+/**
+ * Returns active sessions (ended_at IS NULL) whose last_message_at is older
+ * than SESSION_STALE_MINUTES. Cron-only maintenance query, spans all users.
+ * Ordered oldest-first. Backlog drains over multiple runs.
+ *
+ * @param limit  Max sessions. Defaults to DEFAULT_CRON_BATCH_LIMIT.
+ * @throws Error when the database query fails.
+ */
+export async function getSessionsToClose(
+  limit: number = DEFAULT_CRON_BATCH_LIMIT
+): Promise<ChatSession[]> {
+  const supabase = getAdmin();
+
+  const staleThreshold = new Date(
+    Date.now() - SESSION_STALE_MINUTES * 60 * 1000
+  ).toISOString();
+
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .select("*")
+    .is("ended_at", null)
+    .lt("last_message_at", staleThreshold)
+    .order("last_message_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to fetch sessions to close: ${error.message}`,
+      error
+    );
+  }
+
+  return (data ?? []) as ChatSession[];
+}
+
+/**
+ * Returns sessions that have ended (ended_at IS NOT NULL) but not yet been
+ * summarized (summarized = false). Backed by idx_chat_sessions_needs_summary.
+ * Cron-only, spans all users. Ordered oldest-first by ended_at.
+ *
+ * The cron passes a SMALL limit because each session triggers an LLM call.
+ *
+ * @param limit  Max sessions. Defaults to DEFAULT_CRON_BATCH_LIMIT.
+ * @throws Error when the database query fails.
+ */
+export async function getSessionsNeedingSummary(
+  limit: number = DEFAULT_CRON_BATCH_LIMIT
+): Promise<ChatSession[]> {
+  const supabase = getAdmin();
+
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .select("*")
+    .eq("summarized", false)
+    .not("ended_at", "is", null)
+    .order("ended_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to fetch sessions needing summary: ${error.message}`,
+      error
+    );
+  }
+
+  return (data ?? []) as ChatSession[];
+}
+
 // -----------------------------------------------------------------------------
 // SECTION 6: Memory Context Builder
 // -----------------------------------------------------------------------------
