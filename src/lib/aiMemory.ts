@@ -40,6 +40,7 @@ export interface ChatSession {
   last_message_at: string;
   message_count: number;
   summarized: boolean;
+  facts_extracted: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -195,7 +196,7 @@ function wrapDbError(message: string, cause: PostgrestError | unknown): Error {
  * Detects Postgres unique constraint violations (code 23505), looking at both
  * the error itself and its `cause` chain so wrapped errors still work.
  */
-function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown): boolean {
   // Direct case: raw PostgrestError thrown without wrapping.
   if (error && typeof error === "object" && "code" in error) {
     if ((error as { code?: string }).code === PG_UNIQUE_VIOLATION) {
@@ -1198,6 +1199,80 @@ export async function getSessionsNeedingSummary(
   }
 
   return (data ?? []) as ChatSession[];
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 5c: Facts extraction cron maintenance (server-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns sessions that have ended (ended_at IS NOT NULL) but have not yet
+ * had facts extracted (facts_extracted = false). Backed by
+ * idx_chat_sessions_needs_facts_extraction. Cron-only, spans all users.
+ * Ordered oldest-first by ended_at.
+ *
+ * The cron passes a SMALL limit because each session triggers an LLM call.
+ *
+ * Independent of `summarized`: this query intentionally does NOT filter on
+ * the summarized flag. Summarization (PR4) and facts extraction (PR5) are
+ * separate pipelines.
+ *
+ * @param limit  Max sessions. Defaults to DEFAULT_CRON_BATCH_LIMIT.
+ * @throws Error when the database query fails.
+ */
+export async function getSessionsNeedingFactsExtraction(
+  limit: number = DEFAULT_CRON_BATCH_LIMIT
+): Promise<ChatSession[]> {
+  const supabase = getAdmin();
+
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .select("*")
+    .eq("facts_extracted", false)
+    .not("ended_at", "is", null)
+    .order("ended_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to fetch sessions needing facts extraction: ${error.message}`,
+      error
+    );
+  }
+
+  return (data ?? []) as ChatSession[];
+}
+
+/**
+ * Sets chat_sessions.facts_extracted = true. Marks a session as processed
+ * by the facts-extraction cron.
+ *
+ * Unlike summarization (which has createSummary's best-effort flag update),
+ * this flag is the ONLY completion signal for facts extraction. The cron
+ * must call this on every processed session — including empty sessions and
+ * sessions whose LLM output produced zero fact operations.
+ *
+ * SECURITY: Filters by both session id and user id.
+ *
+ * @throws Error when the database update fails.
+ */
+export async function markFactsExtracted(
+  sessionId: string,
+  userId: string
+): Promise<void> {
+  const supabase = getAdmin();
+  const { error } = await supabase
+    .from("chat_sessions")
+    .update({ facts_extracted: true })
+    .eq("id", sessionId)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to mark session facts-extracted: ${error.message}`,
+      error
+    );
+  }
 }
 
 // -----------------------------------------------------------------------------
