@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import {
   isAiMemoryEnabled,
   getSessionsToClose,
@@ -15,18 +14,85 @@ import {
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-const SUMMARY_MODEL = "claude-sonnet-4-5-20250929";
+// OpenRouter 요약 모델. route.ts의 DEFAULT_COMPLEX_MODEL과 동일한 ID 형식.
+// 요약 품질을 위해 Sonnet 하드코딩 (CTO 결정 — 선택 B).
+const SUMMARY_MODEL = "anthropic/claude-3.5-sonnet";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
 const MAX_MESSAGES_PER_SUMMARY = 200;
 const SUMMARY_MAX_TOKENS = 1024;
 const CLOSE_BATCH_LIMIT = 50;
 const SUMMARIZE_BATCH_LIMIT = 8;
 
-function getAnthropicClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+/**
+ * OpenRouter API 키를 환경변수에서 읽어온다.
+ * 없거나 빈 문자열이면 null.
+ */
+function resolveOpenRouterApiKey(): string | null {
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey || apiKey.trim() === "") {
     return null;
   }
-  return new Anthropic({ apiKey });
+  return apiKey.trim();
+}
+
+/**
+ * OpenRouter chat completions를 호출해 요약 텍스트를 반환한다.
+ *
+ * 이 cron의 기존 에러 처리(summarizeOneSession이 throw하고 바깥 for 루프
+ * try/catch가 받음)와 일관되게, result 객체 대신 throw 기반으로 동작한다.
+ * 실패 시 throw → 해당 세션만 건너뛰고 다음 run에서 재시도된다.
+ *
+ * route.ts의 callOpenRouter를 공용화하지 않고 자체 버전을 둠
+ * (route.ts를 건드리지 않는 게 안전).
+ */
+async function callOpenRouterForSummary(
+  apiKey: string,
+  systemPrompt: string,
+  conversationText: string
+): Promise<string> {
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: SUMMARY_MODEL,
+      max_tokens: SUMMARY_MAX_TOKENS,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: conversationText },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(
+      `OpenRouter request failed: ${response.status} ${response.statusText}` +
+        (errorBody ? ` — ${errorBody.slice(0, 300)}` : "")
+    );
+  }
+
+  // HTTP 200이어도 본문이 JSON이 아닐 수 있음 (게이트웨이 오류 페이지 등).
+  // 파싱 실패를 별도로 구분해 "응답 누락"과 다른 에러 메시지를 남긴다.
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("OpenRouter response was not valid JSON");
+  }
+
+  const content: unknown =
+    (data as { choices?: Array<{ message?: { content?: unknown } }> })
+      ?.choices?.[0]?.message?.content;
+
+  if (typeof content !== "string") {
+    throw new Error("OpenRouter response missing message content");
+  }
+
+  return content;
 }
 
 const SUMMARY_SYSTEM_PROMPT = `You are a summarization assistant for Noor, a financial guidance app for international students. Always respond in English.
@@ -53,7 +119,6 @@ function buildConversationText(messages: DbChatMessage[]): string {
     messages.length > MAX_MESSAGES_PER_SUMMARY
       ? messages.slice(messages.length - MAX_MESSAGES_PER_SUMMARY)
       : messages;
-
   return trimmed
     .map((m) => {
       const speaker = m.role === "user" ? "User" : "Noor";
@@ -68,32 +133,26 @@ function parseSummaryOutput(raw: string): {
 } {
   const text = raw.trim();
   const pattern = /^TOPICS:\s*(.+)$/gim;
-
   let lastMatch: RegExpExecArray | null = null;
   let match: RegExpExecArray | null;
-
   while ((match = pattern.exec(text)) !== null) {
     lastMatch = match;
   }
-
   if (!lastMatch) {
     return { summary: text, topics: [] };
   }
-
   const matchIndex = lastMatch.index ?? text.length;
-
   const summary = text.slice(0, matchIndex).trim();
   const topics = lastMatch[1]
     .split(",")
     .map((t) => t.trim().toLowerCase())
     .filter((t) => t.length > 0)
     .slice(0, 5);
-
   return { summary: summary || text, topics };
 }
 
 async function summarizeOneSession(
-  anthropic: Anthropic,
+  apiKey: string,
   session: ChatSession
 ): Promise<void> {
   if (session.message_count === 0) {
@@ -118,15 +177,11 @@ async function summarizeOneSession(
 
   const conversationText = buildConversationText(messages);
 
-  const response = await anthropic.messages.create({
-    model: SUMMARY_MODEL,
-    max_tokens: SUMMARY_MAX_TOKENS,
-    system: SUMMARY_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: conversationText }],
-  });
-
-  const rawOutput =
-    response.content[0]?.type === "text" ? response.content[0].text : "";
+  const rawOutput = await callOpenRouterForSummary(
+    apiKey,
+    SUMMARY_SYSTEM_PROMPT,
+    conversationText
+  );
 
   if (!rawOutput.trim()) {
     throw new Error(
@@ -135,7 +190,6 @@ async function summarizeOneSession(
   }
 
   const { summary, topics } = parseSummaryOutput(rawOutput);
-
   await createSummary(session.id, session.user_id, {
     summary,
     topics,
@@ -158,7 +212,6 @@ export async function GET(request: NextRequest) {
   const provided = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
     : "";
-
   if (provided !== cronSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -170,9 +223,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const anthropic = getAnthropicClient();
-  if (!anthropic) {
-    console.error("Summarize cron: ANTHROPIC_API_KEY not configured");
+  const apiKey = resolveOpenRouterApiKey();
+  if (!apiKey) {
+    console.error("Summarize cron: OPENROUTER_API_KEY not configured");
     return NextResponse.json(
       { error: "Summarization model not configured" },
       { status: 503 }
@@ -208,7 +261,7 @@ export async function GET(request: NextRequest) {
     const toSummarize = await getSessionsNeedingSummary(SUMMARIZE_BATCH_LIMIT);
     for (const session of toSummarize) {
       try {
-        await summarizeOneSession(anthropic, session);
+        await summarizeOneSession(apiKey, session);
         stats.summarized++;
       } catch (error) {
         stats.summarizeFailed++;
@@ -226,7 +279,6 @@ export async function GET(request: NextRequest) {
   }
 
   console.info("Summarize cron complete:", stats);
-
   return NextResponse.json({
     success: true,
     ...stats,
