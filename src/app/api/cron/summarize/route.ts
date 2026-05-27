@@ -14,9 +14,10 @@ import {
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// OpenRouter 요약 모델. route.ts의 DEFAULT_COMPLEX_MODEL과 동일한 ID 형식.
-// 요약 품질을 위해 Sonnet 하드코딩 (CTO 결정 — 선택 B).
-const SUMMARY_MODEL = "anthropic/claude-3.5-sonnet";
+// OpenRouter 요약 모델. 요약 품질을 위해 Sonnet 사용 (CTO 결정 — 선택 B).
+// "claude-sonnet-latest"는 OpenRouter가 항상 최신 Sonnet으로 연결해줘서
+// 특정 버전 ID가 사라져도 404가 나지 않음 (cron 안정성 우선).
+const SUMMARY_MODEL = "anthropic/claude-sonnet-latest";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const MAX_MESSAGES_PER_SUMMARY = 200;
