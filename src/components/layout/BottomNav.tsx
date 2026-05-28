@@ -69,6 +69,7 @@ function buildMoreMenuGroups(showIntlOnly: boolean): {
 
   const settings: NavItem[] = [
     { href: "/settings", labelKey: "common.settings", icon: SettingsIcon },
+    { href: "/landing", labelKey: "nav.landing", icon: LandingPageIcon },
   ];
 
   return [
@@ -119,7 +120,7 @@ export function BottomNav() {
     allMoreItems.some((item) => isPathActive(safePathname, item.href)) ||
     isMoreOpen;
 
-  const isHomeActive = isPathActive(safePathname, "/");
+  const isAiActive = isPathActive(safePathname, "/chat");
 
   return (
     <>
@@ -224,17 +225,17 @@ export function BottomNav() {
         <div className="max-w-2xl mx-auto px-6">
           <div className="flex items-center justify-between h-20">
             <Link
-              href="/"
+              href="/chat"
               className="flex flex-col items-center justify-center gap-1.5 px-4 py-2 rounded-xl transition-all duration-300 min-w-[72px]"
-              style={{ color: isHomeActive ? activeColor : inactiveColor }}
+              style={{ color: isAiActive ? activeColor : inactiveColor }}
             >
-              <HomeIcon active={isHomeActive} activeColor={activeColor} />
+              <AiTabIcon active={isAiActive} activeColor={activeColor} />
               <span
                 className={`text-[10px] tracking-wide ${
-                  isHomeActive ? "font-medium" : ""
+                  isAiActive ? "font-medium" : ""
                 }`}
               >
-                {t("nav.home")}
+                AI
               </span>
             </Link>
 
@@ -578,6 +579,22 @@ function MoneyIcon({ active }: IconProps) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function LandingPageIcon({ active }: IconProps) {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={active ? 1.75 : 1.25}
+    >
+      <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 21V12h6v9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
