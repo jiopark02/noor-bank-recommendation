@@ -17,6 +17,14 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Redirect already-logged-in users straight to dashboard
+  useEffect(() => {
+    const userId = localStorage.getItem("noor_user_id");
+    if (userId) {
+      router.replace("/dashboard");
+    }
+  }, [router]);
   const [showPassword, setShowPassword] = useState(false);
   const [keepSignedIn, setKeepSignedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -136,7 +144,7 @@ export default function LoginPage() {
         createSession(keepSignedIn);
         updateSessionActivity();
 
-        router.push("/");
+        router.push("/dashboard");
         return;
       }
 
@@ -165,7 +173,7 @@ export default function LoginPage() {
       createSession(keepSignedIn);
       updateSessionActivity();
 
-      router.push("/");
+      router.push("/dashboard");
     } catch (err) {
       setError(ERROR_MESSAGES.SERVER_ERROR);
     } finally {
@@ -181,15 +189,17 @@ export default function LoginPage() {
         <div className="max-w-sm w-full">
           {/* Logo */}
           <div className="text-center mb-12">
-            <h1
-              className="text-2xl tracking-[0.35em] font-semibold"
-              style={{
-                fontFamily:
-                  "'SF Pro Display', 'Helvetica Neue', Inter, sans-serif",
-              }}
-            >
-              NOOR
-            </h1>
+            <Link href="/landing">
+              <h1
+                className="text-2xl tracking-[0.35em] font-semibold hover:opacity-60 transition-opacity"
+                style={{
+                  fontFamily:
+                    "'SF Pro Display', 'Helvetica Neue', Inter, sans-serif",
+                }}
+              >
+                NOOR
+              </h1>
+            </Link>
           </div>
 
           {/* Header */}

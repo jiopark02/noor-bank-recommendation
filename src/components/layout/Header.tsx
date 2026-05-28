@@ -43,7 +43,7 @@ export function Header({ userName = 'there' }: HeaderProps) {
       >
         <div className="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between">
           {/* Logo Section */}
-          <Link href="/" className="flex flex-col items-start">
+          <Link href="/dashboard" className="flex flex-col items-start">
             <span
               className="text-base tracking-[0.25em] font-medium transition-opacity duration-300 hover:opacity-60"
               style={{

@@ -43,6 +43,8 @@
   },
   "nav": {
     "home": "Home",
+    "ai": "AI",
+    "chat": "Chat",
     "banking": "Banking",
     "housing": "Housing",
     "visa": "Visa",

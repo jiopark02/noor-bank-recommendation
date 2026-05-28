@@ -43,6 +43,8 @@
   },
   "nav": {
     "home": "Startseite",
+    "ai": "KI",
+    "chat": "Chat",
     "banking": "Banking",
     "housing": "Wohnung",
     "visa": "Visum",
