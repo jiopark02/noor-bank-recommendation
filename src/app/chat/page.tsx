@@ -133,9 +133,23 @@ export default function ChatPage() {
   }, [messages, isLoading]);
 
   useEffect(() => {
-    if (!quickPromptHandledRef.current && userId && initialPrompt) {
-      quickPromptHandledRef.current = true;
-      void sendMessage(initialPrompt);
+    if (!quickPromptHandledRef.current && userId) {
+      const source =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("source")
+          : null;
+
+      if (source !== "quickprompt") {
+        localStorage.removeItem("noor_quick_prompt");
+        return;
+      }
+
+      const quickPrompt = localStorage.getItem("noor_quick_prompt")?.trim();
+      if (quickPrompt) {
+        quickPromptHandledRef.current = true;
+        localStorage.removeItem("noor_quick_prompt");
+        void sendMessage(quickPrompt);
+      }
     }
   }, [sendMessage, userId, initialPrompt]);
 
