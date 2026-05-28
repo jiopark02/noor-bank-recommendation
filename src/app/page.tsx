@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import { PageLayout } from "@/components/layout";
+import { useTheme } from "@/contexts/ThemeContext";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
+import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
+import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 interface StoredBudget {
   total?: number;
@@ -45,10 +51,110 @@ function formatMoney(value: number): string {
 
 export default function HomePage() {
   const router = useRouter();
+  const { theme, useSchoolTheme } = useTheme();
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [moneyError, setMoneyError] = useState<string | null>(null);
+  const [hasBankConnection, setHasBankConnection] = useState(false);
+  const [userName, setUserName] = useState("there");
+  const [promptDraft, setPromptDraft] = useState("");
+  const [budget, setBudget] = useState<StoredBudget>({ total: 0, spent: 0 });
+  const [accounts, setAccounts] = useState<StoredPlaidAccount[]>([]);
+  const [transactions, setTransactions] = useState<StoredPlaidTransaction[]>(
+    []
+  );
+  const [subscriptions, setSubscriptions] = useState<StoredPlaidSubscription[]>(
+    []
+  );
 
   useEffect(() => {
-    const userId = localStorage.getItem("noor_user_id");
-    router.replace(userId ? "/dashboard" : "/landing");
+    const storedUserId = localStorage.getItem("noor_user_id");
+    if (!storedUserId) {
+      router.replace("/welcome");
+      window.setTimeout(() => {
+        if (window.location.pathname === "/") {
+          window.location.href = "/welcome";
+        }
+      }, 400);
+      return;
+    }
+    setUserId(storedUserId);
+
+    try {
+      const profileRaw = localStorage.getItem("noor_user_profile");
+      if (profileRaw) {
+        const parsed = JSON.parse(profileRaw) as { firstName?: string };
+        if (parsed.firstName?.trim()) {
+          setUserName(parsed.firstName.trim());
+        }
+      }
+    } catch {
+      // Ignore profile parse errors.
+    }
+
+    try {
+      const budgetRaw = localStorage.getItem(STORAGE_KEY_BUDGET);
+      if (budgetRaw) {
+        const parsed = JSON.parse(budgetRaw) as StoredBudget;
+        if (typeof parsed.total === "number" && parsed.total > 0) {
+          setBudget({
+            total: parsed.total,
+            spent: typeof parsed.spent === "number" ? parsed.spent : 0,
+          });
+        }
+      }
+    } catch {
+      // Ignore budget parse errors.
+    }
+
+    let hasActiveConnection = false;
+    try {
+      const storedConnections = localStorage.getItem("noor_plaid_connections");
+      if (storedConnections) {
+        const parsed = JSON.parse(storedConnections) as Array<{
+          status?: string;
+        }>;
+        hasActiveConnection = parsed.some(
+          (connection) => connection.status === "active"
+        );
+      }
+    } catch {
+      // Ignore connection parse errors.
+    }
+
+    setHasBankConnection(hasActiveConnection);
+
+    if (hasActiveConnection) {
+      try {
+        const storedAccountsRaw = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+        const storedTxRaw = localStorage.getItem(STORAGE_KEY_TRANSACTIONS);
+
+        if (storedAccountsRaw) {
+          const parsedAccounts = JSON.parse(storedAccountsRaw) as unknown;
+          if (Array.isArray(parsedAccounts)) {
+            setAccounts(parsedAccounts as StoredPlaidAccount[]);
+          }
+        }
+
+        if (storedTxRaw) {
+          const parsedTx = JSON.parse(storedTxRaw) as unknown;
+          if (Array.isArray(parsedTx)) {
+            setTransactions(parsedTx as StoredPlaidTransaction[]);
+          }
+        }
+      } catch {
+        // Ignore cache parse errors.
+      }
+    } else {
+      setAccounts([]);
+      setTransactions([]);
+      setSubscriptions([]);
+      localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
+      localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
+    }
+
+    setIsLoading(false);
   }, [router]);
 
   const fetchLiveMoneyData = useCallback(async () => {
