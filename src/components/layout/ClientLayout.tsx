@@ -10,22 +10,13 @@ interface ClientLayoutProps {
 }
 
 // Pages where the chat button should not appear
-const HIDDEN_CHAT_PAGES = [
-  "/landing",
-  "/welcome",
-  "/survey",
-  "/login",
-  "/chat",
-  "/forgot-password",
-  "/auth/callback",
-];
+const HIDDEN_CHAT_PAGES = ["/welcome", "/survey", "/login", "/chat"];
 
 export function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
   const safePathname = pathname ?? "";
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [hasLocalSession, setHasLocalSession] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -49,7 +40,6 @@ export function ClientLayout({ children }: ClientLayoutProps) {
       }
     };
 
-    setHasLocalSession(Boolean(localStorage.getItem("noor_user_id")));
     syncSession();
 
     const { data: authListener } = supabase?.auth.onAuthStateChange(
@@ -67,10 +57,7 @@ export function ClientLayout({ children }: ClientLayoutProps) {
   }, []);
 
   const shouldShowChat =
-    isAuthReady &&
-    isAuthenticated &&
-    hasLocalSession &&
-    !HIDDEN_CHAT_PAGES.includes(safePathname);
+    isAuthReady && isAuthenticated && !HIDDEN_CHAT_PAGES.includes(safePathname);
 
   return (
     <>

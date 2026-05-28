@@ -85,13 +85,9 @@ function isPathActive(pathname: string, href: string): boolean {
   );
 }
 
-function pathMatchesNavItem(safePathname: string, href: string): boolean {
-  return safePathname === href || safePathname.startsWith(`${href}/`);
-}
-
 export function BottomNav() {
   const pathname = usePathname();
-  const safePathname = pathname ?? "/dashboard";
+  const safePathname = pathname ?? "/";
   const { theme, useSchoolTheme } = useTheme();
   const { t } = useLanguage();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -285,54 +281,11 @@ function HomeIcon({ active }: IconProps) {
       strokeWidth={active ? 1.75 : 1.25}
     >
       <path
-        d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"
+        d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <path d="M9 21V12h6v9" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function AiTabIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ChatSheetIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9 10h6M9 14h4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M9 22V12h6v10" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
