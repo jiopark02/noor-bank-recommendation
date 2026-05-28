@@ -43,6 +43,8 @@
   },
   "nav": {
     "home": "首页",
+    "ai": "AI",
+    "chat": "聊天",
     "banking": "银行",
     "housing": "住房",
     "visa": "签证",

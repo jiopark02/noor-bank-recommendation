@@ -83,7 +83,7 @@ export default function AuthCallbackPage() {
           );
 
           if (existingProfile) {
-            router.push("/");
+            router.push("/dashboard");
           } else {
             // New user - go to survey to complete profile
             router.push("/survey");

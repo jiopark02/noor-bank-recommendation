@@ -43,6 +43,8 @@
   },
   "nav": {
     "home": "ホーム",
+    "ai": "AI",
+    "chat": "チャット",
     "banking": "銀行",
     "housing": "住居",
     "visa": "ビザ",
