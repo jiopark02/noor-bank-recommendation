@@ -17,11 +17,12 @@ interface NavItem {
 
 // Primary tab: dashboard (AI preview); full chat lives in More
 const MAIN_NAV_ITEMS: NavItem[] = [
-  { href: "/", labelKey: "nav.ai", icon: AiTabIcon },
+  { href: "/dashboard", labelKey: "nav.ai", icon: AiTabIcon },
 ];
 
-// Former primary nav + all “More” destinations (scrollable sheet)
+// Former primary nav + all "More" destinations (scrollable sheet)
 const MORE_NAV_ITEMS: NavItem[] = [
+  { href: "/landing", labelKey: "nav.home", icon: HomeIcon },
   { href: "/banking", labelKey: "nav.banking", icon: BankingIcon },
   { href: "/grow", labelKey: "nav.grow", icon: GrowIcon },
   { href: "/visa", labelKey: "nav.visa", icon: VisaIcon },
@@ -37,17 +38,12 @@ const MORE_NAV_ITEMS: NavItem[] = [
 ];
 
 function pathMatchesNavItem(safePathname: string, href: string): boolean {
-  if (href === "/") {
-    return safePathname === "/";
-  }
-  return (
-    safePathname === href || safePathname.startsWith(`${href}/`)
-  );
+  return safePathname === href || safePathname.startsWith(`${href}/`);
 }
 
 export function BottomNav() {
   const pathname = usePathname();
-  const safePathname = pathname ?? "/";
+  const safePathname = pathname ?? "/dashboard";
   const { theme, useSchoolTheme } = useTheme();
   const { t } = useLanguage();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -211,6 +207,26 @@ export function BottomNav() {
 interface IconProps {
   active?: boolean;
   activeColor?: string;
+}
+
+function HomeIcon({ active }: IconProps) {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={active ? 1.75 : 1.25}
+    >
+      <path
+        d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M9 21V12h6v9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function AiTabIcon({ active }: IconProps) {

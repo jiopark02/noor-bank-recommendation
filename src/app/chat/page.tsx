@@ -9,6 +9,8 @@ import { useChat } from "@/hooks/useChat";
 import { UserContext } from "@/lib/noorAIPrompt";
 import { supabase } from "@/lib/supabase-browser";
 
+const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
+
 function buildUserContext(profile: Record<string, unknown>): UserContext {
   return {
     firstName: profile.firstName as string | undefined,
@@ -29,26 +31,59 @@ function buildUserContext(profile: Record<string, unknown>): UserContext {
   };
 }
 
+function formatContent(content: string): React.ReactNode {
+  const lines = content.replace(/\\\$/g, "$").split("\n");
+  return lines.map((line, i) => {
+    if (line.startsWith("- ") || line.startsWith("• ")) {
+      return <span key={i} className="block ml-3 my-0.5">• {line.slice(2)}</span>;
+    }
+    if (/^(\d+)\.\s/.test(line)) {
+      return <span key={i} className="block ml-3 my-0.5">{line}</span>;
+    }
+    if (line.includes("**")) {
+      const parts = line.split(/\*\*(.*?)\*\*/g);
+      return (
+        <span key={i} className="block">
+          {parts.map((p, j) => j % 2 === 1 ? <strong key={j}>{p}</strong> : p)}
+        </span>
+      );
+    }
+    return <span key={i} className={i > 0 ? "block" : undefined}>{line}</span>;
+  });
+}
+
+const LEVEL_LABEL: Record<UserLevel, string> = {
+  beginner: "Foundations",
+  intermediate: "Building",
+  advanced: "Advanced",
+};
+
 export default function ChatPage() {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [userLevel, setUserLevel] = useState<UserLevel>("beginner");
   const [userId, setUserId] = useState<string | null>(null);
   const [userContext, setUserContext] = useState<UserContext>({});
+  const [userName, setUserName] = useState("");
   const [isBooting, setIsBooting] = useState(true);
+  const [isFocused, setIsFocused] = useState(false);
+
+  // Read and clear the pending prompt synchronously on first render so it
+  // can be displayed immediately — before auth/boot completes.
+  const [initialPrompt] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const qp = localStorage.getItem("noor_quick_prompt");
+      if (qp) { localStorage.removeItem("noor_quick_prompt"); return qp; }
+    } catch { /* ignore */ }
+    return null;
+  });
 
   const quickPromptHandledRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const {
-    messages,
-    isLoading,
-    error,
-    sendMessage,
-    clearMessages,
-    quickPrompts,
-  } = useChat({
+  const { messages, isLoading, error, sendMessage, clearMessages, quickPrompts } = useChat({
     userId,
     userContext,
     loadHistory: true,
@@ -56,88 +91,41 @@ export default function ChatPage() {
 
   useEffect(() => {
     let isMounted = true;
-
-    const hydrateFromSession = async () => {
-      if (!supabase) {
-        if (isMounted) {
-          router.replace("/welcome");
-        }
-        return;
-      }
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.user) {
-        if (isMounted) {
-          router.replace("/welcome");
-        }
-        return;
-      }
-
-      const resolvedUserId = session.user.id;
+    const hydrate = async () => {
+      if (!supabase) { if (isMounted) router.replace("/landing"); return; }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) { if (isMounted) router.replace("/landing"); return; }
+      const uid = session.user.id;
       if (!isMounted) return;
-      setUserId(resolvedUserId);
-
+      setUserId(uid);
       try {
         const [{ data: userRow }, { data: surveyRow }] = await Promise.all([
-          supabase
-            .from("users")
-            .select("first_name,last_name")
-            .eq("id", resolvedUserId)
-            .maybeSingle(),
-          supabase
-            .from("survey_responses")
-            .select(
-              "university,institution_type,has_ssn,has_us_credit_history,monthly_income,campus_side,expected_monthly_spending"
-            )
-            .eq("user_id", resolvedUserId)
-            .order("updated_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
+          supabase.from("users").select("first_name,last_name").eq("id", uid).maybeSingle(),
+          supabase.from("survey_responses")
+            .select("university,institution_type,has_ssn,has_us_credit_history,monthly_income,campus_side,expected_monthly_spending")
+            .eq("user_id", uid).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
         ]);
-
         if (!isMounted) return;
-
+        if (userRow?.first_name) setUserName(userRow.first_name);
         const profile = {
-          firstName: userRow?.first_name,
-          lastName: userRow?.last_name,
-          university: surveyRow?.university,
-          institutionType: surveyRow?.institution_type,
-          hasSSN: surveyRow?.has_ssn,
-          hasCreditHistory: surveyRow?.has_us_credit_history,
-          monthlyIncome: surveyRow?.monthly_income,
-          campusSide: surveyRow?.campus_side,
+          firstName: userRow?.first_name, lastName: userRow?.last_name,
+          university: surveyRow?.university, institutionType: surveyRow?.institution_type,
+          hasSSN: surveyRow?.has_ssn, hasCreditHistory: surveyRow?.has_us_credit_history,
+          monthlyIncome: surveyRow?.monthly_income, campusSide: surveyRow?.campus_side,
           monthlySpending: surveyRow?.expected_monthly_spending,
         } as Record<string, unknown>;
-
         setUserContext(buildUserContext(profile));
-
-        const level = getUserFinanceLevel({
+        setUserLevel(getUserFinanceLevel({
           studentLevel: profile.studentLevel as string | undefined,
           academicLevel: profile.academicLevel as string | undefined,
-          year: profile.graduationYear
-            ? new Date().getFullYear() -
-              (parseInt(profile.graduationYear as string, 10) - 4)
-            : undefined,
+          year: profile.graduationYear ? new Date().getFullYear() - (parseInt(profile.graduationYear as string, 10) - 4) : undefined,
           visaStatus: profile.visaStatus as string | undefined,
-        });
-        setUserLevel(level);
-      } catch {
-        // Keep defaults if profile query fails.
-      } finally {
-        if (isMounted) {
-          setIsBooting(false);
-        }
-      }
+        }));
+      } catch { /* keep defaults */ }
+      finally { if (isMounted) setIsBooting(false); }
     };
-
-    hydrateFromSession();
-
-    return () => {
-      isMounted = false;
-    };
+    hydrate();
+    return () => { isMounted = false; };
   }, [router]);
 
   useEffect(() => {
@@ -145,233 +133,337 @@ export default function ChatPage() {
   }, [messages, isLoading]);
 
   useEffect(() => {
-    if (!quickPromptHandledRef.current && userId) {
-      const quickPrompt = localStorage.getItem("noor_quick_prompt");
-      if (quickPrompt) {
-        quickPromptHandledRef.current = true;
-        localStorage.removeItem("noor_quick_prompt");
-        void sendMessage(quickPrompt);
-      }
+    if (!quickPromptHandledRef.current && userId && initialPrompt) {
+      quickPromptHandledRef.current = true;
+      void sendMessage(initialPrompt);
     }
-  }, [sendMessage, userId]);
+  }, [sendMessage, userId, initialPrompt]);
 
-  const handleSend = async (messageText?: string) => {
-    const text = (messageText ?? input).trim();
-    if (!text || isLoading) return;
-
+  const handleSend = async (text?: string) => {
+    const msg = (text ?? input).trim();
+    if (!msg || isLoading) return;
     setInput("");
-    await sendMessage(text);
+    await sendMessage(msg);
   };
 
-  const handleQuickPrompt = async (prompt: string) => {
-    if (isLoading) return;
-    await handleSend(prompt);
-  };
-
-  if (isBooting) {
+  // Only block the whole page on boot if there's no question to show yet.
+  // If a quick prompt was tapped, render the page immediately so the user
+  // sees their question right away — auth resolves in the background.
+  if (isBooting && !initialPrompt) {
     return (
-      <div className="min-h-screen bg-[#FAF9F7] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-white">
         <motion.div
-          className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full"
+          className="w-5 h-5 rounded-full border-2 border-gray-200 border-t-black"
           animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
         />
       </div>
     );
   }
 
+  // While still booting but we have a pending prompt, show it optimistically
+  // so the user sees their question and the typing indicator immediately.
+  const displayMessages =
+    isBooting && initialPrompt && messages.length === 0
+      ? [{ id: "pending", role: "user" as const, content: initialPrompt, timestamp: new Date() }]
+      : messages;
+  const displayLoading = (isBooting && !!initialPrompt) || isLoading;
+
   return (
-    <div className="min-h-screen bg-[#FAF9F7] flex flex-col">
-      <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+    <div className="min-h-screen flex flex-col bg-white" style={{ fontFamily: FONT }}>
+
+      {/* ── HEADER ── */}
+      <div
+        className="fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3"
+        style={{
+          background: "rgba(255,255,255,0.95)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderBottom: "1px solid rgba(0,0,0,0.07)",
+        }}
+      >
         <div className="flex items-center gap-3">
-          <button onClick={() => router.back()} className="p-1">
-            <svg
-              className="w-5 h-5 text-gray-600"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
+          <button
+            onClick={() => router.back()}
+            className="w-8 h-8 flex items-center justify-center rounded-full transition-colors"
+            style={{ background: "rgba(0,0,0,0.05)" }}
+          >
+            <svg className="w-4 h-4 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
+
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="font-medium text-black">Noor AI</h1>
+              <span className="text-[15px] font-semibold text-black" style={{ fontFamily: FONT }}>
+                Noor AI
+              </span>
               <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                  userLevel === "beginner"
-                    ? "bg-green-100 text-green-700"
-                    : userLevel === "intermediate"
-                    ? "bg-blue-100 text-blue-700"
-                    : "bg-purple-100 text-purple-700"
-                }`}
+                className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500"
+                style={{ fontFamily: FONT }}
               >
-                {userLevel === "beginner"
-                  ? "Foundations"
-                  : userLevel === "intermediate"
-                  ? "Building"
-                  : "Advanced"}
+                {LEVEL_LABEL[userLevel]}
               </span>
             </div>
-            <p className="text-xs text-gray-500">Personalized to your level</p>
+            <p className="text-[11px] text-gray-400 mt-0.5" style={{ fontFamily: FONT }}>
+              {userName ? `Personalized for ${userName}` : "Personalized to your profile"}
+            </p>
           </div>
         </div>
-        {messages.length > 0 && (
-          <button
-            onClick={clearMessages}
-            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            Clear chat
-          </button>
-        )}
+
+        <AnimatePresence>
+          {displayMessages.length > 0 && (
+            <motion.button
+              onClick={clearMessages}
+              className="text-[12px] text-gray-400 hover:text-black transition-colors px-2 py-1"
+              style={{ fontFamily: FONT }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              Clear
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 pb-32">
-        {messages.length === 0 ? (
+      {/* ── MESSAGES ── */}
+      <div className="flex-1 overflow-y-auto pt-[64px] pb-[136px]">
+        {displayMessages.length === 0 ? (
+          /* ── EMPTY STATE ── */
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            className="max-w-md mx-auto px-5 pt-14 pb-4"
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center py-12"
+            transition={{ duration: 0.4, ease: "easeOut" }}
           >
-            <div className="w-16 h-16 bg-black rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <svg
-                className="w-8 h-8 text-white"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            {/* Wordmark */}
+            <div className="mb-8">
+              <p
+                className="text-[11px] font-medium tracking-widest text-gray-400 uppercase mb-3"
+                style={{ fontFamily: FONT, letterSpacing: "0.18em" }}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                />
-              </svg>
+                NOOR
+              </p>
+              <h2
+                className="text-[26px] font-semibold text-black leading-tight"
+                style={{ fontFamily: FONT, letterSpacing: "-0.02em" }}
+              >
+                {userName ? `Hi ${userName}.` : "Ask me anything."}
+              </h2>
+              <p className="text-[14px] text-gray-400 mt-1.5 leading-relaxed" style={{ fontFamily: FONT }}>
+                Banking, credit, visa, taxes — I know your profile.
+              </p>
             </div>
-            <h2 className="text-lg font-medium text-black mb-2">
-              Ask me anything
-            </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              I can help with banking, visa questions, taxes, and more.
-            </p>
 
-            <div className="flex flex-wrap justify-center gap-2">
-              {quickPrompts.map((prompt, index) => (
-                <button
-                  key={`${prompt.label}-${index}`}
-                  onClick={() => handleQuickPrompt(prompt.prompt)}
-                  className="px-4 py-2 bg-white border border-gray-200 rounded-full text-sm text-gray-700 hover:border-gray-400 transition-colors"
+            {/* Prompts as plain rows */}
+            <div className="space-y-1">
+              {quickPrompts.slice(0, 6).map((p, i) => (
+                <motion.button
+                  key={i}
+                  onClick={() => void handleSend(p.prompt)}
+                  className="w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-left group transition-colors"
+                  style={{
+                    background: "rgba(0,0,0,0.03)",
+                    border: "1px solid rgba(0,0,0,0)",
+                  }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.055, duration: 0.3 }}
+                  whileHover={{ background: "rgba(0,0,0,0.06)" }}
+                  whileTap={{ scale: 0.99 }}
                 >
-                  {prompt.label}
-                </button>
+                  <span className="text-[13.5px] text-black" style={{ fontFamily: FONT }}>
+                    {p.label}
+                  </span>
+                  <svg className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </motion.button>
               ))}
             </div>
           </motion.div>
         ) : (
-          <div className="space-y-4">
+          /* ── CONVERSATION ── */
+          <div className="max-w-lg mx-auto px-4 py-5 space-y-3">
             <AnimatePresence>
-              {messages.map((message) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${
-                    message.role === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                      message.role === "user"
-                        ? "bg-black text-white"
-                        : "bg-white border border-gray-200"
-                    }`}
+              {displayMessages.map((msg, i) => {
+                const isUser = msg.role === "user";
+                return (
+                  <motion.div
+                    key={msg.id}
+                    className={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25, delay: Math.min(i * 0.03, 0.15), ease: "easeOut" }}
                   >
-                    <p
-                      className={`text-sm whitespace-pre-wrap ${
-                        message.role === "user" ? "text-white" : "text-gray-800"
+                    {!isUser && (
+                      <div
+                        className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center mb-0.5 bg-black"
+                      >
+                        <span className="text-[9px] font-semibold text-white" style={{ fontFamily: FONT, letterSpacing: "0.06em" }}>N</span>
+                      </div>
+                    )}
+                    <div
+                      className={`max-w-[80%] px-4 py-3 text-[14px] leading-relaxed ${
+                        isUser ? "rounded-2xl rounded-br-[5px]" : "rounded-2xl rounded-bl-[5px]"
                       }`}
+                      style={{
+                        fontFamily: FONT,
+                        ...(isUser
+                          ? { background: "#0A0A0A", color: "#FFFFFF" }
+                          : { background: "#F5F5F5", color: "#0A0A0A" }),
+                      }}
                     >
-                      {message.content}
-                    </p>
-                  </div>
-                </motion.div>
-              ))}
+                      {formatContent(msg.content)}
+                    </div>
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
 
-            {isLoading && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex justify-start"
-              >
-                <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3">
-                  <div className="flex gap-1">
-                    <div
-                      className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0ms" }}
-                    />
-                    <div
-                      className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "150ms" }}
-                    />
-                    <div
-                      className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "300ms" }}
-                    />
+            <AnimatePresence>
+              {displayLoading && (
+                <motion.div
+                  className="flex items-end gap-2 justify-start"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <div className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center mb-0.5 bg-black">
+                    <span className="text-[9px] font-semibold text-white" style={{ fontFamily: FONT, letterSpacing: "0.06em" }}>N</span>
                   </div>
-                </div>
-              </motion.div>
-            )}
+                  <div className="px-4 py-3.5 rounded-2xl rounded-bl-[5px] bg-[#F5F5F5]">
+                    <div className="flex items-center gap-1">
+                      {[0, 1, 2].map((i) => (
+                        <motion.div
+                          key={i}
+                          className="w-1.5 h-1.5 rounded-full bg-gray-400"
+                          animate={{ y: [0, -4, 0] }}
+                          transition={{ duration: 0.55, repeat: Infinity, delay: i * 0.15 }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
-      <div className="fixed bottom-20 left-0 right-0 bg-white border-t border-gray-100 px-4 py-3">
-        {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-            {error}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
+      {/* ── INPUT ── */}
+      <div
+        className="fixed left-0 right-0 z-20 px-4 pb-3"
+        style={{ bottom: "64px" }}
+      >
+        {/* Fade behind input */}
+        <div
+          className="absolute inset-x-0 -top-8 bottom-0 pointer-events-none"
+          style={{ background: "linear-gradient(to top, white 60%, rgba(255,255,255,0))" }}
+        />
+
+        {/* Inline quick prompts when conversation active */}
+        <AnimatePresence>
+          {displayMessages.length > 0 && !displayLoading && (
+            <motion.div
+              className="relative flex gap-2 overflow-x-auto pb-2.5"
+              style={{ scrollbarWidth: "none" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {quickPrompts.slice(0, 4).map((p, i) => (
+                <button
+                  key={i}
+                  onClick={() => void handleSend(p.prompt)}
+                  className="flex-shrink-0 px-3 py-1.5 rounded-full text-[12px] whitespace-nowrap transition-colors"
+                  style={{
+                    background: "white",
+                    border: "1px solid rgba(0,0,0,0.12)",
+                    color: "rgba(0,0,0,0.55)",
+                    fontFamily: FONT,
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              className="mb-2 px-3 py-2 rounded-xl text-[12px] text-red-600 bg-red-50 border border-red-100"
+              style={{ fontFamily: FONT }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Input row */}
+        <div
+          className="relative flex items-center gap-2"
+          style={{
+            background: "#FFFFFF",
+            border: `1px solid ${isFocused ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.1)"}`,
+            borderRadius: "16px",
+            padding: "7px 7px 7px 16px",
+            boxShadow: isFocused ? "0 2px 16px rgba(0,0,0,0.09)" : "0 2px 10px rgba(0,0,0,0.06)",
+            transition: "border-color 0.18s, box-shadow 0.18s",
+          }}
+        >
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void handleSend();
-              }
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); }
             }}
-            placeholder="Ask about banking, visa, taxes..."
-            className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-gray-300 transition-all"
+            placeholder="Ask about banking, visa, taxes…"
+            className="flex-1 bg-transparent outline-none text-[14px] placeholder:text-gray-300"
+            style={{ fontFamily: FONT, color: "#0A0A0A" }}
           />
-          <button
+
+          <motion.button
             onClick={() => void handleSend()}
             disabled={!input.trim() || isLoading}
-            className="p-3 bg-black text-white rounded-xl disabled:opacity-50 transition-all hover:bg-gray-800"
+            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{
+              background: input.trim() && !isLoading ? "#0A0A0A" : "rgba(0,0,0,0.07)",
+              transition: "background 0.18s",
+            }}
+            whileTap={input.trim() && !isLoading ? { scale: 0.9 } : {}}
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+            {isLoading ? (
+              <motion.div
+                className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
               />
-            </svg>
-          </button>
+            ) : (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none">
+                <path
+                  d="M2 7H12M12 7L8 3M12 7L8 11"
+                  stroke={input.trim() ? "white" : "rgba(0,0,0,0.25)"}
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </motion.button>
         </div>
       </div>
 
