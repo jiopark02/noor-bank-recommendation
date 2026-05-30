@@ -443,6 +443,10 @@ export default function HomePage() {
   const accentColor = useSchoolTheme ? theme.primary_color : "#111111";
   const accentTextColor =
     useSchoolTheme && theme.text_on_primary === "black" ? "#111111" : "#FFFFFF";
+  const openFullChat = () => {
+    router.push("/chat");
+  };
+
   const submitPrompt = (rawPrompt?: string) => {
     const text = (rawPrompt ?? promptDraft).trim();
     if (!text) return;
@@ -480,22 +484,38 @@ export default function HomePage() {
         </p>
       </motion.header>
 
-      <section className="grid grid-cols-1 gap-8 md:grid-cols-2 md:gap-10">
+      <section className="flex flex-col gap-6">
         <motion.div
-          className="noor-card p-6 md:p-8 flex flex-col min-h-[min(520px,70vh)] md:min-h-[620px]"
-          initial={{ opacity: 0, x: -16 }}
-          animate={{ opacity: 1, x: 0 }}
+          className="noor-card p-6 md:p-8 flex flex-col w-full min-h-[420px]"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35 }}
         >
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold text-black">
-                AI Assistant
-              </h2>
-            </div>
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-2xl font-semibold text-black">AI Assistant</h2>
+            <button
+              type="button"
+              onClick={openFullChat}
+              aria-label="Open full chat"
+              className="p-2 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors shrink-0"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.75}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"
+                />
+              </svg>
+            </button>
           </div>
 
-          <div className="mt-8 flex-1 space-y-5">
+          <div className="mt-6 flex-1 space-y-5 min-h-[240px] overflow-y-auto">
             <div className="rounded-2xl bg-gray-100 px-4 py-3 max-w-[92%]">
               <p className="text-sm text-gray-700 leading-relaxed">
                 {aiSummary.opening}
@@ -572,8 +592,8 @@ export default function HomePage() {
 
         <motion.div
           className="space-y-5"
-          initial={{ opacity: 0, x: 16 }}
-          animate={{ opacity: 1, x: 0 }}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, delay: 0.05 }}
         >
           <div>
