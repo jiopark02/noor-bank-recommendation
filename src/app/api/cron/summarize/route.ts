@@ -7,6 +7,7 @@ import {
   getSessionMessages,
   createSummary,
   markSessionSummarized,
+  recordCronRun,        // ← 추가
   type ChatSession,
   type DbChatMessage,
 } from "@/lib/aiMemory";
@@ -233,6 +234,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const startedAt = new Date();
+  let infraError: string | null = null;
   const stats = {
     closed: 0,
     closeFailed: 0,
@@ -256,6 +259,9 @@ export async function GET(request: NextRequest) {
     }
   } catch (error) {
     console.error("Summarize cron: getSessionsToClose failed:", error);
+    infraError =
+      `getSessionsToClose failed: ` +
+      `${error instanceof Error ? error.message : String(error)}`;
   }
 
   try {
@@ -277,9 +283,29 @@ export async function GET(request: NextRequest) {
       "Summarize cron: getSessionsNeedingSummary failed:",
       error
     );
+    infraError =
+      (infraError ? infraError + "; " : "") +
+      `getSessionsNeedingSummary failed: ` +
+      `${error instanceof Error ? error.message : String(error)}`;
   }
 
   console.info("Summarize cron complete:", stats);
+
+  // cron_runs에 실행 기록 (격리 — 기록 실패가 본업/응답을 망치지 않게).
+  try {
+    await recordCronRun({
+      jobName: "summarize",
+      startedAt,
+      itemsProcessed: stats.closed + stats.summarized,
+      itemsFailed: stats.closeFailed + stats.summarizeFailed,
+      stats,
+      error: infraError,
+      forceFailed: infraError !== null,
+    });
+  } catch (recordError) {
+    console.error("Summarize cron: failed to record cron_runs row:", recordError);
+  }
+
   return NextResponse.json({
     success: true,
     ...stats,

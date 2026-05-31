@@ -9,6 +9,8 @@ import {
   supersedeUserFact,
   expireUserFact,
   isUniqueViolation,
+  recordCronRun,        // ← 추가
+  deleteOldCronRuns,    // ← 추가
   type ChatSession,
   type DbChatMessage,
   type UserFact,
@@ -39,6 +41,8 @@ const EXISTING_FACTS_LIMIT = 200;
 const MAX_FACT_LENGTH = 500;
 // 한 세션에서 supersede + expire 합계 상한. 초과 시 폭주로 간주.
 const MAX_SUPERSEDE_EXPIRE = 30;
+// cron_runs 보존 기간(일). 이 cron 끝에서 best-effort 정리.
+const CRON_RUNS_RETENTION_DAYS = 180;
 
 // user_facts.category 허용값 (검증용).
 const VALID_CATEGORIES: ReadonlyArray<UserFactCategory> = [
@@ -644,6 +648,8 @@ export async function GET(request: NextRequest) {
 
   // processFailed 세션도 부분 성공 fact가 factsSaved 등에 합산될 수 있음
   //  — 세션은 실패해도 일부 fact가 DB에 반영됐을 수 있기 때문.
+  const startedAt = new Date();
+  let infraError: string | null = null;
   const stats = {
     processed: 0,
     processFailed: 0,
@@ -694,9 +700,41 @@ export async function GET(request: NextRequest) {
       "Extract cron: getSessionsNeedingFactsExtraction failed:",
       error
     );
+    infraError =
+      `getSessionsNeedingFactsExtraction failed: ` +
+      `${error instanceof Error ? error.message : String(error)}`;
   }
 
   console.info("Extract cron complete:", stats);
+
+  // cron_runs에 실행 기록 (격리). items_*는 세션 단위 (factsFailed는 stats에만).
+  try {
+    await recordCronRun({
+      jobName: "extract-facts",
+      startedAt,
+      itemsProcessed: stats.processed,
+      itemsFailed: stats.processFailed,
+      stats,
+      error: infraError,
+      forceFailed: infraError !== null,
+    });
+  } catch (recordError) {
+    console.error("Extract cron: failed to record cron_runs row:", recordError);
+  }
+
+  // cron_runs 보존 정리 (격리 — 느슨한 작업, 실패해도 다음 run에서 정리됨).
+  try {
+    const deleted = await deleteOldCronRuns(CRON_RUNS_RETENTION_DAYS);
+    if (deleted > 0) {
+      console.info(`Extract cron: cleaned up ${deleted} old cron_runs row(s).`);
+    }
+  } catch (cleanupError) {
+    console.warn(
+      "Extract cron: cron_runs cleanup failed (will retry next run):",
+      cleanupError
+    );
+  }
+
   return NextResponse.json({
     success: true,
     ...stats,

@@ -1275,6 +1275,127 @@ export async function markFactsExtracted(
   }
 }
 
+// ============================================================================
+// STEP A — aiMemory.ts 에 추가 (v2: Cursor 검토 반영)
+// ============================================================================
+// 위치: SECTION 5c (markFactsExtracted) 직후, SECTION 6 직전.
+// 아래 섹션 헤더 스타일로 추가.
+//
+// 변경점 (v1 → v2, Cursor 검토 반영):
+//  - throw new Error → throw wrapDbError(msg, error) (기존 패턴, cause 보존)
+//  - const admin → const supabase (기존 변수명 관례)
+//  - // SECTION 5d 헤더 추가
+//  - computeCronStatus는 export 안 함 (내부 helper)
+//  - forceFailed 옵션 추가 — 인프라 에러(배치 조회 실패 등) 시 status 강제 failed
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// SECTION 5d: Cron run monitoring (cron_runs)
+// ---------------------------------------------------------------------------
+
+export type CronJobName = "summarize" | "extract-facts";
+export type CronRunStatus = "success" | "partial" | "failed";
+
+/**
+ * recordCronRun 입력.
+ * - status는 넘기지 않는다. itemsProcessed/itemsFailed로 헬퍼가 계산.
+ * - forceFailed=true면 items가 0/0이어도 status를 'failed'로 강제한다
+ *   (배치 조회 실패 등 인프라 에러로 cron이 일을 못 한 경우 — blind spot 보완).
+ * - stats는 cron이 반환하는 결과 객체를 그대로 넣는다 (jsonb 저장).
+ */
+export interface CronRunInput {
+  jobName: CronJobName;
+  startedAt: Date;          // cron 시작 시각 (라우트 맨 처음에 찍어둔 값)
+  itemsProcessed: number;   // 세션 단위 성공 수
+  itemsFailed: number;      // 세션 단위 실패 수
+  stats: Record<string, unknown>; // 전체 결과 payload (그대로 저장)
+  error?: string | null;    // 인프라/치명적 에러 메시지 (선택)
+  forceFailed?: boolean;    // true면 status를 failed로 강제 (인프라 에러용)
+}
+
+/**
+ * itemsProcessed/itemsFailed로 cron 실행 status를 계산.
+ *  - forceFailed → failed (인프라 에러로 일을 못 함)
+ *  - 실패 0      → success (0개 처리 = 할 일 없었음 포함)
+ *  - 처리>0 & 실패>0 → partial
+ *  - 처리=0 & 실패>0 → failed
+ * (export 안 함 — 내부 helper)
+ */
+function computeCronStatus(
+  itemsProcessed: number,
+  itemsFailed: number,
+  forceFailed: boolean
+): CronRunStatus {
+  if (forceFailed) return "failed";
+  if (itemsFailed === 0) return "success";
+  if (itemsProcessed > 0) return "partial";
+  return "failed";
+}
+
+/**
+ * cron 실행 1건을 cron_runs에 기록한다 (모델 B: 종료 시 1 row INSERT).
+ *
+ * finished_at / duration_ms / status는 이 함수가 계산한다.
+ * 실패 시 throw — 호출하는 cron 라우트가 try/catch로 격리해야 한다
+ * (기록 실패가 cron 본업을 망치면 안 됨).
+ */
+export async function recordCronRun(input: CronRunInput): Promise<void> {
+  const supabase = getAdmin();
+
+  const finishedAt = new Date();
+  const durationMs = finishedAt.getTime() - input.startedAt.getTime();
+  const status = computeCronStatus(
+    input.itemsProcessed,
+    input.itemsFailed,
+    input.forceFailed === true
+  );
+
+  const { error } = await supabase.from("cron_runs").insert({
+    job_name: input.jobName,
+    status,
+    started_at: input.startedAt.toISOString(),
+    finished_at: finishedAt.toISOString(),
+    duration_ms: durationMs,
+    items_processed: input.itemsProcessed,
+    items_failed: input.itemsFailed,
+    stats: input.stats,
+    error: input.error ?? null,
+  });
+
+  if (error) {
+    throw wrapDbError(
+      `recordCronRun failed to insert cron_runs row: ${error.message}`,
+      error
+    );
+  }
+}
+
+/**
+ * cron_runs 보존 정리: 지정 일수보다 오래된 row 삭제.
+ * extract-facts cron 끝에서 best-effort로 호출 (실패해도 본업 무관).
+ * 실패 시 throw — 호출하는 쪽에서 try/catch로 격리.
+ * 삭제된 row 수 반환.
+ */
+export async function deleteOldCronRuns(
+  retentionDays: number
+): Promise<number> {
+  const supabase = getAdmin();
+
+  const cutoff = new Date(
+    Date.now() - retentionDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  const { error, count } = await supabase
+    .from("cron_runs")
+    .delete({ count: "exact" })
+    .lt("created_at", cutoff);
+
+  if (error) {
+    throw wrapDbError(`deleteOldCronRuns failed: ${error.message}`, error);
+  }
+  return count ?? 0;
+}
+
 // -----------------------------------------------------------------------------
 // SECTION 6: Memory Context Builder
 // -----------------------------------------------------------------------------
