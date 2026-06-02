@@ -12,6 +12,7 @@ const PROTECTED_PREFIXES = [
   "/deals",
   "/settings",
   "/chat",
+  "/admin",
 ] as const;
 
 function isProtectedPath(pathname: string): boolean {
@@ -81,5 +82,6 @@ export const config = {
     "/deals/:path*",
     "/settings/:path*",
     "/chat/:path*",
+    "/admin/:path*",
   ],
 };
