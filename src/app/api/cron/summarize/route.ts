@@ -15,10 +15,14 @@ import {
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// OpenRouter 요약 모델. 요약 품질을 위해 Sonnet 사용 (CTO 결정 — 선택 B).
-// 버전 고정 ID — OpenRouter의 "latest" 별칭은 chat completions API에서
-// 유효하지 않음(400). 모델이 retire되면 이 한 줄만 교체하면 됨.
-const SUMMARY_MODEL = "anthropic/claude-sonnet-4.5";
+// OpenRouter summarization model. Sonnet is used for summary quality (CTO decision).
+// Defaults to the "latest" alias (retire-immune); the tilde (~) prefix is required
+// for latest aliases on OpenRouter — without it the API returns "not a valid model ID".
+// Override via the SUMMARY_MODEL env var (e.g. pin to "anthropic/claude-sonnet-4.6")
+// if output stability ever requires it. Resilience to output-format drift is handled
+// in the parser, not by pinning the model.
+const SUMMARY_MODEL =
+  process.env.SUMMARY_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const MAX_MESSAGES_PER_SUMMARY = 200;
