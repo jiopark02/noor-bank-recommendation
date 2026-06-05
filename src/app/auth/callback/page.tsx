@@ -57,9 +57,14 @@ export default function AuthCallbackPage() {
           profile = { ...profile, ...surveyFields };
 
           // Best-effort sync to public.users so OAuth users get a profile row.
+          // Send the verified access token so the server can confirm the
+          // caller is syncing their own profile.
           await fetch("/api/auth/sync-profile", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
             body: JSON.stringify({
               id: user.id,
               email: user.email,
