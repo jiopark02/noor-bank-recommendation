@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/apiAuth';
 import {
   Country,
   getVisaTypes,
@@ -131,6 +132,12 @@ export async function GET(request: NextRequest) {
 // This is an admin endpoint to seed the database with local config data
 export async function POST(request: NextRequest) {
   try {
+    // --- Authorization: this endpoint prepares an admin/script seed payload,
+    // so restrict it to admins. GET stays public (read-only config data). ---
+    if (!(await requireAdmin(request))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { action } = await request.json();
 
     if (action !== 'sync') {
