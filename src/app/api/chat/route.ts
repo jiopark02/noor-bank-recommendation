@@ -895,12 +895,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userContextRaw = bodyObj.userContext;
-    const userContextPatch: Partial<UserContext> =
-      userContextRaw === undefined
-        ? {}
-        : (asPlainObject(userContextRaw) as Partial<UserContext>);
-
     const dbContext = await loadReadOnlyUserContextFromSupabase(authUserId);
 
     if (isAiMemoryEnabled()) {
@@ -928,10 +922,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const mergedUserContext: UserContext = {
-      ...dbContext,
-      ...userContextPatch,
-    };
+    // SECURITY (prompt injection): The client-supplied `userContext` in the
+    // request body was previously spread over `dbContext`, letting the client
+    // override server-side profile values. Those values are interpolated raw
+    // (no escaping) into the system prompt under "## Current User Context" via
+    // generateSystemPrompt, so a crafted field (e.g. firstName containing
+    // newlines + markdown headers) could inject attacker-controlled text into
+    // the model's instruction context. The client only ever re-sends the same
+    // 9 profile fields the server already reads from the DB (users +
+    // survey_responses), so the body value is redundant. We ignore it entirely
+    // and trust only the server-side DB read. Do NOT reintroduce a client
+    // patch here without per-field whitelisting + sanitization and a real need.
+    const mergedUserContext: UserContext = dbContext;
 
     const formattedMessages = parsedMessages.map((msg) => ({
       role: msg.role,
