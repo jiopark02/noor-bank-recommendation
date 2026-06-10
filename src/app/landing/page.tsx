@@ -19,33 +19,35 @@ const SECTIONS = [
   { id: 'meet', number: '01', label: 'MEET NOOR' },
   { id: 'outcome', number: '02', label: 'NOOR OWNS THE OUTCOME' },
   { id: 'intelligence', number: '03', label: 'AI INTELLIGENCE' },
-  { id: 'universities', number: '04', label: 'UNIVERSITIES' },
+  { id: 'topics', number: '04', label: 'YOUR JOURNEY' },
   { id: 'start', number: '05', label: 'GET STARTED' },
 ];
 
 const BANK_MATCHES = [
-  { name: 'Chase Total Checking', score: 98, tag: 'Best Match' },
-  { name: 'Bank of America Core', score: 91, tag: 'Low Fees' },
-  { name: 'Wells Fargo Everyday', score: 84, tag: 'Most Branches' },
+  { name: 'Chase Total Checking', score: 98, tag: 'Best for Beginners' },
+  { name: 'Bank of America Core', score: 91, tag: 'No Monthly Fees' },
+  { name: 'Wells Fargo Everyday', score: 84, tag: 'Easy to Use' },
 ];
 
 const STEPS = [
-  { step: '01', title: 'Tell us about yourself', desc: 'Quick survey — your goals, situation, and university.' },
-  { step: '02', title: 'Noor analyzes', desc: 'AI matches your profile against fees, branches, and requirements.' },
-  { step: '03', title: 'Open your account', desc: 'Click through to your best match. Done in minutes.' },
+  { step: '01', title: 'Tell us about yourself', desc: 'Quick survey — your income, goals, and where you want to be.' },
+  { step: '02', title: 'Noor builds your plan', desc: 'AI tailors recommendations to your unique financial situation.' },
+  { step: '03', title: 'Take your first step', desc: 'Follow your personalized roadmap. Small moves, real results.' },
 ];
 
 const CAPABILITIES = [
-  { label: 'No SSN Required', desc: 'Finds banks that accept ITIN and passport' },
-  { label: 'Fee Analysis', desc: 'Compares maintenance, ATM charges, overdraft' },
-  { label: 'Branch Proximity', desc: 'Maps nearest branches to your campus' },
-  { label: 'Student Perks', desc: 'Waivers, cashback, and sign-on offers' },
+  { label: 'Budget Builder', desc: 'Creates a spending plan that actually fits your life' },
+  { label: 'Credit Coaching', desc: 'Explains your score and how to grow it step by step' },
+  { label: 'Savings Goals', desc: 'Helps you build an emergency fund and save smarter' },
+  { label: 'Spending Insights', desc: 'Spots patterns and shows exactly where money slips away' },
 ];
 
-const UNIVERSITIES_MARQUEE = [
-  'Stanford', 'MIT', 'Harvard', 'UC Berkeley', 'UCLA', 'NYU',
-  'Columbia', 'Yale', 'Princeton', 'Cornell', 'UT Austin', 'UMich',
-  'Duke', 'Northwestern', 'Georgetown', 'USC', 'Carnegie Mellon', 'BU',
+const TOPICS_MARQUEE = [
+  'Budgeting', 'Saving Money', 'Credit Scores', 'Emergency Funds', 'Debt Payoff',
+  'Financial Goals', 'Banking Basics', 'Smart Spending', 'Building Credit',
+  'Investment Basics', 'Tax 101', 'Pay Yourself First', 'Money Mindset',
+  'Net Worth', 'Compound Interest', 'Side Income', 'High-Yield Savings',
+  'Cash Flow', 'Financial Freedom', 'Roth IRA Basics',
 ];
 
 // ── Animation variants ─────────────────────────────────────────────────────
@@ -90,10 +92,10 @@ function CountUp({ to, inView }: { to: number; inView: boolean }) {
 // ── Animated AI chat demo ──────────────────────────────────────────────────
 
 const CHAT_MESSAGES = [
-  { role: 'user' as const, text: 'Which bank is best for international students?' },
-  { role: 'assistant' as const, text: 'Chase Total Checking is your top match — zero monthly fees, accepts ITIN or passport, and ATMs on nearly every campus.' },
-  { role: 'user' as const, text: "What if I don't have an SSN yet?" },
-  { role: 'assistant' as const, text: "No problem. Chase and HSBC both open accounts with just a passport and enrollment letter. I've saved this to your recommendations." },
+  { role: 'user' as const, text: 'How do I create my first budget?' },
+  { role: 'assistant' as const, text: "Try the 50/30/20 rule — 50% on needs, 30% on wants, 20% on savings. I can build a personalized version based on your actual income." },
+  { role: 'user' as const, text: "What's a credit score and why does it matter?" },
+  { role: 'assistant' as const, text: "Your credit score (300–850) is basically your financial reputation. Above 700 unlocks lower rates, better cards, and even apartment approvals." },
 ];
 
 type ChatMsg = typeof CHAT_MESSAGES[number];
@@ -398,7 +400,7 @@ export default function LandingPage() {
 
           <div className="absolute bottom-8 left-8 right-8">
             <p className="text-[10.5px] leading-relaxed" style={{ color: 'rgba(0,0,0,0.18)', fontFamily: FONT }}>
-              Banking guidance for<br />new arrivals &amp; students.
+              Personal finance made<br />simple, for everyone.
             </p>
           </div>
         </motion.div>
@@ -475,7 +477,7 @@ export default function LandingPage() {
                 variants={fadeUp}
                 custom={2}
               >
-                Noor is an AI-powered financial guide for new arrivals and international students. It reads your situation, maps the market, and surfaces the exact bank that fits — no confusion, no fees, just clarity.
+                Noor is an AI-powered financial guide for people who are just getting started with their money. It reads your situation, understands your goals, and gives you real clarity — no jargon, no overwhelm, just simple steps forward.
               </motion.p>
 
               {/* Preview cards */}
@@ -488,7 +490,7 @@ export default function LandingPage() {
                     style={{ border: '1px solid rgba(0,0,0,0.08)', background: 'rgba(0,0,0,0.02)' }}
                   >
                     <div className="text-[9.5px] font-medium uppercase mb-4" style={{ letterSpacing: '0.15em', color: 'rgba(0,0,0,0.3)', fontFamily: FONT }}>
-                      AI Bank Match
+                      Personalized Picks
                     </div>
                     <div className="space-y-1.5">
                       {BANK_MATCHES.map((bank) => (
@@ -517,10 +519,10 @@ export default function LandingPage() {
                     </div>
                     <div className="space-y-3">
                       <div className="py-2.5 px-3.5 rounded-2xl rounded-br-[4px] text-[12.5px] leading-relaxed text-right ml-8" style={{ background: '#000', color: '#FFF', fontFamily: FONT }}>
-                        "Which bank is best for international students with no SSN?"
+                        &ldquo;How do I start building a budget from scratch?&rdquo;
                       </div>
                       <div className="py-2.5 px-3.5 rounded-2xl rounded-bl-[4px] text-[12px] leading-relaxed mr-8" style={{ background: '#F2F2F2', color: '#000', fontFamily: FONT }}>
-                        Chase Total Checking is your top match — zero monthly fees, accepts ITIN or passport...
+                        Try the 50/30/20 rule — 50% needs, 30% wants, 20% savings. I can build yours right now...
                       </div>
                     </div>
                   </HoverCard>
@@ -543,13 +545,13 @@ export default function LandingPage() {
               <SectionBadge label="Noor Owns the Outcome" />
 
               <motion.h2 style={headingStyle} className="mb-10" variants={fadeUp} custom={1}>
-                <span style={{ color: '#000' }}>We find</span>
+                <span style={{ color: '#000' }}>We build</span>
                 <br />
-                <span style={{ color: 'rgba(0,0,0,0.25)' }}>your match.</span>
+                <span style={{ color: 'rgba(0,0,0,0.25)' }}>your plan.</span>
                 <br />
                 <span style={{ color: '#000' }}>You just</span>
                 <br />
-                <span style={{ color: 'rgba(0,0,0,0.25)' }}>show up.</span>
+                <span style={{ color: 'rgba(0,0,0,0.25)' }}>take action.</span>
               </motion.h2>
 
               <motion.p
@@ -557,7 +559,7 @@ export default function LandingPage() {
                 style={{ color: 'rgba(0,0,0,0.45)', maxWidth: '460px', fontFamily: FONT }}
                 variants={fadeUp} custom={2}
               >
-                No fee tables, no fine print, no guesswork. Noor maps your profile against every bank, surfaces the ones that genuinely fit, and tells you exactly why.
+                No dense spreadsheets, no confusing jargon, no guesswork. Noor looks at where you are, maps a clear path forward, and tells you exactly what to do next — step by step.
               </motion.p>
 
               <motion.div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-[640px]" variants={stagger}>
@@ -605,7 +607,7 @@ export default function LandingPage() {
               <motion.h2 style={headingStyle} className="mb-10" variants={fadeUp} custom={1}>
                 <span style={{ color: 'rgba(0,0,0,0.25)' }}>Built on</span>
                 <br />
-                <span style={{ color: '#000' }}>real banking</span>
+                <span style={{ color: '#000' }}>real financial</span>
                 <br />
                 <span style={{ color: 'rgba(0,0,0,0.25)' }}>intelligence.</span>
               </motion.h2>
@@ -615,7 +617,7 @@ export default function LandingPage() {
                 style={{ color: 'rgba(0,0,0,0.45)', maxWidth: '460px', fontFamily: FONT }}
                 variants={fadeUp} custom={2}
               >
-                Powered by Claude AI, Noor understands nuanced financial situations. Ask it anything — it responds like a knowledgeable friend who actually knows banking.
+                Powered by AI, Noor meets you at your level and actually explains things. Ask it anything — budgeting, credit, savings, banking — and get answers that make sense, not textbook definitions.
               </motion.p>
 
               <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-w-[680px]" variants={stagger}>
@@ -706,9 +708,9 @@ export default function LandingPage() {
           </section>
 
           {/* ─────────────────────────────────────────────────────────────
-              04  UNIVERSITIES
+              04  YOUR JOURNEY
           ───────────────────────────────────────────────────────────── */}
-          <section id="universities" className="min-h-screen flex flex-col justify-center py-28 overflow-hidden" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+          <section id="topics" className="min-h-screen flex flex-col justify-center py-28 overflow-hidden" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
             <motion.div
               className="px-10 lg:px-16 max-w-[780px]"
               variants={stagger}
@@ -716,14 +718,14 @@ export default function LandingPage() {
               whileInView="visible"
               viewport={{ once: true, margin: '-80px' }}
             >
-              <SectionBadge label="Universities" />
+              <SectionBadge label="Your Journey" />
 
               <motion.h2 style={headingStyle} className="mb-10" variants={fadeUp} custom={1}>
-                <span style={{ color: '#000' }}>Tailored for</span>
+                <span style={{ color: '#000' }}>Everything</span>
                 <br />
-                <span style={{ color: 'rgba(0,0,0,0.25)' }}>50+ university</span>
+                <span style={{ color: 'rgba(0,0,0,0.25)' }}>money,</span>
                 <br />
-                <span style={{ color: '#000' }}>campuses.</span>
+                <span style={{ color: '#000' }}>simplified.</span>
               </motion.h2>
 
               <motion.p
@@ -731,7 +733,7 @@ export default function LandingPage() {
                 style={{ color: 'rgba(0,0,0,0.45)', maxWidth: '460px', fontFamily: FONT }}
                 variants={fadeUp} custom={2}
               >
-                Noor adapts its recommendations to your specific campus — because the best bank near MIT is different from the best bank near UCLA.
+                From building your first budget to understanding credit scores, Noor covers what actually matters when you&rsquo;re just getting started. No finance degree required.
               </motion.p>
             </motion.div>
 
@@ -749,13 +751,13 @@ export default function LandingPage() {
                 animate={{ x: ['0%', '-50%'] }}
                 transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}
               >
-                {[...UNIVERSITIES_MARQUEE, ...UNIVERSITIES_MARQUEE].map((uni, i) => (
+                {[...TOPICS_MARQUEE, ...TOPICS_MARQUEE].map((topic, i) => (
                   <div
                     key={i}
                     className="px-4 py-2 rounded-full text-[12px] flex-shrink-0"
                     style={{ border: '1px solid rgba(0,0,0,0.12)', color: 'rgba(0,0,0,0.5)', fontFamily: FONT }}
                   >
-                    {uni}
+                    {topic}
                   </div>
                 ))}
               </motion.div>
@@ -775,13 +777,13 @@ export default function LandingPage() {
                 animate={{ x: ['-50%', '0%'] }}
                 transition={{ duration: 24, repeat: Infinity, ease: 'linear' }}
               >
-                {[...UNIVERSITIES_MARQUEE.slice(6), ...UNIVERSITIES_MARQUEE, ...UNIVERSITIES_MARQUEE.slice(6)].map((uni, i) => (
+                {[...TOPICS_MARQUEE.slice(6), ...TOPICS_MARQUEE, ...TOPICS_MARQUEE.slice(6)].map((topic, i) => (
                   <div
                     key={i}
                     className="px-4 py-2 rounded-full text-[12px] flex-shrink-0"
                     style={{ border: '1px solid rgba(0,0,0,0.07)', color: 'rgba(0,0,0,0.3)', fontFamily: FONT }}
                   >
-                    {uni}
+                    {topic}
                   </div>
                 ))}
               </motion.div>
@@ -819,9 +821,9 @@ export default function LandingPage() {
               <SectionBadge label="Get Started" />
 
               <motion.h2 style={headingStyle} className="mb-10" variants={fadeUp} custom={1}>
-                <span style={{ color: 'rgba(0,0,0,0.25)' }}>Your bank</span>
+                <span style={{ color: 'rgba(0,0,0,0.25)' }}>Your journey</span>
                 <br />
-                <span style={{ color: '#000' }}>is waiting.</span>
+                <span style={{ color: '#000' }}>starts here.</span>
               </motion.h2>
 
               <motion.p
@@ -829,7 +831,7 @@ export default function LandingPage() {
                 style={{ color: 'rgba(0,0,0,0.45)', maxWidth: '460px', fontFamily: FONT }}
                 variants={fadeUp} custom={2}
               >
-                Three minutes. No account required to explore. No commitment until you&rsquo;re ready.
+                Three minutes. No account required to explore. No commitment until you&rsquo;re ready. Seriously, just give it a shot.
               </motion.p>
 
               <motion.div className="flex flex-wrap items-center gap-4" variants={fadeUp} custom={3}>
@@ -854,7 +856,7 @@ export default function LandingPage() {
                       whileTap={{ scale: 0.97 }}
                       transition={{ duration: 0.18 }}
                     >
-                      Find My Bank
+                      Start My Journey
                     </motion.button>
                     <motion.button
                       onClick={() => router.push('/login')}
@@ -885,4 +887,3 @@ export default function LandingPage() {
     </div>
   );
 }
-

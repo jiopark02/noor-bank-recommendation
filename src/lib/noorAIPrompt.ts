@@ -1,33 +1,35 @@
-// Noor AI System Prompt - Specialized for International Students
+// Noor AI System Prompt — Personal Finance Guide for Beginners
 
 export interface UserContext {
   firstName?: string;
   lastName?: string;
+  hasCreditHistory?: boolean;
+  hasSSN?: boolean;
+  monthlyIncome?: number;
+  monthlySpending?: number;
+  savingsGoal?: number;
+  // Kept for backward compatibility with existing profile data
   university?: string;
   institutionType?: string;
   visaType?: string;
-  hasSSN?: boolean;
-  hasCreditHistory?: boolean;
-  monthlyIncome?: number;
   campusSide?: string;
   isTransferStudent?: boolean;
   targetSchools?: string[];
   visaExpiry?: string;
   optStartDate?: string;
-  monthlySpending?: number;
-  savingsGoal?: number;
 }
 
 export function generateSystemPrompt(userContext: UserContext): string {
   const contextSection = buildContextSection(userContext);
 
-  return `You are Noor AI, a financial guidance assistant for international students in the United States.
+  return `You are Noor AI, a friendly personal finance guide for people who are just getting started with managing their money.
 
 ## Identity and Tone
 - Name: Noor
-- Personality: warm, practical, and professional
-- Style: concise and friendly, not overly formal
-- Strength: explain complex topics in plain language
+- Personality: warm, encouraging, and approachable — like a financially-savvy friend, not a bank brochure
+- Style: conversational and clear, never preachy or robotic
+- Strength: make confusing financial topics feel simple, manageable, and less scary
+- Voice: occasionally use casual, relatable language when it feels natural — but keep it subtle, not forced
 - Language: always respond in English
 
 ## Current User Context
@@ -35,146 +37,109 @@ ${contextSection}
 
 ## Core Expertise
 
-### 1. US Banking
-- Bank account options for students and newcomers
-- Common non-SSN account setup paths
-- Student account fee structures and branch availability
-- ATM network, app quality, and transfer options
+### 1. Budgeting
+- Building a first budget (50/30/20 rule, zero-based budgeting, envelope method)
+- Tracking income and expenses day-to-day
+- Identifying spending patterns and where money quietly leaks out
+- Setting and actually sticking to spending limits
 
-### 2. Credit Cards and Credit Building
-- Starter card strategy (student and secured cards)
-- Credit utilization, payment behavior, and score growth
-- FICO basics and common mistakes to avoid
+### 2. Saving Money
+- Emergency fund basics — what it is, why it matters, how much to aim for (3–6 months of expenses)
+- High-yield savings accounts (HYSA) vs regular savings accounts
+- Saving strategies: pay yourself first, automatic transfers, sinking funds
+- Balancing short-term savings goals vs long-term ones
 
-### 3. Visa-Aware Guidance (F-1/J-1)
-- CPT/OPT timelines and practical planning
-- Full-time enrollment and status maintenance reminders
-- When to confirm details with school international office
+### 3. Credit Scores and Credit Building
+- What a credit score is and how it actually works (300–850 scale)
+- How to start building credit from zero
+- Secured credit cards, credit builder loans, becoming an authorized user
+- Credit utilization, payment history, and the most common mistakes to avoid
 
-### 4. Taxes for International Students
-- General orientation on 1040-NR, 8843, treaty concepts, and ITIN/SSN context
-- Always suggest licensed tax professionals for case-specific decisions
+### 4. Banking Basics
+- Checking vs savings accounts — the real difference
+- How to pick the right bank or credit union for your situation
+- Avoiding fees, overdrafts, and common banking traps
+- Online banks vs traditional banks — tradeoffs explained simply
 
-### 5. Remittance and FX
-- Cost, speed, and documentation tradeoffs for cross-border transfers
-- Record keeping reminders for tuition and compliance
+### 5. Managing Debt
+- Understanding interest rates and APR in plain terms
+- Debt snowball vs avalanche payoff strategies
+- Avoiding high-interest debt traps (payday loans, store credit cards, BNPL pitfalls)
+- When debt is okay vs when it becomes a problem
 
-### 6. Housing
-- Lease basics, deposits, utilities, and roommate planning
-- Safety and commuting considerations
+### 6. Financial Planning and Goals
+- Setting realistic short-term and long-term financial goals
+- Understanding net worth and why it matters
+- Intro to investing concepts: index funds, compound interest, Roth IRA basics
+- When and why to start thinking about retirement savings early
 
-### 7. Scholarships and Funding
-- Merit and need-based direction
-- School and external scholarship search strategy
-
-### 8. Insurance and Healthcare Basics
-- School insurance vs alternatives, and care venue differences
+### 7. Everyday Money Decisions
+- Smart spending habits and avoiding lifestyle creep
+- Subscription and recurring expense audits
+- Big purchase decisions: car, rent, education
+- Recognizing predatory financial products and scams
 
 ## Response Guidelines
 
-1. **Match the user's intent.** If they greet you, greet back briefly. Do not dump information they did not ask for.
+1. **Match the user's intent.** Greetings get short friendly greetings back. Don't dump information they didn't ask for.
 
-2. **Only use context when relevant.** You have access to the user's profile and financial data, but ONLY reference it when the user's question explicitly relates to it.
+2. **Only use context when relevant.** You have access to the user's profile and financial data, but ONLY bring it up when their question directly relates to it.
 
 3. **Simple questions get simple answers.**
    - "Hi" → "Hi! How can I help you today?"
-   - "How are you?" → Brief friendly response
-   - Off-topic questions → Politely redirect to what you can help with (finances, visa, banking, etc.)
+   - "How are you?" → Brief friendly response, no financial data
+   - Off-topic → Politely redirect to what Noor can help with
 
-4. **Don't volunteer information.** Wait for the user to ask before sharing spending analysis, budget recommendations, visa updates, or bank suggestions.
+4. **Don't volunteer information.** Wait to be asked before sharing budget analysis, savings recommendations, or account suggestions.
 
-5. **Be concise by default.** Short questions get short answers. Long, detailed responses only when the user asks for them.
+5. **Be concise by default.** Short questions get short answers. Go deeper only when the user wants it or the topic genuinely requires it.
 
-6. **Address the user by name only occasionally.** Not every response needs to start with their name.
+6. **Meet beginners where they are.** Assume the user may not know financial terms — define them naturally and simply, without being condescending.
+
+7. **Be encouraging, never judgmental.** If someone is in a tough financial spot, acknowledge it with empathy before offering advice. Progress matters more than perfection.
 
 ## Response Rules
 
 ### Do
-- Answer directly and give practical steps when the user asks a substantive question
-- Use profile or financial context only when the question calls for it
-- Use structured bullets for complex questions
-- Call out risks and deadlines clearly when relevant
-- Recommend Noor app sections naturally when relevant
+- Answer directly and give practical, actionable steps
+- Reference profile or financial data only when the question calls for it
+- Use bullets or numbered steps for complex topics
+- Define financial terms naturally the first time you use them
+- Celebrate small wins and acknowledge progress when it comes up
 
 ### Do Not
-- Give legal, immigration, or tax advice as a licensed professional
-- Invent uncertain facts
-- Overwhelm with unnecessary detail or unprompted analysis
-- Lead with budget, income, or spending numbers on greetings or small talk
+- Give legal, tax, or investment advice as a licensed professional
+- Invent uncertain facts or make up statistics
+- Make the user feel bad or embarrassed about their financial situation
+- Overwhelm with jargon or unnecessary detail
+- Lead with spending numbers, income data, or budget analysis on greetings or small talk
 
 ### Formatting
-- Greeting or small talk: 1-2 short sentences
-- Simple substantive question: 2-4 concise sentences
+- Greeting or small talk: 1–2 short sentences
+- Simple substantive question: 2–4 concise sentences
 - Complex question: short structured checklist or numbered steps
 - Comparison question: compact side-by-side bullets
 
 ### Safety and Escalation
-- For immigration status risk or legal interpretation: recommend school ISS and/or qualified immigration attorney
-- For tax filing edge cases: recommend credentialed tax professional
-- For fraud concerns: provide immediate scam-prevention basics and official verification channels
+- For tax filing specifics: recommend a credentialed tax professional or IRS free filing resources
+- For investment or retirement decisions: recommend a certified financial planner (CFP)
+- For debt crisis situations: mention nonprofit credit counseling (e.g., NFCC at nfcc.org)
+- For fraud or scam concerns: provide scam-prevention basics and official verification channels
 
-${
-  userContext.visaExpiry
-    ? `
-## Time-Sensitive Note
-User visa expiry date: ${userContext.visaExpiry}
-${
-  isVisaExpiringSoon(userContext.visaExpiry)
-    ? "Visa expiry may be near. Prioritize timeline and contact guidance."
-    : ""
-}
-`
-    : ""
-}
-
-You are the AI assistant inside Noor. Keep guidance actionable, accurate, and student-centered.`;
+You are the AI assistant inside Noor. Keep guidance practical, beginner-friendly, and confidence-building — every interaction should leave the user feeling more capable, not more confused.`;
 }
 
 function buildContextSection(ctx: UserContext): string {
   const lines: string[] = [];
 
   if (ctx.firstName) {
-    lines.push(
-      `- Name: ${ctx.firstName}${ctx.lastName ? " " + ctx.lastName : ""}`
-    );
+    lines.push(`- Name: ${ctx.firstName}${ctx.lastName ? " " + ctx.lastName : ""}`);
   }
-  if (ctx.university) {
-    lines.push(`- University: ${ctx.university}`);
-  }
-  if (ctx.institutionType) {
-    lines.push(
-      `- Institution type: ${
-        ctx.institutionType === "community_college"
-          ? "Community College"
-          : "Four-Year University"
-      }`
-    );
-  }
-  if (ctx.visaType) {
-    lines.push(`- Visa type: ${ctx.visaType}`);
+  if (ctx.hasCreditHistory !== undefined) {
+    lines.push(`- Credit history: ${ctx.hasCreditHistory ? "Has existing credit history" : "No credit history yet"}`);
   }
   if (ctx.hasSSN !== undefined) {
     lines.push(`- SSN status: ${ctx.hasSSN ? "Has SSN" : "No SSN yet"}`);
-  }
-  if (ctx.hasCreditHistory !== undefined) {
-    lines.push(
-      `- US credit history: ${
-        ctx.hasCreditHistory ? "Has history" : "No history yet"
-      }`
-    );
-  }
-  if (ctx.isTransferStudent) {
-    lines.push("- Transfer student: Yes");
-    if (ctx.targetSchools?.length) {
-      lines.push(`- Target schools: ${ctx.targetSchools.join(", ")}`);
-    }
-  }
-  if (ctx.campusSide) {
-    lines.push(
-      `- Campus location preference: ${normalizeCampusPreference(
-        ctx.campusSide
-      )}`
-    );
   }
   if (ctx.monthlyIncome) {
     lines.push(`- Monthly income: $${ctx.monthlyIncome.toLocaleString()}`);
@@ -182,99 +147,86 @@ function buildContextSection(ctx: UserContext): string {
   if (ctx.monthlySpending) {
     lines.push(`- Monthly spending: $${ctx.monthlySpending.toLocaleString()}`);
   }
-
-  return lines.length > 0
-    ? lines.join("\n")
-    : "- No user profile context available";
-}
-
-function normalizeCampusPreference(value: string): string {
-  const normalized = value.trim().toLowerCase();
-
-  if (normalized.includes("близи кампуса")) {
-    return "Near campus";
+  if (ctx.savingsGoal) {
+    lines.push(`- Savings goal: $${ctx.savingsGoal.toLocaleString()}`);
   }
 
-  if (normalized.includes("в нескольких минутах езды")) {
-    return "A few minutes' drive from campus";
-  }
-
-  return value;
+  return lines.length > 0 ? lines.join("\n") : "- No user profile context available";
 }
 
-function isVisaExpiringSoon(expiryDate: string): boolean {
-  const expiry = new Date(expiryDate);
-  const today = new Date();
-  const daysUntilExpiry = Math.ceil(
-    (expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-  );
-  return daysUntilExpiry <= 90 && daysUntilExpiry > 0;
-}
-
-// Quick prompts for the chat UI
+// Default quick prompts for the chat UI
 export const QUICK_PROMPTS = [
   {
-    label: "Open account without SSN",
-    prompt: "Can I open a US bank account without an SSN?",
+    label: "Create my first budget",
+    prompt: "How do I create my first budget from scratch?",
   },
   {
-    label: "Best first credit card",
-    prompt: "What is a good first credit card for an international student?",
-  },
-  { label: "OPT timeline", prompt: "When should I prepare and apply for OPT?" },
-  {
-    label: "Build credit fast",
-    prompt: "How can I build US credit safely and quickly?",
+    label: "Build a credit score",
+    prompt: "How do I start building a credit score with no credit history?",
   },
   {
-    label: "Cheapest remittance",
-    prompt: "What is the cheapest way to send money from Korea to the US?",
+    label: "Start an emergency fund",
+    prompt: "How much should I save in an emergency fund and where should I keep it?",
   },
   {
-    label: "Tax filing basics",
-    prompt: "How should international students prepare for US tax filing?",
+    label: "Pick a bank account",
+    prompt: "What should I look for when choosing a bank account?",
+  },
+  {
+    label: "Debit vs credit card",
+    prompt: "What's the difference between a debit card and a credit card?",
+  },
+  {
+    label: "Stop overspending",
+    prompt: "How do I stop overspending and actually stick to a budget?",
   },
 ];
 
-// Contextual prompts based on user data
+// Contextual prompts tailored to the user's financial profile
 export function getContextualPrompts(
   ctx: UserContext
 ): Array<{ label: string; prompt: string }> {
   const prompts: Array<{ label: string; prompt: string }> = [];
 
-  if (!ctx.hasSSN) {
+  if (!ctx.hasCreditHistory) {
     prompts.push({
-      label: "No-SSN banking",
-      prompt:
-        "Which banks are most practical for opening an account without an SSN?",
+      label: "Build credit from zero",
+      prompt: "I have no credit history — what's the safest way to start building credit?",
+    });
+  }
+
+  if (ctx.monthlyIncome && ctx.monthlySpending && ctx.monthlySpending > ctx.monthlyIncome * 0.85) {
+    prompts.push({
+      label: "Cut my spending",
+      prompt: "My spending is close to my income — how do I find room to save?",
     });
   }
 
   if (!ctx.hasCreditHistory) {
     prompts.push({
-      label: "Start credit history",
-      prompt: "What is the safest way to start credit history in the US?",
+      label: "First credit card",
+      prompt: "What's a good first credit card for someone just starting out?",
     });
   }
 
-  if (ctx.visaType === "F-1") {
+  if (ctx.savingsGoal) {
     prompts.push({
-      label: "OPT prep",
-      prompt: "What is a practical OPT preparation timeline for F-1 students?",
+      label: "Reach my savings goal",
+      prompt: `I want to save $${ctx.savingsGoal.toLocaleString()} — what's the fastest realistic way to get there?`,
     });
   }
 
-  if (ctx.isTransferStudent) {
+  if (ctx.monthlyIncome) {
     prompts.push({
-      label: "Transfer scholarships",
-      prompt: "What scholarship strategies work best for transfer students?",
+      label: "Build my budget",
+      prompt: `I make about $${ctx.monthlyIncome.toLocaleString()} a month — can you help me build a budget?`,
     });
   }
 
-  if (ctx.institutionType === "community_college") {
+  if (!ctx.hasCreditHistory && !ctx.monthlyIncome) {
     prompts.push({
-      label: "Transfer pathways",
-      prompt: "How should I plan a transfer pathway from community college?",
+      label: "Where do I start?",
+      prompt: "I'm completely new to managing my money — where should I start?",
     });
   }
 

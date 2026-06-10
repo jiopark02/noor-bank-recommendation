@@ -32,8 +32,8 @@ import {
 export const dynamic = "force-dynamic";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_SIMPLE_MODEL = "google/gemini-2.0-flash-001";
-const DEFAULT_COMPLEX_MODEL = "anthropic/claude-3.5-sonnet";
+const DEFAULT_SIMPLE_MODEL = "google/gemini-2.5-flash-lite";
+const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
 
 function isAiSupabaseReadEnabled(): boolean {
   return process.env.AI_SUPABASE_READ_ENABLED === "true";
@@ -105,15 +105,18 @@ async function loadReadOnlyUserContextFromSupabase(
 function normalizeOpenRouterModelId(model: string): string {
   const trimmed = model.trim();
 
-  if (trimmed === "gemini-2.0-flash") {
-    return "google/gemini-2.0-flash-001";
-  }
+  // Normalize shorthand aliases to current OpenRouter model IDs.
+  const ALIASES: Record<string, string> = {
+    "gemini-2.5-flash-lite": "google/gemini-2.5-flash-lite",
+    "gemini-2.5-flash": "google/gemini-2.5-flash",
+    "claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
+    "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
+    // Legacy aliases kept for backward compat — redirect to current equivalents.
+    "gemini-2.0-flash": "google/gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite": "google/gemini-2.5-flash-lite",
+  };
 
-  if (trimmed === "gemini-2.0-flash-lite") {
-    return "google/gemini-2.0-flash-lite-001";
-  }
-
-  return trimmed;
+  return ALIASES[trimmed] ?? trimmed;
 }
 
 function resolveOpenRouterApiKey(): string | null {
