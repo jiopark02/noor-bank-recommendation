@@ -264,6 +264,29 @@ export function validateName(name: string): { isValid: boolean; error: string | 
 }
 
 // ============================================
+// NAME SANITIZATION
+// ============================================
+// Role split: validateName = UX/form-level correctness feedback;
+// sanitizeNameField = security/storage-level hardening (always applied
+// server-side regardless of form validation).
+export function sanitizeNameField(value: unknown): string {
+  // SECURITY (prompt injection): firstName/lastName are interpolated raw into
+  // the system prompt's "## Current User Context" section as a markdown list
+  // line. A newline in the value lets an attacker break out of that line and
+  // inject a fake section (e.g. "\n## SYSTEM OVERRIDE ..."). We strip control
+  // characters (incl. newlines/tabs) and cap length. We deliberately do NOT
+  // restrict to ASCII letters: the product serves a global beginner audience,
+  // so names like "José" or "김성원" must pass. The goal is to prevent line
+  // breakout, not to validate name "correctness".
+  if (typeof value !== "string") return "";
+  const stripped = value
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.slice(0, 100);
+}
+
+// ============================================
 // SESSION MANAGEMENT
 // ============================================
 

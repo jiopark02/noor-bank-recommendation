@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { v4 as uuidv4 } from "uuid";
 import { sendWelcomeEmail } from "@/lib/email";
+import { sanitizeNameField } from "@/lib/validation";
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,8 +31,8 @@ export async function POST(request: NextRequest) {
 
     const supabaseAdmin = createAdminClient();
     const now = new Date().toISOString();
-    const firstName = surveyData.first_name?.trim() || "User";
-    const lastName = surveyData.last_name?.trim() || null;
+    const firstName = sanitizeNameField(surveyData.first_name) || "User";
+    const lastName = sanitizeNameField(surveyData.last_name) || null;
 
     const { data: createdAuthUser, error: createAuthError } =
       await supabaseAdmin.auth.admin.createUser({

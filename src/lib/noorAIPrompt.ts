@@ -1,5 +1,7 @@
 // Noor AI System Prompt — Personal Finance Guide for Beginners
 
+import { sanitizeNameField } from "@/lib/validation";
+
 export interface UserContext {
   firstName?: string;
   lastName?: string;
@@ -132,8 +134,13 @@ You are the AI assistant inside Noor. Keep guidance practical, beginner-friendly
 function buildContextSection(ctx: UserContext): string {
   const lines: string[] = [];
 
-  if (ctx.firstName) {
-    lines.push(`- Name: ${ctx.firstName}${ctx.lastName ? " " + ctx.lastName : ""}`);
+  // SECURITY (prompt injection): sanitize at interpolation time as a second
+  // layer, in case a row predates the storage-time fix or a write path is
+  // missed. Strips newlines/control chars that could break out of this line.
+  const safeFirst = sanitizeNameField(ctx.firstName);
+  const safeLast = sanitizeNameField(ctx.lastName);
+  if (safeFirst) {
+    lines.push(`- Name: ${safeFirst}${safeLast ? " " + safeLast : ""}`);
   }
   if (ctx.hasCreditHistory !== undefined) {
     lines.push(`- Credit history: ${ctx.hasCreditHistory ? "Has existing credit history" : "No credit history yet"}`);

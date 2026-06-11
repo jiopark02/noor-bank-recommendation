@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
+import { sanitizeNameField } from "@/lib/validation";
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,8 +19,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const bodyId = body?.id;
     const email = (body?.email || "").toLowerCase().trim();
-    const firstName = body?.first_name?.trim() || null;
-    const lastName = body?.last_name?.trim() || null;
+    const firstName = sanitizeNameField(body?.first_name) || null;
+    const lastName = sanitizeNameField(body?.last_name) || null;
     const rawMeta = body?.raw_user_meta_data || null;
 
     if (!email) {
