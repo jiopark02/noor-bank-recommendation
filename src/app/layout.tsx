@@ -5,7 +5,7 @@ import { LanguageProvider } from '@/contexts/LanguageContext';
 import { ClientLayout } from '@/components/layout/ClientLayout';
 
 export const metadata: Metadata = {
-  title: 'Noor - Financial Services for International Students',
+  title: 'Noor - Your Money, Your Goal, Your Companions',
   description: 'Banking, housing, and scholarship recommendations for international students in the US.',
   manifest: '/manifest.json',
   appleWebApp: {
