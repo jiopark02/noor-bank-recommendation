@@ -18,7 +18,7 @@ import {
   DEFAULT_NOTIFICATION_PREFS,
   downloadUserData,
   calculateProfileCompletion,
-  clearSession,
+  clearLocalAuthState,
 } from '@/lib/validation';
 import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
 import { buildJsonAuthorizedHeaders } from '@/lib/supabaseAuthHeaders';
@@ -551,12 +551,11 @@ export default function SettingsPage() {
     setError(null);
     try {
       await new Promise((resolve) => setTimeout(resolve, 1000));
+      clearLocalAuthState();
       [
-        'noor_user_id', 'noor_user_profile', 'noor_notifications',
-        'noor_chat_history', 'noor_session', 'noor_savings_goals',
+        'noor_notifications', 'noor_savings_goals',
         'noor_finance_progress', 'noor_checklist_completed', 'noor_checklist_items',
       ].forEach((key) => localStorage.removeItem(key));
-      clearSession();
       router.push('/welcome');
     } catch {
       setError('Failed to delete account. Please try again.');
@@ -571,9 +570,7 @@ export default function SettingsPage() {
 
   const handleLogout = async () => {
     if (supabase) await supabase.auth.signOut();
-    clearSession();
-    localStorage.removeItem('noor_user_id');
-    localStorage.removeItem('noor_user_profile');
+    clearLocalAuthState();
     router.push('/welcome');
   };
 

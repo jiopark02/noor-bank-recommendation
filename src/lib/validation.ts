@@ -380,6 +380,24 @@ export function clearSession(): void {
 }
 
 // ============================================
+// LOCAL AUTH STATE CLEANUP
+// ============================================
+// SECURITY: Chat history was mirrored to localStorage under "noor_chat_history"
+// and was NOT cleared on logout, leaving prior users' plaintext financial
+// conversations readable on a shared device (via DevTools or "Export My Data").
+// This central helper purges all local auth/profile/chat state and must be
+// called from every logout-equivalent path (explicit logout, account delete,
+// and the SIGNED_OUT auth event covering other-tab logout / token expiry).
+// noor_chat_history is removed in full (not per-user) because the goal is
+// shared-device hygiene: no account's history should linger after sign-out.
+export function clearLocalAuthState(): void {
+  clearSession(); // noor_session (local + sessionStorage)
+  localStorage.removeItem('noor_user_id');
+  localStorage.removeItem('noor_user_profile');
+  localStorage.removeItem('noor_chat_history');
+}
+
+// ============================================
 // ERROR MESSAGES
 // ============================================
 
@@ -557,7 +575,6 @@ export function exportUserData(): string {
   const keys = [
     'noor_user_id',
     'noor_user_profile',
-    'noor_chat_history',
     'noor_savings_goals',
     'noor_finance_progress',
     'noor_notification_prefs',

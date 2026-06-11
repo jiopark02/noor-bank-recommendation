@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { NoorAIChat } from "@/components/chat";
 import { supabase } from "@/lib/supabase-browser";
+import { clearLocalAuthState } from "@/lib/validation";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -50,13 +51,24 @@ export function ClientLayout({ children }: ClientLayoutProps) {
     };
 
     setHasLocalSession(Boolean(localStorage.getItem("noor_user_id")));
+    // SECURITY: one-time cleanup of the legacy plaintext chat mirror. The app no
+    // longer writes noor_chat_history; this removes any residue left on disk for
+    // users who were active before this change (and never logged out).
+    localStorage.removeItem("noor_chat_history");
     syncSession();
 
     const { data: authListener } = supabase?.auth.onAuthStateChange(
-      (_event, session) => {
+      (event, session) => {
         if (!isMounted) return;
         setIsAuthenticated(Boolean(session?.user));
         setIsAuthReady(true);
+        // SECURITY: purge local chat/profile state on sign-out so a shared
+        // device doesn't retain a prior user's plaintext financial chats.
+        // Covers other-tab logout and token expiry, which settings'
+        // handleLogout alone misses.
+        if (event === "SIGNED_OUT") {
+          clearLocalAuthState();
+        }
       }
     ) || { data: { subscription: null } };
 
