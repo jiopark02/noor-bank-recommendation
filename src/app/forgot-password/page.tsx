@@ -11,6 +11,7 @@ import {
   getPasswordStrengthLabel,
   ERROR_MESSAGES,
 } from "@/lib/validation";
+import { supabase } from "@/lib/supabase-browser";
 
 type Step = "email" | "sent" | "reset" | "success";
 
@@ -27,15 +28,82 @@ export default function ForgotPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [canResend, setCanResend] = useState(false);
-  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [recoveryReady, setRecoveryReady] = useState(false);
 
-  // Check for reset token in URL
+  // Handle the recovery link: exchange the token_hash for a recovery session.
+  // PKCE (@supabase/ssr default) requires verifyOtp here, not the ?token= flow.
+  //
+  // Two refs guard the one-time token without deadlocking in dev:
+  //   - verifiedHashRef: set ONLY after a successful verify, so a real
+  //     double-click / refresh of a consumed link is skipped.
+  //   - inFlightRef: marks an in-progress verify for THIS mount and is released
+  //     on cleanup, so a Strict Mode double-mount can retry instead of getting
+  //     stuck with isLoading frozen true.
+  const verifiedHashRef = React.useRef<string | null>(null);
+  const inFlightRef = React.useRef<string | null>(null);
+
   useEffect(() => {
-    const token = searchParams?.get("token");
-    if (token) {
-      setResetToken(token);
-      setStep("reset");
+    const tokenHash = searchParams?.get("token_hash");
+    const type = searchParams?.get("type");
+
+    if (!tokenHash || type !== "recovery") {
+      return;
     }
+    if (verifiedHashRef.current === tokenHash) {
+      return;
+    }
+    if (inFlightRef.current === tokenHash) {
+      return;
+    }
+
+    if (!supabase) {
+      setStep("reset");
+      setError("Authentication service unavailable. Please try again later.");
+      return;
+    }
+
+    let isActive = true;
+    inFlightRef.current = tokenHash;
+    setStep("reset");
+    setIsLoading(true);
+
+    supabase.auth
+      .verifyOtp({ type: "recovery", token_hash: tokenHash })
+      .then(({ error: verifyError }) => {
+        if (!isActive) return;
+        if (verifyError) {
+          setError(
+            "This reset link is invalid or has expired. Please request a new one."
+          );
+          setRecoveryReady(false);
+        } else {
+          verifiedHashRef.current = tokenHash;
+          setError("");
+          setRecoveryReady(true);
+        }
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setError(
+          "This reset link is invalid or has expired. Please request a new one."
+        );
+        setRecoveryReady(false);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        inFlightRef.current = null;
+        setIsLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+      if (
+        inFlightRef.current === tokenHash &&
+        verifiedHashRef.current !== tokenHash
+      ) {
+        inFlightRef.current = null;
+      }
+    };
   }, [searchParams]);
 
   // Countdown for resend
@@ -61,7 +129,6 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
     setError("");
 
-    // Validate email
     const validation = validateEmail(email);
     if (!validation.isValid) {
       setEmailError(validation.error);
@@ -69,17 +136,24 @@ export default function ForgotPasswordPage() {
       return;
     }
 
+    if (!supabase) {
+      setError(ERROR_MESSAGES.SERVER_ERROR);
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch("/api/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
+      // Supabase handles email enumeration protection internally: this resolves
+      // without error whether or not an account exists for the address.
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email.trim().toLowerCase(),
+        {
+          redirectTo: `${window.location.origin}/forgot-password`,
+        }
+      );
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to send reset email");
+      if (resetError) {
+        throw new Error(resetError.message);
       }
 
       setStep("sent");
@@ -95,23 +169,21 @@ export default function ForgotPasswordPage() {
   };
 
   const handleResend = async () => {
-    if (!canResend || !email) return;
+    if (!canResend || !email || !supabase) return;
     setIsLoading(true);
     setCanResend(false);
     setCountdown(60);
 
     try {
-      const response = await fetch("/api/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to resend email");
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email.trim().toLowerCase(),
+        {
+          redirectTo: `${window.location.origin}/forgot-password`,
+        }
+      );
+      if (resetError) {
+        throw new Error(resetError.message);
       }
-
       setError("");
     } catch (err) {
       setError(
@@ -127,39 +199,41 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
     setError("");
 
-    // Validate password
     if (!passwordValidation.isValid) {
       setError("Password does not meet requirements");
       setIsLoading(false);
       return;
     }
-
     if (!passwordsMatch) {
       setError("Passwords don't match");
       setIsLoading(false);
       return;
     }
-
-    if (!resetToken) {
+    if (!recoveryReady || !supabase) {
       setError("Invalid or expired reset link. Please request a new one.");
       setIsLoading(false);
       return;
     }
 
     try {
-      const response = await fetch("/api/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: resetToken,
-          password: newPassword,
-        }),
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
       });
 
-      const data = await response.json();
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to reset password");
+      // SECURITY: tear down the recovery session so the password change does not
+      // leave the user logged in. Default scope 'global' also revokes sessions on
+      // other devices — correct after a reset, since the old password may be
+      // compromised. signOut() emits SIGNED_OUT, which ClientLayout handles by
+      // clearing local auth state. The user re-authenticates with the new
+      // password via the normal login flow. If signOut fails we still show
+      // success (password IS changed) but log it.
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        console.error("Sign-out after password reset failed:", signOutError);
       }
 
       setStep("success");
@@ -602,7 +676,8 @@ export default function ForgotPasswordPage() {
                     disabled={
                       isLoading ||
                       !passwordValidation.isValid ||
-                      !passwordsMatch
+                      !passwordsMatch ||
+                      !recoveryReady
                     }
                     className="w-full py-4 bg-black text-white font-medium rounded-xl transition-all duration-300 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
