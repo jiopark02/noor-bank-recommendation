@@ -51,35 +51,6 @@ CREATE TABLE IF NOT EXISTS recommendations_new (
     updated_at timestamptz DEFAULT now()
 );
 
--- 4. Create saved tables
-CREATE TABLE IF NOT EXISTS saved_banks (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    bank_account_id text NOT NULL,
-    notes text,
-    created_at timestamptz DEFAULT now(),
-    UNIQUE(user_id, bank_account_id)
-);
-
-CREATE TABLE IF NOT EXISTS saved_apartments (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    apartment_id uuid NOT NULL,
-    notes text,
-    created_at timestamptz DEFAULT now(),
-    UNIQUE(user_id, apartment_id)
-);
-
-CREATE TABLE IF NOT EXISTS saved_scholarships (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    scholarship_id text NOT NULL,
-    notes text,
-    application_status text DEFAULT 'not_started',
-    created_at timestamptz DEFAULT now(),
-    UNIQUE(user_id, scholarship_id)
-);
-
 -- 5. Create chat_history table for Noor AI
 CREATE TABLE IF NOT EXISTS chat_history (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

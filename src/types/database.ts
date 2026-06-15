@@ -197,28 +197,3 @@ export interface Recommendation {
   created_at: string;
   updated_at: string;
 }
-
-export interface SavedBank {
-  id: string;
-  user_id: string;
-  bank_account_id: string;
-  notes?: string;
-  created_at: string;
-}
-
-export interface SavedApartment {
-  id: string;
-  user_id: string;
-  apartment_id: string;
-  notes?: string;
-  created_at: string;
-}
-
-export interface SavedScholarship {
-  id: string;
-  user_id: string;
-  scholarship_id: string;
-  notes?: string;
-  application_status: 'not_started' | 'in_progress' | 'submitted' | 'accepted' | 'rejected';
-  created_at: string;
-}
