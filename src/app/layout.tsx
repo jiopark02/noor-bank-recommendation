@@ -6,8 +6,7 @@ import { ClientLayout } from '@/components/layout/ClientLayout';
 
 export const metadata: Metadata = {
   title: 'Noor - Your Money, Your Goal, Your Companions',
-  description: 'Banking, housing, and scholarship recommendations for international students in the US.',
-  manifest: '/manifest.json',
+  description: 'Your money, your goals, your companions — simple, friendly financial guidance.',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -31,6 +30,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <meta name="mobile-web-app-capable" content="yes" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

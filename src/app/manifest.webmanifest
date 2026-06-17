@@ -1,0 +1,9 @@
+{
+  "name": "Noor - Your Money, Your Goal, Your Companions",
+  "short_name": "Noor",
+  "description": "Your money, your goals, your companions — simple, friendly financial guidance.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff"
+}
