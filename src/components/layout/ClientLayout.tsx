@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { NoorAIChat } from "@/components/chat";
-import { supabase } from "@/lib/supabase-browser";
+import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 import { clearLocalAuthState } from "@/lib/validation";
 
 interface ClientLayoutProps {
@@ -40,9 +40,7 @@ export function ClientLayout({ children }: ClientLayoutProps) {
         return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await getSessionSafe();
 
       if (isMounted) {
         setIsAuthenticated(Boolean(session?.user));

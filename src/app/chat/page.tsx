@@ -7,7 +7,7 @@ import { BottomNav } from "@/components/layout";
 import { UserLevel, getUserFinanceLevel } from "@/lib/financeProTips";
 import { useChat } from "@/hooks/useChat";
 import { UserContext } from "@/lib/noorAIPrompt";
-import { supabase } from "@/lib/supabase-browser";
+import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
 
@@ -93,7 +93,7 @@ export default function ChatPage() {
     let isMounted = true;
     const hydrate = async () => {
       if (!supabase) { if (isMounted) router.replace("/landing"); return; }
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSessionSafe();
       if (!session?.user) { if (isMounted) router.replace("/landing"); return; }
       const uid = session.user.id;
       if (!isMounted) return;

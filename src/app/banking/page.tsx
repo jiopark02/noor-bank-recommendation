@@ -6,7 +6,7 @@ import { PageLayout, PageHeader, Tabs, FilterChips, LoadingSpinner } from '@/com
 import { BankRecommendationList, BranchLocator } from '@/components/bank';
 import { CampusSide } from '@/lib/universityData';
 import { useCreditCards, CreditCard } from '@/hooks/useCreditCards';
-import { supabase } from '@/lib/supabase-browser';
+import { supabase, getSessionSafe } from '@/lib/supabase-browser';
 
 const TABS = [
   { id: 'banks', label: 'Banks' },
@@ -107,9 +107,7 @@ export default function BankingPage() {
       let resolvedId: string | null = null;
 
       if (supabase) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const session = await getSessionSafe();
         if (!cancelled && session?.user?.id) {
           resolvedId = session.user.id;
         }
