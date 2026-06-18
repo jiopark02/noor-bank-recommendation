@@ -11,6 +11,12 @@ import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
 
+// Guards the one-shot auto-reload below. sessionStorage survives a reload
+// (same tab) so the second hydrate pass after a reload sees the flag and
+// stops, preventing an infinite reload loop. Cleared on a valid session so a
+// future stale event can self-heal again.
+const AUTH_RELOAD_FLAG = "noor_auth_stale_reload";
+
 function buildUserContext(profile: Record<string, unknown>): UserContext {
   return {
     firstName: profile.firstName as string | undefined,
@@ -94,7 +100,27 @@ export default function ChatPage() {
     const hydrate = async () => {
       if (!supabase) { if (isMounted) router.replace("/login"); return; }
       const session = await getSessionSafe();
-      if (!session?.user) { if (isMounted) router.replace("/login"); return; }
+      if (!session?.user) {
+        // getSessionSafe returned null: either a genuinely absent session (logged
+        // out / expired) or a stale Supabase client whose getSession() timed out
+        // (known SDK bug — a backgrounded tab can corrupt the client so getSession
+        // hangs even though the cookie session is still valid; the only reliable
+        // recovery is recreating the client via a full reload). We can't distinguish
+        // the two from null alone, so reload once to recreate the client: if the
+        // session was real, the reload restores it and chat loads; if genuinely
+        // absent, the post-reload pass is still null and falls through to /login.
+        // The sessionStorage flag caps this at a single reload (no infinite loop).
+        if (!sessionStorage.getItem(AUTH_RELOAD_FLAG)) {
+          sessionStorage.setItem(AUTH_RELOAD_FLAG, "1");
+          window.location.reload();
+          return;
+        }
+        sessionStorage.removeItem(AUTH_RELOAD_FLAG);
+        if (isMounted) router.replace("/login");
+        return;
+      }
+      // Valid session: clear the guard so a future stale event can self-heal again.
+      sessionStorage.removeItem(AUTH_RELOAD_FLAG);
       const uid = session.user.id;
       if (!isMounted) return;
       setUserId(uid);
