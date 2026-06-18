@@ -92,9 +92,9 @@ export default function ChatPage() {
   useEffect(() => {
     let isMounted = true;
     const hydrate = async () => {
-      if (!supabase) { if (isMounted) router.replace("/landing"); return; }
+      if (!supabase) { if (isMounted) router.replace("/login"); return; }
       const session = await getSessionSafe();
-      if (!session?.user) { if (isMounted) router.replace("/landing"); return; }
+      if (!session?.user) { if (isMounted) router.replace("/login"); return; }
       const uid = session.user.id;
       if (!isMounted) return;
       setUserId(uid);
