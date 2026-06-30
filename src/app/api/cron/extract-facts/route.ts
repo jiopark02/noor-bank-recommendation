@@ -124,7 +124,7 @@ async function callOpenRouterForExtraction(
   return content;
 }
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a fact-extraction assistant for Noor, a financial guidance app for international students.
+const EXTRACTION_SYSTEM_PROMPT = `You are a fact-extraction assistant for Noor, a personal finance guidance app for people who are just getting started with managing their money.
 
 You will receive (1) a list of existing known facts about the user, and (2) a conversation between the user and Noor AI. Your job is to extract durable facts about the USER and reconcile them with the existing facts.
 
@@ -145,10 +145,10 @@ EXTRACT — durable, currently-true facts about the user:
 
 DO NOT EXTRACT:
 - Hypotheticals, hopes, vague future wishes — anything not currently in progress.
-  NG: "User wants to apply for OPT someday."
+  NG: "User wants to apply for a credit card someday."
   NG: "User hopes to buy a house."
   NG: "If the user earns $2000, ..."
-  OK: "User is applying for OPT after graduation."   (in progress = fact)
+  OK: "User is opening a checking account this month."   (in progress = fact)
   OK: "User's monthly rent is $1,700."               (confirmed current fact)
   The distinction: sentences that only contain "plan to / hope to / want to / someday"
   are NOT facts, even for the goal category. Only extract things in progress or already
