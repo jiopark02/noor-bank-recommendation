@@ -222,3 +222,13 @@ export interface SavedScholarship {
   application_status: 'not_started' | 'in_progress' | 'submitted' | 'accepted' | 'rejected';
   created_at: string;
 }
+
+export interface WaitlistSignup {
+  id: string;
+  email: string;
+  name: string | null;
+  source: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}

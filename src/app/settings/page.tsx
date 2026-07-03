@@ -346,7 +346,7 @@ export default function SettingsPage() {
     clearSession();
     localStorage.removeItem('noor_user_id');
     localStorage.removeItem('noor_user_profile');
-    router.push('/welcome');
+    router.push('/landing');
   };
 
   return (
