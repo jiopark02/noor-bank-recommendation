@@ -19,6 +19,7 @@ import {
   downloadUserData,
   calculateProfileCompletion,
   clearLocalAuthState,
+  purgeAllNoorLocalState,
 } from '@/lib/validation';
 import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
 import { buildJsonAuthorizedHeaders } from '@/lib/supabaseAuthHeaders';
@@ -364,7 +365,6 @@ export default function SettingsPage() {
   const [newEmail, setNewEmail] = useState('');
   const [emailPassword, setEmailPassword] = useState('');
 
-  const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const [editFirstName, setEditFirstName] = useState('');
@@ -550,12 +550,41 @@ export default function SettingsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      clearLocalAuthState();
-      [
-        'noor_notifications', 'noor_savings_goals',
-        'noor_finance_progress', 'noor_checklist_completed', 'noor_checklist_items',
-      ].forEach((key) => localStorage.removeItem(key));
+      // Deletion authenticates via the Bearer token only — no password gate.
+      // A password check breaks OAuth users (who have no password), and the
+      // token already proves identity account-type-neutrally.
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) {
+        setError('Your session has expired. Please sign in again to delete your account.');
+        setIsLoading(false);
+        return;
+      }
+
+      const res = await fetch('/api/account/delete', {
+        method: 'POST',
+        headers: buildJsonAuthorizedHeaders(rawAuth),
+      });
+
+      if (!res.ok) {
+        // Surface the server's explicit error — never let the user believe the
+        // account was deleted when it was not (or was only half-deleted).
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(errBody.error || 'Failed to delete account. Please try again.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Server returned 200 = deletion is complete. Nothing after this point
+      // may surface as a deletion failure. signOut() can legitimately fail
+      // (the auth user is already deleted, so the server call may 4xx) — that
+      // is a normal outcome, not a deletion failure, so we swallow it. Local
+      // purge and navigation run unconditionally.
+      try {
+        if (supabase) await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('handleDeleteAccount: signOut after deletion failed (expected — user already deleted):', err);
+      }
+      purgeAllNoorLocalState();
       router.push('/welcome');
     } catch {
       setError('Failed to delete account. Please try again.');
@@ -1130,8 +1159,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-4">
-              <ModalInput label="Enter your password" type="password" value={deletePassword} onChange={setDeletePassword} />
-              <ModalInput label='Type "DELETE" to confirm' value={deleteConfirmText} onChange={setDeleteConfirmText} placeholder="DELETE" />
+              <ModalInput label='Type "DELETE" to confirm' value={deleteConfirmText} onChange={setDeleteConfirmText} placeholder="DELETE" autoFocus />
               {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
             </div>
 
@@ -1141,7 +1169,7 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={handleDeleteAccount}
-                disabled={isLoading || deleteConfirmText !== 'DELETE' || !deletePassword}
+                disabled={isLoading || deleteConfirmText !== 'DELETE'}
                 className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
                 style={{ background: '#EF4444', fontFamily: FONT }}
               >

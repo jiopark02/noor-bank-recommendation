@@ -163,6 +163,34 @@ export async function deletePlaidConnection(userId: string, itemId: string) {
 }
 
 /**
+ * Delete ALL Plaid connections for a user in a single idempotent statement.
+ *
+ * Used by account deletion. plaid_connections has no FK to public.users and its
+ * user_id column is TEXT, so it is not covered by any ON DELETE CASCADE and must
+ * be removed explicitly. One filtered delete (not a per-row loop) — removing
+ * zero rows is still success, so a retry after a partial failure converges.
+ */
+export async function deleteAllPlaidConnections(userId: string): Promise<boolean> {
+  try {
+    const supabase = createServerClient();
+    const { error } = await supabase
+      .from("plaid_connections")
+      .delete()
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Error deleting all Plaid connections:", error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error deleting all Plaid connections:", error);
+    return false;
+  }
+}
+
+/**
  * Handle common error responses for Plaid API errors
  */
 export function handlePlaidError(error: unknown): NextResponse {
