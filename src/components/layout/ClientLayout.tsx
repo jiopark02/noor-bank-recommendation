@@ -19,6 +19,7 @@ const HIDDEN_CHAT_PAGES = [
   "/chat",
   "/forgot-password",
   "/auth/callback",
+  "/waitlist",
 ];
 
 export function ClientLayout({ children }: ClientLayoutProps) {

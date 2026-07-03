@@ -330,6 +330,16 @@ export default function LandingPage() {
                 Login
               </motion.button>
               <motion.button
+                onClick={() => router.push('/waitlist')}
+                className="px-5 py-2 text-[13px] rounded-lg"
+                style={{ border: '1px solid rgba(0,0,0,0.18)', color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}
+                whileHover={{ borderColor: 'rgba(0,0,0,0.6)', color: '#000', scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ duration: 0.18 }}
+              >
+                Join waitlist
+              </motion.button>
+              <motion.button
                 onClick={() => router.push('/welcome')}
                 className="px-5 py-2 text-[13px] font-medium rounded-lg"
                 style={{ background: ACCENT_GRADIENT, color: '#FFF', fontFamily: FONT, boxShadow: `0 2px 12px rgba(91,78,232,0.35)` }}
@@ -867,6 +877,16 @@ export default function LandingPage() {
                       transition={{ duration: 0.18 }}
                     >
                       I have an account
+                    </motion.button>
+                    <motion.button
+                      onClick={() => router.push('/waitlist')}
+                      className="px-8 py-3.5 text-[13px] rounded-xl"
+                      style={{ border: '1px solid rgba(0,0,0,0.18)', color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}
+                      whileHover={{ borderColor: 'rgba(0,0,0,0.6)', color: '#000', scale: 1.02 }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      Join waitlist
                     </motion.button>
                   </>
                 )}

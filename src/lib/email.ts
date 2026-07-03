@@ -1,19 +1,10 @@
-import nodemailer from 'nodemailer';
+import { Resend } from "resend";
 
-// SMTP configuration using environment variables
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'mail.privateemail.com',
-  port: parseInt(process.env.SMTP_PORT || '465'),
-  secure: true, // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_USER || 'hello@noor.financial',
-    pass: process.env.SMTP_PASSWORD,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_EMAIL = process.env.SMTP_FROM || 'hello@noor.financial';
-const FROM_NAME = process.env.SMTP_FROM_NAME || 'NOOR';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://noor.financial';
+const FROM_EMAIL = process.env.SMTP_FROM || "hello@noor.financial";
+const FROM_NAME = process.env.SMTP_FROM_NAME || "NOOR";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://noor.financial";
 
 interface EmailOptions {
   to: string;
@@ -22,26 +13,35 @@ interface EmailOptions {
   text?: string;
 }
 
-export async function sendEmail({ to, subject, html, text }: EmailOptions): Promise<boolean> {
+export async function sendEmail({
+  to,
+  subject,
+  html,
+  text,
+}: EmailOptions): Promise<boolean> {
   try {
-    await transporter.sendMail({
-      from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
+    const { error } = await resend.emails.send({
+      from: `${FROM_NAME} <${FROM_EMAIL}>`,
       to,
       subject,
       html,
-      text: text || html.replace(/<[^>]*>/g, ''),
+      text: text || html.replace(/<[^>]*>/g, ""),
     });
+    if (error) throw error;
     console.log(`Email sent successfully to ${to}`);
     return true;
   } catch (error) {
-    console.error('Failed to send email:', error);
+    console.error("Failed to send email:", error);
     return false;
   }
 }
 
 // Welcome Email
-export async function sendWelcomeEmail(email: string, firstName?: string): Promise<boolean> {
-  const name = firstName || 'there';
+export async function sendWelcomeEmail(
+  email: string,
+  firstName?: string
+): Promise<boolean> {
+  const name = firstName || "there";
   const dashboardLink = `${APP_URL}/dashboard`;
 
   const html = `
@@ -124,7 +124,76 @@ export async function sendWelcomeEmail(email: string, firstName?: string): Promi
 
   return sendEmail({
     to: email,
-    subject: 'Welcome to NOOR!',
+    subject: "Welcome to NOOR!",
+    html,
+  });
+}
+
+// Waitlist Confirmation Email
+export async function sendWaitlistConfirmationEmail(
+  email: string,
+  name?: string
+): Promise<boolean> {
+  const greeting = name ? `Hi ${name}` : "Hi there";
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You're on the Noor waitlist</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);">
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 30px; text-align: center; border-bottom: 1px solid #f0f0f0;">
+              <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.3em; color: #000000;">NOOR</h1>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 40px;">
+              <h2 style="margin: 0 0 20px; font-size: 20px; font-weight: 600; color: #000000;">You're on the list.</h2>
+              <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #666666;">
+                ${greeting},
+              </p>
+              <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #666666;">
+                Thanks for signing up. We're rolling out access carefully so every new user gets the best experience possible.
+              </p>
+              <p style="margin: 0 0 30px; font-size: 15px; line-height: 1.6; color: #666666;">
+                When it's your turn, we'll send an invite so you can start chatting with noor — your AI money coach. Set savings goals, get plain-language guidance on your spending, and earn rewards when you hit your targets. No lectures, no judgment.
+              </p>
+              <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #999999;">
+                No spam — we'll only reach out when it matters.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 30px 40px; text-align: center; border-top: 1px solid #f0f0f0;">
+              <p style="margin: 0; font-size: 12px; color: #999999;">
+                &copy; ${new Date().getFullYear()} NOOR. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: "You're on the Noor waitlist",
     html,
   });
 }
