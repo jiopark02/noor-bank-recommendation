@@ -392,32 +392,43 @@ export function clearSession(): void {
 // shared-device hygiene: no account's history should linger after sign-out.
 // SCOPE SPLIT (deliberate, see purgeAllNoorLocalState below):
 //   - clearLocalAuthState = LOGOUT / SIGNED_OUT path. Purges only the sensitive
-//     auth + profile + chat subset. This is the shared-device hygiene boundary;
-//     it is intentionally NOT the full key registry (a logout should not, for
-//     example, reset the device's language preference).
-//   - purgeAllNoorLocalState = ACCOUNT DELETION path. Wipes the entire
-//     NOOR_LOCAL_KEYS registry, because the account no longer exists.
+//     subset (auth + profile + chat + Plaid bank cache). This is the
+//     shared-device hygiene boundary; it is intentionally a curated subset, NOT
+//     a blanket noor_ sweep (a logout should not, for example, reset the
+//     device's language preference).
+//   - purgeAllNoorLocalState = ACCOUNT DELETION path. Blanket noor_ prefix
+//     sweep of local + session storage, because the account no longer exists.
 export function clearLocalAuthState(): void {
   clearSession(); // noor_session (local + sessionStorage)
   localStorage.removeItem('noor_user_id');
   localStorage.removeItem('noor_user_profile');
   localStorage.removeItem('noor_chat_history');
+  // Plaid cache: on a shared device the dashboard renders the previous user's
+  // cached account balances and transactions during the window before the live
+  // fetch overwrites them — real exposure, so clear them on logout too.
+  localStorage.removeItem('noor_plaid_connections');
+  localStorage.removeItem('noor_plaid_accounts');
+  localStorage.removeItem('noor_plaid_transactions');
 }
 
 // ============================================
-// NOOR LOCAL STORAGE KEY REGISTRY
+// NOOR LOCAL STORAGE KEY REGISTRY (documentation + logout-subset reference)
 // ============================================
-// Single source of truth for every key Noor writes to localStorage. Account
-// deletion purges this ENTIRE list — the account is gone, so nothing (not even
-// device-level preferences like language) should linger.
+// This is a documented inventory of known noor_* localStorage keys. It is NO
+// LONGER the account-deletion execution list — purgeAllNoorLocalState() uses a
+// prefix sweep instead, because this hand-maintained list provably drifts (see
+// that function's comment). Keep it current as a reference, but nothing depends
+// on it being exhaustive for correctness anymore.
 //
-// Some keys are written via named constants elsewhere in this file and MUST be
-// kept in sync with this list:
+// Its remaining active role is to document the sensitive subset that the LOGOUT
+// path (clearLocalAuthState) clears vs. leaves — a logout must not wipe device
+// preferences (e.g. language), so logout cannot use the blanket sweep.
+//
+// Some keys are written via named constants elsewhere in this file:
 //   'noor_session'           -> SESSION_KEY
 //   'noor_notification_prefs' -> NOTIFICATION_KEY
 //   'noor_terms_accepted'    -> TERMS_KEY (written ONLY via that constant, so it
-//                               never appears as a bare literal in feature code;
-//                               this registry is the reason it is still purged).
+//                               never appears as a bare literal in feature code).
 export const NOOR_LOCAL_KEYS = [
   'noor_session',
   'noor_user_id',
@@ -425,6 +436,8 @@ export const NOOR_LOCAL_KEYS = [
   'noor_chat_history',
   'noor_locale',
   'noor_plaid_connections',
+  'noor_plaid_accounts',      // dashboard cache of Plaid account balances (bank data)
+  'noor_plaid_transactions',  // dashboard cache of Plaid transactions (bank data)
   'noor_selected_country',
   'noor_user_intent',
   'noor_user_priorities',
@@ -442,18 +455,26 @@ export const NOOR_LOCAL_KEYS = [
 /**
  * Full local-state purge for ACCOUNT DELETION (not logout).
  *
- * Removes every Noor key from localStorage and clears the noor_session mirror
- * in sessionStorage. Distinct from clearLocalAuthState(), which is the
- * logout/SIGNED_OUT path and intentionally purges only the sensitive subset.
- * Account deletion is terminal, so it wipes everything, device preferences
- * included.
+ * Sweeps EVERY key with the "noor_" prefix from both localStorage and
+ * sessionStorage. This deliberately does NOT iterate NOOR_LOCAL_KEYS: the
+ * hand-maintained whitelist was abandoned here after 2026-07-03 live testing
+ * found noor_plaid_accounts / noor_plaid_transactions surviving deletion, and a
+ * full setItem sweep then surfaced ~17 further noor_* keys missing from the
+ * list — including dynamically suffixed keys (e.g. noor_visa_info_<country>)
+ * that no static list can ever cover. Deletion is terminal, so over-deleting
+ * costs nothing (device preferences included), while under-deleting leaves bank
+ * and personal data on shared devices. A prefix sweep can't drift.
  */
 export function purgeAllNoorLocalState(): void {
-  for (const key of NOOR_LOCAL_KEYS) {
-    localStorage.removeItem(key);
+  for (const store of [localStorage, sessionStorage]) {
+    const keys: string[] = [];
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (key && key.startsWith("noor_")) keys.push(key);
+    }
+    // Collect first, then remove — removing while iterating shifts indices.
+    for (const key of keys) store.removeItem(key);
   }
-  // noor_session is also mirrored in sessionStorage; clearSession() covers both.
-  clearSession();
 }
 
 // ============================================
