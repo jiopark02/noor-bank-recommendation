@@ -21,11 +21,14 @@ import {
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// OpenRouter 추출 모델. fact 추출 정확도를 위해 Sonnet 사용 (CTO 결정).
-// 버전 고정 ID — OpenRouter의 "latest" 별칭은 chat completions API에서
-// 유효하지 않음(400). 모델이 retire되면 이 한 줄만 교체하면 됨.
-// (PR4 summarize cron의 SUMMARY_MODEL과 동일 패턴)
-const EXTRACTION_MODEL = "anthropic/claude-sonnet-4.5";
+// OpenRouter fact-extraction model. Sonnet is used for extraction accuracy (CTO decision).
+// Defaults to the "latest" alias (retire-immune); the tilde (~) prefix is required
+// for latest aliases on OpenRouter — without it the API returns "not a valid model ID".
+// Override via the EXTRACTION_MODEL env var (e.g. pin to "anthropic/claude-sonnet-4.6")
+// if output stability ever requires it. Resilience to output-format drift is handled
+// in the parser, not by pinning the model. (Same pattern as SUMMARY_MODEL in the summarize cron.)
+const EXTRACTION_MODEL =
+  process.env.EXTRACTION_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // 한 세션에서 LLM에 넘기는 최대 메시지 수 (PR4와 동일).
@@ -121,7 +124,7 @@ async function callOpenRouterForExtraction(
   return content;
 }
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a fact-extraction assistant for Noor, a financial guidance app for international students.
+const EXTRACTION_SYSTEM_PROMPT = `You are a fact-extraction assistant for Noor, a personal finance guidance app for people who are just getting started with managing their money.
 
 You will receive (1) a list of existing known facts about the user, and (2) a conversation between the user and Noor AI. Your job is to extract durable facts about the USER and reconcile them with the existing facts.
 
@@ -142,10 +145,10 @@ EXTRACT — durable, currently-true facts about the user:
 
 DO NOT EXTRACT:
 - Hypotheticals, hopes, vague future wishes — anything not currently in progress.
-  NG: "User wants to apply for OPT someday."
+  NG: "User wants to apply for a credit card someday."
   NG: "User hopes to buy a house."
   NG: "If the user earns $2000, ..."
-  OK: "User is applying for OPT after graduation."   (in progress = fact)
+  OK: "User is opening a checking account this month."   (in progress = fact)
   OK: "User's monthly rent is $1,700."               (confirmed current fact)
   The distinction: sentences that only contain "plan to / hope to / want to / someday"
   are NOT facts, even for the goal category. Only extract things in progress or already

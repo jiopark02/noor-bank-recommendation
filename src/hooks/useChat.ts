@@ -11,8 +11,6 @@ import {
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
-const STORAGE_KEY = "noor_chat_history";
-
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -37,14 +35,6 @@ interface UseChatReturn {
   quickPrompts: Array<{ label: string; prompt: string }>;
 }
 
-interface StoredChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: string;
-  model?: string;
-}
-
 export function useChat({
   userId,
   userContext = {},
@@ -55,32 +45,6 @@ export function useChat({
   const [error, setError] = useState<string | null>(null);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const isSendingRef = useRef(false);
-
-  const loadLocalHistory = useCallback((): ChatMessage[] => {
-    if (!userId || typeof window === "undefined") {
-      return [];
-    }
-
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        return [];
-      }
-
-      const parsed = JSON.parse(raw) as Record<string, StoredChatMessage[]>;
-      const history = parsed[userId] || [];
-
-      return history.map((msg) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        timestamp: new Date(msg.timestamp),
-        model: msg.model,
-      }));
-    } catch {
-      return [];
-    }
-  }, [userId]);
 
   const loadChatHistory = useCallback(async () => {
     if (!userId) return;
@@ -120,18 +84,16 @@ export function useChat({
           }
         );
 
-        if (formattedMessages.length > 0) {
-          setMessages(formattedMessages);
-          return;
-        }
+        setMessages(formattedMessages);
+        return;
       }
 
-      setMessages(loadLocalHistory());
+      setMessages([]);
     } catch (err) {
       console.error("Failed to load chat history:", err);
-      setMessages(loadLocalHistory());
+      setMessages([]);
     }
-  }, [loadLocalHistory, userId]);
+  }, [userId]);
 
   // Load chat history on mount
   useEffect(() => {
@@ -139,32 +101,6 @@ export function useChat({
       loadChatHistory();
     }
   }, [userId, loadHistory, loadChatHistory]);
-
-  // Persist chat history locally for better UX continuity.
-  useEffect(() => {
-    if (!userId || typeof window === "undefined") {
-      return;
-    }
-
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw
-        ? (JSON.parse(raw) as Record<string, StoredChatMessage[]>)
-        : {};
-
-      parsed[userId] = messages.map((msg) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        timestamp: msg.timestamp.toISOString(),
-        model: msg.model,
-      }));
-
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-    } catch {
-      // Ignore persistence failures to avoid blocking chat UX.
-    }
-  }, [messages, userId]);
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -249,22 +185,7 @@ export function useChat({
   const clearMessages = useCallback(() => {
     setMessages([]);
     setError(null);
-
-    if (!userId || typeof window === "undefined") {
-      return;
-    }
-
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw
-        ? (JSON.parse(raw) as Record<string, StoredChatMessage[]>)
-        : {};
-      parsed[userId] = [];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-    } catch {
-      // Ignore storage errors when clearing messages.
-    }
-  }, [userId]);
+  }, []);
 
   // Get contextual or default quick prompts
   const quickPrompts = userContext

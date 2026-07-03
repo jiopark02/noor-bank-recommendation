@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUserIdFromRequest } from '@/lib/apiAuth';
+import { requireAdmin } from '@/lib/apiAuth';
 import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
 import { ALL_UNIVERSITIES } from '@/lib/universities';
 
@@ -13,8 +13,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!(await getAuthenticatedUserIdFromRequest(request))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await requireAdmin(request))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const supabase = createServerClient();
@@ -112,8 +112,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  if (!(await getAuthenticatedUserIdFromRequest(request))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await requireAdmin(request))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const supabase = createServerClient();

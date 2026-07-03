@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { BankRecommendationList } from '@/components/bank';
-import { supabase } from '@/lib/supabase-browser';
+import { supabase, getSessionSafe } from '@/lib/supabase-browser';
 
 export default function BanksPage() {
   const router = useRouter();
@@ -20,9 +20,7 @@ export default function BanksPage() {
       let resolvedId: string | null = null;
 
       if (supabase) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const session = await getSessionSafe();
         if (!cancelled && session?.user?.id) {
           resolvedId = session.user.id;
         }

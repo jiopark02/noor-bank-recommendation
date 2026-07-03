@@ -264,6 +264,29 @@ export function validateName(name: string): { isValid: boolean; error: string | 
 }
 
 // ============================================
+// NAME SANITIZATION
+// ============================================
+// Role split: validateName = UX/form-level correctness feedback;
+// sanitizeNameField = security/storage-level hardening (always applied
+// server-side regardless of form validation).
+export function sanitizeNameField(value: unknown): string {
+  // SECURITY (prompt injection): firstName/lastName are interpolated raw into
+  // the system prompt's "## Current User Context" section as a markdown list
+  // line. A newline in the value lets an attacker break out of that line and
+  // inject a fake section (e.g. "\n## SYSTEM OVERRIDE ..."). We strip control
+  // characters (incl. newlines/tabs) and cap length. We deliberately do NOT
+  // restrict to ASCII letters: the product serves a global beginner audience,
+  // so names like "José" or "김성원" must pass. The goal is to prevent line
+  // breakout, not to validate name "correctness".
+  if (typeof value !== "string") return "";
+  const stripped = value
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.slice(0, 100);
+}
+
+// ============================================
 // SESSION MANAGEMENT
 // ============================================
 
@@ -354,6 +377,24 @@ export function isInactivityWarning(): boolean {
 export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(SESSION_KEY);
+}
+
+// ============================================
+// LOCAL AUTH STATE CLEANUP
+// ============================================
+// SECURITY: Chat history was mirrored to localStorage under "noor_chat_history"
+// and was NOT cleared on logout, leaving prior users' plaintext financial
+// conversations readable on a shared device (via DevTools or "Export My Data").
+// This central helper purges all local auth/profile/chat state and must be
+// called from every logout-equivalent path (explicit logout, account delete,
+// and the SIGNED_OUT auth event covering other-tab logout / token expiry).
+// noor_chat_history is removed in full (not per-user) because the goal is
+// shared-device hygiene: no account's history should linger after sign-out.
+export function clearLocalAuthState(): void {
+  clearSession(); // noor_session (local + sessionStorage)
+  localStorage.removeItem('noor_user_id');
+  localStorage.removeItem('noor_user_profile');
+  localStorage.removeItem('noor_chat_history');
 }
 
 // ============================================
@@ -534,7 +575,6 @@ export function exportUserData(): string {
   const keys = [
     'noor_user_id',
     'noor_user_profile',
-    'noor_chat_history',
     'noor_savings_goals',
     'noor_finance_progress',
     'noor_notification_prefs',

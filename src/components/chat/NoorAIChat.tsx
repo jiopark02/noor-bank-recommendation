@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { ChatButton } from "./ChatButton";
 import { ChatModal } from "./ChatModal";
 import { UserContext } from "@/lib/noorAIPrompt";
-import { supabase } from "@/lib/supabase-browser";
+import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 
 interface NoorAIChatProps {
   userId?: string;
@@ -72,9 +72,7 @@ export function NoorAIChat({
         return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await getSessionSafe();
 
       const resolvedUserId = session?.user?.id || null;
       if (!isMounted) return;

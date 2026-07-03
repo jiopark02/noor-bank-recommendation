@@ -15,10 +15,14 @@ import {
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// OpenRouter 요약 모델. 요약 품질을 위해 Sonnet 사용 (CTO 결정 — 선택 B).
-// 버전 고정 ID — OpenRouter의 "latest" 별칭은 chat completions API에서
-// 유효하지 않음(400). 모델이 retire되면 이 한 줄만 교체하면 됨.
-const SUMMARY_MODEL = "anthropic/claude-sonnet-4.5";
+// OpenRouter summarization model. Sonnet is used for summary quality (CTO decision).
+// Defaults to the "latest" alias (retire-immune); the tilde (~) prefix is required
+// for latest aliases on OpenRouter — without it the API returns "not a valid model ID".
+// Override via the SUMMARY_MODEL env var (e.g. pin to "anthropic/claude-sonnet-4.6")
+// if output stability ever requires it. Resilience to output-format drift is handled
+// in the parser, not by pinning the model.
+const SUMMARY_MODEL =
+  process.env.SUMMARY_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const MAX_MESSAGES_PER_SUMMARY = 200;
@@ -97,14 +101,14 @@ async function callOpenRouterForSummary(
   return content;
 }
 
-const SUMMARY_SYSTEM_PROMPT = `You are a summarization assistant for Noor, a financial guidance app for international students. Always respond in English.
+const SUMMARY_SYSTEM_PROMPT = `You are a summarization assistant for Noor, a personal finance guidance app for people who are just getting started with managing their money. Always respond in English.
 
 You will receive a conversation between a user and Noor AI. Produce a concise summary that captures information useful for future conversations.
 
 Your summary must:
 - Be one dense paragraph (roughly 80-150 words).
-- Capture concrete facts about the user (visa status, school, financial situation, goals, decisions made) — NOT generic advice Noor gave.
-- Preserve specifics: numbers, bank names, visa types, deadlines.
+- Capture concrete facts about the user (financial situation, goals, decisions made, and relevant circumstances like visa status or school if mentioned) — NOT generic advice Noor gave.
+- Preserve specifics: numbers, bank names, deadlines, and any visa types if present.
 - Be written in third person ("The user...").
 - Omit pleasantries, greetings, and small talk.
 - Never include full sensitive identifiers (e.g. a complete SSN or card number), even if they appear in the conversation.
@@ -112,7 +116,7 @@ Your summary must:
 After the summary paragraph, output exactly one final line in this format:
 TOPICS: tag1, tag2, tag3
 
-Where tags are 2-5 short lowercase topic tags (e.g. "TOPICS: f1_visa, chase_bank, credit_score").
+Where tags are 2-5 short lowercase topic tags (e.g. "TOPICS: budgeting, chase_bank, credit_score").
 
 Output only the summary paragraph followed by the single TOPICS line. Nothing else.`;
 

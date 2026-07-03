@@ -148,32 +148,10 @@ export default function LoginPage() {
         return;
       }
 
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        setError(result.message || ERROR_MESSAGES.INVALID_CREDENTIALS);
+      if (!supabase) {
+        setError("Email login is not available right now. Please try again later.");
         return;
       }
-
-      localStorage.setItem("noor_user_id", result.userId);
-
-      if (result.profile) {
-        localStorage.setItem(
-          "noor_user_profile",
-          JSON.stringify(result.profile)
-        );
-      }
-
-      createSession(keepSignedIn);
-      updateSessionActivity();
-
-      router.push("/dashboard");
     } catch (err) {
       setError(ERROR_MESSAGES.SERVER_ERROR);
     } finally {
