@@ -14,7 +14,12 @@ import {
   createSession,
   acceptTerms,
 } from "@/lib/validation";
-import { supabase } from "@/lib/supabase-browser";
+import {
+  supabase,
+  getSessionSafe,
+  getSupabaseBearerHeaders,
+} from "@/lib/supabase-browser";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import {
   Country,
   getVisaTypes,
@@ -569,6 +574,10 @@ export default function SurveyPage() {
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // True when the user reaches /survey already authenticated (e.g. OAuth
+  // profile completion). In that case we skip account creation / the password
+  // step and submit the survey against their existing token.
+  const [isAuthed, setIsAuthed] = useState(false);
   const [institutionSearch, setInstitutionSearch] = useState("");
   const [showInstitutionList, setShowInstitutionList] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
@@ -597,6 +606,32 @@ export default function SurveyPage() {
       // Default to US if not set
       setData((prev) => ({ ...prev, destinationCountry: "US" }));
     }
+  }, []);
+
+  // Detect an existing session so OAuth users can complete their profile
+  // without re-entering a password. Prefill the identity fields we already know.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const session = await getSessionSafe();
+      if (!mounted || !session?.user) return;
+      setIsAuthed(true);
+      let stored: Record<string, unknown> = {};
+      try {
+        stored = JSON.parse(localStorage.getItem("noor_user_profile") || "{}");
+      } catch {
+        stored = {};
+      }
+      setData((prev) => ({
+        ...prev,
+        email: session.user.email || prev.email,
+        firstName: prev.firstName || (stored.firstName as string) || "",
+        lastName: prev.lastName || (stored.lastName as string) || "",
+      }));
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Password validation
@@ -702,9 +737,16 @@ export default function SurveyPage() {
         (i) => i.id === data.institutionId
       );
 
+      // Authenticated (OAuth) completion submits with a Bearer token, which the
+      // /api/survey route uses to skip account creation. Unauthenticated signup
+      // posts without a token — unchanged behavior.
+      const surveyHeaders = isAuthed
+        ? buildJsonAuthorizedHeaders(await getSupabaseBearerHeaders())
+        : { "Content-Type": "application/json" };
+
       const response = await fetch("/api/survey", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: surveyHeaders,
         body: JSON.stringify({
           first_name: data.firstName,
           last_name: data.lastName,
@@ -779,7 +821,8 @@ export default function SurveyPage() {
       }
 
       // Create a Supabase auth session immediately after successful signup.
-      if (supabase) {
+      // Skipped for the authenticated path — that user is already signed in.
+      if (!isAuthed && supabase) {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: data.email.trim().toLowerCase(),
           password: data.password,
@@ -796,8 +839,11 @@ export default function SurveyPage() {
 
       // Save user ID and create session
       localStorage.setItem("noor_user_id", result.userId);
-      createSession(data.staySignedIn);
+      createSession(isAuthed ? true : data.staySignedIn);
       acceptTerms();
+      // Writer for the onboarding cache (previously a ghost key nothing set):
+      // the survey is now complete. callback also fills this from the DB.
+      localStorage.setItem("noor_onboarding_completed", "true");
 
       // Save user profile locally (use profile from response if available, otherwise build from form data)
       const userProfile = result.profile
@@ -857,9 +903,14 @@ export default function SurveyPage() {
             targetMajor: data.targetMajor,
             expectedTransferYear: data.expectedTransferYear,
           };
-      localStorage.setItem("noor_user_profile", JSON.stringify(userProfile));
+      localStorage.setItem(
+        "noor_user_profile",
+        JSON.stringify(
+          isAuthed ? { ...userProfile, email: data.email } : userProfile
+        )
+      );
 
-      router.push("/");
+      router.push(isAuthed ? "/dashboard" : "/");
     } catch (error) {
       console.error("Survey submission error:", error);
       setSubmitError("Something went wrong. Please try again.");
@@ -964,6 +1015,11 @@ export default function SurveyPage() {
                 )}
               </div>
 
+              {/* Password + confirm are the account-credential step. Hide them
+                  for an already-authenticated user (OAuth profile completion),
+                  since no new auth account is being created. */}
+              {!isAuthed && (
+                <>
               {/* Password with strength indicator */}
               <PasswordInput
                 placeholder={t("survey.password.placeholder")}
@@ -1027,6 +1083,8 @@ export default function SurveyPage() {
                     </div>
                   )}
               </div>
+                </>
+              )}
 
               {/* Stay signed in */}
               <label className="flex items-center gap-3 py-2 cursor-pointer">
@@ -2032,8 +2090,8 @@ export default function SurveyPage() {
                   (!data.firstName ||
                     !data.lastName ||
                     !data.email ||
-                    !passwordValidation.isValid ||
-                    !passwordsMatch ||
+                    (!isAuthed &&
+                      (!passwordValidation.isValid || !passwordsMatch)) ||
                     !data.agreeToTerms ||
                     !data.institutionId ||
                     !data.countryOfOrigin)
