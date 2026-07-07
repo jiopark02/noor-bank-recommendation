@@ -267,11 +267,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Welcome email only for brand-new email/password signups.
+    // Welcome email only for brand-new email/password signups. Must be awaited:
+    // on serverless (Vercel) the function is frozen once the response returns,
+    // so a fire-and-forget promise is killed before the send reaches Resend.
+    // A send failure is logged but never blocks signup success.
     if (signupEmail) {
-      sendWelcomeEmail(signupEmail, firstName || "User").catch((err) => {
-        console.error("Failed to send welcome email:", err);
-      });
+      try {
+        const sent = await sendWelcomeEmail(signupEmail, firstName || "User");
+        if (!sent) {
+          console.error(`Failed to send welcome email to ${signupEmail}`);
+        }
+      } catch (err) {
+        console.error(`Failed to send welcome email to ${signupEmail}:`, err);
+      }
     }
 
     return NextResponse.json({
