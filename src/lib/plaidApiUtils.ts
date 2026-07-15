@@ -51,6 +51,35 @@ export async function getPlaidConnection(userId: string) {
 }
 
 /**
+ * Get a single Plaid connection for a user by its item_id.
+ *
+ * Uses maybeSingle() (not single()): (user_id, item_id) is UNIQUE, so the result
+ * is 0 or 1 row and maybeSingle() never errors on "not exactly one" the way
+ * single() does when a user has multiple connections. Returns null when the
+ * item does not exist for this user.
+ */
+export async function getPlaidConnectionByItemId(userId: string, itemId: string) {
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from("plaid_connections")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("item_id", itemId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Error fetching Plaid connection by item_id:", error);
+    return null;
+  }
+}
+
+/**
  * Get all Plaid connections for a user
  */
 export async function getAllPlaidConnections(userId: string) {

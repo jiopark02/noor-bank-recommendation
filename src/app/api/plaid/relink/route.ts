@@ -8,7 +8,7 @@ import {
 import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
-  getPlaidConnection,
+  getPlaidConnectionByItemId,
   updatePlaidConnectionStatus,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
@@ -38,18 +38,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get existing connection
-    const connection = await getPlaidConnection(userId);
+    // Look up the specific connection by item_id. Multi-connection safe:
+    // getPlaidConnection used .single() and returned null (→ 404 "Connection
+    // not found") whenever the user had more than one connection. Looking up by
+    // (user_id, item_id) — which is UNIQUE — also makes the old item_id mismatch
+    // check redundant.
+    const connection = await getPlaidConnectionByItemId(userId, itemId);
     if (!connection) {
       return NextResponse.json(
         { error: "Connection not found" },
         { status: 404 }
       );
-    }
-
-    // The itemId in the request should match the one we have
-    if (connection.item_id !== itemId) {
-      return NextResponse.json({ error: "Item mismatch" }, { status: 400 });
     }
 
     // Create a new link token in "update" mode using the existing access token
