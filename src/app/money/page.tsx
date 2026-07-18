@@ -47,6 +47,12 @@ export default function MoneyPage() {
   const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
   const [relinkToken, setRelinkToken] = useState<string | null>(null);
   const [isPreparingRelink, setIsPreparingRelink] = useState(false);
+  // Connection management (accounts tab): inline-confirm remove + add-bank notice.
+  const [confirmingRemoveItemId, setConfirmingRemoveItemId] = useState<
+    string | null
+  >(null);
+  const [removingItemId, setRemovingItemId] = useState<string | null>(null);
+  const [addBankNotice, setAddBankNotice] = useState<string | null>(null);
 
   // Date range for transactions
   const [startDate, setStartDate] = useState<string>(() => {
@@ -246,6 +252,80 @@ export default function MoneyPage() {
       }
     },
     [handleBankConnected, userId]
+  );
+
+  // Remove a single connection from NOOR (deletes the DB row; does NOT revoke on
+  // Plaid — see docs/design/connection-management.md §9). The hook re-fetches
+  // connections on success; we ALSO call fetchData() explicitly because removing
+  // one of several banks leaves hasActive unchanged, so the hasActive-dependent
+  // fetch effect would not re-run on its own.
+  const handleRemoveConnection = useCallback(
+    async (itemId: string) => {
+      setRemovingItemId(itemId);
+      try {
+        const ok = await plaidConnections.disconnect(itemId);
+        if (ok) {
+          await fetchData();
+        }
+      } finally {
+        setRemovingItemId(null);
+        setConfirmingRemoveItemId(null);
+      }
+    },
+    [plaidConnections, fetchData]
+  );
+
+  // Add another bank. Own handler (not ConnectBankCard, which has no user-facing
+  // error/duplicate channel): POST exchange-token, surface the 409
+  // ALREADY_CONNECTED duplicate case as an inline notice, refresh on success.
+  const handleAddBankSuccess = useCallback(
+    async (
+      publicToken: string,
+      metadata: { institution: { name: string; institution_id: string } }
+    ) => {
+      if (!userId) return;
+      setAddBankNotice(null);
+      try {
+        const plaidHeaders = buildJsonAuthorizedHeaders(
+          await getSupabaseBearerHeaders()
+        );
+        const response = await fetch("/api/plaid/exchange-token", {
+          method: "POST",
+          headers: plaidHeaders,
+          body: JSON.stringify({
+            publicToken,
+            institutionId: metadata.institution.institution_id,
+            institutionName: metadata.institution.name,
+          }),
+        });
+
+        const data = asPlainObject(await response.json());
+
+        if (
+          response.status === 409 ||
+          readString(data, "code") === "ALREADY_CONNECTED"
+        ) {
+          const name =
+            readString(data, "institutionName") ||
+            metadata.institution.name ||
+            "This bank";
+          setAddBankNotice(`${name} is already connected.`);
+          return;
+        }
+
+        if (data.success !== true) {
+          throw new Error(readErrorMessage(data) || "Failed to add bank");
+        }
+
+        handleBankConnected();
+        await fetchData();
+      } catch (err) {
+        setAddBankNotice(
+          err instanceof Error ? err.message : "Failed to add bank"
+        );
+      }
+    },
+    [userId, handleBankConnected, fetchData]
   );
 
   // Only prompt to connect once we've actually determined there is no
@@ -521,6 +601,78 @@ export default function MoneyPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
           >
+            {/* Linked banks: connection list + remove + add another */}
+            {plaidConnections.connections.length > 0 && (
+              <div className="noor-card p-5 mb-4">
+                <h3 className="font-medium text-black mb-3">Linked banks</h3>
+                <div className="space-y-1">
+                  {plaidConnections.connections.map((conn) => (
+                    <div
+                      key={conn.itemId}
+                      className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-black truncate">
+                          {conn.institutionName}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {conn.status === "active"
+                            ? "Connected"
+                            : "Needs attention"}
+                        </p>
+                      </div>
+                      {confirmingRemoveItemId === conn.itemId ? (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => handleRemoveConnection(conn.itemId)}
+                            disabled={removingItemId === conn.itemId}
+                            className="text-xs font-medium text-red-600 px-2 py-1 rounded disabled:opacity-50"
+                          >
+                            {removingItemId === conn.itemId
+                              ? "Removing…"
+                              : "Confirm"}
+                          </button>
+                          <button
+                            onClick={() => setConfirmingRemoveItemId(null)}
+                            disabled={removingItemId === conn.itemId}
+                            className="text-xs text-gray-500 px-2 py-1 rounded disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            setConfirmingRemoveItemId(conn.itemId)
+                          }
+                          className="text-xs font-medium text-gray-600 hover:text-red-600 px-2.5 py-1 rounded border border-gray-200 flex-shrink-0"
+                        >
+                          Remove from NOOR
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {userId && (
+                  <div className="mt-4">
+                    <PlaidLinkButton
+                      userId={userId}
+                      onSuccess={handleAddBankSuccess}
+                      className="w-full py-3 border border-gray-300 text-black font-medium rounded-xl disabled:opacity-50 transition-all"
+                    >
+                      + Add another bank
+                    </PlaidLinkButton>
+                    {addBankNotice && (
+                      <p className="text-xs text-gray-600 mt-2">
+                        {addBankNotice}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3">
               {accounts.map((account) => (
                 <motion.div

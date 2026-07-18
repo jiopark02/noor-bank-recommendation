@@ -62,7 +62,7 @@ alter table public.plaid_connections
   add column if not exists institution_id text;
 ```
 
-**Applied manually by the operator in the Supabase SQL Editor** — the committed file is not live until then (CLAUDE.md). Backend code must tolerate `institution_id` being absent at runtime until the migration is applied (the insert simply omits/NULLs it; the detection query returns no matches → no false positives).
+**Applied manually by the operator in the Supabase SQL Editor** — the committed file is not live until then (CLAUDE.md). **Deploy ordering is mandatory: this migration MUST be applied before (or with) the code deploy.** The backend does **not** tolerate the column being absent — `storePlaidConnection` always includes the `institution_id` key in its INSERT, and the detection query filters on `institution_id`, so against a schema without the column both fail (the INSERT errors → `storePlaidConnection` returns null → the connect returns 500, breaking all new bank connections). The migration was applied live before this code shipped, so the ordering hazard is resolved; it is recorded here so any re-deploy/rollback preserves the same order.
 
 ---
 

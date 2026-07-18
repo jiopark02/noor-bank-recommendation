@@ -80,6 +80,41 @@ export async function getPlaidConnectionByItemId(userId: string, itemId: string)
 }
 
 /**
+ * Get an active Plaid connection for a user at a given institution, or null.
+ *
+ * Used for app-level duplicate detection (same user re-linking a bank they
+ * already have). Only rows with a matching non-null institution_id are found,
+ * so it detects duplicates only among connections created after the
+ * institution_id column shipped (pre-existing rows are NULL — see design §5).
+ *
+ * NOTE: this is UX-grade detection, NOT a security boundary. The institution_id
+ * used to call it originates from the client; a forged value only affects the
+ * caller's own rows. The persisted institution_id is the server-confirmed value.
+ *
+ * Throws on a query error so the caller can decide the fail direction
+ * (exchange-token fails open — see its call site).
+ */
+export async function getActivePlaidConnectionByInstitution(
+  userId: string,
+  institutionId: string
+) {
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("plaid_connections")
+    .select("item_id,institution_name")
+    .eq("user_id", userId)
+    .eq("institution_id", institutionId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  return data;
+}
+
+/**
  * Get all Plaid connections for a user
  */
 export async function getAllPlaidConnections(userId: string) {
@@ -109,7 +144,8 @@ export async function storePlaidConnection(
   userId: string,
   accessToken: string,
   itemId: string,
-  institutionName: string
+  institutionName: string,
+  institutionId: string | null
 ) {
   try {
     const supabase = createServerClient();
@@ -120,6 +156,7 @@ export async function storePlaidConnection(
         access_token: accessToken,
         item_id: itemId,
         institution_name: institutionName,
+        institution_id: institutionId,
         status: "active",
       })
       .select()
