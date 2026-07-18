@@ -27,6 +27,14 @@ import {
   type DbChatMessage,
   type ChatSession,
 } from "@/lib/aiMemory";
+import {
+  resolvePlaidStateMode,
+  buildPlaidCapabilityBlock,
+  maskPlaidBlockForLog,
+  sanitizePlaidLabel,
+  sealBankData,
+} from "@/lib/plaidChatContext";
+import { getPlaidChatState } from "@/lib/plaidChatState";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -951,15 +959,64 @@ export async function POST(request: NextRequest) {
     const wantsSubscriptionDetails =
       !isGreeting && isSubscriptionQuestion(lastUserMessageText);
 
-    let systemPrompt = generateSystemPrompt(mergedUserContext);
+    // Plaid capability scaffold (B-1). AI_PLAID_STATE = off | connection | balances.
+    // "off" resolves here and leaves everything below byte-for-byte as before —
+    // no scaffold, unchanged base prompt, unchanged keyword-gated blocks.
+    const plaidStateMode = resolvePlaidStateMode();
+    const plaidStateEnabled = plaidStateMode !== "off";
+
+    let systemPrompt = generateSystemPrompt(mergedUserContext, {
+      plaidStateEnabled,
+    });
     systemPrompt += memoryBlock;
+
+    if (plaidStateEnabled) {
+      // Balances (L2) are fetched only on substantive turns; greetings stay at
+      // the L1 connection scaffold so we never do a live balance fetch on "hi".
+      const effectiveDepth =
+        plaidStateMode === "balances" && !isGreeting ? "balances" : "connection";
+      try {
+        const plaidState = await getPlaidChatState(authUserId, {
+          depth: effectiveDepth,
+        });
+        const plaidBlock = buildPlaidCapabilityBlock(plaidState);
+        systemPrompt += plaidBlock;
+        console.debug(
+          "[plaid-state] mode=%s depth=%s connected=%s accounts=%d block=%s",
+          plaidStateMode,
+          effectiveDepth,
+          plaidState.connected,
+          plaidState.accounts?.length ?? 0,
+          maskPlaidBlockForLog(plaidBlock)
+        );
+      } catch (error) {
+        // Fail-open: never block the chat on a Plaid-state read error. Emit an
+        // explicit "state unknown" block so the base prompt's pointer to
+        // "What you can see this turn" stays consistent and the model does not
+        // fabricate a connection verdict.
+        console.error(
+          "[plaid-state] failed to build capability block; using unknown-state fallback:",
+          error
+        );
+        systemPrompt += buildPlaidCapabilityBlock({
+          depth: effectiveDepth,
+          connected: false,
+          connections: [],
+          readError: true,
+        });
+      }
+    }
 
     if (isGreeting) {
       systemPrompt +=
         "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, friendly sentences. Do NOT mention their income, spending, budget, bank balance, visa, or profile details unless they explicitly asked.";
     }
 
-    if (wantsBalance) {
+    // Under "balances" mode the always-on L2 block already injected shallow
+    // balances on substantive turns, so this keyword-gated balance path (and its
+    // buggy buildBalanceSummary formatter) is retired to avoid double-stating the
+    // balance. Under "off"/"connection" it runs exactly as before.
+    if (wantsBalance && plaidStateMode !== "balances") {
       const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(request);
 
       if (balanceSummary) {
@@ -974,13 +1031,22 @@ export async function POST(request: NextRequest) {
       const snapshot = await fetchFinancialSnapshotFromPlaidRoutes(request);
 
       if (snapshot) {
+        // SECURITY (prompt injection): subscription/merchant names and the top
+        // spending category are external free text. When the Plaid-state feature
+        // is on, sanitize them and wrap the subscription list in the <bank_data>
+        // seal — this closes the pre-existing raw-`sub.name` interpolation gap.
+        // When off, both helpers are the identity, so the emitted snapshot string
+        // is byte-for-byte the original (off = clean rollback target).
+        const sealName = (name: string) =>
+          plaidStateEnabled ? sanitizePlaidLabel(name) : name;
+
         const subscriptionBreakdown =
           snapshot.subscriptions.length > 0
             ? snapshot.subscriptions
                 .slice(0, 8)
                 .map(
                   (sub) =>
-                    `  - ${sub.name}: ${formatAmount(
+                    `  - ${sealName(sub.name)}: ${formatAmount(
                       sub.monthlyAmount,
                       sub.currency
                     )}/mo (${sub.frequency})`
@@ -988,9 +1054,25 @@ export async function POST(request: NextRequest) {
                 .join("\n")
             : "  - No active recurring subscriptions detected in the selected date range.";
 
-        systemPrompt += `\n\n## Verified Financial Snapshot\n- ${
-          snapshot.balanceSummary
-        }\n- Estimated monthly income: ${formatAmount(
+        const subscriptionSection = plaidStateEnabled
+          ? sealBankData(subscriptionBreakdown)
+          : subscriptionBreakdown;
+
+        const topSpendingCategory = plaidStateEnabled
+          ? sanitizePlaidLabel(snapshot.topSpendingCategory)
+          : snapshot.topSpendingCategory;
+
+        // C1: in "balances" mode the always-on L2 block already injected the
+        // authoritative balance (null-preserving, subtype-aware). Drop the L3
+        // snapshot's balance line to avoid a duplicate/contradictory figure —
+        // L3's balanceSummary comes from the older /api/plaid/accounts path
+        // (null->$0, depository->"checking", .single() multi-bank 404), so
+        // leaving it in could contradict L2 within the same prompt. Same logic
+        // as retiring the wantsBalance block. off/connection keep it byte-for-byte.
+        const balanceSummaryLine =
+          plaidStateMode === "balances" ? "" : `- ${snapshot.balanceSummary}\n`;
+
+        systemPrompt += `\n\n## Verified Financial Snapshot\n${balanceSummaryLine}- Estimated monthly income: ${formatAmount(
           snapshot.monthlyIncomeEstimate,
           snapshot.currency
         )}\n- Estimated monthly spending: ${formatAmount(
@@ -1002,11 +1084,11 @@ export async function POST(request: NextRequest) {
         )}\n- Estimated monthly subscription cost: ${formatAmount(
           snapshot.monthlySubscriptionEstimate,
           snapshot.currency
-        )}\n- Active subscriptions (monthly):\n${subscriptionBreakdown}\n- Estimated monthly dining spend: ${formatAmount(
+        )}\n- Active subscriptions (monthly):\n${subscriptionSection}\n- Estimated monthly dining spend: ${formatAmount(
           snapshot.diningMonthlyEstimate,
           snapshot.currency
         )}\n- Top spending category: ${
-          snapshot.topSpendingCategory
+          topSpendingCategory
         }\n- Income regularity score (0-100): ${
           snapshot.incomeRegularityScore
         }\n- Baseline risk level: ${

@@ -56,25 +56,61 @@ export default function AuthCallbackPage() {
           );
           profile = { ...profile, ...surveyFields };
 
-          // Best-effort sync to public.users so OAuth users get a profile row.
-          // Send the verified access token so the server can confirm the
-          // caller is syncing their own profile.
-          await fetch("/api/auth/sync-profile", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
-            },
-            body: JSON.stringify({
-              id: user.id,
-              email: user.email,
-              first_name: profile.firstName,
-              last_name: profile.lastName,
-              raw_user_meta_data: user.user_metadata || null,
-            }),
-          }).catch((syncError) => {
+          // New vs returning is decided by the DB, not a local cache: does a
+          // survey_responses row exist for this user? (The old
+          // noor_onboarding_completed check was a ghost key nothing ever wrote,
+          // so every OAuth login was treated as new.)
+          const { data: surveyRow } = await supabase
+            .from("survey_responses")
+            .select("id")
+            .eq("user_id", user.id)
+            .limit(1)
+            .maybeSingle();
+          const hasCompletedSurvey = Boolean(surveyRow);
+
+          // Sync the profile row to public.users. We MUST check res.ok: a silent
+          // failure leaves the user without a users row, which breaks
+          // recommendations and — via the survey_responses FK — blocks survey
+          // completion.
+          let syncOk = false;
+          try {
+            const syncRes = await fetch("/api/auth/sync-profile", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({
+                id: user.id,
+                email: user.email,
+                first_name: profile.firstName,
+                last_name: profile.lastName,
+                raw_user_meta_data: user.user_metadata || null,
+              }),
+            });
+            syncOk = syncRes.ok;
+            if (!syncOk) {
+              console.error(
+                "Profile sync failed:",
+                syncRes.status,
+                await syncRes.text().catch(() => "")
+              );
+            }
+          } catch (syncError) {
             console.error("Profile sync failed:", syncError);
-          });
+          }
+
+          // Surface the failure only when it actually blocks the user: a NEW
+          // user needs the users row before they can complete the survey (FK),
+          // so stop and let them retry via re-login rather than dropping them
+          // into a broken state. A RETURNING user already has their row, so a
+          // non-critical sync refresh failure must not lock them out.
+          if (!syncOk && !hasCompletedSurvey) {
+            setError(
+              "We couldn't finish setting up your account. Please try signing in again."
+            );
+            return;
+          }
 
           localStorage.setItem("noor_user_id", user.id);
           localStorage.setItem("noor_user_profile", JSON.stringify(profile));
@@ -82,15 +118,12 @@ export default function AuthCallbackPage() {
           // Create session (keep signed in by default for OAuth)
           createSession(true);
 
-          // Check if user has completed onboarding
-          const existingProfile = localStorage.getItem(
-            "noor_onboarding_completed"
-          );
-
-          if (existingProfile) {
+          if (hasCompletedSurvey) {
+            // Fill the onboarding cache from the DB (source of truth).
+            localStorage.setItem("noor_onboarding_completed", "true");
             router.push("/dashboard");
           } else {
-            // New user - go to survey to complete profile
+            // No survey yet — send them to complete their profile.
             router.push("/survey");
           }
         } else {

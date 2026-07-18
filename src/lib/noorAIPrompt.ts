@@ -21,8 +21,21 @@ export interface UserContext {
   optStartDate?: string;
 }
 
-export function generateSystemPrompt(userContext: UserContext): string {
+export function generateSystemPrompt(
+  userContext: UserContext,
+  options?: { plaidStateEnabled?: boolean }
+): string {
   const contextSection = buildContextSection(userContext);
+
+  // Response guideline #2. When the Plaid capability scaffold is enabled
+  // (AI_PLAID_STATE != "off"), we drop the unconditional "you have access to
+  // financial data" claim — which is false on turns where no data was injected
+  // — and point the model at the per-turn "What you can see this turn" block.
+  // When disabled, this is byte-for-byte the original line so `off` stays a
+  // clean, inert rollback target.
+  const guideline2 = options?.plaidStateEnabled
+    ? `2. **Only use context when relevant.** Bring up the user's profile or financial data only when their question directly relates to it. What financial data you can actually see this turn is stated below under "What you can see this turn" — rely on that, not on assumptions.`
+    : `2. **Only use context when relevant.** You have access to the user's profile and financial data, but ONLY bring it up when their question directly relates to it.`;
 
   return `You are Noor AI, a friendly personal finance guide for people who are just getting started with managing their money.
 
@@ -85,7 +98,7 @@ ${contextSection}
 
 1. **Match the user's intent.** Greetings get short friendly greetings back. Don't dump information they didn't ask for.
 
-2. **Only use context when relevant.** You have access to the user's profile and financial data, but ONLY bring it up when their question directly relates to it.
+${guideline2}
 
 3. **Simple questions get simple answers.**
    - "Hi" → "Hi! How can I help you today?"

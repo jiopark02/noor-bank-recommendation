@@ -103,53 +103,77 @@ export default function HomePage() {
       // Ignore budget parse errors.
     }
 
-    let hasActiveConnection = false;
-    try {
-      const storedConnections = localStorage.getItem("noor_plaid_connections");
-      if (storedConnections) {
-        const parsed = JSON.parse(storedConnections) as Array<{
-          status?: string;
-        }>;
-        hasActiveConnection = parsed.some(
+    // Determine bank-connection state from the DB (authoritative source), not
+    // localStorage — so it survives a localStorage purge (logout / new device).
+    // isLoading stays true until this resolves, so the UI never flashes a
+    // "not connected" state before the check completes.
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/plaid/connections", {
+          method: "GET",
+          headers: await getSupabaseBearerHeaders(),
+        });
+        const payload = asPlainObject(await res.json());
+        if (!res.ok) {
+          throw new Error(
+            readErrorMessage(payload) || "Failed to load bank connections"
+          );
+        }
+        if (cancelled) return;
+
+        const list = Array.isArray(payload.connections)
+          ? (payload.connections as Array<{ status?: string }>)
+          : [];
+        const hasActiveConnection = list.some(
           (connection) => connection.status === "active"
         );
-      }
-    } catch {
-      // Ignore connection parse errors.
-    }
+        setHasBankConnection(hasActiveConnection);
 
-    setHasBankConnection(hasActiveConnection);
+        if (hasActiveConnection) {
+          try {
+            const storedAccountsRaw = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+            const storedTxRaw = localStorage.getItem(STORAGE_KEY_TRANSACTIONS);
 
-    if (hasActiveConnection) {
-      try {
-        const storedAccountsRaw = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
-        const storedTxRaw = localStorage.getItem(STORAGE_KEY_TRANSACTIONS);
+            if (storedAccountsRaw) {
+              const parsedAccounts = JSON.parse(storedAccountsRaw) as unknown;
+              if (Array.isArray(parsedAccounts)) {
+                setAccounts(parsedAccounts as StoredPlaidAccount[]);
+              }
+            }
 
-        if (storedAccountsRaw) {
-          const parsedAccounts = JSON.parse(storedAccountsRaw) as unknown;
-          if (Array.isArray(parsedAccounts)) {
-            setAccounts(parsedAccounts as StoredPlaidAccount[]);
+            if (storedTxRaw) {
+              const parsedTx = JSON.parse(storedTxRaw) as unknown;
+              if (Array.isArray(parsedTx)) {
+                setTransactions(parsedTx as StoredPlaidTransaction[]);
+              }
+            }
+          } catch {
+            // Ignore cache parse errors.
           }
+        } else {
+          setAccounts([]);
+          setTransactions([]);
+          setSubscriptions([]);
+          localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
+          localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
         }
-
-        if (storedTxRaw) {
-          const parsedTx = JSON.parse(storedTxRaw) as unknown;
-          if (Array.isArray(parsedTx)) {
-            setTransactions(parsedTx as StoredPlaidTransaction[]);
-          }
-        }
-      } catch {
-        // Ignore cache parse errors.
+      } catch (err) {
+        if (cancelled) return;
+        // Transient connection-check failure: surface an error rather than
+        // flipping to "not connected" (which would prompt a re-link and create
+        // duplicate connection rows). moneyError also hides the connect prompt.
+        setMoneyError(
+          err instanceof Error ? err.message : "Failed to load bank connections"
+        );
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    } else {
-      setAccounts([]);
-      setTransactions([]);
-      setSubscriptions([]);
-      localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
-      localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
-    }
+    })();
 
-    setIsLoading(false);
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   const fetchLiveMoneyData = useCallback(async () => {
@@ -230,11 +254,13 @@ export default function HomePage() {
       setMoneyError(message);
 
       if (/no active bank connection/i.test(message)) {
+        // Do NOT delete noor_plaid_connections — connection truth lives in the
+        // DB now; destroying local state caused the "connected but shows
+        // disconnected" loop. Only clear the display cache.
         setHasBankConnection(false);
         setAccounts([]);
         setTransactions([]);
         setSubscriptions([]);
-        localStorage.removeItem("noor_plaid_connections");
         localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
         localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
       }

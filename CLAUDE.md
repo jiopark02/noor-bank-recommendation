@@ -12,8 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Development workflow (invariant)**
 1. Claude Code writes code / SQL / migration files.
-2. **High-risk changes (security, auth, RLS, migrations) get an independent Cursor Ask review** before applying. Routine changes (simple helpers, copy, non-security UI) can be handled inside Claude Code.
-3. **Live verification is the final defense.** "Cursor passed" or "the code looks right" is a first filter, never proof. Security changes are verified by actually attempting the attack (e.g. `set local role authenticated` + the forbidden operation, expecting `42501`).
+2. **Review scales with risk — see the Review Model below.** Low-risk changes ship without a separate review; medium-risk changes get one independent read before commit; high-risk changes require the two-layer review plus live verification, with no exceptions.
+3. **Live verification is the final defense** for every tier. "The review passed" or "the code looks right" is a first filter, never proof. Security changes are verified by actually attempting the attack (e.g. `set local role authenticated` + the forbidden operation, expecting `42501`).
 4. Vercel auto-builds from `main`.
 
 **Hard environment constraints**
@@ -22,7 +22,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Vercel env vars do not auto-redeploy.** After changing an env var, a manual redeploy is required before the change takes effect.
 - Single production deploy from `main`. The tech team also pushes to this repo (branches like `Landing_Page`, `UI_Updates`). **Before starting work, `git fetch` and compare local `HEAD` against `origin/main`; pull if behind.** Stale local code breaks the "read the real artifact" principle even when you read it correctly.
 
-**Review intensity scales with risk.** Things that are hard to reverse (migrations, auth, access control) get heavy, independent review + live verification. Trivial helpers get a light touch. Don't audit the whole attack surface in one pass — decompose into layers and go narrow + deep + verified, one layer at a time.
+**Review Model (the risk tier decides who checks the work).**
+
+- **Low risk** (helpers, copy, non-security UI): write and apply, no separate review. If it is user-facing, live-verify it.
+- **Medium risk** (general features, non-security refactors): after writing, one independent read before commit — either a fresh Claude Code session or chat Claude.
+- **High risk** (security, auth, RLS, migrations, Auth-user deletion, AI-pipeline behavior): the two-layer review below is mandatory **plus** live verification — never skipped.
+
+**Two-layer review (high risk).** The two layers catch different classes of defect, so they are complementary:
+
+- **Layer 1 — a fresh Claude Code session, separate from the implementing one, reviewing read-only.** Attach the diff directly in the prompt. Instruct it to trust no implementer claim, reason only from the diff and the real repo, and state the basis for each verdict. It owns *internal* code defects: line-by-line comparison, regressions, logic.
+- **Layer 2 — a cross-check by chat Claude.** It reconciles the change against accumulated context (the master status doc, design history, live configuration) and owns *contextual* defects that a diff alone cannot surface by construction.
+- The structural weakness is that implementer and reviewers share a model family, so blind spots can correlate; this is offset by leaning harder on live verification.
+
+**Live verification is the final defense across all tiers. "The review passed" ≠ "it is actually safe."** Don't audit the whole attack surface in one pass — decompose into layers and go narrow + deep + verified, one layer at a time.
 
 **⚠️ This repo lives under OneDrive** (`...\OneDrive\Desktop\NOOR\noor-bank-recommendation-1`). OneDrive syncing a git working tree (especially `.git/`) can cause file locks and corruption. If git behaves strangely, suspect this first.
 

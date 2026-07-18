@@ -16,12 +16,12 @@ import {
   saveNotificationPreferences,
   NotificationPreferences,
   DEFAULT_NOTIFICATION_PREFS,
-  downloadUserData,
   calculateProfileCompletion,
   clearLocalAuthState,
+  purgeAllNoorLocalState,
 } from '@/lib/validation';
 import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
-import { buildJsonAuthorizedHeaders } from '@/lib/supabaseAuthHeaders';
+import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supabaseAuthHeaders';
 import {
   UniversitySearchField,
   type UniversitySearchInstitutionType,
@@ -355,6 +355,10 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Page-level error toast. `error` above is only rendered INSIDE modals, so
+  // failures from page-level actions (e.g. data export) must surface here or
+  // they are silent.
+  const [toastError, setToastError] = useState<string | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -364,7 +368,6 @@ export default function SettingsPage() {
   const [newEmail, setNewEmail] = useState('');
   const [emailPassword, setEmailPassword] = useState('');
 
-  const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const [editFirstName, setEditFirstName] = useState('');
@@ -418,6 +421,12 @@ export default function SettingsPage() {
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
     setTimeout(() => setSuccessMessage(null), 3000);
+  };
+
+  // Visible counterpart to showSuccess for page-level (non-modal) failures.
+  const showError = (message: string) => {
+    setToastError(message);
+    setTimeout(() => setToastError(null), 4000);
   };
 
   const handleNotificationChange = (key: keyof NotificationPreferences, value: boolean) => {
@@ -550,12 +559,41 @@ export default function SettingsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      clearLocalAuthState();
-      [
-        'noor_notifications', 'noor_savings_goals',
-        'noor_finance_progress', 'noor_checklist_completed', 'noor_checklist_items',
-      ].forEach((key) => localStorage.removeItem(key));
+      // Deletion authenticates via the Bearer token only — no password gate.
+      // A password check breaks OAuth users (who have no password), and the
+      // token already proves identity account-type-neutrally.
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) {
+        setError('Your session has expired. Please sign in again to delete your account.');
+        setIsLoading(false);
+        return;
+      }
+
+      const res = await fetch('/api/account/delete', {
+        method: 'POST',
+        headers: buildJsonAuthorizedHeaders(rawAuth),
+      });
+
+      if (!res.ok) {
+        // Surface the server's explicit error — never let the user believe the
+        // account was deleted when it was not (or was only half-deleted).
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(errBody.error || 'Failed to delete account. Please try again.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Server returned 200 = deletion is complete. Nothing after this point
+      // may surface as a deletion failure. signOut() can legitimately fail
+      // (the auth user is already deleted, so the server call may 4xx) — that
+      // is a normal outcome, not a deletion failure, so we swallow it. Local
+      // purge and navigation run unconditionally.
+      try {
+        if (supabase) await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('handleDeleteAccount: signOut after deletion failed (expected — user already deleted):', err);
+      }
+      purgeAllNoorLocalState();
       router.push('/welcome');
     } catch {
       setError('Failed to delete account. Please try again.');
@@ -563,9 +601,51 @@ export default function SettingsPage() {
     }
   };
 
-  const handleExportData = () => {
-    downloadUserData();
-    showSuccess('Data export downloaded');
+  const handleExportData = async () => {
+    // GDPR export must come from the server (DB: chat history, user_facts,
+    // survey responses, etc.) — NOT the legacy localStorage dump. Identity is
+    // proven by the Bearer token; the server filters everything by that id.
+    setIsLoading(true);
+    // Export is triggered from a page row, not a modal, so failures must use
+    // the page-level toast (showError) — the modal-only `error` state would be
+    // invisible here.
+    try {
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) {
+        showError('Your session has expired. Please sign in again to export your data.');
+        return;
+      }
+
+      const res = await fetch('/api/account/export', {
+        method: 'GET',
+        headers: buildBearerOnlyHeaders(rawAuth),
+      });
+
+      if (!res.ok) {
+        // Surface the server's explicit error — never a silent no-op.
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        showError(errBody.error || 'Failed to export your data. Please try again.');
+        return;
+      }
+
+      // fetch() does not honor the response's Content-Disposition, so trigger
+      // the download client-side. Filename matches the server header.
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'noor-data-export.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showSuccess('Data export downloaded');
+    } catch {
+      showError('Failed to export your data. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -633,6 +713,28 @@ export default function SettingsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
               </svg>
               {successMessage}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── ERROR TOAST (page-level actions) ── */}
+      <AnimatePresence>
+        {toastError && (
+          <motion.div
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            className="fixed top-4 left-4 right-4 z-50"
+          >
+            <div
+              className="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl text-white text-[13px] font-medium shadow-lg"
+              style={{ background: '#7F1D1D', fontFamily: FONT }}
+            >
+              <svg className="w-4 h-4 flex-shrink-0 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M12 3l9 16H3L12 3z" />
+              </svg>
+              {toastError}
             </div>
           </motion.div>
         )}
@@ -1130,8 +1232,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-4">
-              <ModalInput label="Enter your password" type="password" value={deletePassword} onChange={setDeletePassword} />
-              <ModalInput label='Type "DELETE" to confirm' value={deleteConfirmText} onChange={setDeleteConfirmText} placeholder="DELETE" />
+              <ModalInput label='Type "DELETE" to confirm' value={deleteConfirmText} onChange={setDeleteConfirmText} placeholder="DELETE" autoFocus />
               {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
             </div>
 
@@ -1141,7 +1242,7 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={handleDeleteAccount}
-                disabled={isLoading || deleteConfirmText !== 'DELETE' || !deletePassword}
+                disabled={isLoading || deleteConfirmText !== 'DELETE'}
                 className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
                 style={{ background: '#EF4444', fontFamily: FONT }}
               >

@@ -13,13 +13,19 @@ export interface PlaidConnection {
 
 export function usePlaidConnections(userId: string | null) {
   const [connections, setConnections] = useState<PlaidConnection[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  // Starts true so consumers don't flash a "not connected" state (and prompt a
+  // re-link) before the first fetch resolves.
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch existing connections
+  // Fetch existing connections from the DB (authoritative source), not
+  // localStorage — so connection state survives a localStorage purge
+  // (logout / shared-device cleanup / a new device).
   const fetchConnections = useCallback(async () => {
     if (!userId) {
       setConnections([]);
+      setError(null);
+      setIsLoading(false);
       return;
     }
 
@@ -27,18 +33,31 @@ export function usePlaidConnections(userId: string | null) {
     setError(null);
 
     try {
-      // For now, we store connections in localStorage for the frontend
-      // In a production app with proper session auth, you'd call the backend
-      const stored = localStorage.getItem("noor_plaid_connections");
-      if (stored) {
-        setConnections(JSON.parse(stored));
-      } else {
-        setConnections([]);
+      const response = await fetch("/api/plaid/connections", {
+        method: "GET",
+        headers: await getSupabaseBearerHeaders(),
+      });
+
+      const payload = asPlainObject(await response.json());
+      if (!response.ok) {
+        throw new Error(
+          readErrorMessage(payload) || "Failed to load bank connections"
+        );
       }
+
+      const list = Array.isArray(payload.connections)
+        ? (payload.connections as PlaidConnection[])
+        : [];
+      setConnections(list);
     } catch (err) {
+      // Distinguish a transient load failure from "no connections": set an
+      // error and DO NOT collapse to an empty/disconnected state, so callers
+      // don't surface the connect card (which would push the user to re-link and
+      // create duplicate connection rows) on a temporary hiccup.
       console.error("Error fetching connections:", err);
-      setError("Failed to load bank connections");
-      setConnections([]);
+      setError(
+        err instanceof Error ? err.message : "Failed to load bank connections"
+      );
     } finally {
       setIsLoading(false);
     }
@@ -110,17 +129,9 @@ export function usePlaidConnections(userId: string | null) {
           throw new Error(readErrorMessage(payload) || "Failed to disconnect");
         }
 
-        // Update local state
-        setConnections((prev) => prev.filter((c) => c.itemId !== itemId));
-
-        // Update localStorage
-        const stored = localStorage.getItem("noor_plaid_connections");
-        if (stored) {
-          const all = JSON.parse(stored).filter(
-            (c: PlaidConnection) => c.itemId !== itemId
-          );
-          localStorage.setItem("noor_plaid_connections", JSON.stringify(all));
-        }
+        // Re-pull authoritative state from the DB instead of mutating a local
+        // cache (localStorage is no longer the source of truth).
+        await fetchConnections();
 
         return true;
       } catch (err) {
@@ -130,7 +141,7 @@ export function usePlaidConnections(userId: string | null) {
         return false;
       }
     },
-    [userId]
+    [userId, fetchConnections]
   );
 
   // Relink a broken connection
@@ -204,22 +215,8 @@ export function usePlaidConnections(userId: string | null) {
           );
         }
 
-        // Update local connections
-        const newConnection: PlaidConnection = {
-          itemId: data.itemId,
-          institutionName: data.institutionName,
-          institutionId: data.institutionId,
-          status: "active",
-          createdAt: new Date().toISOString(),
-        };
-
-        setConnections((prev) => [...prev, newConnection]);
-
-        // Save to localStorage
-        const stored = localStorage.getItem("noor_plaid_connections") || "[]";
-        const all = JSON.parse(stored);
-        all.push(newConnection);
-        localStorage.setItem("noor_plaid_connections", JSON.stringify(all));
+        // Re-pull authoritative state from the DB (no localStorage mutation).
+        await fetchConnections();
 
         return true;
       } catch (err) {
@@ -229,7 +226,7 @@ export function usePlaidConnections(userId: string | null) {
         return false;
       }
     },
-    [userId]
+    [userId, fetchConnections]
   );
 
   return {

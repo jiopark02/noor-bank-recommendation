@@ -48,20 +48,36 @@ export async function POST(request: NextRequest) {
     const supabaseAdmin = createAdminClient();
     const now = new Date().toISOString();
 
+    // Read any existing row so we can respect it on a re-login: never reset
+    // created_at, and keep the stored name when the incoming value is empty
+    // (a later OAuth login must not wipe a name the user set).
+    const { data: existing } = await supabaseAdmin
+      .from("users")
+      .select("first_name, last_name")
+      .eq("id", authUserId)
+      .maybeSingle();
+
     // Always use the authenticated user id from the verified token,
     // never a client-supplied id.
-    const { error } = await supabaseAdmin.from("users").upsert(
-      {
-        id: authUserId,
-        email,
-        first_name: firstName || "User",
-        last_name: lastName,
-        raw_user_meta_data: rawMeta,
-        created_at: now,
-        updated_at: now,
-      },
-      { onConflict: "id" }
-    );
+    const payload: Record<string, unknown> = {
+      id: authUserId,
+      email,
+      first_name: firstName || existing?.first_name || "User",
+      last_name: lastName ?? existing?.last_name ?? null,
+      updated_at: now,
+    };
+
+    // created_at and the OAuth metadata blob are written only on first insert.
+    // Omitting them on update means a routine re-login neither resets the
+    // signup date nor re-clobbers raw_user_meta_data every time.
+    if (!existing) {
+      payload.created_at = now;
+      payload.raw_user_meta_data = rawMeta;
+    }
+
+    const { error } = await supabaseAdmin
+      .from("users")
+      .upsert(payload, { onConflict: "id" });
 
     if (error) {
       console.error("Profile sync error:", error);

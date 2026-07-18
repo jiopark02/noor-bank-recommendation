@@ -100,7 +100,10 @@ export default function MoneyPage() {
         const data = asPlainObject(await accountsRes.json());
         const errText = readString(data, "error");
         if (errText && /no active bank connections/i.test(errText)) {
-          localStorage.removeItem("noor_plaid_connections");
+          // Re-pull authoritative connection state from the DB. Do NOT delete
+          // noor_plaid_connections here — connection truth lives in the DB now,
+          // and destroying local state caused the "connected but shows
+          // disconnected" loop.
           plaidConnections.refetch();
         }
         if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {
@@ -245,8 +248,14 @@ export default function MoneyPage() {
     [handleBankConnected, userId]
   );
 
+  // Only prompt to connect once we've actually determined there is no
+  // connection. While the connection check is loading, or if it failed with a
+  // transient error, suppress the card — otherwise a temporary hiccup would push
+  // the user to re-link and create duplicate connection rows.
   const shouldShowConnectCard =
     !!userId &&
+    !plaidConnections.isLoading &&
+    !plaidConnections.error &&
     (!plaidConnections.hasActive ||
       !!(error && /no active bank connections/i.test(error)));
 
