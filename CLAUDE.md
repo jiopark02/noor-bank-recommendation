@@ -50,6 +50,8 @@ All auth flows through Supabase (unified on Supabase Auth — the legacy `passwo
 
 API routes verify identity via `getAuthenticatedUserIdFromRequest()` in `src/lib/apiAuth.ts` (extracts + verifies the Bearer JWT). Admin routes additionally call `requireAdmin()`, which checks membership in the service-role-only `admin_users` table. `requireAdmin` is fail-closed but the caller must `return 403` on null, or it fails open.
 
+`src/middleware.ts` gates page access, not API routes: it redirects to `/login` when there's no Supabase session on `PROTECTED_PREFIXES` (`/dashboard`, `/banking`, `/money`, `/housing`, `/jobs`, `/funding`, `/forum`, `/deals`, `/settings`, `/chat`, `/admin`). It only checks *session presence* — `/admin` passing middleware does not mean the user is an admin; that check still happens per-route via `requireAdmin()`. Anonymous Supabase sessions (e.g. `signInAnonymously()`) satisfy this check identically to password/OAuth sessions, since middleware doesn't branch on auth method.
+
 ### Chat / Noor AI (`src/app/api/chat/route.ts`)
 `POST /api/chat`:
 1. Authenticates via JWT.
@@ -74,6 +76,9 @@ All aiMemory functions use `createAdminClient()` and **must filter by `user_id` 
 
 ### Plaid (`src/lib/plaid.ts`, `src/app/api/plaid/`)
 Initialized in **sandbox** by default (`PLAID_ENV`), production approval pending. Active product: Transactions (Auth/Identity commented out pending dashboard config). Routes: `create-link-token`, `exchange-token`, `accounts`, `transactions`, `disconnect`, `relink`. Per-user multi-connection via `item_id`. **Plaid auth deletes `body.userId` explicitly** before use.
+
+### Other API Surfaces
+Most remaining routes under `src/app/api/` (`banks`, `credit-cards`, `deals`, `forum`, `jobs`, `scholarships`, `apartments`, `universities`, `visa-types`, `bank-branches`, `country-config`) are **catalog reads with no recommendation engine behind them** — per Strategic Decisions, housing/scholarship/jobs stay catalog-only until an engine is built for them; don't assume feature parity with the bank recommendation flow. `src/app/api/admin/*` (`cron-runs`, `import-universities`, `seed-country-data`) are operator tooling gated by `requireAdmin()`, not end-user surfaces.
 
 ### Country & i18n
 `src/lib/countryConfig.ts` drives visa types, bank branches, and recommendation logic by country (`US | UK | CA`). UI is internationalized (`src/i18n/config.ts`, `messages/*.json`); Arabic is the only RTL locale; `LanguageContext` provides `t()`.

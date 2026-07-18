@@ -322,6 +322,14 @@ export default function LandingPage() {
           ) : (
             <>
               <motion.button
+                onClick={() => router.push('/demo')}
+                className="px-5 py-2 text-[13px] rounded-lg"
+                style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}
+                whileHover={{ color: '#000' }}
+              >
+                Try demo
+              </motion.button>
+              <motion.button
                 onClick={() => router.push('/login')}
                 className="px-5 py-2 text-[13px] rounded-lg"
                 style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}
@@ -867,6 +875,16 @@ export default function LandingPage() {
                       transition={{ duration: 0.18 }}
                     >
                       Start My Journey
+                    </motion.button>
+                    <motion.button
+                      onClick={() => router.push('/demo')}
+                      className="px-8 py-3.5 text-[13px] rounded-xl"
+                      style={{ border: '1px solid rgba(0,0,0,0.18)', color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}
+                      whileHover={{ borderColor: 'rgba(0,0,0,0.6)', color: '#000', scale: 1.02 }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      Try demo
                     </motion.button>
                     <motion.button
                       onClick={() => router.push('/login')}
