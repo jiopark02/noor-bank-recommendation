@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ACCENT,
   MAX_DEMO_MESSAGES,
+  WAITLIST_URL,
   DemoShell,
   getCannedAnswer,
   getDemoMessagesUsed,
@@ -119,13 +119,13 @@ export default function DemoChatPage() {
               style={{ background: 'rgba(91,78,232,0.06)', border: '1px solid rgba(91,78,232,0.2)' }}
             >
               <p className="text-[13px] mb-3">You&rsquo;re on the demo — join the waitlist for full access.</p>
-              <Link
-                href="/waitlist"
+              <a
+                href={WAITLIST_URL}
                 className="inline-block px-5 py-2 rounded-lg text-[12.5px] font-medium text-white"
                 style={{ background: ACCENT }}
               >
                 Join waitlist
-              </Link>
+              </a>
             </motion.div>
           )}
           <div ref={bottomRef} />

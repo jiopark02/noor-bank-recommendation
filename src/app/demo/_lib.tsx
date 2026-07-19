@@ -11,6 +11,9 @@ export const ACCENT_GRADIENT = 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%
 
 export const MAX_DEMO_MESSAGES = 3;
 
+// The waitlist stays on the same domain as the demo (no cross-domain jump).
+export const WAITLIST_URL = '/waitlist';
+
 const USAGE_KEY = 'noor_demo_messages_used';
 const ACTIVE_KEY = 'noor_demo_active';
 const USAGE_EVENT = 'noor-demo-usage-changed';
@@ -218,7 +221,7 @@ export function DemoBanner() {
         🔒 You&rsquo;re exploring a demo &nbsp;·&nbsp; {remaining} AI message{remaining === 1 ? '' : 's'} remaining
       </span>
       <Link
-        href="/waitlist"
+        href={WAITLIST_URL}
         className="text-[12.5px] font-medium underline underline-offset-2"
         style={{ color: '#B9AEFF' }}
       >
@@ -274,10 +277,6 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </div>
-
-        <Link href="/landing" className="text-[12px]" style={{ color: 'rgba(0,0,0,0.4)' }}>
-          Exit demo
-        </Link>
       </nav>
 
       {/* Mobile nav */}

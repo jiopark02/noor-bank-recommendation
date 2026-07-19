@@ -2,8 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import Link from 'next/link';
-import { ACCENT, DEMO_PROFILE, DemoCard, DemoShell, useDemoToast } from '../_lib';
+import { ACCENT, WAITLIST_URL, DEMO_PROFILE, DemoCard, DemoShell, useDemoToast } from '../_lib';
 
 export default function DemoSettingsPage() {
   const { show, Toast } = useDemoToast();
@@ -70,13 +69,13 @@ export default function DemoSettingsPage() {
               Join the waitlist to save your real profile and data.
             </p>
           </div>
-          <Link
-            href="/waitlist"
+          <a
+            href={WAITLIST_URL}
             className="px-4 py-2 rounded-lg text-[12.5px] font-medium text-white whitespace-nowrap"
             style={{ background: ACCENT }}
           >
             Join waitlist
-          </Link>
+          </a>
         </DemoCard>
       </motion.div>
     </DemoShell>
