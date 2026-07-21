@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
+import { getSupabaseBearerHeaders, supabase } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 
 export interface PlaidConnection {
@@ -66,6 +66,22 @@ export function usePlaidConnections(userId: string | null) {
   // Load connections on mount
   useEffect(() => {
     fetchConnections();
+  }, [fetchConnections]);
+
+  // The initial fetch above can land before the Supabase session finishes an
+  // in-flight token refresh (getSessionSafe races that refresh against a 3s
+  // timeout), causing a bare 401 with no retry. Re-run once auth settles so
+  // hasActive/connections recover without requiring a page reload.
+  useEffect(() => {
+    if (!supabase) return;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+        fetchConnections();
+      }
+    });
+    return () => subscription.unsubscribe();
   }, [fetchConnections]);
 
   // Connect a new bank (open Plaid Link)

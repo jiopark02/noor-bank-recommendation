@@ -11,6 +11,7 @@ import {
   getAllPlaidConnections,
   updatePlaidConnectionStatus,
   handlePlaidError,
+  getPlaidErrorCode,
 } from "@/lib/plaidApiUtils";
 
 type ApiSubscription = {
@@ -206,11 +207,10 @@ export async function POST(request: NextRequest) {
           // Fallback handled later.
         }
       } catch (plaidError: unknown) {
-        const errorMessage =
-          plaidError instanceof Error ? plaidError.message : "Unknown error";
+        const plaidErrorCode = getPlaidErrorCode(plaidError);
         if (
-          errorMessage.includes("ITEM_LOGIN_REQUIRED") ||
-          errorMessage.includes("invalid access token")
+          plaidErrorCode === "ITEM_LOGIN_REQUIRED" ||
+          plaidErrorCode === "INVALID_ACCESS_TOKEN"
         ) {
           await updatePlaidConnectionStatus(userId, connection.item_id, "error");
           continue;

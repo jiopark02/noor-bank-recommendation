@@ -14,7 +14,7 @@ import {
 } from "@/lib/plaid";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
+import { getSupabaseBearerHeaders, supabase } from "@/lib/supabase-browser";
 import {
   asPlainObject,
   readErrorMessage,
@@ -181,6 +181,23 @@ export default function MoneyPage() {
       fetchData();
     }
   }, [userId, plaidConnections.hasActive, startDate, endDate, fetchData]);
+
+  // The initial fetch above can land while the Supabase session is still
+  // being refreshed (getSessionSafe's 3s race can time out on a slow token
+  // refresh), producing a bare "Unauthorized" with no retry. Re-run fetchData
+  // whenever auth state settles afterward, so a session that finishes
+  // refreshing a moment later clears the error instead of requiring reload.
+  useEffect(() => {
+    if (!supabase) return;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+        fetchData();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [fetchData]);
 
   // Handle date range change
   const handleDateRangeChange = (type: "start" | "end", value: string) => {
