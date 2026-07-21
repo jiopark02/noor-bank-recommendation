@@ -29,7 +29,7 @@ const MARKER_COLORS: Record<MarkerColor, string> = {
   green: '#22c55e',
   orange: '#f97316',
   purple: '#a855f7',
-  default: '#000000',
+  default: '#2B2740',
 };
 
 // Leaflet map component that only loads on the client
@@ -212,7 +212,7 @@ function LeafletMap({
           width: 20px;
           height: 20px;
           border-radius: 50% 50% 50% 0;
-          background: #000000;
+          background: #2B2740;
           position: absolute;
           transform: rotate(-45deg);
           left: 2px;

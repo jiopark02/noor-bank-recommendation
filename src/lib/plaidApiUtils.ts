@@ -220,18 +220,46 @@ export async function deleteAllPlaidConnections(userId: string): Promise<boolean
 }
 
 /**
+ * Extract the Plaid error code from a thrown error. The Plaid SDK throws
+ * axios errors whose `.message` is just "Request failed with status code
+ * 400" — the real code (e.g. ITEM_LOGIN_REQUIRED) lives in
+ * `error.response.data.error_code`.
+ */
+export function getPlaidErrorCode(error: unknown): string | null {
+  if (typeof error === "object" && error !== null) {
+    const response = (error as { response?: { data?: { error_code?: unknown } } })
+      .response;
+    const code = response?.data?.error_code;
+    if (typeof code === "string") return code;
+  }
+  return null;
+}
+
+/**
+ * True when the error means the Plaid item needs re-authentication via
+ * Link update mode (expired/broken bank connection).
+ */
+export function isPlaidLoginRequired(error: unknown): boolean {
+  if (getPlaidErrorCode(error) === "ITEM_LOGIN_REQUIRED") return true;
+  const message = error instanceof Error ? error.message : "";
+  return (
+    message.includes("ITEM_LOGIN_REQUIRED") ||
+    message.includes("invalid access token")
+  );
+}
+
+/**
  * Handle common error responses for Plaid API errors
  */
 export function handlePlaidError(error: unknown): NextResponse {
   const message = error instanceof Error ? error.message : "An error occurred";
 
-  // Check if it's an ITEM_LOGIN_REQUIRED error
-  if (
-    message.includes("ITEM_LOGIN_REQUIRED") ||
-    message.includes("invalid access token")
-  ) {
+  if (isPlaidLoginRequired(error)) {
     return NextResponse.json(
-      { error: "Bank connection expired. Please re-link your account." },
+      {
+        error: "Bank connection expired. Please re-link your account.",
+        errorType: "ITEM_LOGIN_REQUIRED",
+      },
       { status: 401 }
     );
   }

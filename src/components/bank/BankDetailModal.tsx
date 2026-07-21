@@ -6,8 +6,8 @@ import { MapView, getCampusSideColor, DirectionsButton } from '@/components/maps
 import type { MapMarker } from '@/components/maps';
 import { getBranchesForBank, UNIVERSITY_LOCATIONS, BankBranch } from '@/lib/universityData';
 
-// All markers use black for Noor branding
-const NOOR_BLACK = '#000000';
+// All markers use ink for Noor branding
+const NOOR_BLACK = '#2B2740';
 
 interface BankDetailModalProps {
   recommendation: BankRecommendation;
@@ -91,44 +91,46 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
   return (
     <div className="fixed inset-0 z-50">
       {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/25 backdrop-blur-[2px]" onClick={onClose} />
 
       {/* Modal */}
-      <div className="fixed inset-x-0 bottom-0 bg-white rounded-t-2xl max-h-[90vh] overflow-hidden animate-slide-up">
+      <div
+        className="liquid-glass fixed inset-x-0 bottom-0 rounded-t-2xl max-h-[90vh] overflow-hidden animate-slide-up"
+      >
         {/* Handle */}
         <div className="flex justify-center pt-3 pb-2">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          <div className="w-10 h-1 bg-white/30 rounded-full" />
         </div>
 
         {/* Header */}
-        <div className="px-6 pb-4 border-b border-gray-100">
+        <div className="px-6 pb-4 border-b border-white/15">
           <div className="flex items-start justify-between">
             <div>
               {recommendation.categoryPick && (
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold mb-2 ${
-                  recommendation.categoryPick.category === 'best_overall' ? 'bg-black text-white' :
-                  recommendation.categoryPick.category === 'best_low_fees' ? 'bg-green-600 text-white' :
-                  recommendation.categoryPick.category === 'best_international' ? 'bg-blue-600 text-white' :
-                  recommendation.categoryPick.category === 'best_branches' ? 'bg-purple-600 text-white' :
-                  recommendation.categoryPick.category === 'best_online' ? 'bg-indigo-600 text-white' :
-                  recommendation.categoryPick.category === 'best_student' ? 'bg-orange-500 text-white' :
-                  recommendation.categoryPick.category === 'best_no_ssn' ? 'bg-teal-600 text-white' :
-                  'bg-gray-600 text-white'
+                  recommendation.categoryPick.category === 'best_overall' ? 'bg-white text-[#2B2740]' :
+                  recommendation.categoryPick.category === 'best_low_fees' ? 'bg-green-500/20 text-green-300' :
+                  recommendation.categoryPick.category === 'best_international' ? 'bg-blue-500/20 text-blue-300' :
+                  recommendation.categoryPick.category === 'best_branches' ? 'bg-purple-500/20 text-purple-300' :
+                  recommendation.categoryPick.category === 'best_online' ? 'bg-indigo-500/20 text-indigo-300' :
+                  recommendation.categoryPick.category === 'best_student' ? 'bg-orange-500/20 text-orange-300' :
+                  recommendation.categoryPick.category === 'best_no_ssn' ? 'bg-teal-500/20 text-teal-300' :
+                  'bg-white/15 text-white/80'
                 }`}>
                   {recommendation.categoryPick.label}
                 </span>
               )}
-              <h2 className="text-xl font-semibold text-black">{bank.bank_name}</h2>
-              <p className="text-gray-500 text-sm mt-0.5">
+              <h2 className="text-xl font-semibold text-white">{bank.bank_name}</h2>
+              <p className="text-white/60 text-sm mt-0.5">
                 {formatAccountType(bank.account_type)}
               </p>
               {recommendation.categoryPick?.reason && (
-                <p className="text-gray-600 text-sm mt-1 italic">
+                <p className="text-white/70 text-sm mt-1 italic">
                   {recommendation.categoryPick.reason}
                 </p>
               )}
             </div>
-            <div className={isBestMatch ? 'best-fit-badge' : 'fit-badge'}>
+            <div className="inline-flex items-center px-4 py-2 rounded-full bg-white text-[#2B2740] text-sm font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.24)]">
               {Math.round(fitScore)}% fit
             </div>
           </div>
@@ -162,9 +164,9 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
 
           {/* Estimated Costs */}
           {monthlyEstimatedCost > 0 && (
-            <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-6">
-              <p className="text-orange-800 text-sm font-medium">Estimated Costs</p>
-              <p className="text-orange-700 text-sm mt-1">
+            <div className="bg-orange-500/15 border border-orange-400/25 rounded-xl p-4 mb-6">
+              <p className="text-orange-200 text-sm font-medium">Estimated Costs</p>
+              <p className="text-orange-300/90 text-sm mt-1">
                 ~${monthlyEstimatedCost.toFixed(0)}/month ({' '}
                 ${yearlyEstimatedCost.toFixed(0)}/year) based on your usage
               </p>
@@ -174,7 +176,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
           {/* Why We Recommend - Match Reasons */}
           {matchReasons.length > 0 && (
             <div className="mb-6">
-              <h3 className="font-medium text-black mb-3">Why this bank is great for you</h3>
+              <h3 className="font-medium text-white mb-3">Why this bank is great for you</h3>
               <div className="space-y-3">
                 {matchReasons.map((reason, index) => (
                   <ReasonCard key={index} reason={reason} />
@@ -186,14 +188,14 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
           {/* Warnings */}
           {warnings.length > 0 && (
             <div className="mb-6">
-              <h3 className="font-medium text-black mb-3">Things to watch out for</h3>
-              <div className="bg-orange-50 rounded-xl p-4 space-y-3">
+              <h3 className="font-medium text-white mb-3">Things to watch out for</h3>
+              <div className="bg-orange-500/15 rounded-xl p-4 space-y-3">
                 {warnings.map((warning, index) => (
                   <div key={index} className="flex gap-3">
                     <span className="text-lg flex-shrink-0">{warning.icon}</span>
                     <div>
-                      <p className="font-medium text-orange-900 text-sm">{warning.title}</p>
-                      <p className="text-orange-700 text-sm mt-0.5">{warning.description}</p>
+                      <p className="font-medium text-orange-200 text-sm">{warning.title}</p>
+                      <p className="text-orange-300/80 text-sm mt-0.5">{warning.description}</p>
                     </div>
                   </div>
                 ))}
@@ -203,7 +205,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
 
           {/* Requirements */}
           <div className="mb-6">
-            <h3 className="font-medium text-black mb-3">Requirements</h3>
+            <h3 className="font-medium text-white mb-3">Requirements</h3>
             <div className="space-y-2">
               <RequirementRow
                 label="SSN Required"
@@ -231,7 +233,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
           {/* Branch Locations with Map */}
           {branches.length > 0 && (
             <div className="mb-6">
-              <h3 className="font-medium text-black mb-3">
+              <h3 className="font-medium text-white mb-3">
                 Branch Locations ({branches.length} near {userUniversity})
               </h3>
 
@@ -242,7 +244,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
                   zoom={13}
                   markers={branchMarkers}
                   height="220px"
-                  className="border border-gray-200"
+                  className="border border-white/15"
                 />
               </div>
 
@@ -257,7 +259,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
 
           {/* Features */}
           <div className="mb-6">
-            <h3 className="font-medium text-black mb-3">Features</h3>
+            <h3 className="font-medium text-white mb-3">Features</h3>
             <div className="flex flex-wrap gap-2">
               {bank.has_zelle && <FeatureTag label="Zelle" highlight />}
               {bank.has_mobile_deposit && <FeatureTag label="Mobile Deposit" />}
@@ -271,7 +273,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
 
           {/* Fee Details */}
           <div className="mb-6">
-            <h3 className="font-medium text-black mb-3">Fee Details</h3>
+            <h3 className="font-medium text-white mb-3">Fee Details</h3>
             <div className="space-y-2">
               <FeeRow
                 label="Monthly Fee"
@@ -298,11 +300,11 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
             <div className="mb-6 grid grid-cols-2 gap-4">
               {bank.pros?.length > 0 && (
                 <div>
-                  <h3 className="font-medium text-black mb-2">Pros</h3>
+                  <h3 className="font-medium text-white mb-2">Pros</h3>
                   <ul className="space-y-1">
                     {bank.pros.slice(0, 4).map((pro, i) => (
-                      <li key={i} className="text-sm text-gray-600 flex gap-2">
-                        <span className="text-green-500 flex-shrink-0">+</span>
+                      <li key={i} className="text-sm text-white/70 flex gap-2">
+                        <span className="text-green-400 flex-shrink-0">+</span>
                         {pro}
                       </li>
                     ))}
@@ -311,11 +313,11 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
               )}
               {bank.cons?.length > 0 && (
                 <div>
-                  <h3 className="font-medium text-black mb-2">Cons</h3>
+                  <h3 className="font-medium text-white mb-2">Cons</h3>
                   <ul className="space-y-1">
                     {bank.cons.slice(0, 4).map((con, i) => (
-                      <li key={i} className="text-sm text-gray-600 flex gap-2">
-                        <span className="text-red-500 flex-shrink-0">-</span>
+                      <li key={i} className="text-sm text-white/70 flex gap-2">
+                        <span className="text-red-400 flex-shrink-0">-</span>
                         {con}
                       </li>
                     ))}
@@ -327,10 +329,10 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 bg-white">
+        <div className="liquid-glass-strong px-6 py-4 border-t border-white/15">
           <button
             onClick={handleApply}
-            className="w-full py-3.5 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
+            className="w-full py-3.5 bg-white text-[#2B2740] rounded-xl font-medium hover:bg-white/90 transition-colors"
           >
             Apply Now
           </button>
@@ -353,31 +355,31 @@ function formatAccountType(type: string): string {
 
 function StatCard({ label, value, isGood }: { label: string; value: string; isGood: boolean }) {
   return (
-    <div className={`p-3 rounded-xl ${isGood ? 'bg-green-50' : 'bg-gray-50'}`}>
-      <p className="text-xs text-gray-500 mb-0.5">{label}</p>
-      <p className={`font-semibold ${isGood ? 'text-green-700' : 'text-gray-700'}`}>{value}</p>
+    <div className={`p-3 rounded-xl ${isGood ? 'bg-green-500/15' : 'bg-white/8'}`}>
+      <p className="text-xs text-white/50 mb-0.5">{label}</p>
+      <p className={`font-semibold ${isGood ? 'text-green-300' : 'text-white/80'}`}>{value}</p>
     </div>
   );
 }
 
 function ReasonCard({ reason }: { reason: MatchReason }) {
   const bgColor = reason.type === 'positive'
-    ? 'bg-green-50 border-green-100'
+    ? 'bg-green-500/15 border-green-400/20'
     : reason.type === 'info'
-    ? 'bg-blue-50 border-blue-100'
-    : 'bg-orange-50 border-orange-100';
+    ? 'bg-blue-500/15 border-blue-400/20'
+    : 'bg-orange-500/15 border-orange-400/20';
 
   const textColor = reason.type === 'positive'
-    ? 'text-green-900'
+    ? 'text-green-200'
     : reason.type === 'info'
-    ? 'text-blue-900'
-    : 'text-orange-900';
+    ? 'text-blue-200'
+    : 'text-orange-200';
 
   const descColor = reason.type === 'positive'
-    ? 'text-green-700'
+    ? 'text-green-300/80'
     : reason.type === 'info'
-    ? 'text-blue-700'
-    : 'text-orange-700';
+    ? 'text-blue-300/80'
+    : 'text-orange-300/80';
 
   return (
     <div className={`${bgColor} border rounded-xl p-3 flex gap-3`}>
@@ -392,9 +394,9 @@ function ReasonCard({ reason }: { reason: MatchReason }) {
 
 function RequirementRow({ label, value, positive }: { label: string; value: string; positive: boolean }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-      <span className="text-gray-600 text-sm">{label}</span>
-      <span className={`text-sm font-medium ${positive ? 'text-green-600' : 'text-gray-500'}`}>
+    <div className="flex items-center justify-between py-2 border-b border-white/10 last:border-0">
+      <span className="text-white/60 text-sm">{label}</span>
+      <span className={`text-sm font-medium ${positive ? 'text-green-300' : 'text-white/50'}`}>
         {positive && <span className="mr-1">&#10003;</span>}
         {value}
       </span>
@@ -404,15 +406,15 @@ function RequirementRow({ label, value, positive }: { label: string; value: stri
 
 function FeeRow({ label, value, note }: { label: string; value: string; note?: string | null }) {
   return (
-    <div className="py-2 border-b border-gray-100 last:border-0">
+    <div className="py-2 border-b border-white/10 last:border-0">
       <div className="flex items-center justify-between">
-        <span className="text-gray-600 text-sm">{label}</span>
-        <span className={`text-sm font-medium ${value === 'Free' || value === 'None' ? 'text-green-600' : 'text-gray-700'}`}>
+        <span className="text-white/60 text-sm">{label}</span>
+        <span className={`text-sm font-medium ${value === 'Free' || value === 'None' ? 'text-green-300' : 'text-white/80'}`}>
           {value}
         </span>
       </div>
       {note && (
-        <p className="text-gray-400 text-xs mt-1">Waiver: {note}</p>
+        <p className="text-white/40 text-xs mt-1">Waiver: {note}</p>
       )}
     </div>
   );
@@ -421,7 +423,7 @@ function FeeRow({ label, value, note }: { label: string; value: string; note?: s
 function FeatureTag({ label, highlight = false }: { label: string; highlight?: boolean }) {
   return (
     <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm ${
-      highlight ? 'bg-black text-white' : 'bg-gray-100 text-gray-700'
+      highlight ? 'bg-white text-[#2B2740]' : 'bg-white/10 text-white/80'
     }`}>
       {label}
     </span>
@@ -430,17 +432,17 @@ function FeatureTag({ label, highlight = false }: { label: string; highlight?: b
 
 function BranchListItem({ branch }: { branch: BankBranch }) {
   return (
-    <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
-      <span className="w-2.5 h-2.5 rounded-full bg-black mt-1.5 shrink-0" />
+    <div className="flex items-start gap-3 p-3 bg-white/8 rounded-xl">
+      <span className="w-2.5 h-2.5 rounded-full bg-white mt-1.5 shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="font-medium text-sm text-black">{branch.name}</p>
-        <p className="text-xs text-gray-500 mt-0.5 truncate">{branch.address}</p>
+        <p className="font-medium text-sm text-white">{branch.name}</p>
+        <p className="text-xs text-white/50 mt-0.5 truncate">{branch.address}</p>
         <div className="flex items-center gap-2 mt-1">
-          <span className="text-xs text-gray-400 capitalize">{branch.campusSide} side</span>
+          <span className="text-xs text-white/40 capitalize">{branch.campusSide} side</span>
           {branch.phone && (
             <>
-              <span className="text-gray-300">·</span>
-              <a href={`tel:${branch.phone}`} className="text-xs text-gray-400 hover:text-black">
+              <span className="text-white/25">·</span>
+              <a href={`tel:${branch.phone}`} className="text-xs text-white/40 hover:text-white">
                 {branch.phone}
               </a>
             </>
@@ -451,7 +453,7 @@ function BranchListItem({ branch }: { branch: BankBranch }) {
         href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(branch.address)}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="shrink-0 text-xs font-medium text-black hover:opacity-70 transition-opacity"
+        className="shrink-0 text-xs font-medium text-white hover:opacity-70 transition-opacity"
       >
         Directions →
       </a>

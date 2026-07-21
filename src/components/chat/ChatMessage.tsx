@@ -2,7 +2,7 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { useTheme } from "@/contexts/ThemeContext";
+import { AIOrb } from "@/components/ui/AIOrb";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
@@ -17,15 +17,7 @@ export function ChatMessage({
   timestamp,
   isTyping = false,
 }: ChatMessageProps) {
-  const { theme, useSchoolTheme } = useTheme();
   const isUser = role === "user";
-
-  const userBgColor = useSchoolTheme ? theme.primary_color : "#000000";
-  const userTextColor = useSchoolTheme
-    ? theme.text_on_primary === "white"
-      ? "#FFFFFF"
-      : "#000000"
-    : "#FFFFFF";
 
   return (
     <motion.div
@@ -36,29 +28,27 @@ export function ChatMessage({
     >
       {/* Assistant avatar */}
       {!isUser && (
-        <div
-          className="w-8 h-8 rounded-full flex items-center justify-center mr-2 flex-shrink-0"
-          style={{
-            backgroundColor: useSchoolTheme ? theme.secondary_color : "#F5F5F5",
-          }}
-        >
-          <span
-            className="text-xs font-medium"
-            style={{ color: useSchoolTheme ? theme.primary_color : "#000000" }}
-          >
-            N
-          </span>
+        <div className="mr-2 flex-shrink-0">
+          <AIOrb size={28} />
         </div>
       )}
 
       <div
         className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-          isUser ? "rounded-br-md" : "rounded-bl-md bg-[#F5F5F5]"
+          isUser ? "rounded-br-md" : "rounded-bl-md"
         }`}
         style={
           isUser
-            ? { backgroundColor: userBgColor, color: userTextColor }
-            : undefined
+            ? {
+                backgroundColor: "#2B2740",
+                color: "#FFFFFF",
+                boxShadow: "0 6px 20px rgba(43,39,64,0.2)",
+              }
+            : {
+                background: "rgba(255,255,255,0.7)",
+                border: "1px solid rgba(255,255,255,0.75)",
+                color: "#2B2740",
+              }
         }
       >
         {isTyping ? (

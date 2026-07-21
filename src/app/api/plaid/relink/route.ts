@@ -62,7 +62,9 @@ export async function POST(request: NextRequest) {
         products: PLAID_PRODUCTS,
         country_codes: PLAID_COUNTRY_CODES,
         language: "en",
-        redirect_uri: process.env.PLAID_REDIRECT_URI,
+        // redirect_uri intentionally omitted, matching create-link-token: Plaid
+        // rejects the request (INVALID_FIELD) unless the URI is registered in
+        // the dashboard, and it is only required for OAuth institutions.
         access_token: connection.access_token, // This makes it an "update" mode link
       });
 

@@ -925,7 +925,7 @@ export default function SurveyPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen">
       {/* Header */}
       <header className="pt-8 pb-4 text-center">
         <span className="text-xs tracking-[0.3em] font-medium text-gray-400">
@@ -1870,22 +1870,22 @@ export default function SurveyPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
           >
             <motion.div
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
-              className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden"
+              className="liquid-glass max-w-md w-full max-h-[80vh] overflow-hidden"
             >
-              <div className="p-6 border-b border-gray-100">
+              <div className="p-6 border-b border-white/15">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold">
+                  <h2 className="text-xl font-semibold text-white">
                     {t("survey.terms.title")}
                   </h2>
                   <button
                     onClick={() => setShowTermsModal(false)}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-white/40 hover:text-white"
                   >
                     <svg
                       className="w-6 h-6"
@@ -1904,9 +1904,9 @@ export default function SurveyPage() {
                 </div>
               </div>
               <div className="p-6 overflow-y-auto max-h-[60vh]">
-                <div className="prose prose-sm text-gray-600">
+                <div className="prose prose-sm text-white/70">
                   <p className="mb-4">Last updated: January 2026</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     1. Acceptance of Terms
                   </h3>
                   <p className="mb-4">
@@ -1914,7 +1914,7 @@ export default function SurveyPage() {
                     bound by these Terms of Service. If you do not agree to
                     these terms, please do not use our service.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     2. Description of Service
                   </h3>
                   <p className="mb-4">
@@ -1924,7 +1924,7 @@ export default function SurveyPage() {
                     informational purposes only and do not constitute financial
                     advice.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     3. User Responsibilities
                   </h3>
                   <p className="mb-4">
@@ -1932,7 +1932,7 @@ export default function SurveyPage() {
                     your account and password. You agree to provide accurate
                     information and to update your information as necessary.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     4. Privacy
                   </h3>
                   <p className="mb-4">
@@ -1940,7 +1940,7 @@ export default function SurveyPage() {
                     Policy to understand how we collect, use, and protect your
                     information.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     5. Limitation of Liability
                   </h3>
                   <p className="mb-4">
@@ -1950,10 +1950,10 @@ export default function SurveyPage() {
                   </p>
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-100">
+              <div className="p-6 border-t border-white/15">
                 <button
                   onClick={() => setShowTermsModal(false)}
-                  className="w-full py-3 bg-black text-white rounded-xl font-medium"
+                  className="w-full py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl font-medium"
                 >
                   {t("common.close")}
                 </button>
@@ -1970,22 +1970,22 @@ export default function SurveyPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
           >
             <motion.div
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
-              className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden"
+              className="liquid-glass max-w-md w-full max-h-[80vh] overflow-hidden"
             >
-              <div className="p-6 border-b border-gray-100">
+              <div className="p-6 border-b border-white/15">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold">
+                  <h2 className="text-xl font-semibold text-white">
                     {t("survey.privacy.title")}
                   </h2>
                   <button
                     onClick={() => setShowPrivacyModal(false)}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-white/40 hover:text-white"
                   >
                     <svg
                       className="w-6 h-6"
@@ -2004,9 +2004,9 @@ export default function SurveyPage() {
                 </div>
               </div>
               <div className="p-6 overflow-y-auto max-h-[60vh]">
-                <div className="prose prose-sm text-gray-600">
+                <div className="prose prose-sm text-white/70">
                   <p className="mb-4">Last updated: January 2026</p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     What We Collect
                   </h3>
                   <p className="mb-4">
@@ -2014,7 +2014,7 @@ export default function SurveyPage() {
                     your name, email address, university, visa status, and
                     financial preferences.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     How We Use Your Information
                   </h3>
                   <p className="mb-4">
@@ -2022,7 +2022,7 @@ export default function SurveyPage() {
                     recommendations, send relevant updates and notifications,
                     and improve our services.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     Data Storage
                   </h3>
                   <p className="mb-4">
@@ -2030,7 +2030,7 @@ export default function SurveyPage() {
                     encryption. We never sell your personal information to third
                     parties.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     Your Rights
                   </h3>
                   <p className="mb-4">
@@ -2038,7 +2038,7 @@ export default function SurveyPage() {
                     personal data at any time. You can export your data or
                     request account deletion from the Settings page.
                   </p>
-                  <h3 className="text-base font-medium text-gray-900 mb-2">
+                  <h3 className="text-base font-medium text-white mb-2">
                     Contact Us
                   </h3>
                   <p className="mb-4">
@@ -2047,10 +2047,10 @@ export default function SurveyPage() {
                   </p>
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-100">
+              <div className="p-6 border-t border-white/15">
                 <button
                   onClick={() => setShowPrivacyModal(false)}
-                  className="w-full py-3 bg-black text-white rounded-xl font-medium"
+                  className="w-full py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl font-medium"
                 >
                   {t("common.close")}
                 </button>

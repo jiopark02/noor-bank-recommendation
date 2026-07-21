@@ -157,7 +157,7 @@ export default function ProTipsPage() {
   }, [userLevel]);
 
   return (
-    <div className="min-h-screen bg-[#FAF9F7] pb-24">
+    <div className="min-h-screen pb-24">
       {/* Header */}
       <div className="bg-white border-b border-[#E8E6E3]">
         <div className="px-6 py-4">
@@ -259,7 +259,7 @@ export default function ProTipsPage() {
           className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
             showVisaOnly
               ? 'bg-blue-500 text-white'
-              : 'bg-white border border-gray-200 text-gray-600'
+              : 'glass-pill text-gray-600'
           }`}
         >
           {showVisaOnly ? '✓ Visa-specific' : 'Visa-specific'}
@@ -299,8 +299,8 @@ export default function ProTipsPage() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.03 }}
-                  className={`bg-white rounded-2xl border overflow-hidden ${
-                    category === 'warnings' ? 'border-red-200' : 'border-[#E8E6E3]'
+                  className={`noor-card overflow-hidden ${
+                    category === 'warnings' ? 'border border-red-200' : ''
                   }`}
                 >
                   <button
@@ -389,7 +389,7 @@ export default function ProTipsPage() {
         {/* FLOWCHART VIEW */}
         {viewMode === 'flowchart' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-            <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+            <div className="noor-card p-5">
               <h2 className="text-lg font-medium text-[#1A1A1A] mb-2">The Money Flowchart</h2>
               <p className="text-sm text-[#6B6B6B] mb-6">
                 {userLevel === 'beginner' ? (
@@ -473,7 +473,7 @@ export default function ProTipsPage() {
         {viewMode === 'calculators' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
             {/* Emergency Fund Calculator - All levels */}
-            <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+            <div className="noor-card p-5">
               <h3 className="font-medium text-[#1A1A1A] mb-1">Emergency Fund Calculator</h3>
               <p className="text-xs text-[#6B6B6B] mb-4">How much safety net do you need?</p>
 
@@ -503,7 +503,7 @@ export default function ProTipsPage() {
             </div>
 
             {/* HYSA Calculator - All levels */}
-            <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+            <div className="noor-card p-5">
               <h3 className="font-medium text-[#1A1A1A] mb-1">HYSA vs Checking</h3>
               <p className="text-xs text-[#6B6B6B] mb-4">Stop leaving money on the table</p>
 
@@ -534,7 +534,7 @@ export default function ProTipsPage() {
 
             {/* 401(k) Match Calculator - Intermediate+ */}
             {userLevel !== 'beginner' && (
-              <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+              <div className="noor-card p-5">
                 <h3 className="font-medium text-[#1A1A1A] mb-1">401(k) Match Calculator</h3>
                 <p className="text-xs text-[#6B6B6B] mb-4">See how much free money you're missing</p>
 
@@ -592,7 +592,7 @@ export default function ProTipsPage() {
 
             {/* Roth IRA Growth Calculator - Intermediate+ */}
             {userLevel !== 'beginner' && (
-              <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+              <div className="noor-card p-5">
                 <h3 className="font-medium text-[#1A1A1A] mb-1">Roth IRA Growth Calculator</h3>
                 <p className="text-xs text-[#6B6B6B] mb-4">See the power of tax-free compounding</p>
 
@@ -630,7 +630,7 @@ export default function ProTipsPage() {
             )}
 
             {/* Tax Treaty Calculator - All levels */}
-            <div className="bg-white rounded-2xl p-5 border border-[#E8E6E3]">
+            <div className="noor-card p-5">
               <h3 className="font-medium text-[#1A1A1A] mb-1">Tax Treaty Savings</h3>
               <p className="text-xs text-[#6B6B6B] mb-4">Check your country's student tax benefit</p>
 

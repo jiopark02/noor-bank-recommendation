@@ -105,12 +105,17 @@ export function PlaidLinkButton({
   const { open, ready } = usePlaidLink(config);
 
   if (error) {
+    const isAuthError = /unauthorized/i.test(error);
+    const isConfigError = /not configured|environment/i.test(error);
     return (
       <div className="text-center p-4">
         <p className="text-red-500 text-sm">{error}</p>
         <p className="text-gray-400 text-xs mt-2">
-          Plaid needs to be configured. Add your API keys to environment
-          variables.
+          {isAuthError
+            ? "Your session may have expired. Refresh the page or sign in again."
+            : isConfigError
+              ? "Plaid needs to be configured. Add your API keys to environment variables."
+              : "Something went wrong preparing the bank connection. Please try again."}
         </p>
       </div>
     );

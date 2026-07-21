@@ -109,7 +109,7 @@ export default function WelcomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <main className="flex-1 flex flex-col items-center justify-center px-6">
         <div className="max-w-sm w-full">
           <AnimatePresence mode="wait">

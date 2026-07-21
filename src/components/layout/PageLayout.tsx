@@ -11,7 +11,7 @@ interface PageLayoutProps {
 
 export function PageLayout({ children, userName }: PageLayoutProps) {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen">
       <Header userName={userName} />
       <main className="max-w-2xl mx-auto px-6 py-8">
         {children}
@@ -47,14 +47,14 @@ interface TabsProps {
 
 export function Tabs({ tabs, activeTab, onChange }: TabsProps) {
   return (
-    <div className="flex gap-8 border-b border-gray-100 mb-6">
+    <div className="flex gap-8 border-b border-gray-200 mb-6">
       {tabs.map((tab) => (
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
           className={`pb-3 text-[15px] transition-all duration-300 border-b-[1.5px] -mb-px ${
             activeTab === tab.id
-              ? 'text-black border-black font-medium'
+              ? 'text-black border-noor-purple font-medium'
               : 'text-gray-400 border-transparent hover:text-gray-600'
           }`}
         >
@@ -77,8 +77,8 @@ export function FilterChip({ label, active = false, onClick }: FilterChipProps) 
       onClick={onClick}
       className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
         active
-          ? 'bg-black text-white'
-          : 'bg-white text-black border-[1.5px] border-gray-200 hover:border-black'
+          ? 'bg-black text-white shadow-glass'
+          : 'glass-pill text-black hover:border-gray-300'
       }`}
     >
       {label}
@@ -110,7 +110,7 @@ export function FilterChips({ filters, activeFilters, onChange }: FilterChipsPro
 export function LoadingSpinner() {
   return (
     <div className="flex flex-col items-center justify-center py-20">
-      <div className="w-6 h-6 border-[1.5px] border-gray-200 border-t-black rounded-full animate-spin" />
+      <div className="w-6 h-6 border-[1.5px] border-gray-200 border-t-noor-purple rounded-full animate-spin" />
       <p className="mt-5 text-gray-400 text-sm">Finding your matches...</p>
     </div>
   );
@@ -125,7 +125,7 @@ export function OutlineButton({ children, onClick }: OutlineButtonProps) {
   return (
     <button
       onClick={onClick}
-      className="px-4 py-2.5 border-[1.5px] border-gray-200 rounded-full text-sm font-medium transition-all duration-300 hover:border-black"
+      className="glass-pill px-4 py-2.5 text-sm font-medium transition-all duration-300 hover:border-gray-300"
     >
       {children}
     </button>

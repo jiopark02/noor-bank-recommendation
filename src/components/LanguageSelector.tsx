@@ -17,7 +17,7 @@ export function LanguageSelector({ onContinue }: LanguageSelectorProps) {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen flex flex-col">
       {/* Header */}
       <header className="pt-8 pb-4 text-center">
         <span className="text-xs tracking-[0.3em] font-medium text-gray-400">NOOR</span>

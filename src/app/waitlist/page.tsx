@@ -88,7 +88,7 @@ export default function WaitlistPage() {
   const hasError = status === 'error' || status === 'duplicate';
 
   return (
-    <div className={`${manrope.className} bg-white text-[#1a1a1a] min-h-screen`}>
+    <div className={`${manrope.className} text-[#1a1a1a] min-h-screen`}>
       {/* Nav */}
       <nav className="flex justify-between items-center max-w-[1100px] mx-auto px-6 py-8 h-20">
         <button

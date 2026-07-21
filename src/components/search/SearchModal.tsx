@@ -63,7 +63,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const activeColor = useSchoolTheme ? theme.primary_color : '#000000';
+  const activeColor = useSchoolTheme ? theme.primary_color : '#2B2740';
 
   // Filter results based on query
   const results = useMemo(() => {
@@ -134,7 +134,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-black/50 z-50"
+            className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-50"
             onClick={onClose}
           />
 
@@ -144,16 +144,16 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-x-4 top-20 z-50 bg-white rounded-2xl shadow-2xl overflow-hidden max-w-lg mx-auto"
+            className="liquid-glass fixed inset-x-4 top-20 z-50 rounded-3xl overflow-hidden max-w-lg mx-auto"
           >
             {/* Search Input */}
-            <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+            <div className="flex items-center gap-3 p-4 border-b border-white/15">
               <svg
                 width="20"
                 height="20"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="#9CA3AF"
+                stroke="rgba(255,255,255,0.5)"
                 strokeWidth="2"
               >
                 <circle cx="11" cy="11" r="8" />
@@ -168,12 +168,12 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
                   setSelectedIndex(0);
                 }}
                 placeholder="Search banks, scholarships, jobs..."
-                className="flex-1 text-base outline-none placeholder:text-gray-400"
+                className="flex-1 text-base text-white outline-none placeholder:text-white/40 bg-transparent"
               />
               {query && (
                 <button
                   onClick={() => setQuery('')}
-                  className="p-1 text-gray-400 hover:text-gray-600"
+                  className="p-1 text-white/50 hover:text-white"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
@@ -185,14 +185,14 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
             {/* Results */}
             <div className="max-h-80 overflow-y-auto">
               {results.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">
+                <div className="p-8 text-center text-white/60">
                   <p>No results found for "{query}"</p>
                   <p className="text-sm mt-1">Try searching for banks, scholarships, or jobs</p>
                 </div>
               ) : (
                 <div className="p-2">
                   {!query && (
-                    <p className="px-3 py-2 text-xs text-gray-400 font-medium">Quick links</p>
+                    <p className="px-3 py-2 text-xs text-white/40 font-medium">Quick links</p>
                   )}
                   {results.map((result, index) => (
                     <button
@@ -200,17 +200,17 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
                       onClick={() => handleSelect(result)}
                       onMouseEnter={() => setSelectedIndex(index)}
                       className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-colors text-left ${
-                        index === selectedIndex ? 'bg-gray-100' : 'hover:bg-gray-50'
+                        index === selectedIndex ? 'bg-white/15' : 'hover:bg-white/8'
                       }`}
                     >
                       <span className="text-xl">{result.icon}</span>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{result.title}</p>
+                        <p className="font-medium text-white truncate">{result.title}</p>
                         {result.subtitle && (
-                          <p className="text-sm text-gray-500 truncate">{result.subtitle}</p>
+                          <p className="text-sm text-white/60 truncate">{result.subtitle}</p>
                         )}
                       </div>
-                      <span className="text-xs text-gray-400 capitalize">{result.type}</span>
+                      <span className="text-xs text-white/40 capitalize">{result.type}</span>
                     </button>
                   ))}
                 </div>
@@ -218,15 +218,15 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
             </div>
 
             {/* Footer */}
-            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
+            <div className="px-4 py-3 border-t border-white/15 flex items-center justify-between text-xs text-white/40">
               <div className="flex items-center gap-2">
-                <span className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px]">↑↓</span>
+                <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px]">↑↓</span>
                 <span>Navigate</span>
-                <span className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] ml-2">↵</span>
+                <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] ml-2">↵</span>
                 <span>Select</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px]">esc</span>
+                <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px]">esc</span>
                 <span>Close</span>
               </div>
             </div>

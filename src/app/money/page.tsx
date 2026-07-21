@@ -315,7 +315,7 @@ export default function MoneyPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center">
         <motion.div
           className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full"
           animate={{ rotate: 360 }}
@@ -364,7 +364,7 @@ export default function MoneyPage() {
       </div>
 
       {isLoadingData && (
-        <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+        <div className="mb-4 noor-card px-4 py-3 text-sm text-gray-600">
           Syncing your latest bank data...
         </div>
       )}

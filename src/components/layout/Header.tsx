@@ -2,8 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useTheme } from '@/contexts/ThemeContext';
-import { getSchoolTheme, hasCustomTheme } from '@/lib/schoolThemes';
+import { getSchoolTheme } from '@/lib/schoolThemes';
 import { SearchModal } from '@/components/search';
 
 interface HeaderProps {
@@ -11,7 +10,6 @@ interface HeaderProps {
 }
 
 export function Header({ userName = 'there' }: HeaderProps) {
-  const { theme, useSchoolTheme } = useTheme();
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
@@ -26,42 +24,30 @@ export function Header({ userName = 'there' }: HeaderProps) {
   }, []);
 
   const schoolTheme = institutionId ? getSchoolTheme(institutionId) : null;
-  const showSchoolBranding = useSchoolTheme && schoolTheme && hasCustomTheme(institutionId || '');
 
   return (
     <>
       <header
-        className="sticky top-0 z-40 backdrop-blur-sm border-b"
+        className="sticky top-0 z-40 border-b border-white/60"
         style={{
-          backgroundColor: showSchoolBranding
-            ? `${theme.primary_color}F5`
-            : 'rgba(255, 255, 255, 0.95)',
-          borderColor: showSchoolBranding
-            ? `${theme.secondary_color}40`
-            : 'rgb(243, 244, 246)',
+          background: 'rgba(255, 255, 255, 0.55)',
+          backdropFilter: 'blur(20px) saturate(1.4)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
         }}
       >
         <div className="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between">
           {/* Logo Section */}
           <Link href="/dashboard" className="flex flex-col items-start">
-            <span
-              className="text-base tracking-[0.25em] font-medium transition-opacity duration-300 hover:opacity-60"
-              style={{
-                color: showSchoolBranding
-                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                  : '#000000',
-              }}
-            >
+            <span className="text-base tracking-[0.25em] font-medium text-black transition-opacity duration-300 hover:opacity-60">
               NOOR
             </span>
-            {showSchoolBranding && schoolTheme && (
+            {schoolTheme && (
               <div className="flex items-center gap-1.5 mt-0.5">
                 {schoolTheme.logo_url && schoolTheme.logo_url.startsWith('http') ? (
                   <img
                     src={schoolTheme.logo_url}
                     alt={schoolTheme.short_name}
-                    className="w-4 h-4 rounded-full object-contain"
-                    style={{ backgroundColor: theme.secondary_color }}
+                    className="w-4 h-4 rounded-full object-contain bg-white"
                     onError={(e) => {
                       // Fallback to letter if image fails
                       e.currentTarget.style.display = 'none';
@@ -71,23 +57,14 @@ export function Header({ userName = 'there' }: HeaderProps) {
                   />
                 ) : null}
                 <div
-                  className="w-4 h-4 rounded-full items-center justify-center text-[8px] font-bold"
+                  className="w-4 h-4 rounded-full items-center justify-center text-[8px] font-bold bg-gray-100 text-gray-600"
                   style={{
-                    backgroundColor: theme.secondary_color,
-                    color: theme.primary_color,
                     display: schoolTheme.logo_url && schoolTheme.logo_url.startsWith('http') ? 'none' : 'flex',
                   }}
                 >
                   {schoolTheme.short_name.charAt(0)}
                 </div>
-                <span
-                  className="text-[10px] tracking-wide"
-                  style={{
-                    color: showSchoolBranding
-                      ? (theme.text_on_primary === 'white' ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)')
-                      : '#6B7280',
-                  }}
-                >
+                <span className="text-[10px] tracking-wide text-gray-500">
                   {schoolTheme.short_name}
                 </span>
               </div>
@@ -98,33 +75,16 @@ export function Header({ userName = 'there' }: HeaderProps) {
           <div className="flex items-center gap-1">
             <button
               onClick={() => setIsSearchOpen(true)}
-              className="p-2.5 rounded-xl transition-all duration-300 hover:bg-black/5"
-              style={{
-                color: showSchoolBranding
-                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                  : '#000000',
-              }}
+              className="p-2.5 rounded-xl text-black transition-all duration-300 hover:bg-white/70"
             >
               <SearchIcon />
             </button>
-            <button
-              className="p-2.5 rounded-xl transition-all duration-300 hover:bg-black/5"
-              style={{
-                color: showSchoolBranding
-                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                  : '#000000',
-              }}
-            >
+            <button className="p-2.5 rounded-xl text-black transition-all duration-300 hover:bg-white/70">
               <NotificationIcon />
             </button>
             <Link
               href="/settings"
-              className="p-2.5 rounded-xl transition-all duration-300 hover:bg-black/5"
-              style={{
-                color: showSchoolBranding
-                  ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-                  : '#000000',
-              }}
+              className="p-2.5 rounded-xl text-black transition-all duration-300 hover:bg-white/70"
             >
               <SettingsIcon />
             </Link>

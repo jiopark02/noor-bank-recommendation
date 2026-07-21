@@ -280,7 +280,7 @@ export default function GrowPage() {
   }, [userLevel]);
 
   return (
-    <div className="min-h-screen bg-[#FAF9F7] pb-24">
+    <div className="min-h-screen pb-24">
       {/* Header */}
       <div className="bg-white border-b border-[#E8E6E3]">
         <div className="px-6 py-4">
@@ -308,7 +308,7 @@ export default function GrowPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl p-4 border border-[#E8E6E3]"
+          className="noor-card p-4"
         >
           <h2 className="text-lg font-medium text-[#1A1A1A]">{smartMessage.title}</h2>
           <p className="text-sm text-[#6B6B6B] mt-1 leading-relaxed">{smartMessage.subtitle}</p>
@@ -443,7 +443,7 @@ export default function GrowPage() {
             className="space-y-4"
           >
             {/* Emergency Fund Section */}
-            <div className="bg-white rounded-2xl p-4 border border-[#E8E6E3]">
+            <div className="noor-card p-4">
               <button
                 onClick={() => setShowEmergencyGuide(!showEmergencyGuide)}
                 className="w-full flex items-center justify-between"
@@ -546,7 +546,7 @@ export default function GrowPage() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden"
+                    className="noor-card overflow-hidden"
                   >
                     <button
                       onClick={() => setExpandedHYSA(expandedHYSA === account.id ? null : account.id)}
@@ -677,7 +677,7 @@ export default function GrowPage() {
             {userLevel !== 'beginner' && (
               <>
                 {/* Roth IRA Section */}
-                <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
+                <div className="noor-card overflow-hidden">
                   <button
                     onClick={() => setExpandedInvestment(expandedInvestment === 'roth_ira' ? null : 'roth_ira')}
                     className="w-full p-4 text-left"
@@ -764,7 +764,7 @@ export default function GrowPage() {
                 </div>
 
                 {/* 401(k) Section */}
-                <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
+                <div className="noor-card overflow-hidden">
                   <button
                     onClick={() => setExpandedInvestment(expandedInvestment === '401k' ? null : '401k')}
                     className="w-full p-4 text-left"
@@ -847,7 +847,7 @@ export default function GrowPage() {
 
             {/* HSA Section - Advanced only */}
             {userLevel === 'advanced' && (
-              <div className="bg-white rounded-2xl border border-[#E8E6E3] overflow-hidden">
+              <div className="noor-card overflow-hidden">
                 <button
                   onClick={() => setExpandedInvestment(expandedInvestment === 'hsa' ? null : 'hsa')}
                   className="w-full p-4 text-left"
@@ -964,7 +964,7 @@ export default function GrowPage() {
               return (
                 <motion.div
                   key={goal.id}
-                  className="bg-white rounded-2xl p-5 border border-[#E8E6E3]"
+                  className="noor-card p-5"
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                 >
@@ -1060,28 +1060,28 @@ export default function GrowPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center"
+            className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-50 flex items-end justify-center"
           >
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="bg-white w-full max-w-lg rounded-t-3xl max-h-[85vh] overflow-y-auto"
+              className="liquid-glass w-full max-w-lg rounded-t-3xl max-h-[85vh] overflow-y-auto"
             >
-              <div className="sticky top-0 bg-white pt-3 pb-2 flex justify-center border-b border-[#E8E6E3]">
-                <div className="w-10 h-1 bg-gray-300 rounded-full" />
+              <div className="sticky top-0 bg-transparent pt-3 pb-2 flex justify-center border-b border-white/15">
+                <div className="w-10 h-1 bg-white/30 rounded-full" />
               </div>
 
               <div className="p-6">
                 {!quizResult ? (
                   <>
-                    <h2 className="text-xl font-medium text-[#1A1A1A] mb-2">Can I Open a Roth IRA?</h2>
-                    <p className="text-sm text-[#6B6B6B] mb-6">Let's check your eligibility. This takes 30 seconds.</p>
+                    <h2 className="text-xl font-medium text-white mb-2">Can I Open a Roth IRA?</h2>
+                    <p className="text-sm text-white/60 mb-6">Let's check your eligibility. This takes 30 seconds.</p>
 
                     <div className="space-y-6">
                       {ROTH_IRA_ELIGIBILITY_QUESTIONS.map((q, idx) => (
                         <div key={q.id}>
-                          <p className="text-sm font-medium text-[#1A1A1A] mb-3">
+                          <p className="text-sm font-medium text-white mb-3">
                             {idx + 1}. {q.question}
                           </p>
                           <div className="space-y-2">
@@ -1091,8 +1091,8 @@ export default function GrowPage() {
                                 onClick={() => setQuizAnswers(prev => ({ ...prev, [q.id]: opt.value }))}
                                 className={`w-full p-3 rounded-xl border-2 text-left text-sm transition-all ${
                                   quizAnswers[q.id] === opt.value
-                                    ? 'border-black bg-black text-white'
-                                    : 'border-[#E8E6E3] text-[#1A1A1A] hover:border-[#6B6B6B]'
+                                    ? 'border-white bg-white text-[#2B2740]'
+                                    : 'border-white/15 text-white/80 hover:border-white/40'
                                 }`}
                               >
                                 {opt.label}
@@ -1109,14 +1109,14 @@ export default function GrowPage() {
                           setShowEligibilityQuiz(false);
                           setQuizAnswers({});
                         }}
-                        className="flex-1 py-3 border border-[#E8E6E3] rounded-xl text-sm font-medium"
+                        className="flex-1 py-3 border border-white/15 text-white/80 rounded-xl text-sm font-medium"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleQuizComplete}
                         disabled={Object.keys(quizAnswers).length < ROTH_IRA_ELIGIBILITY_QUESTIONS.length}
-                        className="flex-1 py-3 bg-black text-white rounded-xl text-sm font-medium disabled:opacity-50"
+                        className="flex-1 py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl text-sm font-medium disabled:opacity-50"
                       >
                         Check Eligibility
                       </button>
@@ -1124,24 +1124,24 @@ export default function GrowPage() {
                   </>
                 ) : (
                   <>
-                    <div className={`text-center py-6 ${quizResult.eligible ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    <div className={`text-center py-6 ${quizResult.eligible ? 'text-emerald-400' : 'text-amber-400'}`}>
                       <span className="text-5xl">
                         {quizResult.eligible ? '🎉' : '📝'}
                       </span>
                     </div>
 
-                    <h2 className="text-xl font-medium text-[#1A1A1A] mb-2 text-center">
+                    <h2 className="text-xl font-medium text-white mb-2 text-center">
                       {quizResult.eligible ? 'You Can Open a Roth IRA!' : 'Not Yet, But That\'s Okay'}
                     </h2>
 
-                    <p className="text-sm text-[#6B6B6B] mb-6 text-center">{quizResult.reason}</p>
+                    <p className="text-sm text-white/60 mb-6 text-center">{quizResult.reason}</p>
 
-                    <div className="bg-[#F5F4F2] rounded-xl p-4 mb-6">
-                      <h3 className="text-sm font-medium text-[#1A1A1A] mb-2">Next Steps</h3>
+                    <div className="bg-white/8 rounded-xl p-4 mb-6">
+                      <h3 className="text-sm font-medium text-white mb-2">Next Steps</h3>
                       <ul className="space-y-2">
                         {quizResult.nextSteps.map((step, idx) => (
-                          <li key={idx} className="text-sm text-[#6B6B6B] flex items-start gap-2">
-                            <span className="text-[#1A1A1A]">{idx + 1}.</span>
+                          <li key={idx} className="text-sm text-white/60 flex items-start gap-2">
+                            <span className="text-white">{idx + 1}.</span>
                             {step}
                           </li>
                         ))}
@@ -1150,10 +1150,10 @@ export default function GrowPage() {
 
                     {quizResult.alternativeOptions && (
                       <div className="mb-6">
-                        <h3 className="text-sm font-medium text-[#1A1A1A] mb-2">In the meantime...</h3>
+                        <h3 className="text-sm font-medium text-white mb-2">In the meantime...</h3>
                         <div className="flex flex-wrap gap-2">
                           {quizResult.alternativeOptions.map((opt, idx) => (
-                            <span key={idx} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full">
+                            <span key={idx} className="text-xs px-3 py-1.5 bg-blue-500/20 text-blue-300 rounded-full">
                               {opt}
                             </span>
                           ))}
@@ -1167,7 +1167,7 @@ export default function GrowPage() {
                         setQuizAnswers({});
                         setQuizResult(null);
                       }}
-                      className="w-full py-3 bg-black text-white rounded-xl text-sm font-medium"
+                      className="w-full py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl text-sm font-medium"
                     >
                       Got It
                     </button>

@@ -82,17 +82,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function SettingsCard({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="mx-4 rounded-2xl overflow-hidden"
-      style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.07)' }}
-    >
+    <div className="mx-4 noor-card overflow-hidden">
       {children}
     </div>
   );
 }
 
 function Divider() {
-  return <div className="mx-4" style={{ height: '1px', background: 'rgba(0,0,0,0.05)' }} />;
+  return <div className="mx-4" style={{ height: '1px', background: 'rgba(255,255,255,0.75)' }} />;
 }
 
 function Toggle({
@@ -111,7 +108,7 @@ function Toggle({
       style={{
         width: 44,
         height: 24,
-        background: checked ? '#000' : 'rgba(0,0,0,0.12)',
+        background: checked ? '#2B2740' : 'rgba(0,0,0,0.12)',
       }}
     >
       <motion.div
@@ -149,7 +146,7 @@ function SettingsRow({ icon, label, description, value, chevron, danger, onClick
       <div className="flex-1 min-w-0">
         <div
           className="text-[14px] font-medium leading-tight truncate"
-          style={{ color: danger ? '#EF4444' : '#000', fontFamily: FONT }}
+          style={{ color: danger ? '#EF4444' : '#2B2740', fontFamily: FONT }}
         >
           {label}
         </div>
@@ -282,7 +279,7 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 40 }}
         transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-        className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+        className="liquid-glass w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
         style={{ fontFamily: FONT }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -311,7 +308,7 @@ function ModalInput({
     <div>
       <label
         className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-        style={{ color: 'rgba(0,0,0,0.35)', fontFamily: FONT, letterSpacing: '0.1em' }}
+        style={{ color: 'rgba(255,255,255,0.55)', fontFamily: FONT, letterSpacing: '0.1em' }}
       >
         {label}
       </label>
@@ -321,11 +318,11 @@ function ModalInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoFocus={autoFocus}
-        className="w-full px-4 py-3 rounded-xl text-[14px] outline-none transition-all"
+        className="w-full px-4 py-3 rounded-xl text-[14px] outline-none transition-all placeholder-white/40"
         style={{
-          background: 'rgba(0,0,0,0.04)',
-          border: '1px solid rgba(0,0,0,0.08)',
-          color: '#000',
+          background: 'rgba(255,255,255,0.08)',
+          border: '1px solid rgba(255,255,255,0.15)',
+          color: 'rgba(255,255,255,0.92)',
           fontFamily: FONT,
         }}
         onFocus={(e) => {
@@ -333,7 +330,7 @@ function ModalInput({
           e.currentTarget.style.boxShadow = `0 0 0 3px rgba(91,78,232,0.1)`;
         }}
         onBlur={(e) => {
-          e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)';
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
           e.currentTarget.style.boxShadow = 'none';
         }}
       />
@@ -668,7 +665,7 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="min-h-screen pb-28" style={{ background: '#F5F5F5', fontFamily: FONT }}>
+    <div className="min-h-screen pb-28" style={{ fontFamily: FONT }}>
 
       {/* ── STICKY HEADER ── */}
       <div
@@ -677,7 +674,7 @@ export default function SettingsPage() {
           background: 'rgba(255,255,255,0.94)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
-          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          borderBottom: '1px solid rgba(255,255,255,0.75)',
         }}
       >
         <div className="flex items-center gap-3 px-4 py-3.5">
@@ -707,7 +704,7 @@ export default function SettingsPage() {
           >
             <div
               className="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl text-white text-[13px] font-medium shadow-lg"
-              style={{ background: '#111', fontFamily: FONT }}
+              style={{ background: '#2B2740', fontFamily: FONT }}
             >
               <svg className="w-4 h-4 flex-shrink-0 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
@@ -745,8 +742,7 @@ export default function SettingsPage() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        className="mx-4 mt-5 rounded-2xl p-5"
-        style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.07)' }}
+        className="mx-4 mt-5 noor-card p-5"
       >
         <div className="flex items-center gap-4">
           {/* Avatar */}
@@ -796,7 +792,7 @@ export default function SettingsPage() {
 
         {/* Profile completion bar */}
         {profileCompletion.percentage < 100 && (
-          <div className="mt-4 pt-4" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+          <div className="mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.75)' }}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-[12px]" style={{ color: 'rgba(0,0,0,0.38)', fontFamily: FONT }}>
                 Profile {profileCompletion.percentage}% complete
@@ -891,7 +887,7 @@ export default function SettingsPage() {
             key={item.key}
             className="flex items-center gap-3.5 px-4 py-3.5"
             style={{
-              borderBottom: idx < NOTIFICATION_ROWS.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
+              borderBottom: idx < NOTIFICATION_ROWS.length - 1 ? '1px solid rgba(255,255,255,0.75)' : 'none',
             }}
           >
             <div
@@ -966,8 +962,8 @@ export default function SettingsPage() {
           className="w-full py-3.5 rounded-2xl text-[14px] font-medium transition-colors"
           style={{
             background: '#fff',
-            border: '1px solid rgba(0,0,0,0.1)',
-            color: '#000',
+            border: '1px solid rgba(255,255,255,0.75)',
+            color: '#2B2740',
             fontFamily: FONT,
           }}
           whileTap={{ scale: 0.98 }}
@@ -1005,12 +1001,12 @@ export default function SettingsPage() {
         {activeModal === 'changePassword' && (
           <Modal onClose={() => { setActiveModal(null); setError(null); }}>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.06)' }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.1)' }}>
                 {Ico.lock}
               </div>
               <div>
-                <h3 className="text-[16px] font-semibold text-black" style={{ fontFamily: FONT }}>Change Password</h3>
-                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>Must meet all requirements below</p>
+                <h3 className="text-[16px] font-semibold text-white" style={{ fontFamily: FONT }}>Change Password</h3>
+                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: FONT }}>Must meet all requirements below</p>
               </div>
             </div>
 
@@ -1020,7 +1016,7 @@ export default function SettingsPage() {
                 <ModalInput label="New Password" type={showPasswords ? 'text' : 'password'} value={newPassword} onChange={setNewPassword} />
                 {newPassword && (
                   <div className="flex items-center gap-2 mt-2">
-                    <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.08)' }}>
+                    <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.12)' }}>
                       <div
                         className="h-full rounded-full transition-all duration-300"
                         style={{
@@ -1038,7 +1034,7 @@ export default function SettingsPage() {
               <div>
                 <ModalInput label="Confirm New Password" type={showPasswords ? 'text' : 'password'} value={confirmNewPassword} onChange={setConfirmNewPassword} />
                 {confirmNewPassword && (
-                  <p className="text-[12px] mt-1.5" style={{ color: passwordsMatch ? '#22C55E' : '#EF4444', fontFamily: FONT }}>
+                  <p className="text-[12px] mt-1.5" style={{ color: passwordsMatch ? '#4ADE80' : '#F87171', fontFamily: FONT }}>
                     {passwordsMatch ? '✓ Passwords match' : '✗ Passwords don\'t match'}
                   </p>
                 )}
@@ -1046,21 +1042,21 @@ export default function SettingsPage() {
 
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={showPasswords} onChange={(e) => setShowPasswords(e.target.checked)} className="w-4 h-4 rounded" />
-                <span className="text-[13px]" style={{ color: 'rgba(0,0,0,0.5)', fontFamily: FONT }}>Show passwords</span>
+                <span className="text-[13px]" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: FONT }}>Show passwords</span>
               </label>
 
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
+              {error && <p className="text-[13px] text-red-400" style={{ fontFamily: FONT }}>{error}</p>}
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.92)', fontFamily: FONT }}>
                 Cancel
               </button>
               <button
                 onClick={handleChangePassword}
                 disabled={isLoading || !passwordValidation.isValid || !passwordsMatch || !currentPassword}
-                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
-                style={{ background: '#000', fontFamily: FONT }}
+                className="flex-1 py-3 rounded-xl text-[14px] font-medium disabled:opacity-40"
+                style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}
               >
                 {isLoading ? 'Saving…' : 'Update Password'}
               </button>
@@ -1072,30 +1068,30 @@ export default function SettingsPage() {
         {activeModal === 'changeEmail' && (
           <Modal onClose={() => { setActiveModal(null); setError(null); }}>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.06)' }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.1)' }}>
                 {Ico.mail}
               </div>
               <div>
-                <h3 className="text-[16px] font-semibold text-black" style={{ fontFamily: FONT }}>Change Email</h3>
-                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>You'll need to verify your new address</p>
+                <h3 className="text-[16px] font-semibold text-white" style={{ fontFamily: FONT }}>Change Email</h3>
+                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: FONT }}>You'll need to verify your new address</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <ModalInput label="New Email" type="email" value={newEmail} onChange={setNewEmail} placeholder="your@email.com" autoFocus />
               <ModalInput label="Confirm Password" type="password" value={emailPassword} onChange={setEmailPassword} placeholder="Your current password" />
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
+              {error && <p className="text-[13px] text-red-400" style={{ fontFamily: FONT }}>{error}</p>}
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.92)', fontFamily: FONT }}>
                 Cancel
               </button>
               <button
                 onClick={handleChangeEmail}
                 disabled={isLoading || !newEmail || !emailPassword}
-                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
-                style={{ background: '#000', fontFamily: FONT }}
+                className="flex-1 py-3 rounded-xl text-[14px] font-medium disabled:opacity-40"
+                style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}
               >
                 {isLoading ? 'Sending…' : 'Send Verification'}
               </button>
@@ -1107,12 +1103,12 @@ export default function SettingsPage() {
         {activeModal === 'editProfile' && (
           <Modal onClose={() => { setActiveModal(null); setError(null); }}>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.06)' }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.1)' }}>
                 {Ico.user}
               </div>
               <div>
-                <h3 className="text-[16px] font-semibold text-black" style={{ fontFamily: FONT }}>Edit Profile</h3>
-                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>Update your info</p>
+                <h3 className="text-[16px] font-semibold text-white" style={{ fontFamily: FONT }}>Edit Profile</h3>
+                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: FONT }}>Update your info</p>
               </div>
             </div>
 
@@ -1125,7 +1121,7 @@ export default function SettingsPage() {
               <div>
                 <label
                   className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-                  style={{ color: 'rgba(0,0,0,0.35)', fontFamily: FONT, letterSpacing: '0.1em' }}
+                  style={{ color: 'rgba(255,255,255,0.55)', fontFamily: FONT, letterSpacing: '0.1em' }}
                 >
                   School
                 </label>
@@ -1145,18 +1141,18 @@ export default function SettingsPage() {
 
               <ModalInput label="Phone (optional)" type="tel" value={editPhone} onChange={setEditPhone} placeholder="(555) 123-4567" />
 
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
+              {error && <p className="text-[13px] text-red-400" style={{ fontFamily: FONT }}>{error}</p>}
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.92)', fontFamily: FONT }}>
                 Cancel
               </button>
               <button
                 onClick={handleSaveProfile}
                 disabled={isLoading || !editFirstName || !editLastName}
-                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
-                style={{ background: '#000', fontFamily: FONT }}
+                className="flex-1 py-3 rounded-xl text-[14px] font-medium disabled:opacity-40"
+                style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}
               >
                 {isLoading ? 'Saving…' : 'Save Changes'}
               </button>
@@ -1168,19 +1164,19 @@ export default function SettingsPage() {
         {activeModal === 'resetChecklist' && (
           <Modal onClose={() => setActiveModal(null)}>
             <div className="text-center mb-5">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(0,0,0,0.06)' }}>
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(255,255,255,0.1)' }}>
                 {Ico.checkSquare}
               </div>
-              <h3 className="text-[16px] font-semibold text-black mb-2" style={{ fontFamily: FONT }}>Reset Checklist?</h3>
-              <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}>
+              <h3 className="text-[16px] font-semibold text-white mb-2" style={{ fontFamily: FONT }}>Reset Checklist?</h3>
+              <p className="text-[13px]" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: FONT }}>
                 This will reset your checklist progress and show it again on the home screen.
               </p>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setActiveModal(null)} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+              <button onClick={() => setActiveModal(null)} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.92)', fontFamily: FONT }}>
                 Cancel
               </button>
-              <button onClick={handleResetChecklist} className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white" style={{ background: '#000', fontFamily: FONT }}>
+              <button onClick={handleResetChecklist} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}>
                 Reset
               </button>
             </div>
@@ -1190,8 +1186,8 @@ export default function SettingsPage() {
         {/* Language */}
         {showLanguageModal && (
           <Modal onClose={() => setShowLanguageModal(false)}>
-            <h3 className="text-[16px] font-semibold text-black mb-1" style={{ fontFamily: FONT }}>{t('settings.language.title')}</h3>
-            <p className="text-[13px] mb-5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>{t('settings.language.description')}</p>
+            <h3 className="text-[16px] font-semibold text-white mb-1" style={{ fontFamily: FONT }}>{t('settings.language.title')}</h3>
+            <p className="text-[13px] mb-5" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: FONT }}>{t('settings.language.description')}</p>
 
             <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
               {locales.map((loc) => (
@@ -1200,18 +1196,18 @@ export default function SettingsPage() {
                   onClick={() => { setLocale(loc); setShowLanguageModal(false); showSuccess(localeNames[loc] + ' selected'); }}
                   className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all"
                   style={{
-                    border: locale === loc ? '1.5px solid #000' : '1.5px solid rgba(0,0,0,0.1)',
-                    background: locale === loc ? '#000' : '#fff',
+                    border: locale === loc ? '1.5px solid #FFFFFF' : '1.5px solid rgba(255,255,255,0.15)',
+                    background: locale === loc ? '#FFFFFF' : 'rgba(255,255,255,0.08)',
                     fontFamily: FONT,
                   }}
                 >
                   <span className="text-xl">{localeFlags[loc]}</span>
-                  <span className="text-[13px] font-medium" style={{ color: locale === loc ? '#fff' : '#000' }}>{localeNames[loc]}</span>
+                  <span className="text-[13px] font-medium" style={{ color: locale === loc ? '#2B2740' : 'rgba(255,255,255,0.85)' }}>{localeNames[loc]}</span>
                 </button>
               ))}
             </div>
 
-            <button onClick={() => setShowLanguageModal(false)} className="w-full py-3 mt-5 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+            <button onClick={() => setShowLanguageModal(false)} className="w-full py-3 mt-5 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.92)', fontFamily: FONT }}>
               {t('common.close')}
             </button>
           </Modal>
@@ -1221,23 +1217,23 @@ export default function SettingsPage() {
         {activeModal === 'delete' && (
           <Modal onClose={() => { setActiveModal(null); setError(null); }}>
             <div className="text-center mb-5">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(239,68,68,0.1)' }}>
-                <div style={{ color: '#EF4444' }}>{Ico.warning}</div>
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(239,68,68,0.18)' }}>
+                <div style={{ color: '#F87171' }}>{Ico.warning}</div>
               </div>
-              <h3 className="text-[16px] font-semibold text-black mb-2" style={{ fontFamily: FONT }}>Delete Account?</h3>
-              <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}>
+              <h3 className="text-[16px] font-semibold text-white mb-2" style={{ fontFamily: FONT }}>Delete Account?</h3>
+              <p className="text-[13px]" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: FONT }}>
                 This permanently deletes all your data — saved preferences, chat history, and survey responses.{' '}
-                <strong style={{ color: '#000' }}>This cannot be undone.</strong>
+                <strong style={{ color: 'rgba(255,255,255,0.92)' }}>This cannot be undone.</strong>
               </p>
             </div>
 
             <div className="space-y-4">
               <ModalInput label='Type "DELETE" to confirm' value={deleteConfirmText} onChange={setDeleteConfirmText} placeholder="DELETE" autoFocus />
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
+              {error && <p className="text-[13px] text-red-400" style={{ fontFamily: FONT }}>{error}</p>}
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.92)', fontFamily: FONT }}>
                 Cancel
               </button>
               <button

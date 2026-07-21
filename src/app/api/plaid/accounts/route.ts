@@ -6,6 +6,7 @@ import {
   getAllPlaidConnections,
   updatePlaidConnectionStatus,
   handlePlaidError,
+  isPlaidLoginRequired,
 } from "@/lib/plaidApiUtils";
 
 export async function POST(request: NextRequest) {
@@ -103,12 +104,7 @@ export async function POST(request: NextRequest) {
 
         anySuccess = true;
       } catch (plaidError: unknown) {
-        const errorMessage =
-          plaidError instanceof Error ? plaidError.message : "Unknown error";
-        if (
-          errorMessage.includes("ITEM_LOGIN_REQUIRED") ||
-          errorMessage.includes("invalid access token")
-        ) {
+        if (isPlaidLoginRequired(plaidError)) {
           // Mark just this connection broken and keep going — one expired bank
           // must not sink the whole response for a multi-bank user.
           await updatePlaidConnectionStatus(

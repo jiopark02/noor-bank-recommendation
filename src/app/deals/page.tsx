@@ -88,7 +88,7 @@ export default function DealsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF9F7] pb-24">
+    <div className="min-h-screen pb-24">
       {/* Header */}
       <div className="bg-white border-b border-[#E8E6E3]">
         <div className="px-6 py-4 flex items-center justify-between">
@@ -138,7 +138,7 @@ export default function DealsPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
-                className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]"
+                className="noor-card p-4"
               >
                 <div className="flex gap-4">
                   {/* Brand Icon */}
@@ -231,17 +231,17 @@ export default function DealsPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowSubmitModal(false)}
-              className="fixed inset-0 bg-black/50 z-40"
+              className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-40"
             />
             <motion.div
               initial={{ opacity: 0, y: 100 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 100 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl p-6 z-50 max-h-[85vh] overflow-y-auto"
+              className="liquid-glass fixed bottom-0 left-0 right-0 rounded-t-3xl p-6 z-50 max-h-[85vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-medium text-[#1A1A1A]">Submit a Deal</h2>
-                <button onClick={() => setShowSubmitModal(false)} className="text-[#6B6B6B]">
+                <h2 className="text-lg font-medium text-white">Submit a Deal</h2>
+                <button onClick={() => setShowSubmitModal(false)} className="text-white/60">
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -250,67 +250,67 @@ export default function DealsPage() {
 
               {/* Title */}
               <div className="mb-4">
-                <label className="text-sm text-[#6B6B6B] mb-1 block">Deal Title *</label>
+                <label className="text-sm text-white/60 mb-1 block">Deal Title *</label>
                 <input
                   type="text"
                   value={newDeal.title}
                   onChange={(e) => setNewDeal({ ...newDeal, title: e.target.value })}
                   placeholder="e.g., Spotify Student Discount"
-                  className="w-full px-4 py-3 rounded-xl border border-[#E8E6E3] focus:outline-none focus:border-[#1A1A1A] text-[#1A1A1A]"
+                  className="w-full px-4 py-3 rounded-xl border border-white/15 bg-white/10 focus:outline-none focus:border-white/40 text-white placeholder-white/40"
                 />
               </div>
 
               {/* Brand */}
               <div className="mb-4">
-                <label className="text-sm text-[#6B6B6B] mb-1 block">Brand/Store *</label>
+                <label className="text-sm text-white/60 mb-1 block">Brand/Store *</label>
                 <input
                   type="text"
                   value={newDeal.brand}
                   onChange={(e) => setNewDeal({ ...newDeal, brand: e.target.value })}
                   placeholder="e.g., Spotify"
-                  className="w-full px-4 py-3 rounded-xl border border-[#E8E6E3] focus:outline-none focus:border-[#1A1A1A] text-[#1A1A1A]"
+                  className="w-full px-4 py-3 rounded-xl border border-white/15 bg-white/10 focus:outline-none focus:border-white/40 text-white placeholder-white/40"
                 />
               </div>
 
               {/* Description */}
               <div className="mb-4">
-                <label className="text-sm text-[#6B6B6B] mb-1 block">Description *</label>
+                <label className="text-sm text-white/60 mb-1 block">Description *</label>
                 <textarea
                   value={newDeal.description}
                   onChange={(e) => setNewDeal({ ...newDeal, description: e.target.value })}
                   placeholder="Describe the deal..."
                   rows={3}
-                  className="w-full px-4 py-3 rounded-xl border border-[#E8E6E3] focus:outline-none focus:border-[#1A1A1A] text-[#1A1A1A] resize-none"
+                  className="w-full px-4 py-3 rounded-xl border border-white/15 bg-white/10 focus:outline-none focus:border-white/40 text-white placeholder-white/40 resize-none"
                 />
               </div>
 
               {/* Discount */}
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="text-sm text-[#6B6B6B] mb-1 block">Discount %</label>
+                  <label className="text-sm text-white/60 mb-1 block">Discount %</label>
                   <input
                     type="number"
                     value={newDeal.discount_percent}
                     onChange={(e) => setNewDeal({ ...newDeal, discount_percent: e.target.value })}
                     placeholder="50"
-                    className="w-full px-4 py-3 rounded-xl border border-[#E8E6E3] focus:outline-none focus:border-[#1A1A1A] text-[#1A1A1A]"
+                    className="w-full px-4 py-3 rounded-xl border border-white/15 bg-white/10 focus:outline-none focus:border-white/40 text-white placeholder-white/40"
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-[#6B6B6B] mb-1 block">Discount Text</label>
+                  <label className="text-sm text-white/60 mb-1 block">Discount Text</label>
                   <input
                     type="text"
                     value={newDeal.discount_text}
                     onChange={(e) => setNewDeal({ ...newDeal, discount_text: e.target.value })}
                     placeholder="$5.99/month"
-                    className="w-full px-4 py-3 rounded-xl border border-[#E8E6E3] focus:outline-none focus:border-[#1A1A1A] text-[#1A1A1A]"
+                    className="w-full px-4 py-3 rounded-xl border border-white/15 bg-white/10 focus:outline-none focus:border-white/40 text-white placeholder-white/40"
                   />
                 </div>
               </div>
 
               {/* Category */}
               <div className="mb-4">
-                <label className="text-sm text-[#6B6B6B] mb-2 block">Category</label>
+                <label className="text-sm text-white/60 mb-2 block">Category</label>
                 <div className="grid grid-cols-4 gap-2">
                   {DEAL_CATEGORIES.filter((c) => c.id !== 'all').map((cat) => (
                     <button
@@ -318,12 +318,18 @@ export default function DealsPage() {
                       onClick={() => setNewDeal({ ...newDeal, category: cat.id as Deal['category'] })}
                       className={`p-2 rounded-xl border text-center transition-all ${
                         newDeal.category === cat.id
-                          ? 'border-[#1A1A1A] bg-[#FAF9F7]'
-                          : 'border-[#E8E6E3]'
+                          ? 'border-white bg-white'
+                          : 'bg-white/8 border-white/15'
                       }`}
                     >
                       <span className="text-lg block">{cat.icon}</span>
-                      <span className="text-[10px] text-[#6B6B6B] mt-0.5 block">{cat.label}</span>
+                      <span
+                        className={`text-[10px] mt-0.5 block ${
+                          newDeal.category === cat.id ? 'text-[#2B2740]' : 'text-white/70'
+                        }`}
+                      >
+                        {cat.label}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -331,13 +337,13 @@ export default function DealsPage() {
 
               {/* Link */}
               <div className="mb-6">
-                <label className="text-sm text-[#6B6B6B] mb-1 block">Link (optional)</label>
+                <label className="text-sm text-white/60 mb-1 block">Link (optional)</label>
                 <input
                   type="url"
                   value={newDeal.link}
                   onChange={(e) => setNewDeal({ ...newDeal, link: e.target.value })}
                   placeholder="https://..."
-                  className="w-full px-4 py-3 rounded-xl border border-[#E8E6E3] focus:outline-none focus:border-[#1A1A1A] text-[#1A1A1A]"
+                  className="w-full px-4 py-3 rounded-xl border border-white/15 bg-white/10 focus:outline-none focus:border-white/40 text-white placeholder-white/40"
                 />
               </div>
 
