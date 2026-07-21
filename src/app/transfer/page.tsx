@@ -104,7 +104,7 @@ export default function TransferPage() {
 
   if (!isCC) {
     return (
-      <div className="min-h-screen bg-[#FAF9F7] pb-24">
+      <div className="min-h-screen pb-24">
         <div className="px-6 py-4 bg-white border-b border-[#E8E6E3]">
           <h1 className="text-2xl font-light text-[#1A1A1A]">Transfer Center</h1>
         </div>
@@ -121,7 +121,7 @@ export default function TransferPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAF9F7] pb-24">
+    <div className="min-h-screen pb-24">
       {/* Header */}
       <div className="bg-white border-b border-[#E8E6E3]">
         <div className="px-6 py-4">
@@ -137,7 +137,7 @@ export default function TransferPage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl p-6 shadow-sm border border-[#E8E6E3]"
+          className="noor-card p-6"
         >
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -196,7 +196,7 @@ export default function TransferPage() {
         {activeTab === 'goals' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
             {/* Target Universities */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+            <div className="noor-card p-4">
               <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">Your Target Universities</h3>
 
               {userProfile?.targetUniversities && userProfile.targetUniversities.length > 0 ? (
@@ -244,7 +244,7 @@ export default function TransferPage() {
 
             {/* TAG Eligible Universities */}
             {tagUniversities.length > 0 && (
-              <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+              <div className="noor-card p-4">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-medium text-[#1A1A1A]">TAG-Eligible Schools</h3>
                   <span className="text-xs text-green-600">Guaranteed Admission</span>
@@ -349,7 +349,7 @@ export default function TransferPage() {
             )}
 
             {/* General Deadlines Info */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+            <div className="noor-card p-4">
               <h3 className="text-sm font-medium text-[#1A1A1A] mb-3">Key Dates</h3>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
@@ -372,7 +372,7 @@ export default function TransferPage() {
         {activeTab === 'requirements' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
             {/* General Requirements */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+            <div className="noor-card p-4">
               <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">General Transfer Requirements</h3>
               <div className="space-y-3">
                 <div className="flex items-start gap-3">
@@ -415,7 +415,7 @@ export default function TransferPage() {
             </div>
 
             {/* TAG Requirements */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+            <div className="noor-card p-4">
               <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">TAG Requirements</h3>
               <div className="space-y-2 text-sm">
                 <p className="text-[#6B6B6B]">
@@ -432,7 +432,7 @@ export default function TransferPage() {
 
             {/* School-Specific Requirements */}
             {transferAgreements.length > 0 && (
-              <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+              <div className="noor-card p-4">
                 <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">School-Specific Requirements</h3>
                 <div className="space-y-3">
                   {transferAgreements.slice(0, 5).map(agreement => {

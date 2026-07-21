@@ -54,7 +54,7 @@ export default function VisaPage() {
 
   if (!visaInfo) {
     return (
-      <div className="min-h-screen bg-[#FAF9F7] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="animate-pulse text-[#6B6B6B]">Loading...</div>
       </div>
     );
@@ -88,7 +88,7 @@ export default function VisaPage() {
   const programDays = daysUntil(visaInfo.program_end_date);
 
   return (
-    <div className="min-h-screen bg-[#FAF9F7] pb-24">
+    <div className="min-h-screen pb-24">
       {/* Header */}
       <div className="bg-white border-b border-[#E8E6E3]">
         <div className="px-6 py-4">
@@ -102,7 +102,7 @@ export default function VisaPage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl p-6 shadow-sm border border-[#E8E6E3]"
+          className="noor-card p-6"
         >
           <div className="text-center">
             <p className="text-sm text-[#6B6B6B] uppercase tracking-wider mb-2">{labels.documentExpiry}</p>
@@ -131,7 +131,7 @@ export default function VisaPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3] mt-4"
+          className="noor-card p-4 mt-4"
         >
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-[#1A1A1A]">
@@ -227,7 +227,7 @@ export default function VisaPage() {
             className="space-y-4"
           >
             {/* Visa Details Card */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+            <div className="noor-card p-4">
               <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">Visa Details</h3>
               <div className="space-y-3">
                 <div className="flex justify-between items-center py-2 border-b border-[#E8E6E3]">
@@ -254,7 +254,7 @@ export default function VisaPage() {
             </div>
 
             {/* Work Authorization - Country Specific */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]">
+            <div className="noor-card p-4">
               <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">Work Authorization</h3>
 
               {country === 'US' && (
@@ -390,7 +390,7 @@ export default function VisaPage() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]"
+            className="noor-card p-4"
           >
             <h3 className="text-sm font-medium text-[#1A1A1A] mb-4">Visa Timeline</h3>
             <div className="relative">
@@ -444,7 +444,7 @@ export default function VisaPage() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8E6E3]"
+            className="noor-card p-4"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-medium text-[#1A1A1A]">

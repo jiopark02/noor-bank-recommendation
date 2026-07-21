@@ -95,7 +95,9 @@ export async function POST(request: NextRequest) {
 
     // Get active connections from database (all linked institutions)
     const allConnections = await getAllPlaidConnections(userId);
-    const activeConnections = allConnections.filter((c) => c.status === "active");
+    const activeConnections = allConnections.filter(
+      (c) => c.status === "active"
+    );
     if (activeConnections.length === 0) {
       return NextResponse.json(
         {
@@ -212,7 +214,11 @@ export async function POST(request: NextRequest) {
           plaidErrorCode === "ITEM_LOGIN_REQUIRED" ||
           plaidErrorCode === "INVALID_ACCESS_TOKEN"
         ) {
-          await updatePlaidConnectionStatus(userId, connection.item_id, "error");
+          await updatePlaidConnectionStatus(
+            userId,
+            connection.item_id,
+            "error"
+          );
           continue;
         }
         throw plaidError;
@@ -232,58 +238,59 @@ export async function POST(request: NextRequest) {
       recurringSubscriptions.values()
     );
 
-      if (subscriptions.length === 0) {
-        const fallbackByMerchant = new Map<string, ApiSubscription>();
+    if (subscriptions.length === 0) {
+      const fallbackByMerchant = new Map<string, ApiSubscription>();
 
-        transactions
-          .filter((txn) => txn.amount > 0)
-          .forEach((txn) => {
-            const { isSubscription, merchant, category } =
-              detectSubscription(txn);
-            if (!isSubscription) return;
+      transactions
+        .filter((txn) => txn.amount > 0)
+        .forEach((txn) => {
+          const { isSubscription, merchant, category } =
+            detectSubscription(txn);
+          if (!isSubscription) return;
 
-            const name = merchant || txn.merchant_name || txn.name;
-            const key = name.toLowerCase();
-            const existing = fallbackByMerchant.get(key);
+          const name = merchant || txn.merchant_name || txn.name;
+          const key = name.toLowerCase();
+          const existing = fallbackByMerchant.get(key);
 
-            if (!existing) {
-              fallbackByMerchant.set(key, {
-                id: `heuristic_${txn.transaction_id}`,
-                name,
-                amount: txn.amount,
-                monthly_amount: txn.amount,
-                iso_currency_code: txn.iso_currency_code || "USD",
-                frequency: "monthly",
-                last_charged: txn.date,
-                next_charge: null,
-                category: category || txn.category[0] || null,
-                source: "heuristic",
-              });
-              return;
-            }
+          if (!existing) {
+            fallbackByMerchant.set(key, {
+              id: `heuristic_${txn.transaction_id}`,
+              name,
+              amount: txn.amount,
+              monthly_amount: txn.amount,
+              iso_currency_code: txn.iso_currency_code || "USD",
+              frequency: "monthly",
+              last_charged: txn.date,
+              next_charge: null,
+              category: category || txn.category[0] || null,
+              source: "heuristic",
+            });
+            return;
+          }
 
-            if (txn.date > (existing.last_charged || "")) {
-              existing.last_charged = txn.date;
-              existing.amount = txn.amount;
-              existing.monthly_amount = txn.amount;
-            }
-          });
+          if (txn.date > (existing.last_charged || "")) {
+            existing.last_charged = txn.date;
+            existing.amount = txn.amount;
+            existing.monthly_amount = txn.amount;
+          }
+        });
 
-        subscriptions = Array.from(fallbackByMerchant.values());
-      }
+      subscriptions = Array.from(fallbackByMerchant.values());
+    }
 
-    const cashFlowTransactions = transactions.filter(isCashFlowRelevantTransaction);
+    const cashFlowTransactions = transactions.filter(
+      isCashFlowRelevantTransaction
+    );
 
     // Calculate category totals
     const categoryTotals: Record<string, number> = {};
     cashFlowTransactions.forEach((txn) => {
-        if (txn.amount > 0) {
-          // Positive amounts are expenses in Plaid
-          const category = txn.category[0] || "Other";
-          categoryTotals[category] =
-            (categoryTotals[category] || 0) + txn.amount;
-        }
-      });
+      if (txn.amount > 0) {
+        // Positive amounts are expenses in Plaid
+        const category = txn.category[0] || "Other";
+        categoryTotals[category] = (categoryTotals[category] || 0) + txn.amount;
+      }
+    });
 
     // Calculate totals
     const totalSpending = cashFlowTransactions

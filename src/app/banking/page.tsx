@@ -183,7 +183,7 @@ export default function BankingPage() {
 
   if (!userId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="w-6 h-6 border-[1.5px] border-gray-200 border-t-black rounded-full animate-spin" />
       </div>
     );
@@ -224,7 +224,7 @@ export default function BankingPage() {
                   className={`px-4 py-2 rounded-full border-[1.5px] text-sm font-medium whitespace-nowrap transition-all duration-300 ${
                     selectedCampusSide === filter.id
                       ? 'border-black bg-black text-white'
-                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
+                      : 'glass-pill text-gray-600'
                   }`}
                 >
                   {filter.label}

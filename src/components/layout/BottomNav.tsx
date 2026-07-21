@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { useTheme } from "@/contexts/ThemeContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 interface NavItem {
@@ -93,7 +92,6 @@ function pathMatchesNavItem(safePathname: string, href: string): boolean {
 export function BottomNav() {
   const pathname = usePathname();
   const safePathname = pathname ?? "/dashboard";
-  const { theme, useSchoolTheme } = useTheme();
   const { t } = useLanguage();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [visaType, setVisaType] = useState<string | null>(null);
@@ -113,8 +111,8 @@ export function BottomNav() {
     [moreMenuGroups]
   );
 
-  const activeColor = useSchoolTheme ? theme.primary_color : "#000000";
-  const inactiveColor = "#9CA3AF";
+  const activeColor = "#55497D";
+  const inactiveColor = "#A9A4C2";
 
   const isMoreActive =
     allMoreItems.some((item) => isPathActive(safePathname, item.href)) ||
@@ -134,7 +132,7 @@ export function BottomNav() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/30 z-40"
+              className="fixed inset-0 bg-black/25 backdrop-blur-[2px] z-40"
               onClick={() => setIsMoreOpen(false)}
             />
 
@@ -143,17 +141,17 @@ export function BottomNav() {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 pb-24 max-h-[85vh] overflow-y-auto"
+              className="liquid-glass-strong fixed bottom-0 left-0 right-0 rounded-t-3xl z-50 pb-24 max-h-[85vh] overflow-y-auto"
             >
               <div className="p-4">
-                <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+                <div className="w-12 h-1 bg-white/30 rounded-full mx-auto mb-4" />
 
                 <div className="flex items-center justify-between mb-4 px-2">
-                  <h3 className="text-lg font-medium text-gray-900">More</h3>
+                  <h3 className="text-lg font-medium text-white">More</h3>
                   <button
                     type="button"
                     onClick={() => setIsMoreOpen(false)}
-                    className="p-2 rounded-full hover:bg-gray-100"
+                    className="p-2 rounded-full hover:bg-white/10"
                     aria-label="Close menu"
                   >
                     <svg
@@ -161,7 +159,7 @@ export function BottomNav() {
                       height="20"
                       viewBox="0 0 24 24"
                       fill="none"
-                      stroke="#6B7280"
+                      stroke="rgba(255,255,255,0.7)"
                       strokeWidth="2"
                     >
                       <path
@@ -176,7 +174,7 @@ export function BottomNav() {
                 <div className="space-y-6">
                   {moreMenuGroups.map((group) => (
                     <div key={group.title}>
-                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider px-2 mb-2">
+                      <p className="text-xs font-medium text-white/40 uppercase tracking-wider px-2 mb-2">
                         {group.title}
                       </p>
                       <div className="grid grid-cols-3 gap-3">
@@ -192,9 +190,10 @@ export function BottomNav() {
                               className="flex flex-col items-center justify-center p-4 rounded-2xl transition-all"
                               style={{
                                 backgroundColor: isActive
-                                  ? `${activeColor}10`
-                                  : "#F9FAFB",
-                                color: isActive ? activeColor : "#4B5563",
+                                  ? "rgba(255,255,255,0.18)"
+                                  : "rgba(255,255,255,0.08)",
+                                border: "1px solid rgba(255,255,255,0.15)",
+                                color: isActive ? "#FFFFFF" : "rgba(255,255,255,0.65)",
                               }}
                             >
                               <Icon
@@ -221,7 +220,14 @@ export function BottomNav() {
         )}
       </AnimatePresence>
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50">
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/60"
+        style={{
+          background: "rgba(255,255,255,0.6)",
+          backdropFilter: "blur(20px) saturate(1.4)",
+          WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+        }}
+      >
         <div className="max-w-2xl mx-auto px-6">
           <div className="flex items-center justify-between h-20">
             <Link
@@ -264,7 +270,7 @@ export function BottomNav() {
           </div>
         </div>
 
-        <div className="h-safe-bottom bg-white" />
+        <div className="h-safe-bottom" />
       </nav>
     </>
   );

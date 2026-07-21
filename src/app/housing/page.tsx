@@ -167,7 +167,7 @@ export default function HousingPage() {
             className={`px-4 py-2 rounded-full border-[1.5px] text-sm font-medium whitespace-nowrap transition-all duration-300 ${
               selectedCampusSide === filter.id
                 ? 'border-black bg-black text-white'
-                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
+                : 'glass-pill text-gray-600'
             }`}
           >
             {filter.label}
@@ -279,20 +279,20 @@ function ApartmentDetailModal({ apartment, currencySymbol = '$', onClose }: { ap
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative bg-white w-full max-w-lg rounded-t-3xl max-h-[85vh] overflow-y-auto animate-slide-up">
+      <div className="relative liquid-glass w-full max-w-lg rounded-t-3xl max-h-[85vh] overflow-y-auto animate-slide-up">
         {/* Handle */}
-        <div className="sticky top-0 bg-white pt-3 pb-2 flex justify-center">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+        <div className="sticky top-0 bg-[rgba(36,32,50,0.55)] backdrop-blur-xl pt-3 pb-2 flex justify-center">
+          <div className="w-10 h-1 bg-white/30 rounded-full" />
         </div>
 
         {/* Content */}
         <div className="px-6 pb-8">
           {/* Image */}
           {imageUrl && (
-            <div className="aspect-video bg-gray-100 rounded-2xl overflow-hidden mb-4">
+            <div className="aspect-video bg-white/8 rounded-2xl overflow-hidden mb-4">
               <img src={imageUrl} alt={apartment.name} className="w-full h-full object-cover" />
             </div>
           )}
@@ -300,8 +300,8 @@ function ApartmentDetailModal({ apartment, currencySymbol = '$', onClose }: { ap
           {/* Header */}
           <div className="flex items-start justify-between gap-4 mb-4">
             <div>
-              <h2 className="text-xl font-semibold text-black">{apartment.name}</h2>
-              <p className="text-gray-500 text-sm mt-1">{apartment.address}</p>
+              <h2 className="text-xl font-semibold text-white">{apartment.name}</h2>
+              <p className="text-white/60 text-sm mt-1">{apartment.address}</p>
             </div>
             {apartment.campus_side && (
               <LocationBadge side={apartment.campus_side as CampusSide} size="md" />
@@ -312,63 +312,63 @@ function ApartmentDetailModal({ apartment, currencySymbol = '$', onClose }: { ap
           <div className="mb-6">
             <div className="space-y-2">
               <div className="flex items-baseline gap-3">
-                <span className="text-xs uppercase tracking-wide text-gray-500 w-14">Solo</span>
-                <p className="text-xl font-semibold text-black">
+                <span className="text-xs uppercase tracking-wide text-white/60 w-14">Solo</span>
+                <p className="text-xl font-semibold text-white">
                   {currencySymbol}{apartment.price_min.toLocaleString()} - {currencySymbol}{apartment.price_max.toLocaleString()}
-                  <span className="text-sm font-normal text-gray-500">/mo</span>
+                  <span className="text-sm font-normal text-white/60">/mo</span>
                 </p>
               </div>
               <div className="flex items-baseline gap-3">
-                <span className="text-xs uppercase tracking-wide text-gray-500 w-14">Shared</span>
-                <p className="text-lg font-medium text-gray-700">
+                <span className="text-xs uppercase tracking-wide text-white/60 w-14">Shared</span>
+                <p className="text-lg font-medium text-white/80">
                   {currencySymbol}{(apartment.shared_price_min || Math.round(apartment.price_min * 0.55)).toLocaleString()} - {currencySymbol}{(apartment.shared_price_max || Math.round(apartment.price_max * 0.55)).toLocaleString()}
-                  <span className="text-sm font-normal text-gray-500">/mo</span>
+                  <span className="text-sm font-normal text-white/60">/mo</span>
                 </p>
               </div>
             </div>
-            <p className="text-gray-500 text-sm mt-3">
+            <p className="text-white/60 text-sm mt-3">
               {apartment.bedrooms} · {apartment.bathrooms} bath · {apartment.sqft_min}-{apartment.sqft_max} sqft
             </p>
           </div>
 
           {/* Commute Times */}
           <div className="grid grid-cols-4 gap-3 mb-6">
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <p className="text-lg font-medium text-black">{apartment.walking_minutes}</p>
-              <p className="text-xs text-gray-500">min walk</p>
+            <div className="text-center p-3 bg-white/8 rounded-xl">
+              <p className="text-lg font-medium text-white">{apartment.walking_minutes}</p>
+              <p className="text-xs text-white/60">min walk</p>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <p className="text-lg font-medium text-black">{apartment.biking_minutes}</p>
-              <p className="text-xs text-gray-500">min bike</p>
+            <div className="text-center p-3 bg-white/8 rounded-xl">
+              <p className="text-lg font-medium text-white">{apartment.biking_minutes}</p>
+              <p className="text-xs text-white/60">min bike</p>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <p className="text-lg font-medium text-black">{apartment.transit_minutes}</p>
-              <p className="text-xs text-gray-500">min transit</p>
+            <div className="text-center p-3 bg-white/8 rounded-xl">
+              <p className="text-lg font-medium text-white">{apartment.transit_minutes}</p>
+              <p className="text-xs text-white/60">min transit</p>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-              <p className="text-lg font-medium text-black">{apartment.driving_minutes}</p>
-              <p className="text-xs text-gray-500">min drive</p>
+            <div className="text-center p-3 bg-white/8 rounded-xl">
+              <p className="text-lg font-medium text-white">{apartment.driving_minutes}</p>
+              <p className="text-xs text-white/60">min drive</p>
             </div>
           </div>
 
           {/* Amenities */}
           <div className="mb-6">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Amenities</p>
+            <p className="text-xs text-white/40 uppercase tracking-wide mb-2">Amenities</p>
             <div className="flex flex-wrap gap-2">
-              {apartment.gym && <span className="px-3 py-1 bg-gray-100 rounded-full text-xs text-gray-600">Gym</span>}
-              {apartment.furnished && <span className="px-3 py-1 bg-gray-100 rounded-full text-xs text-gray-600">Furnished</span>}
-              {apartment.parking && <span className="px-3 py-1 bg-gray-100 rounded-full text-xs text-gray-600">Parking</span>}
+              {apartment.gym && <span className="px-3 py-1 bg-white/8 rounded-full text-xs text-white/70">Gym</span>}
+              {apartment.furnished && <span className="px-3 py-1 bg-white/8 rounded-full text-xs text-white/70">Furnished</span>}
+              {apartment.parking && <span className="px-3 py-1 bg-white/8 rounded-full text-xs text-white/70">Parking</span>}
               {apartment.pet_policy && apartment.pet_policy !== 'No pets' && (
-                <span className="px-3 py-1 bg-gray-100 rounded-full text-xs text-gray-600">{apartment.pet_policy}</span>
+                <span className="px-3 py-1 bg-white/8 rounded-full text-xs text-white/70">{apartment.pet_policy}</span>
               )}
             </div>
           </div>
 
           {/* Rating */}
           <div className="flex items-center gap-2 mb-6">
-            <span className="text-black font-medium">{apartment.rating}</span>
-            <span className="text-yellow-500">★</span>
-            <span className="text-gray-400 text-sm">({apartment.review_count} reviews)</span>
+            <span className="text-white font-medium">{apartment.rating}</span>
+            <span className="text-yellow-400">★</span>
+            <span className="text-white/40 text-sm">({apartment.review_count} reviews)</span>
           </div>
 
           {/* Map & Directions */}
@@ -389,7 +389,7 @@ function ApartmentDetailModal({ apartment, currencySymbol = '$', onClose }: { ap
           <div className="flex gap-3">
             <button
               onClick={onClose}
-              className="flex-1 py-3 border-[1.5px] border-gray-300 rounded-xl font-medium hover:border-black transition-colors"
+              className="flex-1 py-3 border-[1.5px] border-white/20 rounded-xl font-medium hover:border-white transition-colors"
             >
               Close
             </button>

@@ -48,7 +48,7 @@ export default function BanksPage() {
   }, [router]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       {/* Header */}
       <header className="bg-white border-b border-gray-100">
         <div className="max-w-2xl mx-auto px-4 py-4">
@@ -110,7 +110,7 @@ export default function BanksPage() {
         )}
 
         {/* Help Section */}
-        <div className="mt-8 bg-white rounded-2xl p-6 border border-gray-100">
+        <div className="mt-8 noor-card p-6">
           <h3 className="font-semibold text-gray-900 mb-2">Need help choosing?</h3>
           <p className="text-sm text-gray-500 mb-4">
             Our experts can help you find the perfect bank account for your situation.
@@ -130,7 +130,7 @@ function FilterChip({ label, active = false }: { label: string; active?: boolean
       className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
         active
           ? 'bg-indigo-600 text-white'
-          : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+          : 'glass-pill text-gray-600'
       }`}
     >
       {label}

@@ -217,7 +217,7 @@ function MessagesTab({ social }: { social: ReturnType<typeof useSocial> }) {
                 key={conv.id}
                 onClick={() => handleSelectConversation(conv)}
                 className={`w-full flex items-center gap-3 p-4 rounded-2xl text-left transition-all ${
-                  isUnread ? 'bg-blue-50 border border-blue-100' : 'bg-white border border-gray-100 hover:border-gray-200'
+                  isUnread ? 'bg-blue-50 border border-blue-100' : 'noor-card'
                 }`}
               >
                 {/* Avatar */}
@@ -414,17 +414,17 @@ function NewMessageModal({ users, friends, onSelect, onClose }: {
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="fixed inset-x-4 top-20 bottom-20 bg-white rounded-2xl overflow-hidden animate-slide-up md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-md">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed inset-x-4 top-20 bottom-20 liquid-glass rounded-2xl overflow-hidden animate-slide-up md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-md">
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3">
+        <div className="sticky top-0 bg-white/5 border-b border-white/15 px-4 py-3">
           <div className="flex items-center justify-between mb-3">
-            <button onClick={onClose} className="p-2 -ml-2 text-gray-500 hover:text-black">
+            <button onClick={onClose} className="p-2 -ml-2 text-white/60 hover:text-white">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            <h2 className="font-semibold text-black">New Message</h2>
+            <h2 className="font-semibold text-white">New Message</h2>
             <div className="w-9" />
           </div>
           <input
@@ -432,7 +432,7 @@ function NewMessageModal({ users, friends, onSelect, onClose }: {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search people..."
-            className="w-full p-3 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5"
+            className="w-full p-3 bg-white/10 border border-white/15 text-white placeholder-white/40 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5"
           />
         </div>
 
@@ -440,7 +440,7 @@ function NewMessageModal({ users, friends, onSelect, onClose }: {
         <div className="overflow-y-auto h-[calc(100%-120px)] p-4">
           {friendsList.length > 0 && (
             <>
-              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-2">Friends</p>
+              <p className="text-xs text-white/40 font-medium uppercase tracking-wider mb-2">Friends</p>
               <div className="space-y-1 mb-4">
                 {friendsList.map(user => (
                   <UserListItem key={user.id} user={user} onClick={() => onSelect(user)} />
@@ -451,7 +451,7 @@ function NewMessageModal({ users, friends, onSelect, onClose }: {
 
           {othersList.length > 0 && (
             <>
-              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-2">Others</p>
+              <p className="text-xs text-white/40 font-medium uppercase tracking-wider mb-2">Others</p>
               <div className="space-y-1">
                 {othersList.map(user => (
                   <UserListItem key={user.id} user={user} onClick={() => onSelect(user)} />
@@ -549,7 +549,7 @@ function FriendsTab({ social }: { social: ReturnType<typeof useSocial> }) {
               return (
                 <div
                   key={request.id}
-                  className="flex items-center gap-3 p-4 bg-white border border-gray-100 rounded-2xl"
+                  className="flex items-center gap-3 p-4 noor-card"
                 >
                   <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-medium">
                     {fromUser.first_name.charAt(0).toUpperCase()}
@@ -623,7 +623,7 @@ function FriendCard({ user, onClick, onMessage, onAddFriend, onRemoveFriend, isF
   isFriend: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 p-4 bg-white border border-gray-100 rounded-2xl hover:border-gray-200 transition-all">
+    <div className="flex items-center gap-3 p-4 noor-card transition-all">
       <button onClick={onClick} className="flex items-center gap-3 flex-1 text-left">
         <div className="relative">
           <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-medium">
@@ -687,8 +687,8 @@ function UserProfileModal({ user, isFriend, onAddFriend, onRemoveFriend, onMessa
 }) {
   return (
     <div className="fixed inset-0 z-50">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="fixed inset-x-4 bottom-0 bg-white rounded-t-2xl overflow-hidden animate-slide-up max-h-[80vh]">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed inset-x-4 bottom-0 liquid-glass rounded-t-2xl overflow-hidden animate-slide-up max-h-[80vh]">
         {/* Header */}
         <div className="flex justify-center pt-3 pb-2">
           <div className="w-10 h-1 bg-gray-300 rounded-full" />
@@ -698,7 +698,7 @@ function UserProfileModal({ user, isFriend, onAddFriend, onRemoveFriend, onMessa
           {/* Profile Info */}
           <div className="flex items-center gap-4 mb-6">
             <div className="relative">
-              <div className="w-20 h-20 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-medium text-gray-600">
+              <div className="w-20 h-20 rounded-full bg-white/15 flex items-center justify-center text-2xl font-medium text-white">
                 {user.first_name.charAt(0).toUpperCase()}
               </div>
               {user.is_online && (
@@ -706,23 +706,23 @@ function UserProfileModal({ user, isFriend, onAddFriend, onRemoveFriend, onMessa
               )}
             </div>
             <div>
-              <h2 className="text-xl font-bold text-black">{user.first_name} {user.last_name}</h2>
-              <p className="text-gray-500">@{user.username}</p>
-              <p className="text-sm text-gray-400 mt-1">{user.university}</p>
+              <h2 className="text-xl font-bold text-white">{user.first_name} {user.last_name}</h2>
+              <p className="text-white/60">@{user.username}</p>
+              <p className="text-sm text-white/40 mt-1">{user.university}</p>
             </div>
           </div>
 
           {/* Bio */}
           {user.bio && (
             <div className="mb-6">
-              <p className="text-gray-600">{user.bio}</p>
+              <p className="text-white/70">{user.bio}</p>
             </div>
           )}
 
           {/* Details */}
           <div className="space-y-2 mb-6">
             {user.major && (
-              <div className="flex items-center gap-2 text-sm text-gray-500">
+              <div className="flex items-center gap-2 text-sm text-white/60">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
@@ -738,7 +738,7 @@ function UserProfileModal({ user, isFriend, onAddFriend, onRemoveFriend, onMessa
                 onMessage();
                 onClose();
               }}
-              className="flex-1 py-3 bg-black text-white font-medium rounded-xl hover:bg-gray-800 transition-colors"
+              className="flex-1 py-3 bg-white text-[#2B2740] font-medium rounded-xl hover:bg-white/90 transition-colors"
             >
               Message
             </button>
@@ -748,7 +748,7 @@ function UserProfileModal({ user, isFriend, onAddFriend, onRemoveFriend, onMessa
                   onRemoveFriend();
                   onClose();
                 }}
-                className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-colors"
+                className="flex-1 py-3 bg-white/10 text-white/80 font-medium rounded-xl hover:bg-white/20 transition-colors"
               >
                 Remove Friend
               </button>
@@ -758,7 +758,7 @@ function UserProfileModal({ user, isFriend, onAddFriend, onRemoveFriend, onMessa
                   onAddFriend();
                   onClose();
                 }}
-                className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-colors"
+                className="flex-1 py-3 bg-white/10 text-white/80 font-medium rounded-xl hover:bg-white/20 transition-colors"
               >
                 Add Friend
               </button>
@@ -946,34 +946,34 @@ function PostDetailModal({ post, userVote, onVote, onClose }: {
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="fixed inset-x-0 bottom-0 top-12 bg-white rounded-t-2xl overflow-hidden animate-slide-up">
-        <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-          <button onClick={onClose} className="p-2 -ml-2 text-gray-500 hover:text-black">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed inset-x-0 bottom-0 top-12 liquid-glass rounded-t-2xl overflow-hidden animate-slide-up">
+        <div className="sticky top-0 bg-white/5 border-b border-white/15 px-4 py-3 flex items-center justify-between">
+          <button onClick={onClose} className="p-2 -ml-2 text-white/60 hover:text-white">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-          <span className="text-sm text-gray-500">{post.comment_count} comments</span>
+          <span className="text-sm text-white/60">{post.comment_count} comments</span>
         </div>
 
         <div className="overflow-y-auto h-[calc(100%-60px)] pb-20">
           <div className="p-4">
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-3">
-              <span className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-600">
+            <div className="flex items-center gap-2 text-sm text-white/60 mb-3">
+              <span className="w-6 h-6 rounded-full bg-white/15 flex items-center justify-center text-xs font-medium text-white">
                 {authorName.charAt(0).toUpperCase()}
               </span>
-              <span className="font-medium text-gray-700">{authorName}</span>
+              <span className="font-medium text-white/80">{authorName}</span>
               <span>·</span>
               <span>{timeAgo(post.created_at)}</span>
             </div>
 
-            <h1 className="text-xl font-bold text-black mb-3">{post.title}</h1>
+            <h1 className="text-xl font-bold text-white mb-3">{post.title}</h1>
 
             {post.tags && post.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
                 {post.tags.map((tag) => (
-                  <span key={tag} className="px-2.5 py-1 bg-blue-50 text-blue-600 text-xs rounded-full">
+                  <span key={tag} className="px-2.5 py-1 bg-blue-500/20 text-blue-300 text-xs rounded-full">
                     #{tag}
                   </span>
                 ))}
@@ -981,17 +981,17 @@ function PostDetailModal({ post, userVote, onVote, onClose }: {
             )}
 
             {post.content && (
-              <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap mb-4">
+              <div className="prose prose-sm max-w-none text-white/80 whitespace-pre-wrap mb-4">
                 {post.content}
               </div>
             )}
 
-            <div className="flex items-center gap-4 py-3 border-y border-gray-100 mb-6">
+            <div className="flex items-center gap-4 py-3 border-y border-white/15 mb-6">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => onVote('up')}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-full transition-colors ${
-                    userVote === 'up' ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    userVote === 'up' ? 'bg-orange-500/20 text-orange-300' : 'bg-white/10 text-white/60 hover:bg-white/20'
                   }`}
                 >
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -1000,14 +1000,14 @@ function PostDetailModal({ post, userVote, onVote, onClose }: {
                   <span className="text-sm font-medium">Upvote</span>
                 </button>
                 <span className={`text-sm font-semibold ${
-                  userVote === 'up' ? 'text-orange-500' : userVote === 'down' ? 'text-blue-500' : 'text-gray-700'
+                  userVote === 'up' ? 'text-orange-400' : userVote === 'down' ? 'text-blue-400' : 'text-white/80'
                 }`}>
                   {netVotes}
                 </span>
                 <button
                   onClick={() => onVote('down')}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-full transition-colors ${
-                    userVote === 'down' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    userVote === 'down' ? 'bg-blue-500/20 text-blue-300' : 'bg-white/10 text-white/60 hover:bg-white/20'
                   }`}
                 >
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -1018,21 +1018,21 @@ function PostDetailModal({ post, userVote, onVote, onClose }: {
               </div>
             </div>
 
-            <h2 className="font-semibold text-black mb-4">Comments ({post.comments?.length || 0})</h2>
+            <h2 className="font-semibold text-white mb-4">Comments ({post.comments?.length || 0})</h2>
 
             <form onSubmit={handleSubmitComment} className="mb-6">
               <textarea
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
                 placeholder="Add a comment..."
-                className="w-full p-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-black/5"
+                className="w-full p-3 bg-white/10 border border-white/15 text-white placeholder-white/40 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-black/5"
                 rows={3}
               />
               <div className="flex justify-end mt-2">
                 <button
                   type="submit"
                   disabled={!newComment.trim()}
-                  className="px-4 py-2 bg-black text-white text-sm font-medium rounded-full disabled:opacity-40 hover:bg-gray-800"
+                  className="px-4 py-2 bg-white text-[#2B2740] text-sm font-medium rounded-full disabled:opacity-40 hover:bg-white/90"
                 >
                   Comment
                 </button>
@@ -1046,7 +1046,7 @@ function PostDetailModal({ post, userVote, onVote, onClose }: {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-400 text-sm text-center py-8">
+              <p className="text-white/40 text-sm text-center py-8">
                 No comments yet. Be the first to comment!
               </p>
             )}
@@ -1117,19 +1117,19 @@ function CreatePostModal({ categories, onSubmit, onClose }: {
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="fixed inset-x-4 top-20 bottom-20 bg-white rounded-2xl overflow-hidden animate-slide-up">
-        <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-          <button onClick={onClose} className="p-2 -ml-2 text-gray-500 hover:text-black">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed inset-x-4 top-20 bottom-20 liquid-glass rounded-2xl overflow-hidden animate-slide-up">
+        <div className="sticky top-0 bg-white/5 border-b border-white/15 px-4 py-3 flex items-center justify-between">
+          <button onClick={onClose} className="p-2 -ml-2 text-white/60 hover:text-white">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-          <h2 className="font-semibold text-black">Create Post</h2>
+          <h2 className="font-semibold text-white">Create Post</h2>
           <button
             onClick={handleSubmit}
             disabled={!title.trim() || !category}
-            className="px-4 py-1.5 bg-black text-white text-sm font-medium rounded-full disabled:opacity-40 hover:bg-gray-800"
+            className="px-4 py-1.5 bg-white text-[#2B2740] text-sm font-medium rounded-full disabled:opacity-40 hover:bg-white/90"
           >
             Post
           </button>
@@ -1137,7 +1137,7 @@ function CreatePostModal({ categories, onSubmit, onClose }: {
 
         <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto h-[calc(100%-60px)]">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+            <label className="block text-sm font-medium text-white/80 mb-2">Category *</label>
             <div className="flex flex-wrap gap-2">
               {categories.map((cat) => (
                 <button
@@ -1145,7 +1145,7 @@ function CreatePostModal({ categories, onSubmit, onClose }: {
                   type="button"
                   onClick={() => setCategory(cat.id)}
                   className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                    category === cat.id ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    category === cat.id ? 'bg-white text-[#2B2740]' : 'bg-white/10 text-white/80 hover:bg-white/20'
                   }`}
                 >
                   {cat.icon} {cat.label}
@@ -1155,37 +1155,37 @@ function CreatePostModal({ categories, onSubmit, onClose }: {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Title *</label>
+            <label className="block text-sm font-medium text-white/80 mb-2">Title *</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What's on your mind?"
-              className="w-full p-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5"
+              className="w-full p-3 bg-white/10 border border-white/15 text-white placeholder-white/40 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5"
               maxLength={200}
             />
-            <p className="text-xs text-gray-400 mt-1 text-right">{title.length}/200</p>
+            <p className="text-xs text-white/40 mt-1 text-right">{title.length}/200</p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Details (optional)</label>
+            <label className="block text-sm font-medium text-white/80 mb-2">Details (optional)</label>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="Add more context to your post..."
-              className="w-full p-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-black/5"
+              className="w-full p-3 bg-white/10 border border-white/15 text-white placeholder-white/40 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-black/5"
               rows={6}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Tags (optional)</label>
+            <label className="block text-sm font-medium text-white/80 mb-2">Tags (optional)</label>
             <input
               type="text"
               value={tagsInput}
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="banking, visa, tips (comma separated)"
-              className="w-full p-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5"
+              className="w-full p-3 bg-white/10 border border-white/15 text-white placeholder-white/40 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-black/5"
             />
           </div>
         </form>

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
-import { useTheme } from "@/contexts/ThemeContext";
+import { AIOrb } from "@/components/ui/AIOrb";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
@@ -51,7 +51,6 @@ function formatMoney(value: number): string {
 
 export default function HomePage() {
   const router = useRouter();
-  const { theme, useSchoolTheme } = useTheme();
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -466,9 +465,6 @@ export default function HomePage() {
     userName,
   ]);
 
-  const accentColor = useSchoolTheme ? theme.primary_color : "#111111";
-  const accentTextColor =
-    useSchoolTheme && theme.text_on_primary === "black" ? "#111111" : "#FFFFFF";
   const openFullChat = () => {
     router.push("/chat");
   };
@@ -482,13 +478,9 @@ export default function HomePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
-        <div className="flex flex-col items-center gap-3">
-          <motion.div
-            className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          />
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-5">
+          <AIOrb size={72} variant="soft" />
           <p className="text-sm text-gray-500">Loading your dashboard...</p>
         </div>
       </div>
@@ -502,10 +494,11 @@ export default function HomePage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <h1 className="text-2xl font-semibold text-black tracking-tight">
-          Dashboard
+        <h1 className="display-greeting">
+          Hello {userName === "there" ? "" : userName}
+          <span className="block text-black">How can I help you today?</span>
         </h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="text-sm text-gray-500 mt-3">
           Your assistant and money overview in one place.
         </p>
       </motion.header>
@@ -518,7 +511,10 @@ export default function HomePage() {
           transition={{ duration: 0.35 }}
         >
           <div className="flex items-start justify-between gap-3">
-            <h2 className="text-2xl font-semibold text-black">AI Assistant</h2>
+            <div className="flex items-center gap-3">
+              <AIOrb size={36} />
+              <h2 className="section-title text-2xl">AI Assistant</h2>
+            </div>
             <button
               type="button"
               onClick={openFullChat}
@@ -542,38 +538,32 @@ export default function HomePage() {
           </div>
 
           <div className="mt-6 flex-1 space-y-5 min-h-[240px] overflow-y-auto">
-            <div className="rounded-2xl bg-gray-100 px-4 py-3 max-w-[92%]">
+            <div className="rounded-2xl bg-white/70 border border-white/75 px-4 py-3 max-w-[92%]">
               <p className="text-sm text-gray-700 leading-relaxed">
                 {aiSummary.opening}
               </p>
             </div>
 
-            <div
-              className="rounded-2xl px-4 py-3 ml-auto max-w-[92%]"
-              style={{ backgroundColor: accentColor }}
-            >
-              <p
-                className="text-sm leading-relaxed"
-                style={{ color: accentTextColor }}
-              >
+            <div className="rounded-2xl bg-black px-4 py-3 ml-auto max-w-[92%] shadow-glass">
+              <p className="text-sm leading-relaxed text-white">
                 {aiSummary.question}
               </p>
             </div>
 
-            <div className="rounded-2xl bg-gray-100 px-4 py-3 max-w-[92%]">
+            <div className="rounded-2xl bg-white/70 border border-white/75 px-4 py-3 max-w-[92%]">
               <p className="text-sm text-gray-700 leading-relaxed">
                 {aiSummary.answer}
               </p>
             </div>
           </div>
 
-          <div className="pt-6 border-t border-gray-100">
+          <div className="pt-6 border-t border-white/70">
             <div className="flex flex-wrap gap-2 mb-5">
               {QUICK_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
                   onClick={() => submitPrompt(prompt)}
-                  className="px-4 py-2 rounded-full text-xs border border-gray-200 text-gray-700 hover:border-gray-300 transition-colors"
+                  className="glass-pill px-4 py-2 text-xs text-gray-700 hover:border-gray-300 transition-colors"
                 >
                   {prompt}
                 </button>
@@ -590,12 +580,11 @@ export default function HomePage() {
                   }
                 }}
                 placeholder="Ask about your money..."
-                className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-black"
+                className="flex-1 bg-white/80 border border-white/75 rounded-full px-4 py-3 text-sm outline-none shadow-glass focus:border-noor-purple transition-colors"
               />
               <button
                 onClick={() => submitPrompt()}
-                className="w-11 h-11 rounded-xl text-white flex items-center justify-center transition-colors"
-                style={{ backgroundColor: accentColor, color: accentTextColor }}
+                className="w-11 h-11 rounded-full bg-black text-white flex items-center justify-center shadow-glass transition-colors hover:bg-noor-purple-deep"
                 aria-label="Open chat"
               >
                 <svg
@@ -624,14 +613,14 @@ export default function HomePage() {
         >
           <div>
             <div className="mb-6">
-              <h2 className="text-2xl font-semibold text-black">Money</h2>
+              <h2 className="section-title text-2xl">Money</h2>
               <p className="text-gray-500 text-sm">
                 All your finances in one place
               </p>
             </div>
 
             {isLoadingData && (
-              <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+              <div className="mb-4 rounded-2xl glass-pill px-4 py-3 text-sm text-gray-600">
                 Syncing your latest bank data...
               </div>
             )}
@@ -656,10 +645,7 @@ export default function HomePage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-gray-500 text-xs">Cash</p>
-                  <p
-                    className="text-lg font-medium"
-                    style={{ color: accentColor }}
-                  >
+                  <p className="text-lg font-medium text-noor-purple-deep">
                     {formatMoney(displayMetrics.cash)}
                   </p>
                 </div>
@@ -675,10 +661,7 @@ export default function HomePage() {
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Income</p>
-                <p
-                  className="text-xl font-semibold"
-                  style={{ color: accentColor }}
-                >
+                <p className="text-xl font-semibold text-noor-purple-deep">
                   +{formatMoney(displayMetrics.income)}
                 </p>
               </div>
@@ -704,7 +687,7 @@ export default function HomePage() {
                   displayMetrics.subscriptions.slice(0, 2).map((sub, idx) => (
                     <span
                       key={`${sub.name || "subscription"}-${idx}`}
-                      className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
+                      className="px-3 py-1 bg-white/70 border border-white/75 rounded-full text-sm text-gray-700"
                     >
                       {sub.name || "Subscription"} ·{" "}
                       {formatMoney(sub.amount || 0)}/mo
@@ -720,7 +703,7 @@ export default function HomePage() {
 
             <Link
               href="/money"
-              className="inline-flex items-center rounded-full px-5 py-2.5 text-sm font-medium border-[1.5px] border-black text-black bg-white hover:bg-black hover:text-white transition-colors"
+              className="inline-flex items-center rounded-full px-5 py-2.5 text-sm font-medium bg-black text-white shadow-glass hover:bg-noor-purple-deep transition-colors"
             >
               Open Money
             </Link>

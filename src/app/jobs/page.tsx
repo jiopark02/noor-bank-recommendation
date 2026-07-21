@@ -68,7 +68,7 @@ export default function JobsPage() {
             className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
               activeFilters.includes(filter.id)
                 ? 'bg-black text-white'
-                : 'bg-white text-black border-[1.5px] border-gray-200 hover:border-black'
+                : 'glass-pill text-black'
             }`}
           >
             {filter.label}

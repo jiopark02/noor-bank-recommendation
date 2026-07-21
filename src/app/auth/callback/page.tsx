@@ -140,7 +140,7 @@ export default function AuthCallbackPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+      <div className="min-h-screen flex flex-col items-center justify-center px-6">
         <div className="max-w-sm w-full text-center">
           <div className="w-12 h-12 mx-auto mb-6 rounded-full bg-red-100 flex items-center justify-center">
             <svg
@@ -173,7 +173,7 @@ export default function AuthCallbackPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+    <div className="min-h-screen flex flex-col items-center justify-center px-6">
       <div className="max-w-sm w-full text-center">
         <div className="w-12 h-12 mx-auto mb-6">
           <svg

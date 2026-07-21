@@ -4,12 +4,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { BottomNav } from "@/components/layout";
+import { AIOrb } from "@/components/ui/AIOrb";
 import { UserLevel, getUserFinanceLevel } from "@/lib/financeProTips";
 import { useChat } from "@/hooks/useChat";
 import { UserContext } from "@/lib/noorAIPrompt";
 import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 
-const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
+const FONT = "Inter, 'SF Pro Display', 'Helvetica Neue', -apple-system, sans-serif";
+const SERIF = "Georgia, 'Times New Roman', serif";
 
 // Guards the one-shot auto-reload below. sessionStorage survives a reload
 // (same tab) so the second hydrate pass after a reload sees the flag and
@@ -191,12 +193,8 @@ export default function ChatPage() {
   // sees their question right away — auth resolves in the background.
   if (isBooting && !initialPrompt) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
-        <motion.div
-          className="w-5 h-5 rounded-full border-2 border-gray-200 border-t-black"
-          animate={{ rotate: 360 }}
-          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-        />
+      <div className="min-h-screen flex items-center justify-center">
+        <AIOrb size={64} variant="soft" />
       </div>
     );
   }
@@ -210,36 +208,38 @@ export default function ChatPage() {
   const displayLoading = (isBooting && !!initialPrompt) || isLoading;
 
   return (
-    <div className="min-h-screen flex flex-col bg-white" style={{ fontFamily: FONT }}>
+    <div className="min-h-screen flex flex-col" style={{ fontFamily: FONT }}>
 
       {/* ── HEADER ── */}
       <div
         className="fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3"
         style={{
-          background: "rgba(255,255,255,0.95)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          borderBottom: "1px solid rgba(0,0,0,0.07)",
+          background: "rgba(255,255,255,0.55)",
+          backdropFilter: "blur(20px) saturate(1.4)",
+          WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+          borderBottom: "1px solid rgba(255,255,255,0.6)",
         }}
       >
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
-            className="w-8 h-8 flex items-center justify-center rounded-full transition-colors"
-            style={{ background: "rgba(0,0,0,0.05)" }}
+            className="w-8 h-8 flex items-center justify-center rounded-full transition-colors border border-white/75"
+            style={{ background: "rgba(255,255,255,0.7)" }}
           >
             <svg className="w-4 h-4 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
 
-          <div>
+          <div className="flex items-center gap-2.5">
+            <AIOrb size={26} />
+            <div>
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-semibold text-black" style={{ fontFamily: FONT }}>
                 Noor AI
               </span>
               <span
-                className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500"
+                className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/70 border border-white/75 text-gray-500"
                 style={{ fontFamily: FONT }}
               >
                 {LEVEL_LABEL[userLevel]}
@@ -248,6 +248,7 @@ export default function ChatPage() {
             <p className="text-[11px] text-gray-400 mt-0.5" style={{ fontFamily: FONT }}>
               {userName ? `Personalized for ${userName}` : "Personalized to your profile"}
             </p>
+            </div>
           </div>
         </div>
 
@@ -277,46 +278,57 @@ export default function ChatPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: "easeOut" }}
           >
-            {/* Wordmark */}
-            <div className="mb-8">
-              <p
-                className="text-[11px] font-medium tracking-widest text-gray-400 uppercase mb-3"
-                style={{ fontFamily: FONT, letterSpacing: "0.18em" }}
+            {/* Orb + serif greeting */}
+            <div className="mb-10 flex flex-col items-center text-center">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.6, ease: "easeOut" }}
+                className="mb-8"
               >
-                NOOR
-              </p>
+                <AIOrb size={110} halo />
+              </motion.div>
               <h2
-                className="text-[26px] font-semibold text-black leading-tight"
-                style={{ fontFamily: FONT, letterSpacing: "-0.02em" }}
+                className="text-[34px] leading-[1.15]"
+                style={{ fontFamily: SERIF, letterSpacing: "-0.02em", color: "#6D64A8" }}
               >
-                {userName ? `Hi ${userName}.` : "Ask me anything."}
+                {userName ? `Hello ${userName}` : "Hello"}
               </h2>
-              <p className="text-[14px] text-gray-400 mt-1.5 leading-relaxed" style={{ fontFamily: FONT }}>
-                Banking, credit, visa, taxes — I know your profile.
+              <p
+                className="text-[30px] leading-snug text-black"
+                style={{ fontFamily: SERIF, letterSpacing: "-0.02em" }}
+              >
+                How can I help you today?
+              </p>
+              <p className="text-[14px] text-gray-500 mt-3 leading-relaxed" style={{ fontFamily: FONT }}>
+                Banking, credit, budgeting, taxes — I know your profile.
               </p>
             </div>
 
-            {/* Prompts as plain rows */}
-            <div className="space-y-1">
+            {/* Prompts as frosted rows */}
+            <div className="space-y-2">
               {quickPrompts.slice(0, 6).map((p, i) => (
                 <motion.button
                   key={i}
                   onClick={() => void handleSend(p.prompt)}
-                  className="w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-left group transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl text-left group"
                   style={{
-                    background: "rgba(0,0,0,0.03)",
-                    border: "1px solid rgba(0,0,0,0)",
+                    background: "rgba(255,255,255,0.62)",
+                    border: "1px solid rgba(255,255,255,0.75)",
+                    boxShadow: "0 4px 16px rgba(109,100,168,0.08)",
+                    backdropFilter: "blur(16px)",
+                    WebkitBackdropFilter: "blur(16px)",
                   }}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.055, duration: 0.3 }}
-                  whileHover={{ background: "rgba(0,0,0,0.06)" }}
+                  whileHover={{ background: "rgba(255,255,255,0.85)" }}
                   whileTap={{ scale: 0.99 }}
                 >
                   <span className="text-[13.5px] text-black" style={{ fontFamily: FONT }}>
                     {p.label}
                   </span>
-                  <svg className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </motion.button>
@@ -338,10 +350,8 @@ export default function ChatPage() {
                     transition={{ duration: 0.25, delay: Math.min(i * 0.03, 0.15), ease: "easeOut" }}
                   >
                     {!isUser && (
-                      <div
-                        className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center mb-0.5 bg-black"
-                      >
-                        <span className="text-[9px] font-semibold text-white" style={{ fontFamily: FONT, letterSpacing: "0.06em" }}>N</span>
+                      <div className="flex-shrink-0 mb-0.5">
+                        <AIOrb size={24} />
                       </div>
                     )}
                     <div
@@ -351,8 +361,18 @@ export default function ChatPage() {
                       style={{
                         fontFamily: FONT,
                         ...(isUser
-                          ? { background: "#0A0A0A", color: "#FFFFFF" }
-                          : { background: "#F5F5F5", color: "#0A0A0A" }),
+                          ? {
+                              background: "#2B2740",
+                              color: "#FFFFFF",
+                              boxShadow: "0 6px 20px rgba(43,39,64,0.2)",
+                            }
+                          : {
+                              background: "rgba(255,255,255,0.7)",
+                              border: "1px solid rgba(255,255,255,0.75)",
+                              color: "#2B2740",
+                              backdropFilter: "blur(16px)",
+                              WebkitBackdropFilter: "blur(16px)",
+                            }),
                       }}
                     >
                       {formatContent(msg.content)}
@@ -371,10 +391,16 @@ export default function ChatPage() {
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <div className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center mb-0.5 bg-black">
-                    <span className="text-[9px] font-semibold text-white" style={{ fontFamily: FONT, letterSpacing: "0.06em" }}>N</span>
+                  <div className="flex-shrink-0 mb-0.5">
+                    <AIOrb size={24} />
                   </div>
-                  <div className="px-4 py-3.5 rounded-2xl rounded-bl-[5px] bg-[#F5F5F5]">
+                  <div
+                    className="px-4 py-3.5 rounded-2xl rounded-bl-[5px]"
+                    style={{
+                      background: "rgba(255,255,255,0.7)",
+                      border: "1px solid rgba(255,255,255,0.75)",
+                    }}
+                  >
                     <div className="flex items-center gap-1">
                       {[0, 1, 2].map((i) => (
                         <motion.div
@@ -403,7 +429,7 @@ export default function ChatPage() {
         {/* Fade behind input */}
         <div
           className="absolute inset-x-0 -top-8 bottom-0 pointer-events-none"
-          style={{ background: "linear-gradient(to top, white 60%, rgba(255,255,255,0))" }}
+          style={{ background: "linear-gradient(to top, rgba(246,244,251,0.95) 60%, rgba(246,244,251,0))" }}
         />
 
         {/* Inline quick prompts when conversation active */}
@@ -422,9 +448,10 @@ export default function ChatPage() {
                   onClick={() => void handleSend(p.prompt)}
                   className="flex-shrink-0 px-3 py-1.5 rounded-full text-[12px] whitespace-nowrap transition-colors"
                   style={{
-                    background: "white",
-                    border: "1px solid rgba(0,0,0,0.12)",
-                    color: "rgba(0,0,0,0.55)",
+                    background: "rgba(255,255,255,0.8)",
+                    border: "1px solid rgba(255,255,255,0.75)",
+                    boxShadow: "0 2px 10px rgba(109,100,168,0.1)",
+                    color: "#5C5878",
                     fontFamily: FONT,
                   }}
                 >
@@ -453,11 +480,15 @@ export default function ChatPage() {
         <div
           className="relative flex items-center gap-2"
           style={{
-            background: "#FFFFFF",
-            border: `1px solid ${isFocused ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.1)"}`,
-            borderRadius: "16px",
-            padding: "7px 7px 7px 16px",
-            boxShadow: isFocused ? "0 2px 16px rgba(0,0,0,0.09)" : "0 2px 10px rgba(0,0,0,0.06)",
+            background: "rgba(255,255,255,0.8)",
+            backdropFilter: "blur(20px) saturate(1.4)",
+            WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+            border: `1px solid ${isFocused ? "rgba(109,100,168,0.45)" : "rgba(255,255,255,0.75)"}`,
+            borderRadius: "100px",
+            padding: "7px 7px 7px 18px",
+            boxShadow: isFocused
+              ? "0 8px 28px rgba(109,100,168,0.22)"
+              : "0 6px 20px rgba(109,100,168,0.12)",
             transition: "border-color 0.18s, box-shadow 0.18s",
           }}
         >
@@ -471,18 +502,19 @@ export default function ChatPage() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); }
             }}
-            placeholder="Ask about banking, visa, taxes…"
-            className="flex-1 bg-transparent outline-none text-[14px] placeholder:text-gray-300"
-            style={{ fontFamily: FONT, color: "#0A0A0A" }}
+            placeholder="Ask about banking, credit, taxes…"
+            className="flex-1 bg-transparent outline-none text-[14px] placeholder:text-gray-400"
+            style={{ fontFamily: FONT, color: "#2B2740" }}
           />
 
           <motion.button
             onClick={() => void handleSend()}
             disabled={!input.trim() || isLoading}
-            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
             style={{
-              background: input.trim() && !isLoading ? "#0A0A0A" : "rgba(0,0,0,0.07)",
-              transition: "background 0.18s",
+              background: input.trim() && !isLoading ? "#2B2740" : "rgba(43,39,64,0.08)",
+              boxShadow: input.trim() && !isLoading ? "0 4px 14px rgba(43,39,64,0.28)" : "none",
+              transition: "background 0.18s, box-shadow 0.18s",
             }}
             whileTap={input.trim() && !isLoading ? { scale: 0.9 } : {}}
           >
@@ -496,7 +528,7 @@ export default function ChatPage() {
               <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none">
                 <path
                   d="M2 7H12M12 7L8 3M12 7L8 11"
-                  stroke={input.trim() ? "white" : "rgba(0,0,0,0.25)"}
+                  stroke={input.trim() ? "white" : "rgba(43,39,64,0.3)"}
                   strokeWidth="1.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"

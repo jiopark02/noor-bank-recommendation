@@ -291,7 +291,10 @@ export function handlePlaidError(error: unknown): NextResponse {
     plaidErrorCode === "INVALID_ACCESS_TOKEN"
   ) {
     return NextResponse.json(
-      { error: "Bank connection expired. Please re-link your account." },
+      {
+        error: "Bank connection expired. Please re-link your account.",
+        errorType: "ITEM_LOGIN_REQUIRED",
+      },
       { status: 401 }
     );
   }
