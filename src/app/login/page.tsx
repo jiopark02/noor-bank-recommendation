@@ -167,7 +167,7 @@ export default function LoginPage() {
         <div className="max-w-sm w-full">
           {/* Logo */}
           <div className="text-center mb-12">
-            <Link href="/landing">
+            <Link href="/waitlist">
               <h1
                 className="text-2xl tracking-[0.35em] font-semibold hover:opacity-60 transition-opacity"
                 style={{

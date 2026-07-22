@@ -71,7 +71,7 @@ export default function HomePage() {
   useEffect(() => {
     const storedUserId = localStorage.getItem("noor_user_id");
     if (!storedUserId) {
-      router.replace("/landing");
+      router.replace("/waitlist");
       return;
     }
     setUserId(storedUserId);
