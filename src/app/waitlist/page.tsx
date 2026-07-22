@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Manrope } from 'next/font/google';
 import { motion, AnimatePresence } from 'framer-motion';
 import { validateEmail } from '@/lib/validation';
@@ -40,6 +41,7 @@ const FEATURE_CARDS = [
 ];
 
 export default function WaitlistPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -95,7 +97,7 @@ export default function WaitlistPage() {
           onClick={() => window.location.href = '/landing'}
           className="text-2xl font-extrabold tracking-tight hover:opacity-70 transition-opacity"
         >
-          Noor
+          noor
         </button>
       </nav>
 
@@ -190,6 +192,14 @@ export default function WaitlistPage() {
                         'Join waitlist'
                       )}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/demo')}
+                      disabled={isLoading}
+                      className="w-full md:w-auto px-8 py-4 bg-white text-[#1a1a1a] font-bold rounded-xl border border-[#d1d0ce] hover:border-[#1a1a1a] active:scale-95 transition-all disabled:opacity-60"
+                    >
+                      Try demo
+                    </button>
                   </form>
 
                   {/* Inline error */}
@@ -210,6 +220,15 @@ export default function WaitlistPage() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Secondary: learn more on the landing page (subtle, not a CTA) */}
+            <button
+              type="button"
+              onClick={() => router.push('/landing')}
+              className="text-xs text-[#6b6a68]/70 underline underline-offset-2 hover:text-[#6b6a68] transition-colors mb-4"
+            >
+              for more information
+            </button>
 
             {/* Social proof */}
             {status !== 'success' && (
