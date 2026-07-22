@@ -1,6 +1,12 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let resend: Resend | null = null;
+
+function getResendClient(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!resend) resend = new Resend(process.env.RESEND_API_KEY);
+  return resend;
+}
 
 const FROM_EMAIL = process.env.SMTP_FROM || "hello@noor.financial";
 const FROM_NAME = process.env.SMTP_FROM_NAME || "NOOR";
@@ -19,8 +25,14 @@ export async function sendEmail({
   html,
   text,
 }: EmailOptions): Promise<boolean> {
+  const client = getResendClient();
+  if (!client) {
+    console.error("Failed to send email: RESEND_API_KEY is not configured");
+    return false;
+  }
+
   try {
-    const { error } = await resend.emails.send({
+    const { error } = await client.emails.send({
       from: `${FROM_NAME} <${FROM_EMAIL}>`,
       to,
       subject,
