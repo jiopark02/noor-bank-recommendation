@@ -128,38 +128,6 @@ export const DEMO_TRANSACTIONS: DemoTransaction[] = [
   { name: 'Target', category: 'Shopping', amount: 38.42, date: 'Jun 12' },
 ];
 
-export interface DemoRecommendation {
-  name: string;
-  score: number;
-  tag: string;
-  monthlyFee: string;
-  features: string[];
-}
-
-export const DEMO_RECOMMENDATIONS: DemoRecommendation[] = [
-  {
-    name: 'Capital One 360 Checking',
-    score: 96,
-    tag: 'Best for Beginners',
-    monthlyFee: '$0 / mo',
-    features: ['No SSN history required', 'No monthly fees', 'No minimum balance'],
-  },
-  {
-    name: 'Chase Secure Banking',
-    score: 89,
-    tag: 'Fee-Sensitive Pick',
-    monthlyFee: '$4.95 / mo (waivable)',
-    features: ['Easy fee waiver with direct deposit', 'Zelle built in', 'Large branch network'],
-  },
-  {
-    name: 'Varo Bank',
-    score: 84,
-    tag: 'Fully Digital',
-    monthlyFee: '$0 / mo',
-    features: ['No physical branches needed', 'Early paycheck access', 'Automatic savings tools'],
-  },
-];
-
 const CANNED_ANSWERS: Array<{ keywords: string[]; answer: string }> = [
   {
     keywords: ['budget'],
