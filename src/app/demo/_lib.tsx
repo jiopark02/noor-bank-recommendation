@@ -6,8 +6,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
-export const ACCENT = '#5B4EE8';
-export const ACCENT_GRADIENT = 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)';
 
 export const INK = {
   primary: 'rgba(0,0,0,0.92)',
