@@ -28,8 +28,7 @@ export default function DemoSettingsPage() {
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-black"
-        style={{ borderColor: LINE.default }}
+        className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-black"
       />
     </div>
   );
@@ -55,8 +54,8 @@ export default function DemoSettingsPage() {
             <input
               value={DEMO_PROFILE.email}
               disabled
-              className="w-full border rounded-xl px-4 py-2.5 text-sm"
-              style={{ borderColor: LINE.default, background: SURFACE.subtle, color: INK.muted }}
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm"
+              style={{ background: SURFACE.subtle, color: INK.muted }}
             />
           </div>
 
