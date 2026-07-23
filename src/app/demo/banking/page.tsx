@@ -22,7 +22,7 @@ export default function DemoBankingPage() {
     <DemoShell>
       {Toast}
       <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Banking</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Wallet</h1>
         <p className="text-sm mt-1" style={{ color: 'rgba(0,0,0,0.45)' }}>
           Sample account &amp; recent transactions.
         </p>

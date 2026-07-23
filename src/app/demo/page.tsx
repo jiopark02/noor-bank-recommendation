@@ -23,7 +23,7 @@ export default function DemoEntryPage() {
     }, 380);
 
     const redirectTimer = setTimeout(() => {
-      router.push('/demo/dashboard');
+      router.push('/demo/chat');
     }, 1200);
 
     return () => {

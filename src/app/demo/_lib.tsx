@@ -203,12 +203,27 @@ export function formatMoney(value: number): string {
 // ── Shared shell: banner + nav ──────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { href: '/demo/dashboard', label: 'Dashboard' },
-  { href: '/demo/banking', label: 'Banking' },
-  { href: '/demo/recommendations', label: 'Recommendations' },
   { href: '/demo/chat', label: 'Noor AI' },
-  { href: '/demo/settings', label: 'Settings' },
+  { href: '/demo/banking', label: 'Wallet' },
 ];
+
+function GearIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="5" />
+      <path d="M18.2 12h2.2M3.6 12h2.2M12 5.8V3.6M12 18.2v2.2M16.38 7.62l1.56-1.56M6.06 17.94l1.56-1.56M16.38 16.38l1.56 1.56M6.06 6.06l1.56 1.56" />
+    </svg>
+  );
+}
 
 export function DemoBanner() {
   const remaining = useDemoMessagesRemaining();
@@ -247,7 +262,7 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
         className="sticky top-0 z-40 flex items-center justify-between px-5 py-3 backdrop-blur-sm"
         style={{ background: 'rgba(255,255,255,0.92)', borderBottom: '1px solid rgba(0,0,0,0.07)' }}
       >
-        <button onClick={() => router.push('/demo/dashboard')} className="flex items-center gap-2.5">
+        <button onClick={() => router.push('/demo/chat')} className="flex items-center gap-2.5">
           <div className="w-[24px] h-[24px] rounded flex items-center justify-center" style={{ background: ACCENT_GRADIENT }}>
             <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
               <path d="M6 0.5L11.5 6L6 11.5L0.5 6L6 0.5Z" fill="white" />
@@ -262,20 +277,43 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
           </span>
         </button>
 
-        <div className="hidden sm:flex items-center gap-1">
-          {NAV_ITEMS.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="px-3 py-1.5 rounded-lg text-[12.5px] transition-colors"
-                style={{ color: active ? ACCENT : 'rgba(0,0,0,0.5)', background: active ? 'rgba(91,78,232,0.08)' : 'transparent' }}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-1">
+            {NAV_ITEMS.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="px-3 py-1.5 rounded-lg text-[12.5px] transition-colors"
+                  style={{ color: active ? ACCENT : 'rgba(0,0,0,0.5)', background: active ? 'rgba(91,78,232,0.08)' : 'transparent' }}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+
+          <span
+            className="hidden sm:block w-px h-[15px]"
+            style={{ background: 'rgba(0,0,0,0.1)' }}
+            aria-hidden="true"
+          />
+
+          <Link
+            href="/demo/settings"
+            aria-label="Settings"
+            className="flex items-center justify-center w-7 h-7 rounded-full transition-colors"
+            style={{
+              color: pathname === '/demo/settings' ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.5)',
+              border: '1px solid rgba(0,0,0,0.1)',
+              background: pathname === '/demo/settings'
+                ? 'rgba(0,0,0,0.05)'
+                : 'rgba(255,255,255,0.6)',
+            }}
+          >
+            <GearIcon />
+          </Link>
         </div>
       </nav>
 
