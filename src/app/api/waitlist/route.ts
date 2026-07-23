@@ -37,8 +37,6 @@ export async function POST(request: NextRequest) {
     email,
     name: rawName,
     source: 'waitlist_page',
-    ip_address: request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? null,
-    user_agent: request.headers.get('user-agent') ?? null,
   });
 
   if (error) {
