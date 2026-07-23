@@ -292,7 +292,7 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white text-black" style={{ fontFamily: FONT }}>
+    <div className="min-h-screen" style={{ fontFamily: FONT, background: '#FFFFFF', color: INK.primary }}>
       <DemoBanner />
 
       <nav

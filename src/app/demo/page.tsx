@@ -34,8 +34,8 @@ export default function DemoEntryPage() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center bg-white text-black px-6"
-      style={{ fontFamily: FONT }}
+      className="min-h-screen flex flex-col items-center justify-center px-6"
+      style={{ fontFamily: FONT, background: '#FFFFFF', color: INK.primary }}
     >
       <motion.div
         className="w-12 h-12 rounded-xl mb-8"

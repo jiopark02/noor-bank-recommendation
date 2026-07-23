@@ -32,6 +32,7 @@ export default function DemoChatPage() {
   const [draft, setDraft] = useState('');
   const [typing, setTyping] = useState(false);
   const [used, setUsed] = useState(0);
+  const [inputFocused, setInputFocused] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -144,8 +145,15 @@ export default function DemoChatPage() {
               if (e.key === 'Enter') send();
             }}
             disabled={capped}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             placeholder={capped ? 'Demo message limit reached' : 'Ask Noor anything...'}
-            className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-black disabled:bg-gray-50 disabled:text-gray-400"
+            className="flex-1 border rounded-xl px-4 py-2.5 text-sm outline-none"
+            style={{
+              borderColor: inputFocused ? INK.primary : LINE.default,
+              background: capped ? SURFACE.subtle : undefined,
+              color: capped ? INK.muted : undefined,
+            }}
           />
           <DemoButton
             variant="solid"
