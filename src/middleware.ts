@@ -45,6 +45,14 @@ export async function middleware(request: NextRequest) {
     },
   });
 
+  // Only protected paths need auth resolution + session refresh. Non-protected
+  // paths (/, /landing, /login, /waitlist, ...) fall through to passthrough,
+  // matching the pre-demo-merge baseline where middleware ran only on
+  // PROTECTED_PREFIXES. The demo host check above already ran for every path.
+  if (!isProtectedPath(pathname)) {
+    return response;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -73,11 +81,17 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch {
+    // Fail closed: if auth can't be resolved on a protected path, treat as
+    // unauthenticated and send to /login rather than 500-ing the request.
+    user = null;
+  }
 
-  if (isProtectedPath(pathname) && !user) {
+  if (!user) {
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }
