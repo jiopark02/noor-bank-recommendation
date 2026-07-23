@@ -206,13 +206,6 @@ export default function WaitlistPage() {
             >
               for more information
             </button>
-
-            {/* Social proof */}
-            {status !== 'success' && (
-              <p className="text-sm text-[#6b6a68]/60">
-                <span className="font-semibold text-[#6b6a68]">2,847</span> people ahead of you · no spam, ever
-              </p>
-            )}
           </motion.section>
 
         </div>
