@@ -24,6 +24,7 @@ import {
   formatMemoryForPrompt,
   saveMessages,
   getSessionMessages,
+  getRecentChatTurnCount,
   type DbChatMessage,
   type ChatSession,
 } from "@/lib/aiMemory";
@@ -45,6 +46,47 @@ const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
 
 function isAiSupabaseReadEnabled(): boolean {
   return process.env.AI_SUPABASE_READ_ENABLED === "true";
+}
+
+// Rolling window for the chat rate-limit hard cap (B1): 1 hour.
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+
+interface ChatRateLimitConfig {
+  maxRequestsPerHour: number;
+}
+
+/**
+ * Resolves the chat rate-limit config from env, or null when disabled.
+ *
+ * Disabled (returns null) when CHAT_RATE_LIMIT_ENABLED is not exactly "true",
+ * or when CHAT_MAX_REQUESTS_PER_HOUR is missing / non-numeric / non-positive.
+ * A null result leaves the request flow byte-for-byte unchanged, so an unset or
+ * misconfigured env can never accidentally block real users.
+ */
+function resolveChatRateLimit(): ChatRateLimitConfig | null {
+  if (process.env.CHAT_RATE_LIMIT_ENABLED?.trim() !== "true") {
+    return null;
+  }
+
+  const raw = process.env.CHAT_MAX_REQUESTS_PER_HOUR?.trim();
+  if (!raw) {
+    console.error(
+      "[rate-limit] CHAT_RATE_LIMIT_ENABLED=true but " +
+        "CHAT_MAX_REQUESTS_PER_HOUR is unset; rate limit disabled."
+    );
+    return null;
+  }
+
+  const maxRequestsPerHour = Number(raw);
+  if (!Number.isFinite(maxRequestsPerHour) || maxRequestsPerHour <= 0) {
+    console.error(
+      "[rate-limit] CHAT_RATE_LIMIT_ENABLED=true but " +
+        `CHAT_MAX_REQUESTS_PER_HOUR is invalid (${raw}); rate limit disabled.`
+    );
+    return null;
+  }
+
+  return { maxRequestsPerHour };
 }
 
 function mapSupabaseContextToUserContext(data: {
@@ -891,6 +933,44 @@ export async function POST(request: NextRequest) {
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
     if (!authUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Rate-limit hard cap (B1): reject clearly abnormal usage (e.g. a client
+    // infinite loop) BEFORE any LLM call, DB write, or Plaid fetch — so a
+    // blocked request costs nothing. This is a loose safety ceiling, not a
+    // per-user quota; normal use must never hit it. Gated entirely by
+    // CHAT_RATE_LIMIT_ENABLED, so an unset/false env leaves the flow untouched.
+    const rateLimit = resolveChatRateLimit();
+    if (rateLimit) {
+      try {
+        const recentTurns = await getRecentChatTurnCount(authUserId, {
+          sinceMs: RATE_LIMIT_WINDOW_MS,
+        });
+        if (recentTurns >= rateLimit.maxRequestsPerHour) {
+          console.warn(
+            "[rate-limit] user %s blocked: %d turns in last hour >= cap %d",
+            authUserId,
+            recentTurns,
+            rateLimit.maxRequestsPerHour
+          );
+          return NextResponse.json(
+            {
+              error:
+                "You've reached the usage limit for now. Please try again later.",
+              code: "RATE_LIMITED",
+            },
+            { status: 429 }
+          );
+        }
+      } catch (error) {
+        // Fail-open: a transient count-query failure must not block legitimate
+        // users. Log loudly; the next request re-checks. The account-level
+        // OpenRouter spend limit is the backstop for the DB-down + abuse case.
+        console.error(
+          "[rate-limit] turn-count check failed; allowing request (fail-open):",
+          error
+        );
+      }
     }
 
     let activeSession: ChatSession | null = null;
