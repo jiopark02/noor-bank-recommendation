@@ -14,7 +14,8 @@ import {
 } from "@/lib/plaid";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
+import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
+import { clearLocalAuthState } from "@/lib/validation";
 import {
   asPlainObject,
   readErrorMessage,
@@ -67,15 +68,31 @@ export default function MoneyPage() {
   // Use the Plaid connections hook
   const plaidConnections = usePlaidConnections(userId);
 
-  // Initialize user
+  // Initialize user. noor_user_id is only a legacy synchronous cache; the live
+  // Supabase session is the source of truth. Verify it before rendering so an
+  // expired session redirects cleanly to /login instead of showing the page
+  // with every Plaid endpoint returning 401.
   useEffect(() => {
-    const storedUserId = localStorage.getItem("noor_user_id");
-    if (!storedUserId) {
-      router.push("/welcome");
-      return;
-    }
-    setUserId(storedUserId);
-    setIsLoading(false);
+    let cancelled = false;
+    (async () => {
+      const storedUserId = localStorage.getItem("noor_user_id");
+      if (!storedUserId) {
+        router.push("/welcome");
+        return;
+      }
+      const session = await getSessionSafe();
+      if (cancelled) return;
+      if (!session) {
+        clearLocalAuthState();
+        router.replace("/login");
+        return;
+      }
+      setUserId(session.user.id);
+      setIsLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   // Fetch accounts and transactions

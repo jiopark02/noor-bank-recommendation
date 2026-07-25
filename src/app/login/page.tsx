@@ -8,9 +8,10 @@ import {
   validateEmail,
   createSession,
   updateSessionActivity,
+  clearLocalAuthState,
   ERROR_MESSAGES,
 } from "@/lib/validation";
-import { supabase } from "@/lib/supabase-browser";
+import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 
 export default function LoginPage() {
@@ -18,12 +19,27 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Redirect already-logged-in users straight to dashboard
+  // Redirect already-logged-in users straight to dashboard — but only if a real
+  // Supabase session exists. noor_user_id is a legacy synchronous cache, not the
+  // source of truth; if it lingers after the session has expired, redirecting on
+  // it alone bounces the user to /dashboard, where middleware immediately sends
+  // them back to /login (an infinite loop while every API returns 401). So we
+  // verify the session and clear the stale cache when there is none.
   useEffect(() => {
-    const userId = localStorage.getItem("noor_user_id");
-    if (userId) {
-      router.replace("/dashboard");
-    }
+    let cancelled = false;
+    (async () => {
+      if (!localStorage.getItem("noor_user_id")) return;
+      const session = await getSessionSafe();
+      if (cancelled) return;
+      if (session) {
+        router.replace("/dashboard");
+      } else {
+        clearLocalAuthState();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
   const [showPassword, setShowPassword] = useState(false);
   const [keepSignedIn, setKeepSignedIn] = useState(false);
