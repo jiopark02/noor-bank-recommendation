@@ -7,7 +7,8 @@ import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { useTheme } from "@/contexts/ThemeContext";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
+import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
+import { clearLocalAuthState } from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 interface StoredBudget {
@@ -110,6 +111,18 @@ export default function HomePage() {
     let cancelled = false;
     (async () => {
       try {
+        // The authoritative auth signal is the live Supabase session, not the
+        // legacy noor_user_id cache read above. If the session has expired, clear
+        // the stale cache and send the user to /login instead of rendering the
+        // dashboard and firing 401s at every money/Plaid endpoint.
+        const session = await getSessionSafe();
+        if (cancelled) return;
+        if (!session) {
+          clearLocalAuthState();
+          router.replace("/login");
+          return;
+        }
+
         const res = await fetch("/api/plaid/connections", {
           method: "GET",
           headers: await getSupabaseBearerHeaders(),
