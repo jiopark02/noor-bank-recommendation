@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Manrope } from 'next/font/google';
 import { motion, AnimatePresence } from 'framer-motion';
 import { validateEmail } from '@/lib/validation';
@@ -9,37 +10,8 @@ const manrope = Manrope({ subsets: ['latin'], weight: ['400', '500', '600', '700
 
 type Status = 'idle' | 'loading' | 'success' | 'error' | 'duplicate';
 
-const FEATURE_CARDS = [
-  {
-    title: 'Start with a goal',
-    desc: '"Save for AirPods next month" beats any jargon-filled budget app.',
-    icon: (
-      <svg className="w-6 h-6 text-stone-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Just chat',
-    desc: 'No charts to read, no terms to memorize. Ask a question, get an answer.',
-    icon: (
-      <svg className="w-6 h-6 text-stone-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Bank-grade security',
-    desc: 'Read-only access. Encrypted end-to-end. Never sold, never shared.',
-    icon: (
-      <svg className="w-6 h-6 text-stone-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-      </svg>
-    ),
-  },
-];
-
 export default function WaitlistPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -95,7 +67,7 @@ export default function WaitlistPage() {
           onClick={() => window.location.href = '/landing'}
           className="text-2xl font-extrabold tracking-tight hover:opacity-70 transition-opacity"
         >
-          Noor
+          noor
         </button>
       </nav>
 
@@ -147,6 +119,13 @@ export default function WaitlistPage() {
                   </svg>
                   <p className="text-lg font-bold">You&apos;re on the list!</p>
                   <p className="text-[#6b6a68]">We&apos;ll email you when it&apos;s your turn.</p>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/demo')}
+                    className="w-full md:w-auto mt-4 px-8 py-4 bg-white text-[#1a1a1a] font-bold rounded-xl border border-[#d1d0ce] hover:border-[#1a1a1a] active:scale-95 transition-all"
+                  >
+                    Try demo
+                  </button>
                 </motion.div>
               ) : (
                 <motion.div
@@ -190,6 +169,14 @@ export default function WaitlistPage() {
                         'Join waitlist'
                       )}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/demo')}
+                      disabled={isLoading}
+                      className="w-full md:w-auto px-8 py-4 bg-white text-[#1a1a1a] font-bold rounded-xl border border-[#d1d0ce] hover:border-[#1a1a1a] active:scale-95 transition-all disabled:opacity-60"
+                    >
+                      Try demo
+                    </button>
                   </form>
 
                   {/* Inline error */}
@@ -211,38 +198,14 @@ export default function WaitlistPage() {
               )}
             </AnimatePresence>
 
-            {/* Social proof */}
-            {status !== 'success' && (
-              <p className="text-sm text-[#6b6a68]/60">
-                <span className="font-semibold text-[#6b6a68]">2,847</span> people ahead of you · no spam, ever
-              </p>
-            )}
-          </motion.section>
-
-          {/* Feature cards */}
-          <motion.section
-            className="grid grid-cols-1 gap-4"
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.12, ease: [0.16, 1, 0.3, 1] }}
-          >
-            {FEATURE_CARDS.map((card) => (
-              <div
-                key={card.title}
-                className="p-8 rounded-2xl flex flex-col gap-4 bg-white transition-all duration-200"
-                style={{ border: '1px solid #e5e4e2' }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#d1d0ce')}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#e5e4e2')}
-              >
-                <div className="w-10 h-10 flex items-center justify-center bg-stone-100 rounded-lg flex-shrink-0">
-                  {card.icon}
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg mb-1">{card.title}</h3>
-                  <p className="text-[#6b6a68] leading-relaxed">{card.desc}</p>
-                </div>
-              </div>
-            ))}
+            {/* Secondary: learn more on the landing page (subtle, not a CTA) */}
+            <button
+              type="button"
+              onClick={() => router.push('/landing')}
+              className="text-xs text-[#6b6a68]/70 underline underline-offset-2 hover:text-[#6b6a68] transition-colors mb-4"
+            >
+              for more information
+            </button>
           </motion.section>
 
         </div>

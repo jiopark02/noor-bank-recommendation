@@ -228,7 +228,5 @@ export interface WaitlistSignup {
   email: string;
   name: string | null;
   source: string;
-  ip_address: string | null;
-  user_agent: string | null;
   created_at: string;
 }

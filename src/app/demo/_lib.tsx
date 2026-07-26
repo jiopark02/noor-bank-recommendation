@@ -6,10 +6,82 @@ import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
-export const ACCENT = '#5B4EE8';
-export const ACCENT_GRADIENT = 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)';
+
+export const INK = {
+  primary: 'rgba(0,0,0,0.92)',
+  secondary: 'rgba(0,0,0,0.55)',
+  muted: 'rgba(0,0,0,0.4)',
+  inverse: '#FFFFFF',
+};
+
+export const LINE = {
+  hairline: 'rgba(0,0,0,0.06)',
+  default: 'rgba(0,0,0,0.09)',
+  strong: 'rgba(0,0,0,0.14)',
+};
+
+export const SURFACE = {
+  subtle: 'rgba(0,0,0,0.03)',
+  raised: 'rgba(0,0,0,0.055)',
+  glass: 'rgba(255,255,255,0.72)',
+  solid: 'rgba(0,0,0,0.9)',
+};
+
+export const GRADIENT = {
+  mark: 'linear-gradient(135deg, #3C3C3E 0%, #000000 100%)',
+  surface: 'linear-gradient(180deg, rgba(0,0,0,0.022) 0%, rgba(0,0,0,0.004) 100%)',
+};
+
+export type DemoButtonVariant = 'solid' | 'glass' | 'ghost';
+
+export const DEMO_BUTTON_CLASS =
+  'inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[12.5px] font-medium transition-colors';
+
+export function demoButtonStyle(variant: DemoButtonVariant = 'glass'): React.CSSProperties {
+  switch (variant) {
+    case 'solid':
+      return {
+        background: SURFACE.solid,
+        color: INK.inverse,
+        border: '1px solid transparent',
+      };
+    case 'ghost':
+      return {
+        background: 'transparent',
+        color: INK.secondary,
+        border: '1px solid transparent',
+      };
+    case 'glass':
+    default:
+      return {
+        background: 'rgba(255,255,255,0.55)',
+        color: INK.primary,
+        border: `1px solid ${LINE.strong}`,
+      };
+  }
+}
+
+export function DemoButton({
+  variant = 'glass',
+  className = '',
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: DemoButtonVariant }) {
+  return (
+    <button
+      className={`${DEMO_BUTTON_CLASS} ${className}`}
+      style={demoButtonStyle(variant)}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
 
 export const MAX_DEMO_MESSAGES = 3;
+
+// The waitlist stays on the same domain as the demo (no cross-domain jump).
+export const WAITLIST_URL = '/waitlist';
 
 const USAGE_KEY = 'noor_demo_messages_used';
 const ACTIVE_KEY = 'noor_demo_active';
@@ -125,38 +197,6 @@ export const DEMO_TRANSACTIONS: DemoTransaction[] = [
   { name: 'Target', category: 'Shopping', amount: 38.42, date: 'Jun 12' },
 ];
 
-export interface DemoRecommendation {
-  name: string;
-  score: number;
-  tag: string;
-  monthlyFee: string;
-  features: string[];
-}
-
-export const DEMO_RECOMMENDATIONS: DemoRecommendation[] = [
-  {
-    name: 'Capital One 360 Checking',
-    score: 96,
-    tag: 'Best for Beginners',
-    monthlyFee: '$0 / mo',
-    features: ['No SSN history required', 'No monthly fees', 'No minimum balance'],
-  },
-  {
-    name: 'Chase Secure Banking',
-    score: 89,
-    tag: 'Fee-Sensitive Pick',
-    monthlyFee: '$4.95 / mo (waivable)',
-    features: ['Easy fee waiver with direct deposit', 'Zelle built in', 'Large branch network'],
-  },
-  {
-    name: 'Varo Bank',
-    score: 84,
-    tag: 'Fully Digital',
-    monthlyFee: '$0 / mo',
-    features: ['No physical branches needed', 'Early paycheck access', 'Automatic savings tools'],
-  },
-];
-
 const CANNED_ANSWERS: Array<{ keywords: string[]; answer: string }> = [
   {
     keywords: ['budget'],
@@ -200,12 +240,27 @@ export function formatMoney(value: number): string {
 // ── Shared shell: banner + nav ──────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { href: '/demo/dashboard', label: 'Dashboard' },
-  { href: '/demo/banking', label: 'Banking' },
-  { href: '/demo/recommendations', label: 'Recommendations' },
   { href: '/demo/chat', label: 'Noor AI' },
-  { href: '/demo/settings', label: 'Settings' },
+  { href: '/demo/banking', label: 'Wallet' },
 ];
+
+function GearIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="5" />
+      <path d="M18.2 12h2.2M3.6 12h2.2M12 5.8V3.6M12 18.2v2.2M16.38 7.62l1.56-1.56M6.06 17.94l1.56-1.56M16.38 16.38l1.56 1.56M6.06 6.06l1.56 1.56" />
+    </svg>
+  );
+}
 
 export function DemoBanner() {
   const remaining = useDemoMessagesRemaining();
@@ -218,9 +273,9 @@ export function DemoBanner() {
         🔒 You&rsquo;re exploring a demo &nbsp;·&nbsp; {remaining} AI message{remaining === 1 ? '' : 's'} remaining
       </span>
       <Link
-        href="/waitlist"
+        href={WAITLIST_URL}
         className="text-[12.5px] font-medium underline underline-offset-2"
-        style={{ color: '#B9AEFF' }}
+        style={{ color: 'rgba(255,255,255,0.95)' }}
       >
         Join waitlist →
       </Link>
@@ -237,15 +292,15 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white text-black" style={{ fontFamily: FONT }}>
+    <div className="min-h-screen" style={{ fontFamily: FONT, background: '#FFFFFF', color: INK.primary }}>
       <DemoBanner />
 
       <nav
         className="sticky top-0 z-40 flex items-center justify-between px-5 py-3 backdrop-blur-sm"
-        style={{ background: 'rgba(255,255,255,0.92)', borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+        style={{ background: SURFACE.glass, borderBottom: `1px solid ${LINE.default}` }}
       >
-        <button onClick={() => router.push('/demo/dashboard')} className="flex items-center gap-2.5">
-          <div className="w-[24px] h-[24px] rounded flex items-center justify-center" style={{ background: ACCENT_GRADIENT }}>
+        <button onClick={() => router.push('/demo/chat')} className="flex items-center gap-2.5">
+          <div className="w-[24px] h-[24px] rounded flex items-center justify-center" style={{ background: GRADIENT.mark }}>
             <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
               <path d="M6 0.5L11.5 6L6 11.5L0.5 6L6 0.5Z" fill="white" />
             </svg>
@@ -253,35 +308,54 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
           <span style={{ letterSpacing: '0.22em', fontSize: '12px', fontWeight: 600 }}>NOOR</span>
           <span
             className="px-1.5 py-0.5 rounded text-[9px] font-medium uppercase"
-            style={{ letterSpacing: '0.08em', background: 'rgba(91,78,232,0.1)', color: ACCENT }}
+            style={{ letterSpacing: '0.08em', background: SURFACE.raised, color: INK.secondary }}
           >
             Demo
           </span>
         </button>
 
-        <div className="hidden sm:flex items-center gap-1">
-          {NAV_ITEMS.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="px-3 py-1.5 rounded-lg text-[12.5px] transition-colors"
-                style={{ color: active ? ACCENT : 'rgba(0,0,0,0.5)', background: active ? 'rgba(91,78,232,0.08)' : 'transparent' }}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-1">
+            {NAV_ITEMS.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="px-3 py-1.5 rounded-lg text-[12.5px] transition-colors"
+                  style={{ color: active ? INK.primary : INK.secondary, background: active ? SURFACE.raised : 'transparent', fontWeight: active ? 500 : undefined }}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
 
-        <Link href="/landing" className="text-[12px]" style={{ color: 'rgba(0,0,0,0.4)' }}>
-          Exit demo
-        </Link>
+          <span
+            className="hidden sm:block w-px h-[15px]"
+            style={{ background: LINE.default }}
+            aria-hidden="true"
+          />
+
+          <Link
+            href="/demo/settings"
+            aria-label="Settings"
+            className="flex items-center justify-center w-7 h-7 rounded-full transition-colors"
+            style={{
+              color: pathname === '/demo/settings' ? INK.primary : INK.secondary,
+              border: `1px solid ${LINE.default}`,
+              background: pathname === '/demo/settings'
+                ? SURFACE.raised
+                : 'rgba(255,255,255,0.6)',
+            }}
+          >
+            <GearIcon />
+          </Link>
+        </div>
       </nav>
 
       {/* Mobile nav */}
-      <div className="sm:hidden flex items-center gap-1 overflow-x-auto px-3 py-2" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+      <div className="sm:hidden flex items-center gap-1 overflow-x-auto px-3 py-2" style={{ borderBottom: `1px solid ${LINE.hairline}` }}>
         {NAV_ITEMS.map((item) => {
           const active = pathname === item.href;
           return (
@@ -289,7 +363,7 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
               key={item.href}
               href={item.href}
               className="px-3 py-1.5 rounded-lg text-[12px] whitespace-nowrap"
-              style={{ color: active ? ACCENT : 'rgba(0,0,0,0.5)', background: active ? 'rgba(91,78,232,0.08)' : 'rgba(0,0,0,0.03)' }}
+              style={{ color: active ? INK.primary : INK.secondary, background: active ? SURFACE.raised : SURFACE.subtle, fontWeight: active ? 500 : undefined }}
             >
               {item.label}
             </Link>
@@ -306,7 +380,7 @@ export function DemoCard({ children, className = '' }: { children: React.ReactNo
   return (
     <div
       className={`rounded-2xl p-5 ${className}`}
-      style={{ border: '1px solid rgba(0,0,0,0.08)', background: 'rgba(0,0,0,0.02)' }}
+      style={{ border: `1px solid ${LINE.default}`, background: GRADIENT.surface }}
     >
       {children}
     </div>

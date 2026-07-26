@@ -68,7 +68,7 @@ function buildMoreMenuGroups(showIntlOnly: boolean): {
 
   const settings: NavItem[] = [
     { href: "/settings", labelKey: "common.settings", icon: SettingsIcon },
-    { href: "/landing", labelKey: "nav.landing", icon: LandingPageIcon },
+    { href: "/waitlist", labelKey: "nav.landing", icon: LandingPageIcon },
   ];
 
   return [

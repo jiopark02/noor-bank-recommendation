@@ -1,12 +1,17 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ACCENT,
   MAX_DEMO_MESSAGES,
+  WAITLIST_URL,
   DemoShell,
+  DemoButton,
+  DEMO_BUTTON_CLASS,
+  demoButtonStyle,
+  INK,
+  LINE,
+  SURFACE,
   getCannedAnswer,
   getDemoMessagesUsed,
   incrementDemoMessagesUsed,
@@ -27,6 +32,7 @@ export default function DemoChatPage() {
   const [draft, setDraft] = useState('');
   const [typing, setTyping] = useState(false);
   const [used, setUsed] = useState(0);
+  const [inputFocused, setInputFocused] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -65,7 +71,7 @@ export default function DemoChatPage() {
     <DemoShell>
       <header className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Noor AI</h1>
-        <p className="text-sm mt-1" style={{ color: 'rgba(0,0,0,0.45)' }}>
+        <p className="text-sm mt-1" style={{ color: INK.muted }}>
           {MAX_DEMO_MESSAGES - used > 0
             ? `${MAX_DEMO_MESSAGES - used} message${MAX_DEMO_MESSAGES - used === 1 ? '' : 's'} left in this demo.`
             : "You've used all your demo messages."}
@@ -74,7 +80,7 @@ export default function DemoChatPage() {
 
       <div
         className="rounded-2xl flex flex-col"
-        style={{ border: '1px solid rgba(0,0,0,0.08)', height: '52vh', minHeight: 360 }}
+        style={{ border: `1px solid ${LINE.default}`, height: '52vh', minHeight: 360 }}
       >
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           <AnimatePresence initial={false}>
@@ -116,22 +122,22 @@ export default function DemoChatPage() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               className="rounded-2xl p-4 text-center"
-              style={{ background: 'rgba(91,78,232,0.06)', border: '1px solid rgba(91,78,232,0.2)' }}
+              style={{ background: SURFACE.subtle, border: `1px solid ${LINE.default}` }}
             >
               <p className="text-[13px] mb-3">You&rsquo;re on the demo — join the waitlist for full access.</p>
-              <Link
-                href="/waitlist"
-                className="inline-block px-5 py-2 rounded-lg text-[12.5px] font-medium text-white"
-                style={{ background: ACCENT }}
+              <a
+                href={WAITLIST_URL}
+                className={DEMO_BUTTON_CLASS}
+                style={demoButtonStyle('solid')}
               >
                 Join waitlist
-              </Link>
+              </a>
             </motion.div>
           )}
           <div ref={bottomRef} />
         </div>
 
-        <div className="flex items-center gap-2 p-3" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+        <div className="flex items-center gap-2 p-3" style={{ borderTop: `1px solid ${LINE.hairline}` }}>
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -139,20 +145,27 @@ export default function DemoChatPage() {
               if (e.key === 'Enter') send();
             }}
             disabled={capped}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             placeholder={capped ? 'Demo message limit reached' : 'Ask Noor anything...'}
-            className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-black disabled:bg-gray-50 disabled:text-gray-400"
+            className="flex-1 border rounded-xl px-4 py-2.5 text-sm outline-none"
+            style={{
+              borderColor: inputFocused ? INK.primary : LINE.default,
+              background: capped ? SURFACE.subtle : undefined,
+              color: capped ? INK.muted : undefined,
+            }}
           />
-          <button
+          <DemoButton
+            variant="solid"
             onClick={() => send()}
             disabled={capped || !draft.trim()}
-            className="w-10 h-10 rounded-xl text-white flex items-center justify-center disabled:opacity-40"
-            style={{ background: ACCENT }}
+            className="w-10 h-10 !px-0 disabled:opacity-40"
             aria-label="Send"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14m-6-6 6 6-6 6" />
             </svg>
-          </button>
+          </DemoButton>
         </div>
       </div>
     </DemoShell>

@@ -21,14 +21,37 @@ function isProtectedPath(pathname: string): boolean {
   );
 }
 
+// When DEMO_DOMAIN is set, that hostname serves only the /demo experience
+// (plus /waitlist, its one allowed exit) — visitors there must never see the
+// main site (landing, login, dashboard, etc). Everything else keeps
+// resolving normally on the main domain.
+const DEMO_DOMAIN = process.env.DEMO_DOMAIN;
+const DEMO_DOMAIN_ALLOWED_PREFIXES = ["/demo", "/waitlist", "/_next", "/api"];
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  if (
+    DEMO_DOMAIN &&
+    request.nextUrl.hostname === DEMO_DOMAIN &&
+    !DEMO_DOMAIN_ALLOWED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  ) {
+    return NextResponse.redirect(new URL("/demo", request.url));
+  }
 
   let response = NextResponse.next({
     request: {
       headers: request.headers,
     },
   });
+
+  // Only protected paths need auth resolution + session refresh. Non-protected
+  // paths (/, /landing, /login, /waitlist, ...) fall through to passthrough,
+  // matching the pre-demo-merge baseline where middleware ran only on
+  // PROTECTED_PREFIXES. The demo host check above already ran for every path.
+  if (!isProtectedPath(pathname)) {
+    return response;
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -58,11 +81,17 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch {
+    // Fail closed: if auth can't be resolved on a protected path, treat as
+    // unauthenticated and send to /login rather than 500-ing the request.
+    user = null;
+  }
 
-  if (isProtectedPath(pathname) && !user) {
+  if (!user) {
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }
@@ -72,16 +101,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/dashboard/:path*",
-    "/banking/:path*",
-    "/money/:path*",
-    "/housing/:path*",
-    "/jobs/:path*",
-    "/funding/:path*",
-    "/forum/:path*",
-    "/deals/:path*",
-    "/settings/:path*",
-    "/chat/:path*",
-    "/admin/:path*",
+    // Run on virtually every page request (not just protected prefixes) so the
+    // demo-domain hostname check above can intercept /, /landing, /waitlist, etc.
+    // Static assets, Next internals, and API routes are excluded.
+    "/((?!_next/static|_next/image|favicon.ico|api/).*)",
   ],
 };

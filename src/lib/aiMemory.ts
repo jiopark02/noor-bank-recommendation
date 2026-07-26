@@ -594,6 +594,46 @@ export async function getSessionMessages(
 }
 
 /**
+ * Counts a user's assistant chat turns within a rolling time window.
+ *
+ * Used by the chat rate-limit hard cap. One assistant row is written per
+ * completed turn (saveMessages), so counting assistant rows in the window
+ * approximates "how many chat requests has this user made recently". The count
+ * uses head:true (no rows selected) and hits the existing idx_chat_messages_user
+ * (user_id, created_at desc) index, so it stays cheap even under abuse.
+ *
+ * SECURITY: filters by user_id only (the verified JWT id, never a request body).
+ *
+ * @param userId  verified user id.
+ * @param sinceMs window length in milliseconds, looking back from now.
+ * @returns the number of assistant turns in the window.
+ * @throws Error when the count query fails. The caller decides fail-open vs
+ *   fail-closed — the rate-limit check treats a thrown error as fail-open.
+ */
+export async function getRecentChatTurnCount(
+  userId: string,
+  { sinceMs }: { sinceMs: number }
+): Promise<number> {
+  const supabase = getAdmin();
+  const since = new Date(Date.now() - sinceMs).toISOString();
+
+  const { count, error } = await supabase
+    .from("chat_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("role", "assistant")
+    .gte("created_at", since);
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to count recent chat turns: ${error.message}`,
+      error
+    );
+  }
+  return count ?? 0;
+}
+
+/**
  * Returns the most recent N messages for a user's active session, in
  * chronological order (oldest first). Convenience wrapper used by route.ts
  * when building the LLM context window without sending the entire history.
