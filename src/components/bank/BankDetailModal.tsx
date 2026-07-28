@@ -7,7 +7,7 @@ import type { MapMarker } from '@/components/maps';
 import { getBranchesForBank, UNIVERSITY_LOCATIONS, BankBranch } from '@/lib/universityData';
 
 // All markers use ink for Noor branding
-const NOOR_BLACK = '#2B2740';
+const NOOR_BLACK = '#000000';
 
 interface BankDetailModalProps {
   recommendation: BankRecommendation;
@@ -108,7 +108,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
             <div>
               {recommendation.categoryPick && (
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold mb-2 ${
-                  recommendation.categoryPick.category === 'best_overall' ? 'bg-white text-[#2B2740]' :
+                  recommendation.categoryPick.category === 'best_overall' ? 'bg-white text-[#000000]' :
                   recommendation.categoryPick.category === 'best_low_fees' ? 'bg-green-500/20 text-green-300' :
                   recommendation.categoryPick.category === 'best_international' ? 'bg-blue-500/20 text-blue-300' :
                   recommendation.categoryPick.category === 'best_branches' ? 'bg-purple-500/20 text-purple-300' :
@@ -130,7 +130,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
                 </p>
               )}
             </div>
-            <div className="inline-flex items-center px-4 py-2 rounded-full bg-white text-[#2B2740] text-sm font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.24)]">
+            <div className="inline-flex items-center px-4 py-2 rounded-full bg-white text-[#000000] text-sm font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.24)]">
               {Math.round(fitScore)}% fit
             </div>
           </div>
@@ -332,7 +332,7 @@ export function BankDetailModal({ recommendation, isOpen, onClose }: BankDetailM
         <div className="liquid-glass-strong px-6 py-4 border-t border-white/15">
           <button
             onClick={handleApply}
-            className="w-full py-3.5 bg-white text-[#2B2740] rounded-xl font-medium hover:bg-white/90 transition-colors"
+            className="w-full py-3.5 bg-white text-[#000000] rounded-xl font-medium hover:bg-white/90 transition-colors"
           >
             Apply Now
           </button>
@@ -423,7 +423,7 @@ function FeeRow({ label, value, note }: { label: string; value: string; note?: s
 function FeatureTag({ label, highlight = false }: { label: string; highlight?: boolean }) {
   return (
     <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm ${
-      highlight ? 'bg-white text-[#2B2740]' : 'bg-white/10 text-white/80'
+      highlight ? 'bg-white text-[#000000]' : 'bg-white/10 text-white/80'
     }`}>
       {label}
     </span>

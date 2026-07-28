@@ -325,7 +325,7 @@ export default function DealsPage() {
                       <span className="text-lg block">{cat.icon}</span>
                       <span
                         className={`text-[10px] mt-0.5 block ${
-                          newDeal.category === cat.id ? 'text-[#2B2740]' : 'text-white/70'
+                          newDeal.category === cat.id ? 'text-[#000000]' : 'text-white/70'
                         }`}
                       >
                         {cat.label}

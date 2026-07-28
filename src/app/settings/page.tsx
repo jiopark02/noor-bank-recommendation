@@ -108,7 +108,7 @@ function Toggle({
       style={{
         width: 44,
         height: 24,
-        background: checked ? '#2B2740' : 'rgba(0,0,0,0.12)',
+        background: checked ? '#000000' : 'rgba(0,0,0,0.12)',
       }}
     >
       <motion.div
@@ -146,7 +146,7 @@ function SettingsRow({ icon, label, description, value, chevron, danger, onClick
       <div className="flex-1 min-w-0">
         <div
           className="text-[14px] font-medium leading-tight truncate"
-          style={{ color: danger ? '#EF4444' : '#2B2740', fontFamily: FONT }}
+          style={{ color: danger ? '#EF4444' : '#000000', fontFamily: FONT }}
         >
           {label}
         </div>
@@ -699,7 +699,7 @@ export default function SettingsPage() {
           >
             <div
               className="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl text-white text-[13px] font-medium shadow-lg"
-              style={{ background: '#2B2740', fontFamily: FONT }}
+              style={{ background: '#000000', fontFamily: FONT }}
             >
               <svg className="w-4 h-4 flex-shrink-0 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
@@ -948,7 +948,7 @@ export default function SettingsPage() {
           style={{
             background: '#fff',
             border: '1px solid rgba(255,255,255,0.75)',
-            color: '#2B2740',
+            color: '#000000',
             fontFamily: FONT,
           }}
           whileTap={{ scale: 0.98 }}
@@ -1041,7 +1041,7 @@ export default function SettingsPage() {
                 onClick={handleChangePassword}
                 disabled={isLoading || !passwordValidation.isValid || !passwordsMatch || !currentPassword}
                 className="flex-1 py-3 rounded-xl text-[14px] font-medium disabled:opacity-40"
-                style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}
+                style={{ background: '#FFFFFF', color: '#000000', fontFamily: FONT }}
               >
                 {isLoading ? 'Saving…' : 'Update Password'}
               </button>
@@ -1076,7 +1076,7 @@ export default function SettingsPage() {
                 onClick={handleChangeEmail}
                 disabled={isLoading || !newEmail || !emailPassword}
                 className="flex-1 py-3 rounded-xl text-[14px] font-medium disabled:opacity-40"
-                style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}
+                style={{ background: '#FFFFFF', color: '#000000', fontFamily: FONT }}
               >
                 {isLoading ? 'Sending…' : 'Send Verification'}
               </button>
@@ -1137,7 +1137,7 @@ export default function SettingsPage() {
                 onClick={handleSaveProfile}
                 disabled={isLoading || !editFirstName || !editLastName}
                 className="flex-1 py-3 rounded-xl text-[14px] font-medium disabled:opacity-40"
-                style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}
+                style={{ background: '#FFFFFF', color: '#000000', fontFamily: FONT }}
               >
                 {isLoading ? 'Saving…' : 'Save Changes'}
               </button>
@@ -1161,7 +1161,7 @@ export default function SettingsPage() {
               <button onClick={() => setActiveModal(null)} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.92)', fontFamily: FONT }}>
                 Cancel
               </button>
-              <button onClick={handleResetChecklist} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: '#FFFFFF', color: '#2B2740', fontFamily: FONT }}>
+              <button onClick={handleResetChecklist} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: '#FFFFFF', color: '#000000', fontFamily: FONT }}>
                 Reset
               </button>
             </div>
@@ -1187,7 +1187,7 @@ export default function SettingsPage() {
                   }}
                 >
                   <span className="text-xl">{localeFlags[loc]}</span>
-                  <span className="text-[13px] font-medium" style={{ color: locale === loc ? '#2B2740' : 'rgba(255,255,255,0.85)' }}>{localeNames[loc]}</span>
+                  <span className="text-[13px] font-medium" style={{ color: locale === loc ? '#000000' : 'rgba(255,255,255,0.85)' }}>{localeNames[loc]}</span>
                 </button>
               ))}
             </div>

@@ -1091,7 +1091,7 @@ export default function GrowPage() {
                                 onClick={() => setQuizAnswers(prev => ({ ...prev, [q.id]: opt.value }))}
                                 className={`w-full p-3 rounded-xl border-2 text-left text-sm transition-all ${
                                   quizAnswers[q.id] === opt.value
-                                    ? 'border-white bg-white text-[#2B2740]'
+                                    ? 'border-white bg-white text-[#000000]'
                                     : 'border-white/15 text-white/80 hover:border-white/40'
                                 }`}
                               >
@@ -1116,7 +1116,7 @@ export default function GrowPage() {
                       <button
                         onClick={handleQuizComplete}
                         disabled={Object.keys(quizAnswers).length < ROTH_IRA_ELIGIBILITY_QUESTIONS.length}
-                        className="flex-1 py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl text-sm font-medium disabled:opacity-50"
+                        className="flex-1 py-3 bg-white text-[#000000] hover:bg-white/90 rounded-xl text-sm font-medium disabled:opacity-50"
                       >
                         Check Eligibility
                       </button>
@@ -1167,7 +1167,7 @@ export default function GrowPage() {
                         setQuizAnswers({});
                         setQuizResult(null);
                       }}
-                      className="w-full py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl text-sm font-medium"
+                      className="w-full py-3 bg-white text-[#000000] hover:bg-white/90 rounded-xl text-sm font-medium"
                     >
                       Got It
                     </button>

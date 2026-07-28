@@ -9,48 +9,31 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Global overrides: "black" is deep plum-ink and the gray ramp is
-        // lavender-tinted, so legacy text-black / bg-gray-* classes across
-        // every page inherit the pastel-glass design without edits.
-        black: '#2B2740',
-        gray: {
-          50: '#F8F7FC',
-          100: '#F0EEF8',
-          200: '#E4E1F0',
-          300: '#CFCBE2',
-          400: '#A9A4C2',
-          500: '#817C9C',
-          600: '#5C5878',
-          700: '#474360',
-          800: '#353149',
-          900: '#2B2740',
-          950: '#1D1A2E',
-        },
         // Noor Design System
         noor: {
-          ink: '#2B2740',
-          black: '#2B2740',
+          ink: '#000000',
+          black: '#000000',
           white: '#FFFFFF',
-          cream: '#F6F4FB',
+          cream: '#FAFAFA',
           purple: {
-            DEFAULT: '#6D64A8',
-            deep: '#55497D',
+            DEFAULT: '#000000',
+            deep: '#1A1A1A',
           },
           orb: {
-            pink: '#F6C6E4',
-            lilac: '#CDB9F2',
-            blue: '#B9D2F4',
-            mint: '#D3F0DC',
-            butter: '#F7EBC9',
+            pink: '#F5F5F5',
+            lilac: '#D6D6D6',
+            blue: '#B0B0B0',
+            mint: '#808080',
+            butter: '#E0E0E0',
           },
           gray: {
-            50: '#F8F7FC',
-            100: '#F0EEF8',
-            200: '#E4E1F0',
-            300: '#CFCBE2',
-            400: '#A9A4C2',
-            500: '#817C9C',
-            600: '#5C5878',
+            50: '#F9FAFB',
+            100: '#F3F4F6',
+            200: '#E5E7EB',
+            300: '#D1D5DB',
+            400: '#9CA3AF',
+            500: '#6B7280',
+            600: '#4B5563',
           },
         },
       },
@@ -59,12 +42,12 @@ const config: Config = {
         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
       },
       borderRadius: {
-        'noor': '16px',
-        'noor-lg': '24px',
+        'noor': '12px',
+        'noor-lg': '16px',
       },
       boxShadow: {
-        glass: '0 8px 32px rgba(109, 100, 168, 0.12)',
-        'glass-lg': '0 16px 48px rgba(109, 100, 168, 0.18)',
+        glass: '0 8px 32px rgba(0, 0, 0, 0.12)',
+        'glass-lg': '0 16px 48px rgba(0, 0, 0, 0.18)',
       },
       spacing: {
         'safe-bottom': 'env(safe-area-inset-bottom)',

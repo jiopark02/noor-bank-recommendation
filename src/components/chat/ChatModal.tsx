@@ -105,7 +105,7 @@ export function ChatModal({
                 <div className="mb-4">
                   <AIOrb size={64} halo />
                 </div>
-                <h4 className="heading-serif text-lg text-[#cdb9f2] mb-1">Hi! I'm Noor</h4>
+                <h4 className="heading-serif text-lg text-white mb-1">Hi! I'm Noor</h4>
                 <p className="text-sm text-white/60 mb-2">
                   I'm here to help with banking, housing, visa questions, and
                   more.
@@ -193,7 +193,7 @@ export function ChatModal({
                   height="20"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="#2B2740"
+                  stroke="#000000"
                   strokeWidth="2"
                 >
                   <path

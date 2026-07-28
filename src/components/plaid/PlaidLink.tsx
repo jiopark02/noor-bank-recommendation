@@ -165,11 +165,14 @@ interface ConnectBankCardProps {
 }
 
 export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
+  const [connectError, setConnectError] = useState<string | null>(null);
+
   const handleSuccess = useCallback(
     async (
       publicToken: string,
       metadata: { institution: { name: string; institution_id: string } }
     ) => {
+      setConnectError(null);
       try {
         // Exchange public token for access token
         const plaidHeaders = buildJsonAuthorizedHeaders(
@@ -187,54 +190,31 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
 
         const data = asPlainObject(await response.json());
 
-        if (data.success === true) {
-          const itemId = readString(data, "itemId");
-          if (!itemId) {
-            console.error("Failed to exchange token:", readErrorMessage(data));
-            return;
-          }
-          const stored = localStorage.getItem("noor_plaid_connections") || "[]";
-          const existing = JSON.parse(stored) as Array<{
-            itemId: string;
-            institutionName: string;
-            institutionId?: string;
-            status: "active" | "error";
-            createdAt?: string;
-          }>;
-
-          const nextConnection = {
-            itemId,
-            institutionName:
-              readString(data, "institutionName") ||
-              metadata.institution.name ||
-              "Unknown Bank",
-            institutionId:
-              readString(data, "institutionId") ||
-              metadata.institution.institution_id ||
-              undefined,
-            status: "active" as const,
-            createdAt: new Date().toISOString(),
-          };
-
-          const deduped = existing.filter(
-            (c) => c.itemId !== nextConnection.itemId
-          );
-          deduped.push(nextConnection);
-          localStorage.setItem(
-            "noor_plaid_connections",
-            JSON.stringify(deduped)
-          );
-
-          // Refresh parent component
-          onConnected?.();
-        } else {
-          console.error(
-            "Failed to exchange token:",
-            readErrorMessage(data) ?? data
-          );
+        if (
+          response.status === 409 ||
+          readString(data, "code") === "ALREADY_CONNECTED"
+        ) {
+          const name =
+            readString(data, "institutionName") ||
+            metadata.institution.name ||
+            "This bank";
+          setConnectError(`${name} is already connected.`);
+          return;
         }
+
+        if (!response.ok || data.success !== true) {
+          setConnectError(
+            readErrorMessage(data) || "Failed to connect bank account."
+          );
+          return;
+        }
+
+        // Connection is persisted server-side (DB is the source of truth);
+        // just tell the parent to refetch from it.
+        onConnected?.();
       } catch (err) {
         console.error("Error exchanging token:", err);
+        setConnectError("Failed to connect bank account. Please try again.");
       }
     },
     [userId, onConnected]
@@ -337,6 +317,11 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
           Connect Bank Account
         </span>
       </PlaidLinkButton>
+      {connectError && (
+        <p className="text-xs text-red-600 mt-3 text-center">
+          {connectError}
+        </p>
+      )}
     </motion.div>
   );
 }

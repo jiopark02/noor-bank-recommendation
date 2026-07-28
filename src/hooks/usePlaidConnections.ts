@@ -32,7 +32,7 @@ export function usePlaidConnections(userId: string | null) {
     setIsLoading(true);
     setError(null);
 
-    try {
+    const attempt = async (): Promise<PlaidConnection[]> => {
       const response = await fetch("/api/plaid/connections", {
         method: "GET",
         headers: await getSupabaseBearerHeaders(),
@@ -40,14 +40,41 @@ export function usePlaidConnections(userId: string | null) {
 
       const payload = asPlainObject(await response.json());
       if (!response.ok) {
-        throw new Error(
-          readErrorMessage(payload) || "Failed to load bank connections"
-        );
+        const message =
+          readErrorMessage(payload) || "Failed to load bank connections";
+        const err = new Error(message) as Error & { status?: number };
+        err.status = response.status;
+        throw err;
       }
 
-      const list = Array.isArray(payload.connections)
+      return Array.isArray(payload.connections)
         ? (payload.connections as PlaidConnection[])
         : [];
+    };
+
+    // getSessionSafe() races a 3s timeout against a known Supabase Web Lock
+    // stall (see supabase-browser.ts). Under load — e.g. right after the
+    // Plaid Link flow, which fires ~100+ of its own requests — that race can
+    // be lost even with a perfectly valid session, producing a false 401.
+    // Retry with backoff rather than surfacing a "not connected" state that
+    // would push the user toward a duplicate connection.
+    const RETRY_DELAYS_MS = [1500, 3000];
+
+    try {
+      let list: PlaidConnection[] | undefined;
+      for (let i = 0; ; i++) {
+        try {
+          list = await attempt();
+          break;
+        } catch (err) {
+          const status = err instanceof Error ? (err as { status?: number }).status : undefined;
+          if (status === 401 && i < RETRY_DELAYS_MS.length) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[i]));
+            continue;
+          }
+          throw err;
+        }
+      }
       setConnections(list);
     } catch (err) {
       // Distinguish a transient load failure from "no connections": set an

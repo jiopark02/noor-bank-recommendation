@@ -290,7 +290,7 @@ export default function ChatPage() {
               </motion.div>
               <h2
                 className="text-[34px] leading-[1.15]"
-                style={{ fontFamily: SERIF, letterSpacing: "-0.02em", color: "#6D64A8" }}
+                style={{ fontFamily: SERIF, letterSpacing: "-0.02em", color: "#000000" }}
               >
                 {userName ? `Hello ${userName}` : "Hello"}
               </h2>
@@ -315,7 +315,7 @@ export default function ChatPage() {
                   style={{
                     background: "rgba(255,255,255,0.62)",
                     border: "1px solid rgba(255,255,255,0.75)",
-                    boxShadow: "0 4px 16px rgba(109,100,168,0.08)",
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
                     backdropFilter: "blur(16px)",
                     WebkitBackdropFilter: "blur(16px)",
                   }}
@@ -362,14 +362,14 @@ export default function ChatPage() {
                         fontFamily: FONT,
                         ...(isUser
                           ? {
-                              background: "#2B2740",
+                              background: "#000000",
                               color: "#FFFFFF",
-                              boxShadow: "0 6px 20px rgba(43,39,64,0.2)",
+                              boxShadow: "0 6px 20px rgba(0,0,0,0.2)",
                             }
                           : {
                               background: "rgba(255,255,255,0.7)",
                               border: "1px solid rgba(255,255,255,0.75)",
-                              color: "#2B2740",
+                              color: "#000000",
                               backdropFilter: "blur(16px)",
                               WebkitBackdropFilter: "blur(16px)",
                             }),
@@ -450,7 +450,7 @@ export default function ChatPage() {
                   style={{
                     background: "rgba(255,255,255,0.8)",
                     border: "1px solid rgba(255,255,255,0.75)",
-                    boxShadow: "0 2px 10px rgba(109,100,168,0.1)",
+                    boxShadow: "0 2px 10px rgba(0,0,0,0.1)",
                     color: "#5C5878",
                     fontFamily: FONT,
                   }}
@@ -483,12 +483,12 @@ export default function ChatPage() {
             background: "rgba(255,255,255,0.8)",
             backdropFilter: "blur(20px) saturate(1.4)",
             WebkitBackdropFilter: "blur(20px) saturate(1.4)",
-            border: `1px solid ${isFocused ? "rgba(109,100,168,0.45)" : "rgba(255,255,255,0.75)"}`,
+            border: `1px solid ${isFocused ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.75)"}`,
             borderRadius: "100px",
             padding: "7px 7px 7px 18px",
             boxShadow: isFocused
-              ? "0 8px 28px rgba(109,100,168,0.22)"
-              : "0 6px 20px rgba(109,100,168,0.12)",
+              ? "0 8px 28px rgba(0,0,0,0.22)"
+              : "0 6px 20px rgba(0,0,0,0.12)",
             transition: "border-color 0.18s, box-shadow 0.18s",
           }}
         >
@@ -504,7 +504,7 @@ export default function ChatPage() {
             }}
             placeholder="Ask about banking, credit, taxes…"
             className="flex-1 bg-transparent outline-none text-[14px] placeholder:text-gray-400"
-            style={{ fontFamily: FONT, color: "#2B2740" }}
+            style={{ fontFamily: FONT, color: "#000000" }}
           />
 
           <motion.button
@@ -512,8 +512,8 @@ export default function ChatPage() {
             disabled={!input.trim() || isLoading}
             className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
             style={{
-              background: input.trim() && !isLoading ? "#2B2740" : "rgba(43,39,64,0.08)",
-              boxShadow: input.trim() && !isLoading ? "0 4px 14px rgba(43,39,64,0.28)" : "none",
+              background: input.trim() && !isLoading ? "#000000" : "rgba(0,0,0,0.08)",
+              boxShadow: input.trim() && !isLoading ? "0 4px 14px rgba(0,0,0,0.28)" : "none",
               transition: "background 0.18s, box-shadow 0.18s",
             }}
             whileTap={input.trim() && !isLoading ? { scale: 0.9 } : {}}
@@ -528,7 +528,7 @@ export default function ChatPage() {
               <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none">
                 <path
                   d="M2 7H12M12 7L8 3M12 7L8 11"
-                  stroke={input.trim() ? "white" : "rgba(43,39,64,0.3)"}
+                  stroke={input.trim() ? "white" : "rgba(0,0,0,0.3)"}
                   strokeWidth="1.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"

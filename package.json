@@ -28,7 +28,7 @@
     "plaid": "^41.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-plaid-link": "^4.1.1",
+    "react-plaid-link": "^4.2.0",
     "resend": "^6.12.4",
     "uuid": "^13.0.0"
   },

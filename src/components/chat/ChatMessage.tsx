@@ -40,14 +40,14 @@ export function ChatMessage({
         style={
           isUser
             ? {
-                backgroundColor: "#2B2740",
+                backgroundColor: "#000000",
                 color: "#FFFFFF",
-                boxShadow: "0 6px 20px rgba(43,39,64,0.2)",
+                boxShadow: "0 6px 20px rgba(0,0,0,0.2)",
               }
             : {
                 background: "rgba(255,255,255,0.7)",
                 border: "1px solid rgba(255,255,255,0.75)",
-                color: "#2B2740",
+                color: "#000000",
               }
         }
       >

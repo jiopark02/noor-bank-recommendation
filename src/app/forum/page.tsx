@@ -738,7 +738,7 @@ function UserProfileModal({ user, isFriend, onAddFriend, onRemoveFriend, onMessa
                 onMessage();
                 onClose();
               }}
-              className="flex-1 py-3 bg-white text-[#2B2740] font-medium rounded-xl hover:bg-white/90 transition-colors"
+              className="flex-1 py-3 bg-white text-[#000000] font-medium rounded-xl hover:bg-white/90 transition-colors"
             >
               Message
             </button>
@@ -1032,7 +1032,7 @@ function PostDetailModal({ post, userVote, onVote, onClose }: {
                 <button
                   type="submit"
                   disabled={!newComment.trim()}
-                  className="px-4 py-2 bg-white text-[#2B2740] text-sm font-medium rounded-full disabled:opacity-40 hover:bg-white/90"
+                  className="px-4 py-2 bg-white text-[#000000] text-sm font-medium rounded-full disabled:opacity-40 hover:bg-white/90"
                 >
                   Comment
                 </button>
@@ -1129,7 +1129,7 @@ function CreatePostModal({ categories, onSubmit, onClose }: {
           <button
             onClick={handleSubmit}
             disabled={!title.trim() || !category}
-            className="px-4 py-1.5 bg-white text-[#2B2740] text-sm font-medium rounded-full disabled:opacity-40 hover:bg-white/90"
+            className="px-4 py-1.5 bg-white text-[#000000] text-sm font-medium rounded-full disabled:opacity-40 hover:bg-white/90"
           >
             Post
           </button>
@@ -1145,7 +1145,7 @@ function CreatePostModal({ categories, onSubmit, onClose }: {
                   type="button"
                   onClick={() => setCategory(cat.id)}
                   className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                    category === cat.id ? 'bg-white text-[#2B2740]' : 'bg-white/10 text-white/80 hover:bg-white/20'
+                    category === cat.id ? 'bg-white text-[#000000]' : 'bg-white/10 text-white/80 hover:bg-white/20'
                   }`}
                 >
                   {cat.icon} {cat.label}

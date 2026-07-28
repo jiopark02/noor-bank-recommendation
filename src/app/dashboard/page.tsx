@@ -1,195 +1,122 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
-import { AIOrb } from "@/components/ui/AIOrb";
+import { ConnectBankCard, PlaidLinkButton } from "@/components/plaid";
+import {
+  PlaidAccount,
+  PlaidTransaction,
+  formatCurrency,
+  CATEGORY_ICONS,
+  CATEGORY_COLORS,
+} from "@/lib/plaid";
+import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
+import {
+  getSupabaseBearerHeaders,
+  getSessionSafe,
+  supabase,
+} from "@/lib/supabase-browser";
 import { clearLocalAuthState } from "@/lib/validation";
-import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
+import {
+  asPlainObject,
+  readErrorMessage,
+  readString,
+} from "@/lib/requestJson";
 
-interface StoredBudget {
-  total?: number;
-  spent?: number;
-}
+type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
 
-interface StoredPlaidAccount {
-  type?: string;
-  current_balance?: number;
-}
+type SubscriptionView = {
+  id: string;
+  name: string;
+  amount: number;
+  monthly_amount: number;
+  frequency: "weekly" | "monthly" | "yearly" | "unknown";
+  last_charged: string | null;
+  next_charge: string | null;
+  source: "plaid_recurring" | "heuristic";
+};
 
-interface StoredPlaidTransaction {
-  amount?: number;
-  category?: string[];
-  name?: string;
-}
-
-interface StoredPlaidSubscription {
-  name?: string;
-  amount?: number;
-  monthly_amount?: number;
-}
-
-const STORAGE_KEY_BUDGET = "noor_budget";
-const STORAGE_KEY_ACCOUNTS = "noor_plaid_accounts";
-const STORAGE_KEY_TRANSACTIONS = "noor_plaid_transactions";
-
-const QUICK_PROMPTS = [
-  "How much can I spend this week?",
-  "Am I on track this month?",
-];
-
-function formatMoney(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(value);
-}
-
-export default function HomePage() {
+export default function DashboardPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingData, setIsLoadingData] = useState(false);
-  const [moneyError, setMoneyError] = useState<string | null>(null);
-  const [hasBankConnection, setHasBankConnection] = useState(false);
   const [userName, setUserName] = useState("there");
-  const [promptDraft, setPromptDraft] = useState("");
-  const [budget, setBudget] = useState<StoredBudget>({ total: 0, spent: 0 });
-  const [accounts, setAccounts] = useState<StoredPlaidAccount[]>([]);
-  const [transactions, setTransactions] = useState<StoredPlaidTransaction[]>(
-    []
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [accounts, setAccounts] = useState<PlaidAccount[]>([]);
+  const [transactions, setTransactions] = useState<PlaidTransaction[]>([]);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionView[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
+  const [relinkToken, setRelinkToken] = useState<string | null>(null);
+  const [isPreparingRelink, setIsPreparingRelink] = useState(false);
+  // Connection management (accounts tab): inline-confirm remove + add-bank notice.
+  const [confirmingRemoveItemId, setConfirmingRemoveItemId] = useState<
+    string | null
+  >(null);
+  const [removingItemId, setRemovingItemId] = useState<string | null>(null);
+  const [addBankNotice, setAddBankNotice] = useState<string | null>(null);
+
+  // Date range for transactions
+  const [startDate, setStartDate] = useState<string>(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    return date.toISOString().split("T")[0];
+  });
+  const [endDate, setEndDate] = useState<string>(
+    () => new Date().toISOString().split("T")[0]
   );
-  const [subscriptions, setSubscriptions] = useState<StoredPlaidSubscription[]>(
-    []
-  );
+
+  // Use the Plaid connections hook
+  const plaidConnections = usePlaidConnections(userId);
 
   useEffect(() => {
-    const storedUserId = localStorage.getItem("noor_user_id");
-    if (!storedUserId) {
-      router.replace("/waitlist");
-      return;
-    }
-    setUserId(storedUserId);
-
-    try {
-      const profileRaw = localStorage.getItem("noor_user_profile");
-      if (profileRaw) {
-        const parsed = JSON.parse(profileRaw) as { firstName?: string };
-        if (parsed.firstName?.trim()) {
-          setUserName(parsed.firstName.trim());
+    const profileData = localStorage.getItem("noor_user_profile");
+    if (profileData) {
+      try {
+        const profile = JSON.parse(profileData);
+        if (profile.firstName) {
+          setUserName(profile.firstName);
         }
+      } catch {
+        // ignore malformed cached profile
       }
-    } catch {
-      // Ignore profile parse errors.
     }
+  }, []);
 
-    try {
-      const budgetRaw = localStorage.getItem(STORAGE_KEY_BUDGET);
-      if (budgetRaw) {
-        const parsed = JSON.parse(budgetRaw) as StoredBudget;
-        if (typeof parsed.total === "number" && parsed.total > 0) {
-          setBudget({
-            total: parsed.total,
-            spent: typeof parsed.spent === "number" ? parsed.spent : 0,
-          });
-        }
-      }
-    } catch {
-      // Ignore budget parse errors.
-    }
-
-    // Determine bank-connection state from the DB (authoritative source), not
-    // localStorage — so it survives a localStorage purge (logout / new device).
-    // isLoading stays true until this resolves, so the UI never flashes a
-    // "not connected" state before the check completes.
+  // Initialize user. noor_user_id is only a legacy synchronous cache; the live
+  // Supabase session is the source of truth. Verify it before rendering so an
+  // expired session redirects cleanly to /login instead of showing the page
+  // with every Plaid endpoint returning 401.
+  useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        // The authoritative auth signal is the live Supabase session, not the
-        // legacy noor_user_id cache read above. If the session has expired, clear
-        // the stale cache and send the user to /login instead of rendering the
-        // dashboard and firing 401s at every money/Plaid endpoint.
-        const session = await getSessionSafe();
-        if (cancelled) return;
-        if (!session) {
-          clearLocalAuthState();
-          router.replace("/login");
-          return;
-        }
-
-        const res = await fetch("/api/plaid/connections", {
-          method: "GET",
-          headers: await getSupabaseBearerHeaders(),
-        });
-        const payload = asPlainObject(await res.json());
-        if (!res.ok) {
-          throw new Error(
-            readErrorMessage(payload) || "Failed to load bank connections"
-          );
-        }
-        if (cancelled) return;
-
-        const list = Array.isArray(payload.connections)
-          ? (payload.connections as Array<{ status?: string }>)
-          : [];
-        const hasActiveConnection = list.some(
-          (connection) => connection.status === "active"
-        );
-        setHasBankConnection(hasActiveConnection);
-
-        if (hasActiveConnection) {
-          try {
-            const storedAccountsRaw = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
-            const storedTxRaw = localStorage.getItem(STORAGE_KEY_TRANSACTIONS);
-
-            if (storedAccountsRaw) {
-              const parsedAccounts = JSON.parse(storedAccountsRaw) as unknown;
-              if (Array.isArray(parsedAccounts)) {
-                setAccounts(parsedAccounts as StoredPlaidAccount[]);
-              }
-            }
-
-            if (storedTxRaw) {
-              const parsedTx = JSON.parse(storedTxRaw) as unknown;
-              if (Array.isArray(parsedTx)) {
-                setTransactions(parsedTx as StoredPlaidTransaction[]);
-              }
-            }
-          } catch {
-            // Ignore cache parse errors.
-          }
-        } else {
-          setAccounts([]);
-          setTransactions([]);
-          setSubscriptions([]);
-          localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
-          localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        // Transient connection-check failure: surface an error rather than
-        // flipping to "not connected" (which would prompt a re-link and create
-        // duplicate connection rows). moneyError also hides the connect prompt.
-        setMoneyError(
-          err instanceof Error ? err.message : "Failed to load bank connections"
-        );
-      } finally {
-        if (!cancelled) setIsLoading(false);
+      const storedUserId = localStorage.getItem("noor_user_id");
+      if (!storedUserId) {
+        router.push("/welcome");
+        return;
       }
+      const session = await getSessionSafe();
+      if (cancelled) return;
+      if (!session) {
+        clearLocalAuthState();
+        router.replace("/login");
+        return;
+      }
+      setUserId(session.user.id);
+      setIsLoading(false);
     })();
-
     return () => {
       cancelled = true;
     };
   }, [router]);
 
-  const fetchLiveMoneyData = useCallback(async () => {
-    if (!userId || !hasBankConnection) {
+  // Fetch accounts and transactions
+  const fetchData = useCallback(async () => {
+    if (!userId || !plaidConnections.hasActive) {
       setAccounts([]);
       setTransactions([]);
       setSubscriptions([]);
@@ -197,532 +124,846 @@ export default function HomePage() {
     }
 
     setIsLoadingData(true);
-    setMoneyError(null);
+    setError(null);
 
-    try {
-      const endDate = new Date().toISOString().split("T")[0];
-      const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0];
-
+    const attempt = async () => {
       const plaidHeaders = buildJsonAuthorizedHeaders(
         await getSupabaseBearerHeaders()
       );
 
-      const [accountsRes, transactionsRes] = await Promise.all([
-        fetch("/api/plaid/accounts", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({}),
-        }),
-        fetch("/api/plaid/transactions", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({ startDate, endDate }),
-        }),
-      ]);
+      // Fetch accounts
+      const accountsRes = await fetch("/api/plaid/accounts", {
+        method: "POST",
+        headers: plaidHeaders,
+        body: JSON.stringify({}),
+      });
+
+      if (accountsRes.status === 401) {
+        const err = new Error("Unauthorized") as Error & { status?: number };
+        err.status = 401;
+        throw err;
+      }
 
       if (!accountsRes.ok) {
-        const data = asPlainObject(
-          await accountsRes.json().catch(() => ({}))
-        );
+        const data = asPlainObject(await accountsRes.json());
+        const errText = readString(data, "error");
+        if (errText && /no active bank connections/i.test(errText)) {
+          // Re-pull authoritative connection state from the DB. Do NOT delete
+          // noor_plaid_connections here — connection truth lives in the DB now,
+          // and destroying local state caused the "connected but shows
+          // disconnected" loop.
+          plaidConnections.refetch();
+        }
+        if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {
+          setError(
+            "Your bank connection has expired. Please re-link your account."
+          );
+          setRelinkItemId(plaidConnections.connections[0]?.itemId || null);
+          return;
+        }
         throw new Error(readErrorMessage(data) || "Failed to fetch accounts");
       }
 
-      if (!transactionsRes.ok) {
-        const data = asPlainObject(
-          await transactionsRes.json().catch(() => ({}))
+      const accountsData = asPlainObject(await accountsRes.json());
+      if (accountsData.success === true) {
+        setAccounts(
+          Array.isArray(accountsData.accounts) ? accountsData.accounts : []
         );
+      }
+
+      // Fetch transactions
+      const txnRes = await fetch("/api/plaid/transactions", {
+        method: "POST",
+        headers: plaidHeaders,
+        body: JSON.stringify({ startDate, endDate }),
+      });
+
+      if (txnRes.status === 401) {
+        const err = new Error("Unauthorized") as Error & { status?: number };
+        err.status = 401;
+        throw err;
+      }
+
+      if (!txnRes.ok) {
+        const data = asPlainObject(await txnRes.json());
+        if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {
+          setError(
+            "Your bank connection has expired. Please re-link your account."
+          );
+          setRelinkItemId(plaidConnections.connections[0]?.itemId || null);
+          return;
+        }
         throw new Error(
           readErrorMessage(data) || "Failed to fetch transactions"
         );
       }
 
-      const accountsData = asPlainObject(await accountsRes.json());
-      const transactionsData = asPlainObject(await transactionsRes.json());
-
-      const nextAccounts = Array.isArray(accountsData.accounts)
-        ? accountsData.accounts
-        : [];
-      const nextTransactions = Array.isArray(transactionsData.transactions)
-        ? transactionsData.transactions
-        : [];
-      const nextSubscriptions = Array.isArray(transactionsData.subscriptions)
-        ? transactionsData.subscriptions
-        : [];
-
-      setAccounts(nextAccounts);
-      setTransactions(nextTransactions);
-      setSubscriptions(nextSubscriptions);
-
-      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(nextAccounts));
-      localStorage.setItem(
-        STORAGE_KEY_TRANSACTIONS,
-        JSON.stringify(nextTransactions)
-      );
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to sync bank data";
-      setMoneyError(message);
-
-      if (/no active bank connection/i.test(message)) {
-        // Do NOT delete noor_plaid_connections — connection truth lives in the
-        // DB now; destroying local state caused the "connected but shows
-        // disconnected" loop. Only clear the display cache.
-        setHasBankConnection(false);
-        setAccounts([]);
-        setTransactions([]);
-        setSubscriptions([]);
-        localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
-        localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
+      const txnData = asPlainObject(await txnRes.json());
+      if (txnData.success === true) {
+        setTransactions(
+          Array.isArray(txnData.transactions) ? txnData.transactions : []
+        );
+        setSubscriptions(
+          Array.isArray(txnData.subscriptions) ? txnData.subscriptions : []
+        );
       }
+    };
+
+    // Same getSessionSafe() 3s-timeout race as usePlaidConnections (see
+    // supabase-browser.ts) — under load, a valid session can still lose that
+    // race and produce a false 401. Retry with backoff instead of leaving the
+    // page stuck showing zeros for a connection that is actually fine.
+    const RETRY_DELAYS_MS = [1500, 3000];
+
+    try {
+      for (let i = 0; ; i++) {
+        try {
+          await attempt();
+          break;
+        } catch (err) {
+          const status = err instanceof Error ? (err as { status?: number }).status : undefined;
+          if (status === 401 && i < RETRY_DELAYS_MS.length) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[i]));
+            continue;
+          }
+          throw err;
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching data:", err);
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch data";
+      setError(message);
     } finally {
       setIsLoadingData(false);
     }
-  }, [userId, hasBankConnection]);
-
-  useEffect(() => {
-    if (!isLoading) {
-      fetchLiveMoneyData();
-    }
-  }, [isLoading, fetchLiveMoneyData]);
-
-  const metrics = useMemo(() => {
-    const cash = accounts
-      .filter(
-        (account) => account.type === "checking" || account.type === "savings"
-      )
-      .reduce((sum, account) => sum + (account.current_balance || 0), 0);
-
-    const creditUsed = accounts
-      .filter((account) => account.type === "credit")
-      .reduce((sum, account) => sum + (account.current_balance || 0), 0);
-
-    const spending = transactions
-      .filter((txn) => (txn.amount || 0) > 0)
-      .reduce((sum, txn) => sum + (txn.amount || 0), 0);
-
-    const income = transactions
-      .filter((txn) => (txn.amount || 0) < 0)
-      .reduce((sum, txn) => sum + Math.abs(txn.amount || 0), 0);
-
-    const netWorth = cash - creditUsed;
-    const totalBudget = budget.total && budget.total > 0 ? budget.total : 0;
-    const budgetSpent =
-      typeof budget.spent === "number" && budget.spent > 0
-        ? budget.spent
-        : spending;
-    const budgetRemaining =
-      totalBudget > 0 ? Math.max(0, totalBudget - budgetSpent) : 0;
-
-    const categoryMap: Record<string, number> = {};
-    transactions
-      .filter((txn) => (txn.amount || 0) > 0)
-      .forEach((txn) => {
-        const category = txn.category?.[0] || "Other";
-        categoryMap[category] =
-          (categoryMap[category] || 0) + (txn.amount || 0);
-      });
-
-    const categorySpending = Object.entries(categoryMap)
-      .map(([name, amount]) => ({ name, amount }))
-      .sort((a, b) => b.amount - a.amount);
-
-    const inferredSubscriptions = transactions.filter((txn) => {
-      const amount = txn.amount || 0;
-      if (amount <= 0) return false;
-
-      const categoryText = (txn.category || []).join(" ").toLowerCase();
-      const nameText = (txn.name || "").toLowerCase();
-      return (
-        categoryText.includes("subscription") ||
-        /netflix|spotify|apple|prime|adobe|hulu|youtube|google/i.test(nameText)
-      );
-    });
-
-    const normalizedSubscriptions =
-      subscriptions.length > 0
-        ? subscriptions
-            .map((sub) => ({
-              name: sub.name || "Subscription",
-              amount:
-                typeof sub.monthly_amount === "number"
-                  ? sub.monthly_amount
-                  : sub.amount || 0,
-            }))
-            .filter((sub) => sub.amount > 0)
-        : inferredSubscriptions.map((txn) => ({
-            name: txn.name || "Subscription",
-            amount: txn.amount || 0,
-          }));
-
-    const totalSubscriptions = normalizedSubscriptions.reduce(
-      (sum, sub) => sum + sub.amount,
-      0
-    );
-
-    return {
-      cash,
-      creditUsed,
-      netWorth,
-      spending,
-      income,
-      budgetRemaining,
-      categorySpending,
-      subscriptions: normalizedSubscriptions,
-      totalSubscriptions,
-    };
-  }, [accounts, transactions, budget, subscriptions]);
-
-  const displayMetrics = useMemo(() => {
-    if (!hasBankConnection) {
-      return {
-        cash: 0,
-        creditUsed: 0,
-        netWorth: 0,
-        spending: 0,
-        income: 0,
-        budgetRemaining: 0,
-        categorySpending: [] as Array<{ name: string; amount: number }>,
-        subscriptions: [] as Array<{ name: string; amount: number }>,
-        totalSubscriptions: 0,
-      };
-    }
-
-    return metrics;
-  }, [hasBankConnection, metrics]);
-
-  const aiSummary = useMemo(() => {
-    if (isLoadingData) {
-      return {
-        opening:
-          "Syncing your Plaid data now. I will calculate your safe cap in a moment.",
-        question: "Can you show me a safe spending cap for this week?",
-        answer:
-          "I am updating your balances and recent transactions before giving a number.",
-      };
-    }
-
-    if (moneyError) {
-      return {
-        opening: "I could not read your latest Plaid data due to a sync error.",
-        question: "Can you show me a safe spending cap for this week?",
-        answer:
-          "Please reconnect or refresh your bank data in Money page and I will recalculate instantly.",
-      };
-    }
-
-    if (!hasBankConnection) {
-      return {
-        opening:
-          "Connect your bank account in Money page and I will calculate your spending cap from live Plaid data.",
-        question: "Can you show me a safe spending cap for this week?",
-        answer:
-          "I need a connected account before I can estimate a safe weekly cap.",
-      };
-    }
-
-    if (transactions.length === 0 && accounts.length === 0) {
-      return {
-        opening:
-          "Your bank is connected, but there is not enough transaction history yet to compute a reliable cap.",
-        question: "Can you show me a safe spending cap for this week?",
-        answer:
-          "Once Plaid returns recent activity, I will calculate this using your real cash flow.",
-      };
-    }
-
-    const now = new Date();
-    const daysInMonth = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0
-    ).getDate();
-    const dayOfMonth = now.getDate();
-    const daysRemaining = Math.max(1, daysInMonth - dayOfMonth + 1);
-    const weeksRemaining = Math.max(1, Math.ceil(daysRemaining / 7));
-
-    const averageDailySpending = metrics.spending / 30;
-    const projectedRemainingSpend = averageDailySpending * daysRemaining;
-    const subscriptionReserve = metrics.totalSubscriptions;
-    const safetyReserve = Math.max(150, metrics.cash * 0.2);
-    const spendableThisMonth = Math.max(
-      0,
-      metrics.cash -
-        projectedRemainingSpend -
-        subscriptionReserve -
-        safetyReserve
-    );
-    const weeklyCap = Math.max(0, spendableThisMonth / weeksRemaining);
-
-    return {
-      opening: `Good day, ${userName}. Based on your balances and recent spending, you can safely spend ${formatMoney(
-        spendableThisMonth
-      )} for the rest of this month while keeping a reserve of ${formatMoney(
-        safetyReserve
-      )}.`,
-      question: "Can you show me a safe spending cap for this week?",
-      answer: `Using your recent run rate (${formatMoney(
-        averageDailySpending
-      )}/day) and ${daysRemaining} day(s) left this month, a safe weekly cap is about ${formatMoney(
-        weeklyCap
-      )}.`,
-    };
   }, [
-    isLoadingData,
-    moneyError,
-    hasBankConnection,
-    transactions,
-    accounts,
-    metrics,
-    userName,
+    userId,
+    plaidConnections.hasActive,
+    plaidConnections.connections,
+    startDate,
+    endDate,
   ]);
 
-  const openFullChat = () => {
-    router.push("/chat");
+  // Fetch data when user connects or date range changes
+  useEffect(() => {
+    if (userId && plaidConnections.hasActive) {
+      fetchData();
+    }
+  }, [userId, plaidConnections.hasActive, startDate, endDate, fetchData]);
+
+  // The initial fetch above can land while the Supabase session is still
+  // being refreshed (getSessionSafe's 3s race can time out on a slow token
+  // refresh), producing a bare "Unauthorized" with no retry. Re-run fetchData
+  // whenever auth state settles afterward, so a session that finishes
+  // refreshing a moment later clears the error instead of requiring reload.
+  useEffect(() => {
+    if (!supabase) return;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+        fetchData();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [fetchData]);
+
+  // Handle date range change
+  const handleDateRangeChange = (type: "start" | "end", value: string) => {
+    if (type === "start") {
+      setStartDate(value);
+    } else {
+      setEndDate(value);
+    }
   };
 
-  const submitPrompt = (rawPrompt?: string) => {
-    const text = (rawPrompt ?? promptDraft).trim();
-    if (!text) return;
-    localStorage.setItem("noor_quick_prompt", text);
-    router.push("/chat");
-  };
+  // Handle new bank connection
+  const handleBankConnected = useCallback(() => {
+    setRelinkItemId(null);
+    setRelinkToken(null);
+    setError(null);
+    plaidConnections.refetch();
+  }, [plaidConnections]);
+
+  // Handle re-link
+  const handleRelink = useCallback(async () => {
+    if (!relinkItemId) return;
+    try {
+      setIsPreparingRelink(true);
+      const linkToken = await plaidConnections.relink(relinkItemId);
+      if (linkToken) {
+        setRelinkToken(linkToken);
+      }
+    } catch (err) {
+      console.error("Relink failed:", err);
+    } finally {
+      setIsPreparingRelink(false);
+    }
+  }, [relinkItemId, plaidConnections]);
+
+  const handleRelinkSuccess = useCallback(
+    async (
+      publicToken: string,
+      metadata: { institution: { name: string; institution_id: string } }
+    ) => {
+      if (!userId) return;
+
+      try {
+        const plaidHeaders = buildJsonAuthorizedHeaders(
+          await getSupabaseBearerHeaders()
+        );
+        const response = await fetch("/api/plaid/exchange-token", {
+          method: "POST",
+          headers: plaidHeaders,
+          body: JSON.stringify({
+            publicToken,
+            institutionId: metadata.institution.institution_id,
+            institutionName: metadata.institution.name,
+          }),
+        });
+
+        const data = asPlainObject(await response.json());
+        if (data.success !== true) {
+          throw new Error(
+            readErrorMessage(data) || "Failed to complete re-link"
+          );
+        }
+
+        setRelinkToken(null);
+        handleBankConnected();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to complete re-link";
+        setError(message);
+      }
+    },
+    [handleBankConnected, userId]
+  );
+
+  // Remove a single connection from NOOR (deletes the DB row; does NOT revoke on
+  // Plaid — see docs/design/connection-management.md §9). The hook re-fetches
+  // connections on success; we ALSO call fetchData() explicitly because removing
+  // one of several banks leaves hasActive unchanged, so the hasActive-dependent
+  // fetch effect would not re-run on its own.
+  const handleRemoveConnection = useCallback(
+    async (itemId: string) => {
+      setRemovingItemId(itemId);
+      try {
+        const ok = await plaidConnections.disconnect(itemId);
+        if (ok) {
+          await fetchData();
+        }
+      } finally {
+        setRemovingItemId(null);
+        setConfirmingRemoveItemId(null);
+      }
+    },
+    [plaidConnections, fetchData]
+  );
+
+  // Add another bank. Own handler (not ConnectBankCard, which has no user-facing
+  // error/duplicate channel): POST exchange-token, surface the 409
+  // ALREADY_CONNECTED duplicate case as an inline notice, refresh on success.
+  const handleAddBankSuccess = useCallback(
+    async (
+      publicToken: string,
+      metadata: { institution: { name: string; institution_id: string } }
+    ) => {
+      if (!userId) return;
+      setAddBankNotice(null);
+      try {
+        const plaidHeaders = buildJsonAuthorizedHeaders(
+          await getSupabaseBearerHeaders()
+        );
+        const response = await fetch("/api/plaid/exchange-token", {
+          method: "POST",
+          headers: plaidHeaders,
+          body: JSON.stringify({
+            publicToken,
+            institutionId: metadata.institution.institution_id,
+            institutionName: metadata.institution.name,
+          }),
+        });
+
+        const data = asPlainObject(await response.json());
+
+        if (
+          response.status === 409 ||
+          readString(data, "code") === "ALREADY_CONNECTED"
+        ) {
+          const name =
+            readString(data, "institutionName") ||
+            metadata.institution.name ||
+            "This bank";
+          setAddBankNotice(`${name} is already connected.`);
+          return;
+        }
+
+        if (data.success !== true) {
+          throw new Error(readErrorMessage(data) || "Failed to add bank");
+        }
+
+        handleBankConnected();
+        await fetchData();
+      } catch (err) {
+        setAddBankNotice(
+          err instanceof Error ? err.message : "Failed to add bank"
+        );
+      }
+    },
+    [userId, handleBankConnected, fetchData]
+  );
+
+  // Only prompt to connect once we've actually determined there is no
+  // connection. While the connection check is loading, or if it failed with a
+  // transient error, suppress the card — otherwise a temporary hiccup would push
+  // the user to re-link and create duplicate connection rows.
+  const shouldShowConnectCard =
+    !!userId &&
+    !plaidConnections.isLoading &&
+    !plaidConnections.error &&
+    (!plaidConnections.hasActive ||
+      !!(error && /no active bank connections/i.test(error)));
+
+  // Calculate totals
+  const totals = useMemo(() => {
+    const checking = accounts
+      .filter((a) => a.type === "checking" || a.type === "savings")
+      .reduce((sum, a) => sum + a.current_balance, 0);
+
+    const credit = accounts
+      .filter((a) => a.type === "credit")
+      .reduce((sum, a) => sum + a.current_balance, 0);
+
+    const creditLimit = accounts
+      .filter((a) => a.type === "credit")
+      .reduce((sum, a) => sum + (a.credit_limit || 0), 0);
+
+    const netWorth = checking - credit;
+
+    return { checking, credit, creditLimit, netWorth };
+  }, [accounts]);
+
+  // Calculate spending by category
+  const categorySpending = useMemo(() => {
+    const categories: Record<string, number> = {};
+
+    transactions
+      .filter((t) => t.amount > 0)
+      .forEach((t) => {
+        const category = t.category[0] || "Other";
+        categories[category] = (categories[category] || 0) + t.amount;
+      });
+
+    return Object.entries(categories)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [transactions]);
+
+  const totalSubscriptions = subscriptions.reduce(
+    (sum, s) => sum + s.monthly_amount,
+    0
+  );
+
+  // Monthly spending
+  const monthlySpending = useMemo(() => {
+    return transactions
+      .filter((t) => t.amount > 0)
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [transactions]);
+
+  // Monthly income
+  const monthlyIncome = useMemo(() => {
+    return transactions
+      .filter((t) => t.amount < 0)
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+  }, [transactions]);
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-5">
-          <AIOrb size={72} variant="soft" />
-          <p className="text-sm text-gray-500">Loading your dashboard...</p>
-        </div>
+        <motion.div
+          className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+        />
       </div>
     );
   }
 
+  const TABS: { id: TabId; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "accounts", label: "Accounts" },
+    { id: "transactions", label: "Transactions" },
+    { id: "subscriptions", label: "Subscriptions" },
+  ];
+
   return (
     <PageLayout userName={userName}>
-      <motion.header
-        className="mb-8 md:mb-10"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <h1 className="display-greeting">
-          Hello {userName === "there" ? "" : userName}
-          <span className="block text-black">How can I help you today?</span>
-        </h1>
-        <p className="text-sm text-gray-500 mt-3">
-          Your assistant and money overview in one place.
-        </p>
-      </motion.header>
-
-      <section className="flex flex-col gap-6">
-        <motion.div
-          className="noor-card p-6 md:p-8 flex flex-col w-full min-h-[420px]"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <AIOrb size={36} />
-              <h2 className="section-title text-2xl">AI Assistant</h2>
-            </div>
-            <button
-              type="button"
-              onClick={openFullChat}
-              aria-label="Open full chat"
-              className="p-2 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors shrink-0"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.75}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"
-                />
-              </svg>
-            </button>
-          </div>
-
-          <div className="mt-6 flex-1 space-y-5 min-h-[240px] overflow-y-auto">
-            <div className="rounded-2xl bg-white/70 border border-white/75 px-4 py-3 max-w-[92%]">
-              <p className="text-sm text-gray-700 leading-relaxed">
-                {aiSummary.opening}
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-black px-4 py-3 ml-auto max-w-[92%] shadow-glass">
-              <p className="text-sm leading-relaxed text-white">
-                {aiSummary.question}
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-white/70 border border-white/75 px-4 py-3 max-w-[92%]">
-              <p className="text-sm text-gray-700 leading-relaxed">
-                {aiSummary.answer}
-              </p>
-            </div>
-          </div>
-
-          <div className="pt-6 border-t border-white/70">
-            <div className="flex flex-wrap gap-2 mb-5">
-              {QUICK_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => submitPrompt(prompt)}
-                  className="glass-pill px-4 py-2 text-xs text-gray-700 hover:border-gray-300 transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                value={promptDraft}
-                onChange={(event) => setPromptDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    submitPrompt();
-                  }
-                }}
-                placeholder="Ask about your money..."
-                className="flex-1 bg-white/80 border border-white/75 rounded-full px-4 py-3 text-sm outline-none shadow-glass focus:border-noor-purple transition-colors"
-              />
-              <button
-                onClick={() => submitPrompt()}
-                className="w-11 h-11 rounded-full bg-black text-white flex items-center justify-center shadow-glass transition-colors hover:bg-noor-purple-deep"
-                aria-label="Open chat"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 12h14m-6-6 6 6-6 6"
-                  />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          className="space-y-5"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.05 }}
-        >
+      {/* Header */}
+      <header className="mb-6">
+        <div className="flex items-center justify-between">
           <div>
-            <div className="mb-6">
-              <h2 className="section-title text-2xl">Money</h2>
-              <p className="text-gray-500 text-sm">
-                All your finances in one place
-              </p>
+            <h1 className="text-2xl font-semibold text-black">Wallet</h1>
+            <p className="text-gray-500 text-sm">
+              All your finances in one place
+            </p>
+          </div>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+              activeTab === tab.id
+                ? "bg-black text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {isLoadingData && (
+        <div className="mb-4 noor-card px-4 py-3 text-sm text-gray-600">
+          Syncing your latest bank data...
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-700">{error}</p>
+          {relinkItemId && !relinkToken && (
+            <button
+              onClick={handleRelink}
+              disabled={isPreparingRelink}
+              className="mt-3 rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isPreparingRelink ? "Preparing re-link..." : "Re-link bank"}
+            </button>
+          )}
+          {relinkToken && userId && (
+            <div className="mt-3">
+              <PlaidLinkButton
+                userId={userId}
+                linkTokenOverride={relinkToken}
+                onSuccess={handleRelinkSuccess}
+                className="rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white"
+              >
+                Complete bank re-link
+              </PlaidLinkButton>
             </div>
+          )}
+        </div>
+      )}
 
-            {isLoadingData && (
-              <div className="mb-4 rounded-2xl glass-pill px-4 py-3 text-sm text-gray-600">
-                Syncing your latest bank data...
-              </div>
-            )}
-
-            {!isLoadingData && moneyError && (
-              <div className="mb-4 rounded-xl border border-red-200 bg-rose-50 px-4 py-3 text-sm text-red-800">
-                {moneyError}
-              </div>
-            )}
-
-            {!isLoadingData && !moneyError && !hasBankConnection && (
-              <div className="mb-4 rounded-xl border border-red-200 bg-rose-50 px-4 py-3 text-sm text-red-800">
-                No active bank connections found. Please connect a bank first.
-              </div>
-            )}
-
-            <div className="noor-card p-6 mb-5">
-              <p className="text-gray-500 text-sm mb-1">Net Worth</p>
-              <p className="text-4xl font-semibold text-black mb-4">
-                {formatMoney(displayMetrics.netWorth)}
+      <AnimatePresence mode="wait">
+        {/* Overview Tab */}
+        {activeTab === "overview" && (
+          <motion.div
+            key="overview"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            {/* Net Worth Card */}
+            <div className="noor-card p-6 mb-4 bg-gradient-to-br from-gray-900 to-black text-black">
+              <p className="text-gray-600 text-sm mb-1">Net Worth</p>
+              <p className="text-4xl font-semibold mb-4">
+                {formatCurrency(totals.netWorth)}
               </p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-gray-500 text-xs">Cash</p>
-                  <p className="text-lg font-medium text-noor-purple-deep">
-                    {formatMoney(displayMetrics.cash)}
+                  <p className="text-gray-600 text-xs">Cash</p>
+                  <p className="text-lg font-medium text-green-700">
+                    {formatCurrency(totals.checking)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Credit Used</p>
-                  <p className="text-lg font-medium text-red-600">
-                    -{formatMoney(displayMetrics.creditUsed)}
+                  <p className="text-gray-600 text-xs">Credit Used</p>
+                  <p className="text-lg font-medium text-red-700">
+                    -{formatCurrency(totals.credit)}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-5">
+            {/* Monthly Summary */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Income</p>
-                <p className="text-xl font-semibold text-noor-purple-deep">
-                  +{formatMoney(displayMetrics.income)}
+                <p className="text-xl font-semibold text-green-600">
+                  +{formatCurrency(monthlyIncome)}
                 </p>
               </div>
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Spending</p>
                 <p className="text-xl font-semibold text-red-600">
-                  -{formatMoney(displayMetrics.spending)}
+                  -{formatCurrency(monthlySpending)}
                 </p>
               </div>
             </div>
 
-            <div className="noor-card p-5 mb-5">
+            {/* Spending by Category */}
+            <div className="noor-card p-5 mb-4">
+              <h3 className="font-medium text-black mb-4">
+                Spending by Category
+              </h3>
+              <div className="space-y-3">
+                {categorySpending.slice(0, 5).map((cat) => (
+                  <div key={cat.name} className="flex items-center gap-3">
+                    <span className="text-xl w-8">
+                      {CATEGORY_ICONS[cat.name] || "💰"}
+                    </span>
+                    <div className="flex-1">
+                      <div className="flex justify-between mb-1">
+                        <span className="text-sm text-black">{cat.name}</span>
+                        <span className="text-sm font-medium text-black">
+                          {formatCurrency(cat.amount)}
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <motion.div
+                          className="h-full rounded-full"
+                          style={{
+                            backgroundColor:
+                              CATEGORY_COLORS[cat.name] || "#6B7280",
+                          }}
+                          initial={{ width: 0 }}
+                          animate={{
+                            width: `${(cat.amount / monthlySpending) * 100}%`,
+                          }}
+                          transition={{ duration: 0.5 }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Subscriptions Summary */}
+            <div className="noor-card p-5 mb-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-medium text-black">
                   Monthly Subscriptions
                 </h3>
                 <span className="text-lg font-semibold text-black">
-                  {formatMoney(displayMetrics.totalSubscriptions)}
+                  {formatCurrency(totalSubscriptions)}
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {displayMetrics.subscriptions.length > 0 ? (
-                  displayMetrics.subscriptions.slice(0, 2).map((sub, idx) => (
-                    <span
-                      key={`${sub.name || "subscription"}-${idx}`}
-                      className="px-3 py-1 bg-white/70 border border-white/75 rounded-full text-sm text-gray-700"
-                    >
-                      {sub.name || "Subscription"} ·{" "}
-                      {formatMoney(sub.amount || 0)}/mo
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-sm text-gray-500">
-                    No subscriptions detected
+                {subscriptions.map((sub, i) => (
+                  <span
+                    key={i}
+                    className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
+                  >
+                    {sub.name} · {formatCurrency(sub.monthly_amount)}/mo
                   </span>
-                )}
+                ))}
               </div>
             </div>
 
-            <Link
-              href="/money"
-              className="inline-flex items-center rounded-full px-5 py-2.5 text-sm font-medium bg-black text-white shadow-glass hover:bg-noor-purple-deep transition-colors"
-            >
-              Open Money
-            </Link>
-          </div>
-        </motion.div>
-      </section>
+            {/* Connect Bank Account */}
+            {shouldShowConnectCard && (
+              <ConnectBankCard
+                userId={userId}
+                onConnected={handleBankConnected}
+              />
+            )}
+          </motion.div>
+        )}
+
+        {/* Accounts Tab */}
+        {activeTab === "accounts" && (
+          <motion.div
+            key="accounts"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            {/* Linked banks: connection list + remove + add another */}
+            {plaidConnections.connections.length > 0 && (
+              <div className="noor-card p-5 mb-4">
+                <h3 className="font-medium text-black mb-3">Linked banks</h3>
+                <div className="space-y-1">
+                  {plaidConnections.connections.map((conn) => (
+                    <div
+                      key={conn.itemId}
+                      className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-black truncate">
+                          {conn.institutionName}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {conn.status === "active"
+                            ? "Connected"
+                            : "Needs attention"}
+                        </p>
+                      </div>
+                      {confirmingRemoveItemId === conn.itemId ? (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => handleRemoveConnection(conn.itemId)}
+                            disabled={removingItemId === conn.itemId}
+                            className="text-xs font-medium text-red-600 px-2 py-1 rounded disabled:opacity-50"
+                          >
+                            {removingItemId === conn.itemId
+                              ? "Removing…"
+                              : "Confirm"}
+                          </button>
+                          <button
+                            onClick={() => setConfirmingRemoveItemId(null)}
+                            disabled={removingItemId === conn.itemId}
+                            className="text-xs text-gray-500 px-2 py-1 rounded disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            setConfirmingRemoveItemId(conn.itemId)
+                          }
+                          className="text-xs font-medium text-gray-600 hover:text-red-600 px-2.5 py-1 rounded border border-gray-200 flex-shrink-0"
+                        >
+                          Remove from NOOR
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {userId && (
+                  <div className="mt-4">
+                    <PlaidLinkButton
+                      userId={userId}
+                      onSuccess={handleAddBankSuccess}
+                      className="w-full py-3 border border-gray-300 text-black font-medium rounded-xl disabled:opacity-50 transition-all"
+                    >
+                      + Add another bank
+                    </PlaidLinkButton>
+                    {addBankNotice && (
+                      <p className="text-xs text-gray-600 mt-2">
+                        {addBankNotice}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {accounts.map((account) => (
+                <motion.div
+                  key={account.id}
+                  className="noor-card p-5"
+                  whileHover={{ scale: 1.01 }}
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-medium text-black">{account.name}</p>
+                      <p className="text-sm text-gray-500">
+                        {account.institution_name} · ****{account.mask}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p
+                        className={`text-xl font-semibold ${
+                          account.type === "credit"
+                            ? "text-red-600"
+                            : "text-black"
+                        }`}
+                      >
+                        {account.type === "credit" ? "-" : ""}
+                        {formatCurrency(account.current_balance)}
+                      </p>
+                      {account.type === "credit" && account.credit_limit && (
+                        <p className="text-xs text-gray-500">
+                          of {formatCurrency(account.credit_limit)} limit
+                        </p>
+                      )}
+                      {account.available_balance !== null &&
+                        account.type !== "credit" && (
+                          <p className="text-xs text-gray-500">
+                            {formatCurrency(account.available_balance)}{" "}
+                            available
+                          </p>
+                        )}
+                    </div>
+                  </div>
+                  {account.type === "credit" && account.credit_limit && (
+                    <div className="mt-3">
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <motion.div
+                          className={`h-full rounded-full ${
+                            account.current_balance / account.credit_limit > 0.7
+                              ? "bg-red-500"
+                              : "bg-green-500"
+                          }`}
+                          initial={{ width: 0 }}
+                          animate={{
+                            width: `${
+                              (account.current_balance / account.credit_limit) *
+                              100
+                            }%`,
+                          }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {Math.round(
+                          (account.current_balance / account.credit_limit) * 100
+                        )}
+                        % used
+                      </p>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+
+            {shouldShowConnectCard && (
+              <div className="mt-6">
+                <ConnectBankCard
+                  userId={userId}
+                  onConnected={handleBankConnected}
+                />
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Transactions Tab */}
+        {activeTab === "transactions" && (
+          <motion.div
+            key="transactions"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <div className="space-y-2">
+              {transactions.map((txn) => (
+                <motion.div
+                  key={txn.id}
+                  className="noor-card px-4 py-3 flex items-center justify-between"
+                  whileHover={{ scale: 1.01 }}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">
+                      {CATEGORY_ICONS[txn.category[0]] || "💰"}
+                    </span>
+                    <div>
+                      <p className="font-medium text-black text-sm">
+                        {txn.merchant_name || txn.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {new Date(txn.date).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                        {txn.pending && " · Pending"}
+                      </p>
+                    </div>
+                  </div>
+                  <p
+                    className={`font-semibold ${
+                      txn.amount < 0 ? "text-green-600" : "text-black"
+                    }`}
+                  >
+                    {txn.amount < 0 ? "+" : "-"}
+                    {formatCurrency(Math.abs(txn.amount))}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Subscriptions Tab */}
+        {activeTab === "subscriptions" && (
+          <motion.div
+            key="subscriptions"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            {/* Total */}
+            <div className="noor-card p-5 mb-4 bg-gradient-to-r from-purple-500 to-pink-500 text-black">
+              <p className="text-black/80 text-sm mb-1">
+                Monthly Subscriptions
+              </p>
+              <p className="text-3xl font-semibold">
+                {formatCurrency(totalSubscriptions)}/mo
+              </p>
+              <p className="text-black/70 text-sm mt-2">
+                {formatCurrency(totalSubscriptions * 12)}/year
+              </p>
+            </div>
+
+            {/* Subscription List */}
+            <div className="space-y-2">
+              {subscriptions.length > 0 ? (
+                subscriptions.map((sub, i) => (
+                  <motion.div
+                    key={i}
+                    className="noor-card p-4 flex items-center justify-between"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center">
+                        <span className="text-lg">📱</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-black">{sub.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {sub.last_charged
+                            ? `Last charged ${new Date(
+                                sub.last_charged
+                              ).toLocaleDateString()}`
+                            : "Recent recurring charge"}
+                        </p>
+                        {sub.next_charge && (
+                          <p className="text-xs text-gray-500">
+                            Next expected{" "}
+                            {new Date(sub.next_charge).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <p className="font-semibold text-black">
+                      {formatCurrency(sub.monthly_amount)}/mo
+                    </p>
+                  </motion.div>
+                ))
+              ) : (
+                <div className="noor-card p-8 text-center">
+                  <p className="text-gray-500">No subscriptions detected</p>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Connect your accounts to detect subscriptions automatically
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Tips */}
+            <div className="noor-card p-4 mt-4 bg-blue-50">
+              <p className="text-sm text-blue-800">
+                💡 Tip: Cancel unused subscriptions to save money. Even
+                $10/month is $120/year!
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </PageLayout>
   );
 }

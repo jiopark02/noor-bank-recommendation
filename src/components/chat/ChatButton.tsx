@@ -20,7 +20,7 @@ export function ChatButton({ isOpen, onClick, hasNewMessage = false }: ChatButto
         backdropFilter: 'blur(20px) saturate(1.4)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
         border: '1px solid rgba(255,255,255,0.8)',
-        boxShadow: '0 8px 32px rgba(109,100,168,0.28)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.28)',
       }}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
@@ -36,7 +36,7 @@ export function ChatButton({ isOpen, onClick, hasNewMessage = false }: ChatButto
             height="22"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#2B2740"
+            stroke="#000000"
             strokeWidth="2"
             initial={{ rotate: -90, opacity: 0 }}
             animate={{ rotate: 0, opacity: 1 }}
@@ -62,7 +62,7 @@ export function ChatButton({ isOpen, onClick, hasNewMessage = false }: ChatButto
       {hasNewMessage && !isOpen && (
         <motion.div
           className="absolute top-0 right-0 w-3 h-3 rounded-full"
-          style={{ background: '#6D64A8' }}
+          style={{ background: '#000000' }}
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', stiffness: 500, damping: 15 }}

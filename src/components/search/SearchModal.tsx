@@ -63,7 +63,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const activeColor = useSchoolTheme ? theme.primary_color : '#2B2740';
+  const activeColor = useSchoolTheme ? theme.primary_color : '#000000';
 
   // Filter results based on query
   const results = useMemo(() => {

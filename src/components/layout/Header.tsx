@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getSchoolTheme } from '@/lib/schoolThemes';
+import { getSchoolTheme, hasCustomTheme } from '@/lib/schoolThemes';
 import { SearchModal } from '@/components/search';
 
 interface HeaderProps {
@@ -23,16 +23,17 @@ export function Header({ userName = 'there' }: HeaderProps) {
     }
   }, []);
 
-  const schoolTheme = institutionId ? getSchoolTheme(institutionId) : null;
+  const schoolTheme =
+    institutionId && hasCustomTheme(institutionId)
+      ? getSchoolTheme(institutionId)
+      : null;
 
   return (
     <>
       <header
-        className="sticky top-0 z-40 border-b border-white/60"
+        className="sticky top-0 z-40 border-b border-gray-200"
         style={{
-          background: 'rgba(255, 255, 255, 0.55)',
-          backdropFilter: 'blur(20px) saturate(1.4)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+          background: '#FFFFFF',
         }}
       >
         <div className="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between">
@@ -41,7 +42,7 @@ export function Header({ userName = 'there' }: HeaderProps) {
             <span className="text-base tracking-[0.25em] font-medium text-black transition-opacity duration-300 hover:opacity-60">
               NOOR
             </span>
-            {schoolTheme && (
+            {schoolTheme ? (
               <div className="flex items-center gap-1.5 mt-0.5">
                 {schoolTheme.logo_url && schoolTheme.logo_url.startsWith('http') ? (
                   <img
@@ -66,6 +67,15 @@ export function Header({ userName = 'there' }: HeaderProps) {
                 </div>
                 <span className="text-[10px] tracking-wide text-gray-500">
                   {schoolTheme.short_name}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <div className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold bg-gray-100 text-gray-600">
+                  {userName.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-[10px] tracking-wide text-gray-500">
+                  {userName}
                 </span>
               </div>
             )}

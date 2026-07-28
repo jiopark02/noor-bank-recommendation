@@ -1953,7 +1953,7 @@ export default function SurveyPage() {
               <div className="p-6 border-t border-white/15">
                 <button
                   onClick={() => setShowTermsModal(false)}
-                  className="w-full py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl font-medium"
+                  className="w-full py-3 bg-white text-[#000000] hover:bg-white/90 rounded-xl font-medium"
                 >
                   {t("common.close")}
                 </button>
@@ -2050,7 +2050,7 @@ export default function SurveyPage() {
               <div className="p-6 border-t border-white/15">
                 <button
                   onClick={() => setShowPrivacyModal(false)}
-                  className="w-full py-3 bg-white text-[#2B2740] hover:bg-white/90 rounded-xl font-medium"
+                  className="w-full py-3 bg-white text-[#000000] hover:bg-white/90 rounded-xl font-medium"
                 >
                   {t("common.close")}
                 </button>
