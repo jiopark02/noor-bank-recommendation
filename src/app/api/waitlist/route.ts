@@ -27,12 +27,10 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  const emailSent = await sendWaitlistConfirmationEmail(email, rawName ?? undefined);
-
-  if (!emailSent) {
-    return NextResponse.json({ message: 'Something went wrong. Please try again.' }, { status: 500 });
-  }
-
+  // Persist the lead first. A saved row is the primary outcome; the confirmation
+  // email is best-effort. If email were sent first (as it used to be), a mail
+  // failure would 500 before the insert and the lead would be lost with no
+  // record of who signed up.
   const { error } = await supabase.from('waitlist_signups').insert({
     email,
     name: rawName,
@@ -40,11 +38,28 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
+    // Duplicate email (UNIQUE violation). Return 409 and do NOT send a
+    // confirmation email — the address is already registered.
     if (error.code === '23505') {
       return NextResponse.json({ message: 'already_registered' }, { status: 409 });
     }
     console.error('Waitlist insert error:', error);
     return NextResponse.json({ message: 'Something went wrong. Please try again.' }, { status: 500 });
+  }
+
+  // Lead is saved. Send the confirmation email best-effort: we MUST await it
+  // (Vercel freezes the function once the response returns, so an un-awaited
+  // send never fires), but a send failure must not fail the request. The user
+  // gets 200 either way because the lead really was persisted.
+  // sendWaitlistConfirmationEmail can signal failure by returning false rather
+  // than throwing, so we check both the thrown case and the return value.
+  try {
+    const emailSent = await sendWaitlistConfirmationEmail(email, rawName ?? undefined);
+    if (!emailSent) {
+      console.error('Waitlist confirmation email failed to send (returned false) for:', email);
+    }
+  } catch (emailError) {
+    console.error('Waitlist confirmation email threw for:', email, emailError);
   }
 
   return NextResponse.json({ success: true }, { status: 200 });
