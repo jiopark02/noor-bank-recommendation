@@ -5,6 +5,16 @@ import { sendWelcomeEmail } from "@/lib/email";
 import { sanitizeNameField } from "@/lib/validation";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 
+// Temporary signup pause (fail-open). Gates ONLY the unauthenticated
+// email/password signup path below; the authenticated OAuth
+// profile-completion path is never affected. Blocks only when SIGNUP_DISABLED
+// is exactly "true" — any other value, including unset, leaves signup open, so
+// forgetting to remove the variable on resume can never silently close signups.
+// This is a temporary launch-gating measure, not a permanent gate.
+function isSignupDisabled(): boolean {
+  return process.env.SIGNUP_DISABLED === "true";
+}
+
 // Shared survey_responses row mapping. Used by BOTH the unauthenticated signup
 // path and the authenticated (OAuth profile-completion) path, so the field
 // mapping lives in exactly one place and never drifts between the two.
@@ -129,7 +139,22 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      // ---- UNAUTHENTICATED PATH (legacy email/password signup) — unchanged ----
+      // ---- UNAUTHENTICATED PATH (legacy email/password signup) ----
+      // Temporary signup pause: reject brand-new account creation BEFORE it
+      // reaches admin.createUser. Early-return so no auth user is ever created;
+      // this must never be a create-then-rollback path. Fail-open (see
+      // isSignupDisabled): only closes when SIGNUP_DISABLED === "true".
+      if (isSignupDisabled()) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "New signups are temporarily paused. Please join the waitlist and we'll email you when signups reopen.",
+          },
+          { status: 403 }
+        );
+      }
+
       if (!surveyData.email || !surveyData.password) {
         return NextResponse.json(
           { success: false, message: "Email and password are required" },

@@ -353,15 +353,6 @@ export default function LoginPage() {
             >
               Forgot password?
             </Link>
-            <p className="text-sm text-gray-500">
-              Don't have an account?{" "}
-              <Link
-                href="/survey"
-                className="text-black font-medium hover:opacity-70 transition-opacity"
-              >
-                Sign up
-              </Link>
-            </p>
           </div>
 
           {/* Divider */}
