@@ -40,5 +40,6 @@ next-env.d.ts
 .vercel
 .env*.local
 
-#Claude
-CLAUDE.md
+# Audit
+audit/L0-evidence.txt
+audit/results/
