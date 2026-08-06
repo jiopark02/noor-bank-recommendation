@@ -36,6 +36,10 @@ import {
   sealBankData,
 } from "@/lib/plaidChatContext";
 import { getPlaidChatState } from "@/lib/plaidChatState";
+import {
+  evaluatePlaidEgressDecision,
+  logPlaidEgressDecision,
+} from "@/lib/plaidEgressPolicy";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -1050,7 +1054,12 @@ export async function POST(request: NextRequest) {
     });
     systemPrompt += memoryBlock;
 
-    if (plaidStateEnabled) {
+    const capabilityScaffoldDecision = evaluatePlaidEgressDecision({
+      channel: "capability_scaffold",
+      plaidStateMode,
+    });
+    logPlaidEgressDecision(capabilityScaffoldDecision, { mode: plaidStateMode });
+    if (capabilityScaffoldDecision.allowed) {
       // Balances (L2) are fetched only on substantive turns; greetings stay at
       // the L1 connection scaffold so we never do a live balance fetch on "hi".
       const effectiveDepth =
@@ -1096,7 +1105,13 @@ export async function POST(request: NextRequest) {
     // balances on substantive turns, so this keyword-gated balance path (and its
     // buggy buildBalanceSummary formatter) is retired to avoid double-stating the
     // balance. Under "off"/"connection" it runs exactly as before.
-    if (wantsBalance && plaidStateMode !== "balances") {
+    const balanceKeywordDecision = evaluatePlaidEgressDecision({
+      channel: "balance_keyword",
+      plaidStateMode,
+      wantsBalance,
+    });
+    logPlaidEgressDecision(balanceKeywordDecision, { mode: plaidStateMode });
+    if (balanceKeywordDecision.allowed) {
       const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(request);
 
       if (balanceSummary) {
@@ -1107,7 +1122,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (wantsFinancialAnalysis) {
+    const financialAnalysisDecision = evaluatePlaidEgressDecision({
+      channel: "financial_analysis_keyword",
+      plaidStateMode,
+      wantsFinancialAnalysis,
+    });
+    logPlaidEgressDecision(financialAnalysisDecision, { mode: plaidStateMode });
+    if (financialAnalysisDecision.allowed) {
       const snapshot = await fetchFinancialSnapshotFromPlaidRoutes(request);
 
       if (snapshot) {
