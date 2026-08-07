@@ -29,7 +29,8 @@ This file is loaded as baseline context in every session, so anything stale here
 - Korean comments already in the codebase are being migrated to English as a tracked task; don't add new ones.
 
 **Hard environment constraints**
-- **No local Node.js.** `npm run dev` / `npm run build` cannot be run locally. The only build verification is the Vercel deploy. Never claim a change is "verified" on the basis of a local build — it didn't happen. TypeScript compile errors surface first on Vercel; fix and re-push is the normal loop.
+- **No local Node.js.** `npm run dev` / `npm run build` cannot be run locally. Never claim a change is "verified" on the basis of a local build — it didn't happen. TypeScript compile errors surface first on Vercel; fix and re-push is the normal loop.
+- **Two automated checks run on push, not one.** Vercel builds (tsc type-check) and `.github/workflows/test.yml` runs `vitest run` on every push to main and every PR (#26+ runs exist — this CI predates our awareness of it). They cover different things: the Vercel build type-checks source (test files are excluded via tsconfig), while CI actually executes the tests. Note CI uses `npm install`, not `npm ci`, so the lockfile is not strictly enforced.
 - **Migrations are NOT auto-applied.** Migration files are committed to `supabase/migrations/`, but the DB change is applied **manually by the operator in the Supabase SQL Editor**. The tech team also applies SQL directly. Never assume a committed migration is live, and never conclude "I didn't run it, so it isn't live." If a design depends on schema, a live query is the gate.
 - **The migrations directory is not the source of truth for the schema.** The live database contains at least two UNIQUE constraints that no migration file creates (`users.email`, `survey_responses.user_id`), applied directly through the console or API. A schema rebuilt from `supabase/migrations/` alone would silently lack them. Read the live schema before reasoning about constraints.
 - **Vercel env changes do not auto-redeploy.** After changing an env var a manual redeploy is required. This is the most common cause of "I changed it but nothing happened."
@@ -148,6 +149,8 @@ Environment comes from `PLAID_ENV`, defaulting to sandbox; that's the only place
 
 The scaffold path and the first keyword path are mutually exclusive by construction, so the flag chooses *which code injects balances*, not *whether* they are injected. Treat "balances are gated" as false unless you have re-read these three paths.
 
+`src/lib/plaidEgressPolicy.ts` is the single decision surface for whether Plaid-derived data reaches the LLM prompt. The three injection points in the chat route (capability scaffold, balance-keyword, financial-analysis-keyword) all route through `evaluatePlaidEgressDecision` and log a masked-by-construction `[plaid-egress]` decision line. As of the B6 first pass this is observability-only: the financial-analysis path is still not gated by `AI_PLAID_STATE` — the gap is now observable in logs, not closed. Each `reason` string names the condition it evaluated, never a downstream effect.
+
 ⚠️ **Connection status filtering is not uniform.** The chat state builder filters to `status === "active"` for the "is the user connected" decision and the balance fetch, but the connections array it renders into the sealed bank-data block retains every row and prints its status. Institution names from **errored** connections therefore reach the model.
 
 ⚠️ **`/api/plaid/disconnect` deletes the DB row without calling `itemRemove`,** so the Item stays live on Plaid's side. `/api/account/delete` does call it, best-effort, because it already loads the access token. Access tokens are stored as **plaintext TEXT** in `plaid_connections`; there is no column-level or application-level encryption. Note the consequence once production credentials are in play: deleting a row discards the only copy of the token, so the Item can no longer be revoked at all.
@@ -256,7 +259,7 @@ Purposes only. **Values, and whether a variable is currently set, are live state
 
 - **Never read `src/lib/locationData/apartmentsData.ts`.** It is over 160,000 lines. Opening it will exhaust a session's context. If you need something from it, grep for the specific value. The same caution applies to `package-lock.json`.
 - **`docs/` is stale and is not a source of truth.** The design notes under `docs/design/` carry line numbers that no longer match the code and describe an older architecture; `docs/demo-mode.md` describes a call that does not exist. Read the code, not `docs/`. If a task requires understanding a past design decision, ask the operator rather than citing these files.
-- **No local build** → verification is the Vercel deploy only. (Repeated because it's the most common false assumption.)
+- **No local build** → the Vercel deploy is the only local-build-equivalent check; CI (`vitest run` via `.github/workflows/test.yml`) covers tests separately, on every push. (Repeated because "no local build" is the most common false assumption.)
 - **Migrations are applied manually** in the Supabase SQL Editor, and the live schema contains constraints no migration creates. (Repeated for the same reason.)
 - **Vercel env changes need a manual redeploy** (Deployments → ⋯ → Redeploy). This applies to *deleting* a variable too.
 - **A rolling window doesn't clear on redeploy.** After turning the chat cap off, an already-exceeded hourly count keeps returning 429 until the window elapses. Don't read that as "the redeploy didn't take" — check the logs.
