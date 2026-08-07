@@ -98,7 +98,7 @@ export default function WaitlistPage() {
 
             {/* Description */}
             <p className="text-lg md:text-xl text-[#6b6a68] max-w-2xl mx-auto mb-10 leading-relaxed">
-              Noor is an AI financial assistant for the rest of us — the ones who don&apos;t know
+              Noor is for the rest of us — the ones who don&apos;t know
               where to start. Tell us what you&apos;re saving for. We&apos;ll handle the rest.
             </p>
 
