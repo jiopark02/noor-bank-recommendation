@@ -1919,10 +1919,8 @@ export default function SurveyPage() {
                   </h3>
                   <p className="mb-4">
                     Noor provides financial guidance, banking recommendations,
-                    and tools specifically designed for international students
-                    in the United States. Our recommendations are for
-                    informational purposes only and do not constitute financial
-                    advice.
+                    and tools. Our recommendations are for informational
+                    purposes only and do not constitute financial advice.
                   </p>
                   <h3 className="text-base font-medium text-gray-900 mb-2">
                     3. User Responsibilities
@@ -2043,7 +2041,7 @@ export default function SurveyPage() {
                   </h3>
                   <p className="mb-4">
                     If you have questions about this Privacy Policy, please
-                    contact us at privacy@noorapp.com.
+                    contact us at privacy@noor.financial.
                   </p>
                 </div>
               </div>
