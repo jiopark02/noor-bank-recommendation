@@ -1044,8 +1044,10 @@ export async function POST(request: NextRequest) {
       !isGreeting && isSubscriptionQuestion(lastUserMessageText);
 
     // Plaid capability scaffold (B-1). AI_PLAID_STATE = off | connection | balances.
-    // "off" resolves here and leaves everything below byte-for-byte as before —
-    // no scaffold, unchanged base prompt, unchanged keyword-gated blocks.
+    // "off" suppresses the scaffold block and leaves the base prompt unchanged.
+    // It does NOT mean everything below is unchanged: the balance-keyword block
+    // still runs under "off", and the financial-analysis block no longer runs
+    // under any mode because its egress channel denies on every input.
     const plaidStateMode = resolvePlaidStateMode();
     const plaidStateEnabled = plaidStateMode !== "off";
 
@@ -1136,8 +1138,9 @@ export async function POST(request: NextRequest) {
         // spending category are external free text. When the Plaid-state feature
         // is on, sanitize them and wrap the subscription list in the <bank_data>
         // seal — this closes the pre-existing raw-`sub.name` interpolation gap.
-        // When off, both helpers are the identity, so the emitted snapshot string
-        // is byte-for-byte the original (off = clean rollback target).
+        // This branch is currently unreachable under every mode: the
+        // financial-analysis egress channel denies on every input, so neither
+        // helper runs and this block emits nothing.
         const sealName = (name: string) =>
           plaidStateEnabled ? sanitizePlaidLabel(name) : name;
 
@@ -1169,7 +1172,9 @@ export async function POST(request: NextRequest) {
         // L3's balanceSummary comes from the older /api/plaid/accounts path
         // (null->$0, depository->"checking", .single() multi-bank 404), so
         // leaving it in could contradict L2 within the same prompt. Same logic
-        // as retiring the wantsBalance block. off/connection keep it byte-for-byte.
+        // as retiring the wantsBalance block. This selection is now dead in
+        // every mode: the enclosing branch never runs, so no mode emits a
+        // balance line from here.
         const balanceSummaryLine =
           plaidStateMode === "balances" ? "" : `- ${snapshot.balanceSummary}\n`;
 

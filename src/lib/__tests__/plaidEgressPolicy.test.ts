@@ -123,6 +123,9 @@ describe("evaluatePlaidEgressDecision — balance_keyword", () => {
   });
 });
 
+// This channel is switched off unconditionally: every mode denies, and a
+// matched keyword is reported with the channel_disabled_ reason rather than
+// being allowed.
 describe("evaluatePlaidEgressDecision — financial_analysis_keyword", () => {
   it("denies when wantsFinancialAnalysis is false and mode is off", () => {
     const decision = evaluatePlaidEgressDecision({
@@ -163,7 +166,7 @@ describe("evaluatePlaidEgressDecision — financial_analysis_keyword", () => {
     });
   });
 
-  it("allows when wantsFinancialAnalysis is true and mode is off — confirms this channel is not gated by AI_PLAID_STATE", () => {
+  it("denies when wantsFinancialAnalysis is true and mode is off — channel is off unconditionally, not mode-gated", () => {
     const decision = evaluatePlaidEgressDecision({
       channel: "financial_analysis_keyword",
       plaidStateMode: "off",
@@ -171,12 +174,12 @@ describe("evaluatePlaidEgressDecision — financial_analysis_keyword", () => {
     });
     expect(decision).toEqual({
       channel: "financial_analysis_keyword",
-      allowed: true,
-      reason: "keyword_matched_ungated",
+      allowed: false,
+      reason: "channel_disabled_transaction_policy_pending",
     });
   });
 
-  it("allows when wantsFinancialAnalysis is true and mode is connection", () => {
+  it("denies when wantsFinancialAnalysis is true and mode is connection", () => {
     const decision = evaluatePlaidEgressDecision({
       channel: "financial_analysis_keyword",
       plaidStateMode: "connection",
@@ -184,12 +187,12 @@ describe("evaluatePlaidEgressDecision — financial_analysis_keyword", () => {
     });
     expect(decision).toEqual({
       channel: "financial_analysis_keyword",
-      allowed: true,
-      reason: "keyword_matched_ungated",
+      allowed: false,
+      reason: "channel_disabled_transaction_policy_pending",
     });
   });
 
-  it("allows when wantsFinancialAnalysis is true and mode is balances", () => {
+  it("denies when wantsFinancialAnalysis is true and mode is balances — no mode re-opens this channel", () => {
     const decision = evaluatePlaidEgressDecision({
       channel: "financial_analysis_keyword",
       plaidStateMode: "balances",
@@ -197,8 +200,8 @@ describe("evaluatePlaidEgressDecision — financial_analysis_keyword", () => {
     });
     expect(decision).toEqual({
       channel: "financial_analysis_keyword",
-      allowed: true,
-      reason: "keyword_matched_ungated",
+      allowed: false,
+      reason: "channel_disabled_transaction_policy_pending",
     });
   });
 });

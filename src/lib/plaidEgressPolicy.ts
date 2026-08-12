@@ -3,10 +3,11 @@ import type { PlaidStateMode } from "@/lib/plaidChatContext";
 // Shared decision surface for the three places in the chat route that decide
 // whether Plaid-derived data reaches the LLM prompt (the "capability
 // scaffold" block, the balance-keyword path, and the financial-analysis
-// keyword path). Each channel's formula below is copied verbatim from that
-// channel's existing inline condition in route.ts — this module makes the
-// three decisions observable and independently testable, it does not change
-// what any of them currently decide. See audit/plans/B6-plan.md.
+// keyword path). The capability-scaffold and balance-keyword formulas below
+// are copied verbatim from those channels' inline conditions in route.ts, so
+// this module only makes them observable and independently testable. The
+// financial-analysis channel is the exception: it no longer mirrors an inline
+// condition and is switched off outright — see its case for why.
 
 export type PlaidEgressChannel =
   | "capability_scaffold"
@@ -23,6 +24,12 @@ export interface PlaidEgressPolicyInput {
 export interface PlaidEgressDecision {
   channel: PlaidEgressChannel;
   allowed: boolean;
+  // reason naming: condition results name what was evaluated (e.g. mode_off,
+  // keyword_not_matched, mode_is_balances); a channel switched off entirely is
+  // not a condition result and takes the channel_disabled_ prefix instead.
+  // unknown_channel_fail_closed is in neither series: it names a fail-closed
+  // fallback for a channel value outside the union, not an evaluated condition
+  // and not a switched-off channel.
   reason: string;
 }
 
@@ -56,11 +63,20 @@ export function evaluatePlaidEgressDecision(
       };
     }
     case "financial_analysis_keyword": {
-      const allowed = Boolean(input.wantsFinancialAnalysis);
+      // This channel is switched off unconditionally and reads no configuration.
+      // Re-opening it requires reviewing the injection-path design at Plaid
+      // production cutover.
+      if (!input.wantsFinancialAnalysis) {
+        return {
+          channel: input.channel,
+          allowed: false,
+          reason: "keyword_not_matched",
+        };
+      }
       return {
         channel: input.channel,
-        allowed,
-        reason: allowed ? "keyword_matched_ungated" : "keyword_not_matched",
+        allowed: false,
+        reason: "channel_disabled_transaction_policy_pending",
       };
     }
     default: {
