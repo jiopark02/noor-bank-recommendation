@@ -79,6 +79,84 @@ function buildSurveyRow(
   };
 }
 
+// Which request-body key(s) each survey_responses column is derived from.
+// An UPDATE must be keyed on the ORIGINATING BODY KEY rather than the column
+// name, because the two are not interchangeable: seven columns are named
+// differently from the key that feeds them, `expected_monthly_spending` is fed
+// by either of two keys (and today's client sends only the second one), and
+// `digital_preference` / `monthly_budget` each feed two columns. Testing
+// surveyData[column] instead would silently drop those.
+const UPDATABLE_COLUMN_SOURCE_KEYS: Record<string, string[]> = {
+  country_of_origin: ["country_of_origin"],
+  destination_country: ["destination_country"],
+  institution_id: ["institution_id"],
+  institution_type: ["institution_type"],
+  university: ["university"],
+  academic_level: ["academic_level"],
+  year_in_program: ["year_in_program"],
+  major: ["major"],
+  gpa: ["gpa"],
+  student_level: ["student_level"],
+  has_ssn: ["has_ssn"],
+  has_itin: ["has_itin"],
+  has_nin: ["has_nin"],
+  has_sin: ["has_sin"],
+  has_us_credit_history: ["has_us_credit_history"],
+  has_us_address: ["has_local_address"],
+  monthly_income: ["monthly_income"],
+  expected_monthly_spending: ["expected_monthly_spending", "monthly_budget"],
+  fee_sensitivity: ["fee_sensitivity"],
+  monthly_budget: ["monthly_budget"],
+  primary_banking_needs: ["banking_needs"],
+  digital_preference: ["digital_preference"],
+  international_transfer_frequency: ["international_transfers"],
+  avg_transfer_amount: ["avg_transfer_amount"],
+  needs_nearby_branch: ["branch_preference"],
+  needs_zelle: ["needs_zelle"],
+  prefers_online_banking: ["digital_preference"],
+  preferred_bank_type: ["banking_style"],
+  campus_proximity: ["campus_proximity"],
+  campus_side: ["campus_side"],
+  primary_goals: ["goals"],
+  credit_goals: ["credit_goals"],
+  preferred_language: ["preferred_language"],
+};
+
+// Written on every re-submit regardless of what the body contains: reaching
+// this route means the survey was completed, and updated_at is set explicitly
+// because whether a DB trigger maintains it is not verifiable from this repo.
+const ALWAYS_UPDATED_COLUMNS = ["onboarding_completed", "updated_at"];
+
+// Build the UPDATE payload by inclusion rather than by deletion, so a column is
+// written only when the caller actually sent something that feeds it. Presence
+// of the KEY decides, never the value: that keeps "sent null" (clear this
+// field) distinct from "omitted" (leave it alone), which a null-filter cannot
+// do. hasOwnProperty returns false rather than throwing for primitive bodies
+// (number/string/array); null/undefined throw earlier, at the first_name read.
+// The immutable columns (id, created_at, user_id) are excluded by construction
+// — they appear in neither list.
+function buildSurveyUpdate(
+  surveyRow: Record<string, unknown>,
+  surveyData: unknown
+): Record<string, unknown> {
+  const update: Record<string, unknown> = {};
+
+  ALWAYS_UPDATED_COLUMNS.forEach((column) => {
+    update[column] = surveyRow[column];
+  });
+
+  Object.keys(UPDATABLE_COLUMN_SOURCE_KEYS).forEach((column) => {
+    const wasSent = UPDATABLE_COLUMN_SOURCE_KEYS[column].some((key) =>
+      Object.prototype.hasOwnProperty.call(surveyData, key)
+    );
+    if (wasSent) {
+      update[column] = surveyRow[column];
+    }
+  });
+
+  return update;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // A Bearer token switches this route into the authenticated
@@ -253,12 +331,10 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (existingSurvey) {
-        // Exclude immutable columns from the update; refresh updated_at
-        // (already set to `now` in the shared row).
-        const surveyUpdate: Record<string, unknown> = { ...surveyRow };
-        delete surveyUpdate.id;
-        delete surveyUpdate.created_at;
-        delete surveyUpdate.user_id;
+        // Update only the columns the request actually carries. Overwriting the
+        // whole row would blank every column the caller omitted, which silently
+        // destroys answers the current form does not collect.
+        const surveyUpdate = buildSurveyUpdate(surveyRow, surveyData);
 
         const { error } = await supabaseAdmin
           .from("survey_responses")
