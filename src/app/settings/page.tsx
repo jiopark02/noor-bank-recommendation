@@ -498,8 +498,12 @@ export default function SettingsPage() {
   };
 
   const handleSaveProfile = async () => {
-    if (!editFirstName || !editLastName) {
-      setError('First and last name are required');
+    // Last name is optional. The signup form no longer collects it, and nothing
+    // writes users.last_name from here, so requiring it would permanently block
+    // this handler — which is the only path that saves the school fields to the
+    // server.
+    if (!editFirstName) {
+      setError('First name is required');
       return;
     }
     setIsLoading(true);
@@ -1104,7 +1108,7 @@ export default function SettingsPage() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <ModalInput label="First Name *" value={editFirstName} onChange={setEditFirstName} />
-                <ModalInput label="Last Name *" value={editLastName} onChange={setEditLastName} />
+                <ModalInput label="Last Name" value={editLastName} onChange={setEditLastName} />
               </div>
 
               <div>
@@ -1139,7 +1143,7 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={handleSaveProfile}
-                disabled={isLoading || !editFirstName || !editLastName}
+                disabled={isLoading || !editFirstName}
                 className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
                 style={{ background: '#000', fontFamily: FONT }}
               >

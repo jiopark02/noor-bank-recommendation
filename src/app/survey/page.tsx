@@ -1,11 +1,9 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { useUniversitySearch, University } from "@/hooks/useUniversitySearch";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { LanguageSelector } from "@/components/LanguageSelector";
 import {
   validatePassword,
   validateEmail,
@@ -20,162 +18,54 @@ import {
   getSupabaseBearerHeaders,
 } from "@/lib/supabase-browser";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import {
-  Country,
-  getVisaTypes,
-  getRequiredDocuments,
-  getBanks,
-  getCountryDisplay,
-  COUNTRY_DISPLAY,
-} from "@/lib/countryConfig";
+import { COUNTRY_DISPLAY } from "@/lib/countryConfig";
 
 interface SurveyData {
-  // Step 1
   firstName: string;
-  lastName: string;
   email: string;
   password: string;
   confirmPassword: string;
   staySignedIn: boolean;
   agreeToTerms: boolean;
-  institutionId: string;
-  institutionName: string;
-  institutionType: "university" | "community_college" | "";
-  countryOfOrigin: string;
-  destinationCountry: string; // US, UK, or CA
-  // Step 2
-  academicLevel: string;
-  year: string;
-  // Step 2.5 (for CC students)
-  planningToTransfer: boolean | null;
-  targetUniversities: string[];
-  targetMajor: string;
-  expectedTransferYear: string;
-  // Step 3 - ID/Tax Numbers (country-specific)
-  hasSSN: boolean | null; // US: Social Security Number
-  hasITIN: boolean | null; // US: Individual Taxpayer Identification Number
-  hasNIN: boolean | null; // UK: National Insurance Number
-  hasSIN: boolean | null; // CA: Social Insurance Number
-  hasLocalAddress: boolean | null; // Address in destination country
-  // Step 4
+  // Not asked on this form: read from localStorage, and used only to pick the
+  // currency symbol shown beside the money inputs.
+  destinationCountry: string;
   monthlyIncome: number;
   monthlyExpenses: number;
-  feePriority: string;
-  // Step 5
-  bankingNeeds: string[];
-  bankingStyle: string;
-  // Step 6
-  transferFrequency: string;
-  branchPreference: string;
-  campusSide: string;
-  // Step 7
-  goals: string[];
-  creditCardInterest: string;
+  // undefined means "not answered", which is distinct from yes and from no.
+  // JSON.stringify omits undefined-valued keys, so an unanswered question sends
+  // no key at all and the stored column is left untouched.
+  hasUsCreditHistory: boolean | undefined;
 }
 
 const INITIAL_DATA: SurveyData = {
   firstName: "",
-  lastName: "",
   email: "",
   password: "",
   confirmPassword: "",
   staySignedIn: false,
   agreeToTerms: false,
-  institutionId: "",
-  institutionName: "",
-  institutionType: "",
-  countryOfOrigin: "",
   destinationCountry: "",
-  academicLevel: "",
-  year: "",
-  planningToTransfer: null,
-  targetUniversities: [],
-  targetMajor: "",
-  expectedTransferYear: "",
-  hasSSN: null,
-  hasITIN: null,
-  hasNIN: null,
-  hasSIN: null,
-  hasLocalAddress: null,
   monthlyIncome: 0,
   monthlyExpenses: 0,
-  feePriority: "",
-  bankingNeeds: [],
-  bankingStyle: "",
-  transferFrequency: "",
-  branchPreference: "",
-  campusSide: "",
-  goals: [],
-  creditCardInterest: "",
+  hasUsCreditHistory: undefined,
 };
 
-// Country-specific configurations - using comprehensive data from countryConfig
+// Currency display only. Recommendation logic does not read this.
 const COUNTRY_CONFIG = {
   US: {
-    name: COUNTRY_DISPLAY.US.name,
     currency: COUNTRY_DISPLAY.US.currencySymbol,
     currencyCode: COUNTRY_DISPLAY.US.currency,
-    taxIdLabel: "SSN",
-    taxIdFullName: "Social Security Number",
-    altTaxIdLabel: "ITIN",
-    altTaxIdFullName: "Individual Taxpayer Identification Number",
-    addressLabel: "US address",
-    visaTypes: getVisaTypes("US").map((v) => v.code),
-    visaTypesDetailed: getVisaTypes("US"),
-    documents: getRequiredDocuments("US"),
-    banks: getBanks("US"),
   },
   UK: {
-    name: COUNTRY_DISPLAY.UK.name,
     currency: COUNTRY_DISPLAY.UK.currencySymbol,
     currencyCode: COUNTRY_DISPLAY.UK.currency,
-    taxIdLabel: "NIN",
-    taxIdFullName: "National Insurance Number",
-    altTaxIdLabel: "BRP",
-    altTaxIdFullName: "Biometric Residence Permit",
-    addressLabel: "UK address",
-    visaTypes: getVisaTypes("UK").map((v) => v.code),
-    visaTypesDetailed: getVisaTypes("UK"),
-    documents: getRequiredDocuments("UK"),
-    banks: getBanks("UK"),
-    requiresNHS: true,
   },
   CA: {
-    name: COUNTRY_DISPLAY.CA.name,
     currency: COUNTRY_DISPLAY.CA.currencySymbol,
     currencyCode: COUNTRY_DISPLAY.CA.currency,
-    taxIdLabel: "SIN",
-    taxIdFullName: "Social Insurance Number",
-    altTaxIdLabel: null,
-    altTaxIdFullName: null,
-    addressLabel: "Canadian address",
-    visaTypes: getVisaTypes("CA").map((v) => v.code),
-    visaTypesDetailed: getVisaTypes("CA"),
-    documents: getRequiredDocuments("CA"),
-    banks: getBanks("CA"),
-    requiresProvincialHealth: true,
   },
 };
-
-// Institution type options
-const INSTITUTION_TYPES = [
-  { id: "university", label: "4-Year University" },
-  { id: "community_college", label: "Community College" },
-];
-
-const COUNTRIES = [
-  "Japan",
-  "Korea",
-  "China",
-  "India",
-  "Vietnam",
-  "Canada",
-  "Brazil",
-  "Singapore",
-  "Bangladesh",
-  "Nigeria",
-  "Other",
-];
 
 // Input Component - MUST be outside the main component to prevent re-renders
 const Input = ({
@@ -368,63 +258,6 @@ const PasswordInput = ({
   );
 };
 
-// Select Component
-const Select = ({
-  value,
-  onChange,
-  options,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  placeholder?: string;
-}) => (
-  <select
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-    className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black bg-white appearance-none text-gray-700"
-    style={{
-      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239CA3AF'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
-      backgroundRepeat: "no-repeat",
-      backgroundPosition: "right 12px center",
-      backgroundSize: "20px",
-      paddingRight: "44px",
-    }}
-  >
-    <option value="" className="text-gray-400">
-      {placeholder || "Select..."}
-    </option>
-    {options.map((opt) => (
-      <option key={opt} value={opt}>
-        {opt}
-      </option>
-    ))}
-  </select>
-);
-
-// Option Button (wide)
-const OptionButton = ({
-  selected,
-  onClick,
-  children,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) => (
-  <button
-    onClick={onClick}
-    className={`w-full px-5 py-3.5 rounded-xl border-2 font-medium text-left transition-all duration-300 ${
-      selected
-        ? "border-black bg-black text-white"
-        : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
-    }`}
-  >
-    {children}
-  </button>
-);
-
 // Toggle Button (Yes/No)
 const ToggleButtons = ({
   value,
@@ -455,33 +288,6 @@ const ToggleButtons = ({
       No
     </button>
   </div>
-);
-
-// Multi-select Chip
-const ChipButton = ({
-  selected,
-  onClick,
-  children,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) => (
-  <button
-    onClick={onClick}
-    className={`px-4 py-2.5 rounded-full border-[1.5px] text-sm font-medium transition-all duration-300 ${
-      selected
-        ? "border-black bg-black text-white"
-        : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
-    }`}
-  >
-    {children}
-  </button>
-);
-
-// Feedback Text
-const Feedback = ({ children }: { children: React.ReactNode }) => (
-  <p className="text-emerald-600 text-sm mt-4 animate-fade-in">{children}</p>
 );
 
 // Money Input - handles leading zeros properly
@@ -543,50 +349,43 @@ const MoneyInput = ({
   );
 };
 
-// Progress Dots
-const ProgressDots = ({
-  step,
-  totalSteps,
-}: {
-  step: number;
-  totalSteps: number;
-}) => (
-  <div className="flex justify-center gap-2 mb-10">
-    {Array.from({ length: totalSteps }).map((_, i) => (
-      <div
-        key={i}
-        className={`h-2 rounded-full transition-all duration-300 ${
-          i + 1 === step
-            ? "bg-black w-6"
-            : i + 1 < step
-            ? "bg-black w-2"
-            : "bg-gray-200 w-2"
-        }`}
-      />
-    ))}
-  </div>
+// "You opened this" marker beside a policy link. Display only — deliberately
+// NOT part of any submit condition. Having opened a document is not consent,
+// and gating submission on it would only add friction without adding proof.
+const ViewedMark = () => (
+  <svg
+    className="inline-block w-3 h-3 ml-0.5 -mt-0.5 text-emerald-600"
+    fill="currentColor"
+    viewBox="0 0 20 20"
+    aria-hidden="true"
+  >
+    <path
+      fillRule="evenodd"
+      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+      clipRule="evenodd"
+    />
+  </svg>
 );
 
 export default function SurveyPage() {
   const router = useRouter();
-  const { t, locale } = useLanguage();
-  const [step, setStep] = useState(0); // Start at 0 for language selection
+  const { t } = useLanguage();
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // True when the user reaches /survey already authenticated (e.g. OAuth
-  // profile completion). In that case we skip account creation / the password
-  // step and submit the survey against their existing token.
+  // profile completion). In that case we skip account creation and the password
+  // fields, and submit the survey against their existing token.
   const [isAuthed, setIsAuthed] = useState(false);
-  const [institutionSearch, setInstitutionSearch] = useState("");
-  const [showInstitutionList, setShowInstitutionList] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  // Read markers only. See ViewedMark.
+  const [termsViewed, setTermsViewed] = useState(false);
+  const [privacyViewed, setPrivacyViewed] = useState(false);
 
   // Validation states
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [emailSuggestion, setEmailSuggestion] = useState<string | null>(null);
-  const [isEduEmail, setIsEduEmail] = useState(false);
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
 
   // Get country config
@@ -594,7 +393,9 @@ export default function SurveyPage() {
     COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] ||
     COUNTRY_CONFIG.US;
 
-  // Load destination country from localStorage
+  // Load destination country from localStorage. This form does not ask for it;
+  // /welcome is where it gets chosen. Every fallback path lands on US, so the
+  // money inputs never render a wrong currency symbol.
   useEffect(() => {
     const savedCountry = localStorage.getItem("noor_selected_country");
     if (
@@ -626,7 +427,6 @@ export default function SurveyPage() {
         ...prev,
         email: session.user.email || prev.email,
         firstName: prev.firstName || (stored.firstName as string) || "",
-        lastName: prev.lastName || (stored.lastName as string) || "",
       }));
     })();
     return () => {
@@ -638,11 +438,6 @@ export default function SurveyPage() {
   const passwordValidation = useMemo(() => {
     return validatePassword(data.password);
   }, [data.password]);
-
-  // Email validation
-  const emailValidation = useMemo(() => {
-    return validateEmail(data.email);
-  }, [data.email]);
 
   // Check if passwords match
   const passwordsMatch =
@@ -657,7 +452,6 @@ export default function SurveyPage() {
       } else {
         setErrors((prev) => ({ ...prev, email: null }));
         setEmailSuggestion(validation.suggestion);
-        setIsEduEmail(validation.isEdu);
       }
     }
   }, [data.email, touchedFields]);
@@ -667,29 +461,6 @@ export default function SurveyPage() {
     setTouchedFields((prev) => new Set(prev).add(field));
   };
 
-  // Total steps: +1 for language selection at start
-  // 9 for CC students with transfer, 8 for others (including step 0)
-  const isCC = data.institutionType === "community_college";
-  const showTransferStep = isCC && data.planningToTransfer === true;
-  const totalSteps = showTransferStep ? 9 : 8; // Includes step 0 for language
-
-  // Use API-based university search
-  const { universities: filteredInstitutions, isLoading: institutionsLoading } =
-    useUniversitySearch({
-      country: data.destinationCountry || "US",
-      type:
-        data.institutionType === "community_college"
-          ? "community_college"
-          : data.institutionType === "university"
-          ? "university"
-          : "all",
-      enabled: !!data.institutionType && !!data.destinationCountry,
-      searchQuery: institutionSearch,
-    });
-
-  // TAG-eligible universities (simplified - in production would be from API)
-  const tagUniversities: University[] = [];
-
   const updateField = <K extends keyof SurveyData>(
     field: K,
     value: SurveyData[K]
@@ -697,46 +468,21 @@ export default function SurveyPage() {
     setData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const toggleArrayField = (
-    field: "bankingNeeds" | "goals" | "targetUniversities",
-    value: string
-  ) => {
-    setData((prev) => ({
-      ...prev,
-      [field]: prev[field].includes(value)
-        ? prev[field].filter((v) => v !== value)
-        : [...prev[field], value],
-    }));
-  };
-
-  const selectInstitution = (inst: University) => {
-    updateField("institutionId", inst.id);
-    updateField("institutionName", inst.name);
-    setInstitutionSearch(inst.short_name);
-    setShowInstitutionList(false);
-  };
-
-  const handleNext = () => {
-    if (step < totalSteps - 1) {
-      setStep(step + 1);
-    }
-  };
-
-  const handleBack = () => {
-    if (step > 0) {
-      setStep(step - 1);
-    }
-  };
-
   const handleSubmit = async () => {
+    // Second layer of the consent gate. The disabled attribute on the button is
+    // UI only and can be stripped from the browser, so re-check before any
+    // network call. This runs before setIsSubmitting so a rejected submit never
+    // leaves the form locked.
+    if (!data.agreeToTerms) {
+      setSubmitError(
+        "Please accept the Terms of Service and Privacy Policy to continue."
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      // Get institution info from selected institution
-      const selectedInstitution = filteredInstitutions.find(
-        (i) => i.id === data.institutionId
-      );
-
       // Authenticated (OAuth) completion submits with a Bearer token, which the
       // /api/survey route uses to skip account creation. Unauthenticated signup
       // posts without a token — unchanged behavior.
@@ -744,70 +490,28 @@ export default function SurveyPage() {
         ? buildJsonAuthorizedHeaders(await getSupabaseBearerHeaders())
         : { "Content-Type": "application/json" };
 
+      // Every key below gets written to the database. The server decides what to
+      // UPDATE by testing whether the KEY is present, not whether its value is
+      // meaningful, so a key carrying null overwrites the stored column. Fields
+      // this form no longer asks about therefore have their keys deleted here
+      // rather than sent as null, undefined or "".
+      //
+      // The credit-history key below is the one that may hold undefined, and
+      // that is deliberate: JSON.stringify omits undefined-valued keys entirely,
+      // so "not answered" arrives as an absent key and leaves the column alone.
+      //
+      // monthly_budget must stay: it feeds both monthly_budget and
+      // expected_monthly_spending, and the chat prompt reads the latter.
       const response = await fetch("/api/survey", {
         method: "POST",
         headers: surveyHeaders,
         body: JSON.stringify({
           first_name: data.firstName,
-          last_name: data.lastName,
           email: data.email,
           password: data.password,
-          country_of_origin: data.countryOfOrigin,
-          destination_country: data.destinationCountry,
-          university:
-            selectedInstitution?.short_name || institutionSearch || "",
-          institution_id: data.institutionId,
-          institution_type: data.institutionType,
-          visa_status: countryConfig.visaTypes[0], // Default to first visa type
-          // Country-specific ID/Tax numbers
-          has_ssn:
-            data.destinationCountry === "US" ? data.hasSSN ?? false : null,
-          has_itin:
-            data.destinationCountry === "US" ? data.hasITIN ?? false : null,
-          has_nin:
-            data.destinationCountry === "UK" ? data.hasNIN ?? false : null,
-          has_sin:
-            data.destinationCountry === "CA" ? data.hasSIN ?? false : null,
-          has_local_address: data.hasLocalAddress ?? false,
           monthly_income: data.monthlyIncome,
           monthly_budget: data.monthlyExpenses,
-          currency: countryConfig.currencyCode,
-          international_transfers: data.transferFrequency,
-          branch_preference: data.branchPreference,
-          banking_needs: data.bankingNeeds,
-          banking_style: data.bankingStyle,
-          campus_side: data.campusSide !== "unknown" ? data.campusSide : null,
-          goals: data.goals,
-          credit_card_interest: data.creditCardInterest,
-          needs_zelle:
-            data.destinationCountry === "US" &&
-            data.bankingNeeds.includes("Bill pay"),
-          credit_goals: data.goals.includes("Credit history")
-            ? "build-credit"
-            : "basic",
-          fee_sensitivity:
-            data.feePriority === "budget"
-              ? "very-sensitive"
-              : data.feePriority === "premium"
-              ? "not-sensitive"
-              : "medium",
-          digital_preference:
-            data.bankingStyle === "Digital"
-              ? "mobile-first"
-              : data.bankingStyle === "Branches"
-              ? "branch"
-              : "both",
-          campus_proximity:
-            data.branchPreference === "must"
-              ? "very-important"
-              : data.branchPreference === "preferred"
-              ? "somewhat-important"
-              : "not-important",
-          // Transfer-related fields for CC students
-          planning_to_transfer: data.planningToTransfer,
-          target_universities: data.targetUniversities,
-          target_major: data.targetMajor,
-          expected_transfer_year: data.expectedTransferYear,
+          has_us_credit_history: data.hasUsCreditHistory,
         }),
       });
 
@@ -840,75 +544,38 @@ export default function SurveyPage() {
       // Save user ID and create session
       localStorage.setItem("noor_user_id", result.userId);
       createSession(isAuthed ? true : data.staySignedIn);
-      acceptTerms();
+      // Third layer of the consent gate, and the only one that is not UI: a user
+      // who did not tick the box gets no acceptance record written at all.
+      if (data.agreeToTerms) acceptTerms();
       // Writer for the onboarding cache (previously a ghost key nothing set):
       // the survey is now complete. callback also fills this from the DB.
       localStorage.setItem("noor_onboarding_completed", "true");
 
-      // Save user profile locally (use profile from response if available, otherwise build from form data)
-      const userProfile = result.profile
-        ? {
-            id: result.userId,
-            ...result.profile,
-            destinationCountry: data.destinationCountry,
-            institutionType: data.institutionType,
-            hasSSN: data.hasSSN,
-            hasITIN: data.hasITIN,
-            hasNIN: data.hasNIN,
-            hasSIN: data.hasSIN,
-            hasLocalAddress: data.hasLocalAddress,
-            monthlyIncome: data.monthlyIncome,
-            monthlyExpenses: data.monthlyExpenses,
-            currency: countryConfig.currencyCode,
-            bankingNeeds: data.bankingNeeds,
-            bankingStyle: data.bankingStyle,
-            transferFrequency: data.transferFrequency,
-            branchPreference: data.branchPreference,
-            campusSide: data.campusSide !== "unknown" ? data.campusSide : null,
-            goals: data.goals,
-            creditCardInterest: data.creditCardInterest,
-            planningToTransfer: data.planningToTransfer,
-            targetUniversities: data.targetUniversities,
-            targetMajor: data.targetMajor,
-            expectedTransferYear: data.expectedTransferYear,
-          }
-        : {
-            id: result.userId,
-            firstName: data.firstName,
-            lastName: data.lastName,
-            email: data.email,
-            institutionId: data.institutionId,
-            institutionType: data.institutionType,
-            university:
-              selectedInstitution?.short_name || institutionSearch || "",
-            countryOfOrigin: data.countryOfOrigin,
-            destinationCountry: data.destinationCountry,
-            hasSSN: data.hasSSN,
-            hasITIN: data.hasITIN,
-            hasNIN: data.hasNIN,
-            hasSIN: data.hasSIN,
-            hasLocalAddress: data.hasLocalAddress,
-            monthlyIncome: data.monthlyIncome,
-            monthlyExpenses: data.monthlyExpenses,
-            currency: countryConfig.currencyCode,
-            bankingNeeds: data.bankingNeeds,
-            bankingStyle: data.bankingStyle,
-            transferFrequency: data.transferFrequency,
-            branchPreference: data.branchPreference,
-            campusSide: data.campusSide !== "unknown" ? data.campusSide : null,
-            goals: data.goals,
-            creditCardInterest: data.creditCardInterest,
-            planningToTransfer: data.planningToTransfer,
-            targetUniversities: data.targetUniversities,
-            targetMajor: data.targetMajor,
-            expectedTransferYear: data.expectedTransferYear,
-          };
-      localStorage.setItem(
-        "noor_user_profile",
-        JSON.stringify(
-          isAuthed ? { ...userProfile, email: data.email } : userProfile
-        )
-      );
+      // Merge over the cached profile rather than replacing it. Settings is the
+      // only writer for the school fields now, and re-submitting this form must
+      // not erase what it stored. result.profile is deliberately not spread
+      // wholesale: with the school keys gone from the request it comes back with
+      // those fields set to null, which would clobber them.
+      let priorProfile: Record<string, unknown> = {};
+      try {
+        priorProfile = JSON.parse(
+          localStorage.getItem("noor_user_profile") || "{}"
+        );
+      } catch {
+        priorProfile = {};
+      }
+
+      const userProfile = {
+        ...priorProfile,
+        id: result.userId,
+        firstName: result.profile?.firstName ?? data.firstName,
+        email: isAuthed ? data.email : result.profile?.email ?? data.email,
+        destinationCountry: data.destinationCountry,
+        currency: countryConfig.currencyCode,
+        monthlyIncome: data.monthlyIncome,
+        monthlyExpenses: data.monthlyExpenses,
+      };
+      localStorage.setItem("noor_user_profile", JSON.stringify(userProfile));
 
       router.push(isAuthed ? "/dashboard" : "/");
     } catch (error) {
@@ -918,11 +585,6 @@ export default function SurveyPage() {
       setIsSubmitting(false);
     }
   };
-
-  // Handle language selection step
-  if (step === 0) {
-    return <LanguageSelector onContinue={() => setStep(1)} />;
-  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -934,933 +596,263 @@ export default function SurveyPage() {
       </header>
 
       <div className="max-w-md mx-auto px-6 pb-32">
-        <ProgressDots step={step} totalSteps={totalSteps - 1} />
+        <div className="animate-fade-in">
+          <h1 className="text-3xl font-semibold tracking-tight mb-2">
+            {t("survey.step1.title")}
+          </h1>
+          <p className="text-gray-500 mb-8">{t("survey.step1.subtitle")}</p>
 
-        {/* Step 1: First, you. */}
-        {step === 1 && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step1.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step1.subtitle")}</p>
+          <div className="space-y-4">
+            <Input
+              placeholder={t("survey.step1.firstName")}
+              value={data.firstName}
+              onChange={(v) => updateField("firstName", v)}
+              error={
+                touchedFields.has("firstName") && !data.firstName
+                  ? t("errors.required")
+                  : null
+              }
+              required
+            />
 
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <Input
-                  placeholder={t("survey.step1.firstName")}
-                  value={data.firstName}
-                  onChange={(v) => updateField("firstName", v)}
-                  error={
-                    touchedFields.has("firstName") && !data.firstName
-                      ? t("errors.required")
-                      : null
-                  }
-                  required
-                />
-                <Input
-                  placeholder={t("survey.step1.lastName")}
-                  value={data.lastName}
-                  onChange={(v) => updateField("lastName", v)}
-                  error={
-                    touchedFields.has("lastName") && !data.lastName
-                      ? t("errors.required")
-                      : null
-                  }
-                  required
-                />
-              </div>
-
-              {/* Email with validation */}
-              <div className="space-y-1">
-                <Input
-                  type="email"
-                  placeholder={t("survey.step1.email")}
-                  value={data.email}
-                  onChange={(v) => {
-                    updateField("email", v);
-                    markTouched("email");
-                  }}
-                  error={touchedFields.has("email") ? errors.email : null}
-                  required
-                />
-                {emailSuggestion && (
-                  <button
-                    onClick={() => {
-                      const corrected = emailSuggestion
-                        .replace("Did you mean ", "")
-                        .replace("?", "");
-                      updateField("email", corrected);
-                      setEmailSuggestion(null);
-                    }}
-                    className="text-xs text-blue-600 hover:underline"
-                  >
-                    {emailSuggestion}
-                  </button>
-                )}
-                {isEduEmail && (
-                  <div className="flex items-center gap-1 text-xs text-emerald-600">
-                    <svg
-                      className="w-3 h-3"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    {t("survey.step1.eduVerified")}
-                  </div>
-                )}
-              </div>
-
-              {/* Password + confirm are the account-credential step. Hide them
-                  for an already-authenticated user (OAuth profile completion),
-                  since no new auth account is being created. */}
-              {!isAuthed && (
-                <>
-              {/* Password with strength indicator */}
-              <PasswordInput
-                placeholder={t("survey.password.placeholder")}
-                value={data.password}
+            {/* Email with validation */}
+            <div className="space-y-1">
+              <Input
+                type="email"
+                placeholder={t("survey.step1.email")}
+                value={data.email}
                 onChange={(v) => {
-                  updateField("password", v);
-                  markTouched("password");
+                  updateField("email", v);
+                  markTouched("email");
                 }}
-                showStrength={true}
-                strengthData={passwordValidation}
+                error={touchedFields.has("email") ? errors.email : null}
+                required
               />
-
-              {/* Confirm password with match indicator */}
-              <div className="space-y-1">
-                <PasswordInput
-                  placeholder={t("survey.password.confirm")}
-                  value={data.confirmPassword}
-                  onChange={(v) => {
-                    updateField("confirmPassword", v);
-                    markTouched("confirmPassword");
+              {emailSuggestion && (
+                <button
+                  onClick={() => {
+                    const corrected = emailSuggestion
+                      .replace("Did you mean ", "")
+                      .replace("?", "");
+                    updateField("email", corrected);
+                    setEmailSuggestion(null);
                   }}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  {emailSuggestion}
+                </button>
+              )}
+            </div>
+
+            {/* Password + confirm create the account credentials. Hidden for an
+                already-authenticated user (OAuth profile completion), since no
+                new auth account is being created. */}
+            {!isAuthed && (
+              <>
+                {/* Password with strength indicator */}
+                <PasswordInput
+                  placeholder={t("survey.password.placeholder")}
+                  value={data.password}
+                  onChange={(v) => {
+                    updateField("password", v);
+                    markTouched("password");
+                  }}
+                  showStrength={true}
+                  strengthData={passwordValidation}
                 />
-                {touchedFields.has("confirmPassword") &&
-                  data.confirmPassword && (
-                    <div
-                      className={`flex items-center gap-1 text-xs ${
-                        passwordsMatch ? "text-emerald-600" : "text-red-500"
-                      }`}
-                    >
-                      {passwordsMatch ? (
-                        <>
-                          <svg
-                            className="w-3 h-3"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          {t("survey.password.match")}
-                        </>
-                      ) : (
-                        <>
-                          <svg
-                            className="w-3 h-3"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          {t("survey.password.noMatch")}
-                        </>
-                      )}
-                    </div>
-                  )}
-              </div>
-                </>
-              )}
 
-              {/* Stay signed in */}
-              <label className="flex items-center gap-3 py-2 cursor-pointer">
-                <div
-                  onClick={() =>
-                    updateField("staySignedIn", !data.staySignedIn)
-                  }
-                  className={`w-5 h-5 rounded border-[1.5px] flex items-center justify-center transition-all duration-300 ${
-                    data.staySignedIn
-                      ? "bg-black border-black"
-                      : "border-gray-300"
-                  }`}
-                >
-                  {data.staySignedIn && (
-                    <svg
-                      className="w-3 h-3 text-white"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  )}
-                </div>
-                <span className="text-sm text-gray-600">
-                  {t("survey.step1.staySignedIn")}
-                </span>
-              </label>
-
-              {/* Terms & Privacy */}
-              <label className="flex items-start gap-3 py-2 cursor-pointer">
-                <div
-                  onClick={() =>
-                    updateField("agreeToTerms", !data.agreeToTerms)
-                  }
-                  className={`w-5 h-5 mt-0.5 rounded border-[1.5px] flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
-                    data.agreeToTerms
-                      ? "bg-black border-black"
-                      : "border-gray-300"
-                  }`}
-                >
-                  {data.agreeToTerms && (
-                    <svg
-                      className="w-3 h-3 text-white"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  )}
-                </div>
-                <span className="text-sm text-gray-600">
-                  {t("survey.step1.agreeToTerms")}{" "}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowTermsModal(true);
+                {/* Confirm password with match indicator */}
+                <div className="space-y-1">
+                  <PasswordInput
+                    placeholder={t("survey.password.confirm")}
+                    value={data.confirmPassword}
+                    onChange={(v) => {
+                      updateField("confirmPassword", v);
+                      markTouched("confirmPassword");
                     }}
-                    className="text-black underline hover:opacity-70"
-                  >
-                    {t("survey.terms.title")}
-                  </button>{" "}
-                  {t("common.and")}{" "}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowPrivacyModal(true);
-                    }}
-                    className="text-black underline hover:opacity-70"
-                  >
-                    {t("survey.privacy.title")}
-                  </button>
-                  <span className="text-red-400 ml-1">*</span>
-                </span>
-              </label>
-
-              {/* Institution Type */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t("survey.step1.schoolType")}
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {INSTITUTION_TYPES.map((type) => (
-                    <button
-                      key={type.id}
-                      onClick={() => {
-                        updateField(
-                          "institutionType",
-                          type.id as "university" | "community_college"
-                        );
-                        updateField("institutionId", "");
-                        setInstitutionSearch("");
-                      }}
-                      className={`py-3 rounded-xl border-2 font-medium text-sm transition-all duration-300 ${
-                        data.institutionType === type.id
-                          ? "border-black bg-black text-white"
-                          : "border-gray-200 text-gray-700 hover:border-gray-400"
-                      }`}
-                    >
-                      {type.id === "university"
-                        ? t("survey.step1.university")
-                        : t("survey.step1.communityCollege")}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Institution Search */}
-              {data.institutionType && (
-                <div className="relative">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {data.institutionType === "community_college"
-                      ? t("survey.step1.communityCollege")
-                      : t("survey.step1.university")}
-                  </label>
-                  <input
-                    type="text"
-                    value={institutionSearch}
-                    onChange={(e) => {
-                      setInstitutionSearch(e.target.value);
-                      setShowInstitutionList(true);
-                    }}
-                    onFocus={() => setShowInstitutionList(true)}
-                    placeholder={
-                      data.institutionType === "community_college"
-                        ? t("survey.step1.searchCC")
-                        : t("survey.step1.searchUni")
-                    }
-                    className="w-full px-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
                   />
-                  {showInstitutionList && institutionSearch.trim().length >= 2 && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                      {filteredInstitutions.length > 0 ? (
-                        <>
-                          {filteredInstitutions.map((inst) => (
-                            <button
-                              key={inst.id}
-                              onClick={() => selectInstitution(inst)}
-                              className={`w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 ${
-                                data.institutionId === inst.id
-                                  ? "bg-gray-50"
-                                  : ""
-                              }`}
+                  {touchedFields.has("confirmPassword") &&
+                    data.confirmPassword && (
+                      <div
+                        className={`flex items-center gap-1 text-xs ${
+                          passwordsMatch ? "text-emerald-600" : "text-red-500"
+                        }`}
+                      >
+                        {passwordsMatch ? (
+                          <>
+                            <svg
+                              className="w-3 h-3"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
                             >
-                              <p className="font-medium text-sm text-gray-900">
-                                {inst.short_name}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {inst.name} · {inst.city}, {inst.state}
-                              </p>
-                            </button>
-                          ))}
-                          <button
-                            onClick={() => {
-                              updateField("institutionId", "other");
-                              setShowInstitutionList(false);
-                            }}
-                            className="w-full px-4 py-3 text-left hover:bg-gray-50 text-gray-500 text-sm"
-                          >
-                            {t("survey.step1.cantFindSchool")}
-                          </button>
-                        </>
-                      ) : institutionSearch.trim().length >= 2 ? (
-                        <button
-                          onClick={() => {
-                            updateField("institutionId", "other");
-                            setShowInstitutionList(false);
-                          }}
-                          className="w-full px-4 py-3 text-left text-gray-500 text-sm"
-                        >
-                          {t("survey.step1.noResults")}
-                        </button>
-                      ) : null}
-                    </div>
-                  )}
-                  {data.institutionId && data.institutionName && (
-                    <p className="text-xs text-emerald-600 mt-1">
-                      ✓ {data.institutionName}
-                    </p>
-                  )}
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                            {t("survey.password.match")}
+                          </>
+                        ) : (
+                          <>
+                            <svg
+                              className="w-3 h-3"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                            {t("survey.password.noMatch")}
+                          </>
+                        )}
+                      </div>
+                    )}
                 </div>
-              )}
+              </>
+            )}
 
-              <Select
-                placeholder={t("survey.step1.countryOfOrigin")}
-                value={data.countryOfOrigin}
-                onChange={(v) => updateField("countryOfOrigin", v)}
-                options={COUNTRIES}
+            {/* Money in */}
+            <div className="pt-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t("survey.step4.income")}{" "}
+                <span className="text-gray-400">
+                  ({countryConfig.currencyCode})
+                </span>
+                <span className="text-red-400 ml-1">*</span>
+              </label>
+              <MoneyInput
+                value={data.monthlyIncome}
+                onChange={(v) => updateField("monthlyIncome", v)}
+                currencySymbol={countryConfig.currency}
+              />
+              <p className="text-gray-400 text-xs mt-1.5">
+                {t("survey.step4.incomeHint")}
+              </p>
+            </div>
+
+            {/* Money out */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t("survey.step4.expenses")}{" "}
+                <span className="text-gray-400">
+                  ({countryConfig.currencyCode})
+                </span>
+                <span className="text-red-400 ml-1">*</span>
+              </label>
+              <MoneyInput
+                value={data.monthlyExpenses}
+                onChange={(v) => updateField("monthlyExpenses", v)}
+                currencySymbol={countryConfig.currency}
+              />
+              <p className="text-gray-400 text-xs mt-1.5">
+                {t("survey.step4.expensesHint")}
+              </p>
+            </div>
+
+            {/* Credit history. Optional: leaving it blank is a real answer
+                ("don't know") and is stored as no answer at all, which is why
+                there is no third button for it. Copy is English on purpose — no
+                message catalogue carries this string, and a missing key would
+                render as the raw key path. */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Do you have a credit history in the US?
+              </label>
+              <p className="text-gray-400 text-xs mb-3">
+                Optional — leave this blank if you are not sure.
+              </p>
+              <ToggleButtons
+                value={data.hasUsCreditHistory ?? null}
+                onChange={(v) => updateField("hasUsCreditHistory", v)}
               />
             </div>
-          </div>
-        )}
 
-        {/* Step 2: Where you are. */}
-        {step === 2 && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step2.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step2.subtitle")}</p>
-
-            <div className="space-y-6">
-              <div className="space-y-2">
-                {isCC
-                  ? // CC-specific options
-                    [
-                      "Associate's",
-                      "Certificate Program",
-                      "ESL/Language",
-                      "Undecided",
-                    ].map((level) => (
-                      <OptionButton
-                        key={level}
-                        selected={data.academicLevel === level}
-                        onClick={() => updateField("academicLevel", level)}
-                      >
-                        {level}
-                      </OptionButton>
-                    ))
-                  : // University options
-                    [
-                      "Bachelor's",
-                      "Master's",
-                      "PhD",
-                      "Postdoc",
-                      "Exchange/Visiting",
-                    ].map((level) => (
-                      <OptionButton
-                        key={level}
-                        selected={data.academicLevel === level}
-                        onClick={() => updateField("academicLevel", level)}
-                      >
-                        {level}
-                      </OptionButton>
-                    ))}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step2.year")}
-                </label>
-                <div className="flex gap-2">
-                  {(isCC ? ["1", "2", "3+"] : ["1", "2", "3", "4", "5+"]).map(
-                    (year) => (
-                      <button
-                        key={year}
-                        onClick={() => updateField("year", year)}
-                        className={`flex-1 py-3 rounded-xl border-2 font-medium transition-all duration-300 ${
-                          data.year === year
-                            ? "border-black bg-black text-white"
-                            : "border-gray-200 text-gray-700 hover:border-gray-400"
-                        }`}
-                      >
-                        {year}
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-
-              {/* Transfer question for CC students */}
-              {isCC && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    {t("survey.step2.planningTransfer")}
-                  </label>
-                  <ToggleButtons
-                    value={data.planningToTransfer}
-                    onChange={(v) => updateField("planningToTransfer", v)}
-                  />
-                  {data.planningToTransfer === true && (
-                    <Feedback>{t("survey.step2.transferFeedback")}</Feedback>
-                  )}
-                </div>
-              )}
-
-              {data.academicLevel && data.year && (
-                <Feedback>{t("survey.step2.tailorFeedback")}</Feedback>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Step 2.5: Transfer Goals (CC students only) */}
-        {step === 3 && isCC && data.planningToTransfer && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step2_5.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step2_5.subtitle")}</p>
-
-            <div className="space-y-6">
-              {/* TAG Eligible Universities */}
-              {tagUniversities.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {t("survey.step2_5.tagEligible")}
-                    <span className="text-xs text-emerald-600 ml-2">
-                      {t("survey.step2_5.guaranteed")}
-                    </span>
-                  </label>
-                  <div className="space-y-2">
-                    {tagUniversities.map((uni) => (
-                      <button
-                        key={uni.id}
-                        onClick={() =>
-                          toggleArrayField("targetUniversities", uni.id)
-                        }
-                        className={`w-full p-3 rounded-xl border-2 text-left transition-all duration-300 ${
-                          data.targetUniversities.includes(uni.id)
-                            ? "border-black bg-black text-white"
-                            : "border-gray-200 hover:border-gray-400"
-                        }`}
-                      >
-                        <p className="font-medium text-sm">{uni.short_name}</p>
-                        <p
-                          className={`text-xs ${
-                            data.targetUniversities.includes(uni.id)
-                              ? "text-gray-300"
-                              : "text-gray-500"
-                          }`}
-                        >
-                          {uni.name}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Other UC options */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t("survey.step2_5.otherTargets")}
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { id: "ucla", name: "UCLA" },
-                    { id: "ucb", name: "UC Berkeley" },
-                    { id: "usc", name: "USC" },
-                    { id: "stanford", name: "Stanford" },
-                  ].map((uni) => {
-                    if (data.targetUniversities.includes(uni.id)) return null;
-                    return (
-                      <ChipButton
-                        key={uni.id}
-                        selected={data.targetUniversities.includes(uni.id)}
-                        onClick={() =>
-                          toggleArrayField("targetUniversities", uni.id)
-                        }
-                      >
-                        {uni.name}
-                      </ChipButton>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Target Major */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t("survey.step2_5.targetMajor")}
-                </label>
-                <Input
-                  placeholder={t("survey.step2_5.majorPlaceholder")}
-                  value={data.targetMajor}
-                  onChange={(v) => updateField("targetMajor", v)}
-                />
-              </div>
-
-              {/* Expected Transfer Year */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step2_5.expectedTransfer")}
-                </label>
-                <div className="flex gap-2">
-                  {["Fall 2026", "Spring 2027", "Fall 2027", "Later"].map(
-                    (term) => (
-                      <button
-                        key={term}
-                        onClick={() =>
-                          updateField("expectedTransferYear", term)
-                        }
-                        className={`flex-1 py-3 rounded-xl border-2 font-medium text-sm transition-all duration-300 ${
-                          data.expectedTransferYear === term
-                            ? "border-black bg-black text-white"
-                            : "border-gray-200 text-gray-700 hover:border-gray-400"
-                        }`}
-                      >
-                        {term}
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-
-              {data.targetUniversities.length > 0 && (
-                <Feedback>
-                  {t("survey.step2_5.targetsFeedback").replace(
-                    "{count}",
-                    String(data.targetUniversities.length)
-                  )}
-                </Feedback>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Step 3 or 4: What We're Working With. */}
-        {((step === 3 && !showTransferStep) ||
-          (step === 4 && showTransferStep)) && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step3.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step3.subtitle")}</p>
-
-            <div className="space-y-6">
-              {/* US-specific: SSN and ITIN */}
-              {data.destinationCountry === "US" && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      {t("survey.step3.ssn")}
-                    </label>
-                    <ToggleButtons
-                      value={data.hasSSN}
-                      onChange={(v) => updateField("hasSSN", v)}
+            {/* Stay signed in */}
+            <label className="flex items-center gap-3 py-2 cursor-pointer">
+              <div
+                onClick={() => updateField("staySignedIn", !data.staySignedIn)}
+                className={`w-5 h-5 rounded border-[1.5px] flex items-center justify-center transition-all duration-300 ${
+                  data.staySignedIn ? "bg-black border-black" : "border-gray-300"
+                }`}
+              >
+                {data.staySignedIn && (
+                  <svg
+                    className="w-3 h-3 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
                     />
-                    {data.hasSSN === false && (
-                      <Feedback>{t("survey.step3.noSsnFeedback")}</Feedback>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      {t("survey.step3.itin")}
-                    </label>
-                    <ToggleButtons
-                      value={data.hasITIN}
-                      onChange={(v) => updateField("hasITIN", v)}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* UK-specific: NIN */}
-              {data.destinationCountry === "UK" && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    {t("survey.step3.nin")}
-                  </label>
-                  <ToggleButtons
-                    value={data.hasNIN}
-                    onChange={(v) => updateField("hasNIN", v)}
-                  />
-                  {data.hasNIN === false && (
-                    <Feedback>{t("survey.step3.noNinFeedback")}</Feedback>
-                  )}
-                </div>
-              )}
-
-              {/* Canada-specific: SIN */}
-              {data.destinationCountry === "CA" && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    {t("survey.step3.sin")}
-                  </label>
-                  <ToggleButtons
-                    value={data.hasSIN}
-                    onChange={(v) => updateField("hasSIN", v)}
-                  />
-                  {data.hasSIN === false && (
-                    <Feedback>{t("survey.step3.noSinFeedback")}</Feedback>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step3.localAddress")}
-                </label>
-                <ToggleButtons
-                  value={data.hasLocalAddress}
-                  onChange={(v) => updateField("hasLocalAddress", v)}
-                />
-                {data.hasLocalAddress === true && (
-                  <Feedback>{t("survey.step3.addressFeedback")}</Feedback>
+                  </svg>
                 )}
               </div>
-            </div>
-          </div>
-        )}
+              <span className="text-sm text-gray-600">
+                {t("survey.step1.staySignedIn")}
+              </span>
+            </label>
 
-        {/* Step 4 or 5: Your Finances. */}
-        {((step === 4 && !showTransferStep) ||
-          (step === 5 && showTransferStep)) && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step4.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step4.subtitle")}</p>
-
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t("survey.step4.income")}{" "}
-                  <span className="text-gray-400">
-                    ({countryConfig.currencyCode})
-                  </span>
-                </label>
-                <MoneyInput
-                  value={data.monthlyIncome}
-                  onChange={(v) => updateField("monthlyIncome", v)}
-                  currencySymbol={countryConfig.currency}
-                />
-                <p className="text-gray-400 text-xs mt-1.5">
-                  {t("survey.step4.incomeHint")}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {t("survey.step4.expenses")}{" "}
-                  <span className="text-gray-400">
-                    ({countryConfig.currencyCode})
-                  </span>
-                </label>
-                <MoneyInput
-                  value={data.monthlyExpenses}
-                  onChange={(v) => updateField("monthlyExpenses", v)}
-                  currencySymbol={countryConfig.currency}
-                />
-                <p className="text-gray-400 text-xs mt-1.5">
-                  {t("survey.step4.expensesHint")}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step4.priority")}
-                </label>
-                <div className="space-y-2">
-                  {[
-                    { id: "budget", labelKey: "survey.step4.budget" },
-                    { id: "balance", labelKey: "survey.step4.balance" },
-                    { id: "premium", labelKey: "survey.step4.premium" },
-                  ].map((opt) => (
-                    <OptionButton
-                      key={opt.id}
-                      selected={data.feePriority === opt.id}
-                      onClick={() => updateField("feePriority", opt.id)}
-                    >
-                      {t(opt.labelKey)}
-                    </OptionButton>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 5 or 6: How you bank. */}
-        {((step === 5 && !showTransferStep) ||
-          (step === 6 && showTransferStep)) && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step5.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step5.subtitle")}</p>
-
-            <div className="space-y-6">
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { id: "Everyday spending", key: "survey.step5.everyday" },
-                  { id: "Family transfers", key: "survey.step5.family" },
-                  { id: "Tuition", key: "survey.step5.tuition" },
-                  {
-                    id: "International wires",
-                    key: "survey.step5.international",
-                  },
-                  { id: "Campus ATM", key: "survey.step5.atm" },
-                  { id: "Mobile deposit", key: "survey.step5.mobile" },
-                  { id: "Bill pay", key: "survey.step5.billPay" },
-                  { id: "Savings", key: "survey.step5.savings" },
-                ].map((need) => (
-                  <ChipButton
-                    key={need.id}
-                    selected={data.bankingNeeds.includes(need.id)}
-                    onClick={() => toggleArrayField("bankingNeeds", need.id)}
+            {/* Terms & Privacy — standard clickwrap: ticking the box is the
+                consent, and each policy opens in its own titled modal. */}
+            <label className="flex items-start gap-3 py-2 cursor-pointer">
+              <div
+                onClick={() => updateField("agreeToTerms", !data.agreeToTerms)}
+                className={`w-5 h-5 mt-0.5 rounded border-[1.5px] flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
+                  data.agreeToTerms ? "bg-black border-black" : "border-gray-300"
+                }`}
+              >
+                {data.agreeToTerms && (
+                  <svg
+                    className="w-3 h-3 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
                   >
-                    {t(need.key)}
-                  </ChipButton>
-                ))}
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                )}
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step5.style")}
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { id: "Branches", key: "survey.step5.branches" },
-                    { id: "Digital", key: "survey.step5.digital" },
-                    { id: "Either", key: "survey.step5.either" },
-                  ].map((style) => (
-                    <button
-                      key={style.id}
-                      onClick={() => updateField("bankingStyle", style.id)}
-                      className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
-                        data.bankingStyle === style.id
-                          ? "border-black bg-black text-white"
-                          : "border-gray-200 text-gray-700 hover:border-gray-400"
-                      }`}
-                    >
-                      {t(style.key)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+              <span className="text-sm text-gray-600">
+                {t("survey.step1.agreeToTerms")}{" "}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTermsModal(true);
+                    setTermsViewed(true);
+                  }}
+                  className="text-black underline hover:opacity-70"
+                >
+                  {t("survey.terms.title")}
+                </button>
+                {termsViewed && <ViewedMark />}{" "}
+                {t("common.and")}{" "}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowPrivacyModal(true);
+                    setPrivacyViewed(true);
+                  }}
+                  className="text-black underline hover:opacity-70"
+                >
+                  {t("survey.privacy.title")}
+                </button>
+                {privacyViewed && <ViewedMark />}
+                <span className="text-red-400 ml-1">*</span>
+              </span>
+            </label>
           </div>
-        )}
-
-        {/* Step 6 or 7: Global. */}
-        {((step === 6 && !showTransferStep) ||
-          (step === 7 && showTransferStep)) && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step6.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step6.subtitle")}</p>
-
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step6.transfers")}
-                </label>
-                <div className="space-y-2">
-                  {[
-                    { id: "never", key: "survey.step6.never" },
-                    { id: "few", key: "survey.step6.fewTimes" },
-                    { id: "monthly", key: "survey.step6.monthly" },
-                  ].map((opt) => (
-                    <OptionButton
-                      key={opt.id}
-                      selected={data.transferFrequency === opt.id}
-                      onClick={() => updateField("transferFrequency", opt.id)}
-                    >
-                      {t(opt.key)}
-                    </OptionButton>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step6.branchNearby")}
-                </label>
-                <div className="space-y-2">
-                  {[
-                    { id: "must", key: "survey.step6.mustHave" },
-                    { id: "preferred", key: "survey.step6.preferred" },
-                    { id: "dont", key: "survey.step6.dontNeed" },
-                  ].map((opt) => (
-                    <OptionButton
-                      key={opt.id}
-                      selected={data.branchPreference === opt.id}
-                      onClick={() => updateField("branchPreference", opt.id)}
-                    >
-                      {t(opt.key)}
-                    </OptionButton>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step6.campusSide")}
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { id: "north", key: "survey.step6.north" },
-                    { id: "south", key: "survey.step6.south" },
-                    { id: "east", key: "survey.step6.east" },
-                    { id: "west", key: "survey.step6.west" },
-                    { id: "center", key: "survey.step6.center" },
-                    { id: "unknown", key: "survey.step6.notSure" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      onClick={() => updateField("campusSide", opt.id)}
-                      className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
-                        data.campusSide === opt.id
-                          ? "border-black bg-black text-white"
-                          : "border-gray-200 text-gray-700 hover:border-gray-400"
-                      }`}
-                    >
-                      {t(opt.key)}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-gray-400 text-xs mt-2">
-                  {t("survey.step6.campusHint")}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 7 or 8: Your goals. */}
-        {((step === 7 && !showTransferStep) ||
-          (step === 8 && showTransferStep)) && (
-          <div className="animate-fade-in">
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">
-              {t("survey.step7.title")}
-            </h1>
-            <p className="text-gray-500 mb-8">{t("survey.step7.subtitle")}</p>
-
-            <div className="space-y-6">
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { id: "Bank account", key: "survey.step7.bankAccount" },
-                  { id: "Credit history", key: "survey.step7.creditHistory" },
-                  { id: "Housing", key: "survey.step7.housing" },
-                  { id: "Student loans", key: "survey.step7.studentLoans" },
-                  { id: "Campus jobs", key: "survey.step7.campusJobs" },
-                  { id: "Investing", key: "survey.step7.investing" },
-                  { id: "Post-grad planning", key: "survey.step7.postGrad" },
-                ].map((goal) => (
-                  <ChipButton
-                    key={goal.id}
-                    selected={data.goals.includes(goal.id)}
-                    onClick={() => toggleArrayField("goals", goal.id)}
-                  >
-                    {t(goal.key)}
-                  </ChipButton>
-                ))}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  {t("survey.step7.creditCards")}
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { id: "Start now", key: "survey.step7.startNow" },
-                    { id: "Later", key: "survey.step7.later" },
-                    { id: "Skip", key: "survey.step7.skip" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      onClick={() => updateField("creditCardInterest", opt.id)}
-                      className={`py-3.5 rounded-xl border-2 font-medium transition-all duration-300 ${
-                        data.creditCardInterest === opt.id
-                          ? "border-black bg-black text-white"
-                          : "border-gray-200 text-gray-700 hover:border-gray-400"
-                      }`}
-                    >
-                      {t(opt.key)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Terms Modal */}
@@ -2071,68 +1063,52 @@ export default function SurveyPage() {
               <p className="text-red-600 text-sm text-center">{submitError}</p>
             </motion.div>
           )}
-          <div className="flex gap-3">
-            {step >= 1 && (
-              <button
-                onClick={handleBack}
-                className="px-6 py-3.5 border-[1.5px] border-gray-300 rounded-xl font-medium transition-all duration-300 hover:border-black"
-              >
-                {t("common.back")}
-              </button>
-            )}
-            {step < totalSteps - 1 ? (
-              <button
-                onClick={handleNext}
-                disabled={
-                  step === 1 &&
-                  (!data.firstName ||
-                    !data.lastName ||
-                    !data.email ||
-                    (!isAuthed &&
-                      (!passwordValidation.isValid || !passwordsMatch)) ||
-                    !data.agreeToTerms ||
-                    !data.institutionId ||
-                    !data.countryOfOrigin)
-                }
-                className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
-              >
-                {t("common.continue")}
-              </button>
+          <button
+            onClick={handleSubmit}
+            // First layer of the consent gate, and the only place required
+            // fields get checked now that this is a single screen. The read
+            // markers (termsViewed / privacyViewed) are deliberately absent
+            // from this condition.
+            disabled={
+              isSubmitting ||
+              !data.agreeToTerms ||
+              !data.firstName ||
+              !data.monthlyIncome ||
+              !data.monthlyExpenses ||
+              (!isAuthed &&
+                (!data.email ||
+                  !passwordValidation.isValid ||
+                  !passwordsMatch))
+            }
+            className="w-full py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg
+                  className="animate-spin w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                {t("survey.submit.creating")}
+              </span>
             ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={isSubmitting}
-                className="flex-1 py-3.5 bg-black text-white rounded-xl font-medium transition-all duration-300 hover:bg-gray-800 disabled:bg-gray-300"
-              >
-                {isSubmitting ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg
-                      className="animate-spin w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
-                    {t("survey.submit.creating")}
-                  </span>
-                ) : (
-                  t("survey.submit.complete")
-                )}
-              </button>
+              t("survey.submit.complete")
             )}
-          </div>
+          </button>
         </div>
       </div>
     </div>
