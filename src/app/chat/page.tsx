@@ -24,7 +24,6 @@ function buildUserContext(profile: Record<string, unknown>): UserContext {
     university: profile.university as string | undefined,
     institutionType: profile.institutionType as string | undefined,
     visaType: profile.visaType as string | undefined,
-    hasSSN: profile.hasSSN as boolean | undefined,
     hasCreditHistory: profile.hasCreditHistory as boolean | undefined,
     monthlyIncome: profile.monthlyIncome as number | undefined,
     campusSide: profile.campusSide as string | undefined,

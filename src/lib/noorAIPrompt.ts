@@ -6,7 +6,6 @@ export interface UserContext {
   firstName?: string;
   lastName?: string;
   hasCreditHistory?: boolean;
-  hasSSN?: boolean;
   monthlyIncome?: number;
   monthlySpending?: number;
   savingsGoal?: number;
@@ -157,9 +156,6 @@ function buildContextSection(ctx: UserContext): string {
   }
   if (ctx.hasCreditHistory !== undefined) {
     lines.push(`- Credit history: ${ctx.hasCreditHistory ? "Has existing credit history" : "No credit history yet"}`);
-  }
-  if (ctx.hasSSN !== undefined) {
-    lines.push(`- SSN status: ${ctx.hasSSN ? "Has SSN" : "No SSN yet"}`);
   }
   if (ctx.monthlyIncome) {
     lines.push(`- Monthly income: $${ctx.monthlyIncome.toLocaleString()}`);

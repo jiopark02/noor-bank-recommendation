@@ -55,7 +55,6 @@ export function NoorAIChat({
             lastName: userRow?.last_name || undefined,
             university: surveyRow?.university || undefined,
             institutionType: surveyRow?.institution_type || undefined,
-            hasSSN: surveyRow?.has_ssn ?? undefined,
             hasCreditHistory: surveyRow?.has_us_credit_history ?? undefined,
             monthlyIncome: surveyRow?.monthly_income ?? undefined,
             campusSide: surveyRow?.campus_side || undefined,

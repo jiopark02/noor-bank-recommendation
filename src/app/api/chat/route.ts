@@ -98,7 +98,6 @@ function mapSupabaseContextToUserContext(data: {
   last_name?: string | null;
   university?: string | null;
   institution_type?: string | null;
-  has_ssn?: boolean | null;
   has_us_credit_history?: boolean | null;
   monthly_income?: number | null;
   campus_side?: string | null;
@@ -109,7 +108,6 @@ function mapSupabaseContextToUserContext(data: {
     lastName: data.last_name ?? undefined,
     university: data.university ?? undefined,
     institutionType: data.institution_type ?? undefined,
-    hasSSN: data.has_ssn ?? undefined,
     hasCreditHistory: data.has_us_credit_history ?? undefined,
     monthlyIncome: data.monthly_income ?? undefined,
     campusSide: data.campus_side ?? undefined,
@@ -135,7 +133,7 @@ async function loadReadOnlyUserContextFromSupabase(
     supabaseAdmin
       .from("survey_responses")
       .select(
-        "university,institution_type,has_ssn,has_us_credit_history,monthly_income,campus_side,expected_monthly_spending"
+        "university,institution_type,has_us_credit_history,monthly_income,campus_side,expected_monthly_spending"
       )
       .eq("user_id", userId)
       .order("updated_at", { ascending: false })
@@ -148,7 +146,6 @@ async function loadReadOnlyUserContextFromSupabase(
     last_name: userRow?.last_name,
     university: surveyRow?.university,
     institution_type: surveyRow?.institution_type,
-    has_ssn: surveyRow?.has_ssn,
     has_us_credit_history: surveyRow?.has_us_credit_history,
     monthly_income: surveyRow?.monthly_income,
     campus_side: surveyRow?.campus_side,
