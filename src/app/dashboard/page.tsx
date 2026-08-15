@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
+import { SafeToSpendDemoCard } from "@/components/demo/SafeToSpendDemoCard";
 import { useTheme } from "@/contexts/ThemeContext";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
@@ -660,6 +661,8 @@ export default function HomePage() {
                 No active bank connections found. Please connect a bank first.
               </div>
             )}
+
+            <SafeToSpendDemoCard />
 
             <div className="noor-card p-6 mb-5">
               <p className="text-gray-500 text-sm mb-1">Net Worth</p>
