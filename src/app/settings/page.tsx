@@ -446,8 +446,11 @@ export default function SettingsPage() {
     router.push('/');
   };
 
+  // The cached profile is deliberately left in place. The survey merges its
+  // result over this key on submit rather than replacing it, so clearing it up
+  // front buys nothing and costs both the survey prefill and this page's
+  // completeness display, which read the same cache.
   const handleRetakeSurvey = () => {
-    localStorage.removeItem('noor_user_profile');
     router.push('/survey');
   };
 

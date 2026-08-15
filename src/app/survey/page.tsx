@@ -18,6 +18,7 @@ import {
   getSupabaseBearerHeaders,
 } from "@/lib/supabase-browser";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
+import type { Session } from "@supabase/supabase-js";
 import { COUNTRY_DISPLAY } from "@/lib/countryConfig";
 
 interface SurveyData {
@@ -411,11 +412,23 @@ export default function SurveyPage() {
 
   // Detect an existing session so OAuth users can complete their profile
   // without re-entering a password. Prefill the identity fields we already know.
+  //
+  // The mount-time read alone is not enough: getSessionSafe() resolves to null
+  // on a 3s timeout as well as on a real absence of session, and the two are
+  // indistinguishable here. A slow token refresh therefore used to pin isAuthed
+  // at false for the lifetime of the page, pushing an already-authenticated
+  // retake into the signup path. Pairing the read with an onAuthStateChange
+  // subscription (same combination as ClientLayout) lets a session that arrives
+  // late still be adopted.
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      const session = await getSessionSafe();
-      if (!mounted || !session?.user) return;
+
+    // Adoption is deliberately one-way: it only ever turns isAuthed on. A null
+    // session is ignored rather than clearing the flag, so a refresh landing
+    // mid-submit cannot flip the form back to the account-creation path.
+    const adoptSession = (nextSession: Session | null) => {
+      if (!mounted || !nextSession?.user) return;
+      const session = nextSession;
       setIsAuthed(true);
       let stored: Record<string, unknown> = {};
       try {
@@ -428,9 +441,23 @@ export default function SurveyPage() {
         email: session.user.email || prev.email,
         firstName: prev.firstName || (stored.firstName as string) || "",
       }));
-    })();
+    };
+
+    const syncSession = async () => {
+      adoptSession(await getSessionSafe());
+    };
+
+    syncSession();
+
+    const { data: authListener } = supabase?.auth.onAuthStateChange(
+      (_event, session) => {
+        adoptSession(session);
+      }
+    ) || { data: { subscription: null } };
+
     return () => {
       mounted = false;
+      authListener.subscription?.unsubscribe();
     };
   }, []);
 
