@@ -20,9 +20,11 @@ const DEMO_BANK = { name: 'Chase', mask: '4417', balance: 1284.50 };
 
 // DEMO ONLY — invented upcoming charges. Not Plaid transactions.
 const UPCOMING = [
-  { id: 'rent', label: 'Rent', due: 'Sep 1', amount: 850 },
-  { id: 'phone', label: 'Phone', due: 'Aug 22', amount: 45 },
   { id: 'spotify', label: 'Spotify', due: 'Aug 19', amount: 11.99 },
+  { id: 'phone', label: 'Phone', due: 'Aug 22', amount: 45 },
+  { id: 'car', label: 'Car insurance', due: 'Aug 26', amount: 145 },
+  { id: 'rent', label: 'Rent', due: 'Sep 1', amount: 850 },
+  { id: 'electric', label: 'Electric', due: 'Sep 3', amount: 95 },
 ];
 
 // DEMO ONLY — invented savings goal. Not a stored user goal.
@@ -37,7 +39,7 @@ function formatUsd(value: number): string {
 
 const upcomingTotal = UPCOMING.reduce((sum, bill) => sum + bill.amount, 0);
 
-// 1284.50 - 906.99 - 40 = 337.51
+// 1284.50 - 1146.99 - 40 = 97.51
 const safe = DEMO_BANK.balance - upcomingTotal - GOAL.weekly;
 
 export function SafeToSpendDemoCard() {
