@@ -521,8 +521,10 @@ export default function SurveyPage() {
       // error. That is exactly the failure this guard exists to prevent, and it
       // happened in production.
       //
-      // The helper itself is left alone on purpose — it has 22 call sites, and
-      // changing its return contract would touch all of them. So the divergence
+      // The helper itself is left alone on purpose — it has call sites across
+      // most of the app, and changing its return contract would touch every one
+      // of them. (Deliberately not stating how many: the number is derivable by
+      // grep and goes stale the moment a caller is added.) So the divergence
       // lives here instead: read the session directly, and if no token can be
       // obtained, do not send the request at all. If getSupabaseBearerHeaders()
       // is ever changed to fail loudly on a missing token, this detour becomes
@@ -544,21 +546,36 @@ export default function SurveyPage() {
           read = await readSession(1500, "survey-submit-retry", 2);
         }
 
-        const accessToken =
-          read.status === "session" ? read.session.access_token : null;
-
-        if (!accessToken) {
-          // Deliberately does not claim the session expired. It may not have:
-          // a valid cookie session can produce this, and saying "you were
-          // signed out" would be a guess presented as fact.
+        if (read.status !== "session") {
+          // Neither branch claims the session expired. It may not have: both
+          // outcomes are reachable with a valid cookie session, and saying
+          // "you were signed out" would be a guess presented as fact.
+          //
+          // The two do need different advice, though, and collapsing them into
+          // one message is what made this dead-end before: "unavailable" is a
+          // read that never answered, so waiting and pressing the button again
+          // can genuinely clear it, but "none" is an answer — the same button
+          // will keep producing the same answer, and telling that user to try
+          // again in a moment is a promise the page cannot keep.
+          //
+          // The "none" copy asks for a reload rather than offering to switch
+          // this form back to account creation. Deliberately no
+          // setIsAuthed(false): that path would hand the signup form to
+          // someone who already has an account, and the email collision that
+          // follows has no self-service recovery. Being asked to reload is the
+          // cheaper failure. It does cost the typed answers — nothing on this
+          // screen persists a draft — so the copy says re-enter rather than
+          // claiming they are still here.
           setSubmitError(
-            "We couldn't confirm your sign-in just now, so your answers weren't submitted. Your answers are still here — please try again in a moment."
+            read.status === "unavailable"
+              ? "We couldn't confirm your sign-in just now, so your answers weren't submitted. Your answers are still here — please try again in a moment."
+              : "We couldn't confirm your sign-in, so your answers weren't submitted. Please reload the page and sign in if you're asked to, then enter your answers again."
           );
           return;
         }
 
         surveyHeaders = buildJsonAuthorizedHeaders({
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${read.session.access_token}`,
         });
       }
 

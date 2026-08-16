@@ -41,11 +41,13 @@ const GET_SESSION_TIMEOUT_MS = 3000;
  * that only ask "is there a session right now" but wrong for callers that must
  * decide whether the absence is authoritative:
  *
- *   - "none"        getSession() answered and there is genuinely no session.
- *   - "unavailable" we never got an answer (client not configured, timeout,
- *                   thrown error). This is NOT evidence of being logged out —
- *                   a valid cookie session can produce it — so callers must
- *                   withhold any logout decision and may retry.
+ *   - "none"        getSession() answered cleanly and there is genuinely no
+ *                   session. An answer carrying an error is NOT this.
+ *   - "unavailable" we never got a clean answer (client not configured,
+ *                   timeout, or an error — thrown, or returned in
+ *                   getSession's own error field). This is NOT evidence of
+ *                   being logged out — a valid cookie session can produce it —
+ *                   so callers must withhold any logout decision and may retry.
  *
  * Note that getSession() is not a local-storage read: this is a cookie-based
  * client, so an expired access token makes it hit
@@ -79,12 +81,20 @@ type SessionReadLogFields = {
   attempt: number;
   timeoutMs: number;
   elapsedMs: number;
-  reason: string;
+  // Closed union, matching SessionReadResult's reason, so the "code-defined
+  // constant" claim below is enforced by the type rather than by convention.
+  reason: "not-configured" | "timeout" | "error";
   errorName?: string;
   errorMessage?: string;
 };
 
-// PII-free by construction: every field is a code-defined constant or a number.
+// Every field is a code-defined constant or a number, with ONE exception:
+// errorMessage carries an error string produced by supabase-js or the network
+// stack, so its content is not controlled by this repo and cannot be asserted
+// to be PII-free. It is logged anyway because a failed session read is
+// otherwise undiagnosable, and it is narrower than the whole error object that
+// this function replaced. Treat it as the only field here that is not
+// PII-free by construction.
 // Never add the session, an access/refresh token, an email, a user id, or any
 // monetary figure here — this line goes to the browser console verbatim.
 function warnSessionReadUnavailable(fields: SessionReadLogFields): void {
@@ -153,6 +163,45 @@ export async function readSession(
         reason: "timeout",
       });
       return { status: "unavailable", reason: "timeout", elapsedMs };
+    }
+
+    // A resolved call is not the same as an answer. getSession() can resolve
+    // with an error in hand — a refresh that failed rather than threw — and
+    // reading only result.data.session would file that under "none", which is
+    // contracted above as an AUTHORITATIVE absence. An errored read is not
+    // evidence of being logged out, so it belongs in "unavailable" with the
+    // timeout and the throw.
+    //
+    // Whether supabase-js actually resolves-with-error on a failed refresh, as
+    // opposed to throwing, is not verifiable from this repo. That does not
+    // matter for the decision: if it never takes this path the branch is inert,
+    // and if it does, "unavailable" is the reading that withholds the logout
+    // decision and lets the caller retry. It is safe either way, which is why
+    // it is written without confirming the library's behavior first.
+    //
+    // Shares reason="error" with the catch below rather than introducing a
+    // fourth reason; errorName is what separates the two in the log.
+    //
+    // The !session half of the condition is not redundant. supabase-js's
+    // declared return type pairs an error with a null session, so an error
+    // arriving alongside a usable session should be impossible — but that type
+    // cannot be read from this repo to confirm it. If the combination does
+    // occur, a session in hand is still a session, and discarding it here
+    // would block a submit that has a perfectly good token: the exact failure
+    // this whole path exists to prevent. Preferring the session in that case
+    // also keeps getSessionSafe()'s output byte-identical to what it returned
+    // before this branch was added.
+    if (result.error && !result.data.session) {
+      warnSessionReadUnavailable({
+        label,
+        attempt,
+        timeoutMs,
+        elapsedMs,
+        reason: "error",
+        errorName: result.error.name || "UnknownError",
+        errorMessage: result.error.message,
+      });
+      return { status: "unavailable", reason: "error", elapsedMs };
     }
 
     const session = result.data.session;

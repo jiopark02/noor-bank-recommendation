@@ -259,9 +259,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (!surveyData.email || !surveyData.password) {
+      // Email only. A missing password can no longer reach this line — the 401
+      // above returns on it — so testing for it here would be a disjunct that
+      // is never true, and the old "Email and password are required" wording
+      // would name a cause this branch can no longer have.
+      if (!surveyData.email) {
         return NextResponse.json(
-          { success: false, message: "Email and password are required" },
+          { success: false, message: "Email is required" },
           { status: 400 }
         );
       }
