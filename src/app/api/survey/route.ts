@@ -218,6 +218,32 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // ---- UNAUTHENTICATED PATH (legacy email/password signup) ----
+      // A request with no Bearer token AND no password is not a signup attempt
+      // — it is an authenticated client whose token went missing on the way
+      // out. That happens: getSupabaseBearerHeaders() returns {} when the
+      // browser cannot read its session, and the request then arrives here
+      // looking anonymous. It is NOT anonymous in any other respect: the form
+      // pre-fills the email from the session, so `email` is populated and only
+      // `password` is empty. Keying this on the missing password is what
+      // separates the two cases; keying it on email would never fire.
+      //
+      // This must come before the signup-pause gate below, otherwise a signed-in
+      // user gets told "New signups are temporarily paused", which is both
+      // false and unactionable. Answer 401 instead: no credentials were
+      // presented. A real signup attempt carries a password and falls through
+      // to the gate unchanged.
+      if (!surveyData.password) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "AUTH_REQUIRED",
+            message:
+              "We couldn't verify your sign-in for this request. Please reload the page and try again.",
+          },
+          { status: 401 }
+        );
+      }
+
       // Temporary signup pause: reject brand-new account creation BEFORE it
       // reaches admin.createUser. Early-return so no auth user is ever created;
       // this must never be a create-then-rollback path. Fail-open (see
@@ -233,9 +259,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (!surveyData.email || !surveyData.password) {
+      // Email only. A missing password can no longer reach this line — the 401
+      // above returns on it — so testing for it here would be a disjunct that
+      // is never true, and the old "Email and password are required" wording
+      // would name a cause this branch can no longer have.
+      if (!surveyData.email) {
         return NextResponse.json(
-          { success: false, message: "Email and password are required" },
+          { success: false, message: "Email is required" },
           { status: 400 }
         );
       }
