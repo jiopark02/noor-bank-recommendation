@@ -15,7 +15,7 @@ import {
 import {
   supabase,
   getSessionSafe,
-  getSupabaseBearerHeaders,
+  readSession,
 } from "@/lib/supabase-browser";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import type { Session } from "@supabase/supabase-js";
@@ -513,9 +513,54 @@ export default function SurveyPage() {
       // Authenticated (OAuth) completion submits with a Bearer token, which the
       // /api/survey route uses to skip account creation. Unauthenticated signup
       // posts without a token — unchanged behavior.
-      const surveyHeaders = isAuthed
-        ? buildJsonAuthorizedHeaders(await getSupabaseBearerHeaders())
-        : { "Content-Type": "application/json" };
+      //
+      // This screen deliberately does NOT use getSupabaseBearerHeaders() on the
+      // authenticated path. That helper returns {} when it cannot get a token,
+      // which lets the request go out with no Authorization header at all; the
+      // route then reads it as an anonymous signup and answers with a signup
+      // error. That is exactly the failure this guard exists to prevent, and it
+      // happened in production.
+      //
+      // The helper itself is left alone on purpose — it has 22 call sites, and
+      // changing its return contract would touch all of them. So the divergence
+      // lives here instead: read the session directly, and if no token can be
+      // obtained, do not send the request at all. If getSupabaseBearerHeaders()
+      // is ever changed to fail loudly on a missing token, this detour becomes
+      // redundant and should be folded back into it.
+      let surveyHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      if (isAuthed) {
+        let read = await readSession(3000, "survey-submit");
+
+        // "unavailable" means the read never answered — a timeout or a failed
+        // token refresh — not that the user is signed out, so it is worth one
+        // more try. "none" is an actual answer, so retrying it would only
+        // repeat itself. The retry runs on a shorter budget to bound how long
+        // the button can sit spinning before the user hears anything.
+        if (read.status === "unavailable") {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          read = await readSession(1500, "survey-submit-retry", 2);
+        }
+
+        const accessToken =
+          read.status === "session" ? read.session.access_token : null;
+
+        if (!accessToken) {
+          // Deliberately does not claim the session expired. It may not have:
+          // a valid cookie session can produce this, and saying "you were
+          // signed out" would be a guess presented as fact.
+          setSubmitError(
+            "We couldn't confirm your sign-in just now, so your answers weren't submitted. Your answers are still here — please try again in a moment."
+          );
+          return;
+        }
+
+        surveyHeaders = buildJsonAuthorizedHeaders({
+          Authorization: `Bearer ${accessToken}`,
+        });
+      }
 
       // Every key below gets written to the database. The server decides what to
       // UPDATE by testing whether the KEY is present, not whether its value is
