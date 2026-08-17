@@ -40,7 +40,7 @@ export async function sendEmail({
       text: text || html.replace(/<[^>]*>/g, ""),
     });
     if (error) throw error;
-    console.log(`Email sent successfully to ${to}`);
+    console.log("Email sent successfully");
     return true;
   } catch (error) {
     console.error("Failed to send email:", error);
