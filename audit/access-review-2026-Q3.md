@@ -57,9 +57,9 @@ This is recorded here rather than as three unrelated findings because the sequen
 
 A register of external recipients was created during this review. One did not previously exist, which is itself a finding against policy §6.1.
 
-- Active recipients identified: 8
-- Inactive code paths recorded separately: 4
-- Newly identified during this review: 5 browser-level recipients not previously recorded, of which 2 carry more than request metadata
+- Recipients were enumerated by category: application-server egress, browser-level egress, and infrastructure providers.
+- Code paths that are unreachable under current configuration were recorded separately from active recipients.
+- This review newly identified browser-level recipients that had not previously been recorded. Two of them carry more than request metadata and are recorded as findings F6 and F7.
 
 Confirmed absent by full code review: analytics processors, tag managers, tracking pixels, inbound webhook endpoints.
 
