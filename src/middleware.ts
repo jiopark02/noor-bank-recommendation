@@ -56,8 +56,30 @@ export async function middleware(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+  // Fail closed. Reaching here means a protected path is being served by a
+  // deployment with no Supabase credentials, so auth cannot be resolved at
+  // all. Passing the request through would hand out /dashboard, /settings,
+  // /admin and the rest with no check — misconfiguration must not degrade
+  // into an absence of authentication.
+  //
+  // 503 rather than a /login redirect: with the env missing the browser
+  // client is unconfigured too, so getSessionSafe() returns null and the
+  // login form cannot work. The user would land on a login page that can
+  // never succeed, with the real cause invisible. This matches how the cron
+  // routes already treat a missing CRON_SECRET (503, distinct from the 401
+  // they return for a bad one).
+  //
+  // no-store keeps an edge or browser cache from serving this 503 after the
+  // env is fixed and redeployed.
   if (!supabaseUrl || !supabaseAnonKey) {
-    return response;
+    console.error(
+      "[middleware] Supabase env missing; refusing protected path",
+      pathname
+    );
+    return new NextResponse("Service temporarily unavailable", {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
