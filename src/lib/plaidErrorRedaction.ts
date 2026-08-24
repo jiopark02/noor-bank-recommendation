@@ -18,11 +18,26 @@
  * - `redactPlaidAxiosError` is the impure step the response interceptor calls.
  *   It replaces the dangerous fields on the error IN PLACE.
  *
- * ALLOW-LIST, NEVER DENY-LIST
- * Nothing in this file deletes a known-bad key (e.g. `delete headers[...]`).
- * We copy the fields named below into a fresh object and never read the rest.
- * A deny-list would silently spring a leak the day the SDK renames or adds an
- * auth header; an allow-list cannot.
+ * HOW EACH LAYER DECIDES WHAT SURVIVES — stated precisely, because the two
+ * layers do NOT offer the same guarantee.
+ *
+ * `buildSafePlaidErrorDiagnostics` is a strict allow-list. It copies the fields
+ * named below — and only when the value is actually a string — into a fresh
+ * object, and never reads the rest. It removes nothing key-by-key, so it cannot
+ * spring a leak the day the SDK renames or adds an auth header.
+ *
+ * `redactPlaidAxiosError` cannot work that way, because it must hand back the
+ * SAME error object (see its own doc comment for why). It operates on the
+ * error's properties instead, and wholesale rather than selectively:
+ * `config` and `response` are REPLACED by objects rebuilt from the allow-listed
+ * summary, and `request` is REMOVED whole. No key inside them is inspected or
+ * filtered, so no known-bad key list is being maintained here either.
+ *
+ * The limit of that, stated rather than glossed over: any OTHER property axios
+ * hangs on the error — `code`, `status`, `cause`, adapter-supplied custom props
+ * — is left untouched, because the three above are the only ones this function
+ * names. None of them carry credentials in the axios version we depend on; that
+ * is a fact about what axios currently attaches, not a promise this file makes.
  */
 
 /**
@@ -201,8 +216,9 @@ export function buildSafePlaidErrorDiagnostics(
  * `error.message` to detect ITEM_LOGIN_REQUIRED, and rebuilding the error would
  * change what they see.
  *
- * All three of `config`, `request` and `response` are replaced, not just
- * `config`. axios constructs the error as
+ * All three of `config`, `request` and `response` are dealt with, not just
+ * `config`: `config` and `response` are replaced by rebuilt objects and
+ * `request` is deleted outright. axios constructs the error as
  * `new AxiosError(msg, code, response.config, response.request, response)`, so
  * `error.config` and `error.response.config` are THE SAME OBJECT — replacing
  * only `error.config` would leave the real headers reachable through
