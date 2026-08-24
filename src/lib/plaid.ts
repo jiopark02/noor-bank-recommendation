@@ -1,3 +1,4 @@
+import axios from "axios";
 import {
   Configuration,
   PlaidApi,
@@ -5,6 +6,7 @@ import {
   Products,
   CountryCode,
 } from "plaid";
+import { redactPlaidAxiosError } from "./plaidErrorRedaction";
 
 // Plaid configuration
 const configuration = new Configuration({
@@ -20,7 +22,53 @@ const configuration = new Configuration({
   },
 });
 
-export const plaidClient = new PlaidApi(configuration);
+// PLAID-SEC1: every Plaid call goes through this axios instance, whose only job
+// is to strip credentials off rejected requests before they reach any caller.
+//
+// The Configuration above injects PLAID-CLIENT-ID / PLAID-SECRET as request
+// headers, so an AxiosError carries them on `error.config.headers` and carries
+// the user's access_token on `error.config.data`. Redacting here — inside the
+// SDK's promise chain, before the rejection is handed to the caller — means
+// every `catch` in the app receives an already-safe error, instead of the
+// safety depending on each log site remembering to be careful.
+//
+// create() is deliberately called with NO config object: an empty create()
+// inherits the global axios defaults, so timeout, transformRequest/Response and
+// validateStatus stay exactly as they were when the SDK used the global axios.
+const plaidHttp = axios.create();
+
+// One response interceptor, error path only.
+// - The success handler is the identity function: successful responses pass
+//   through untouched, so response parsing is unchanged.
+// - No request interceptor is registered, so header injection, body
+//   serialization and URL assembly remain entirely the SDK's.
+// - The failure handler ends in Promise.reject, preserving rejection semantics.
+//   It must never swallow an error or convert it into a resolution.
+plaidHttp.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => Promise.reject(redactPlaidAxiosError(error))
+);
+
+/**
+ * The single Plaid client for the whole app.
+ *
+ * ⚠️ If you ever construct a second PlaidApi, it MUST receive `plaidHttp` as
+ * the third argument as well. The redaction guarantee above is a property of
+ * THIS instance, not of the SDK: a client built as `new PlaidApi(configuration)`
+ * falls back to the global axios, has no interceptor, and will leak the secret
+ * and the user's access_token into the logs on its first failed call.
+ *
+ * ⚠️ The third constructor parameter is plaid's public API
+ * (`BaseAPI(configuration?, basePath?, axios?)`) and every generated method
+ * dispatches through `this.axios`. Re-verify that signature when upgrading
+ * `plaid` across a major version — if the injection point moves, the
+ * interceptor silently stops running and the leak returns.
+ *
+ * `undefined` for basePath keeps the SDK default, and `configuration.basePath`
+ * (derived from PLAID_ENV above) still wins, because the generated request
+ * builder evaluates `configuration?.basePath || basePath`.
+ */
+export const plaidClient = new PlaidApi(configuration, undefined, plaidHttp);
 
 // Products we want to access
 // Note: Auth is commented out for sandbox testing - it triggers the "Save with Plaid" flow
