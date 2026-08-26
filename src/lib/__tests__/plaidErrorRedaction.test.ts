@@ -2,6 +2,8 @@ import { inspect } from "node:util";
 import { describe, it, expect } from "vitest";
 import {
   buildSafePlaidErrorDiagnostics,
+  getPlaidErrorCode,
+  getPlaidErrorStatus,
   redactPlaidAxiosError,
 } from "../plaidErrorRedaction";
 
@@ -348,5 +350,107 @@ describe("buildSafePlaidErrorDiagnostics — G: purity", () => {
 
     expect(first).toEqual(second);
     expect(first).not.toBe(second); // a fresh object every time
+  });
+});
+
+// H — the read side. These exist because the judgment they replace
+// (`error.message.includes("ITEM_LOGIN_REQUIRED")`) could never match: axios
+// builds the message as "Request failed with status code 400".
+describe("getPlaidErrorCode — H: reads the code the message never carried", () => {
+  it("reads the code after the real redaction pipeline has run", () => {
+    // Not a hand-built fixture: the error is passed through the same function
+    // the interceptor calls, so this proves producer and reader agree.
+    const redacted = redactPlaidAxiosError(makeAxiosLikeError());
+
+    expect(getPlaidErrorCode(redacted)).toBe("ITEM_LOGIN_REQUIRED");
+    expect(getPlaidErrorStatus(redacted)).toBe(400);
+  });
+
+  it("confirms the message itself carries no code — the original defect", () => {
+    const redacted = redactPlaidAxiosError(makeAxiosLikeError()) as Error;
+
+    expect(redacted.message).toBe("Request failed with status code 400");
+    expect(redacted.message).not.toContain("ITEM_LOGIN_REQUIRED");
+  });
+
+  it("falls back to response.data on an error that never met the interceptor", () => {
+    // A second PlaidApi built without plaidHttp, or a direct axios call: no
+    // plaidDiagnostics marker, code still at the original location.
+    const raw = makeAxiosLikeError();
+    expect(raw.plaidDiagnostics).toBeUndefined();
+
+    expect(getPlaidErrorCode(raw)).toBe("ITEM_LOGIN_REQUIRED");
+    expect(getPlaidErrorStatus(raw)).toBe(400);
+  });
+
+  it("prefers plaidDiagnostics over response.data when both are present", () => {
+    const error = makeAxiosLikeError();
+    error.plaidDiagnostics = { error_code: "RATE_LIMIT_EXCEEDED", status: 429 };
+
+    expect(getPlaidErrorCode(error)).toBe("RATE_LIMIT_EXCEEDED");
+    expect(getPlaidErrorStatus(error)).toBe(429);
+  });
+
+  it("returns undefined for the redaction-failure fallback", () => {
+    // redactPlaidAxiosError fails closed to a plain Error carrying only the
+    // message; there is no code to recover and we must not invent one.
+    const fallback = new Error("Plaid request failed");
+    fallback.name = "PlaidRedactionFailure";
+
+    expect(getPlaidErrorCode(fallback)).toBeUndefined();
+    expect(getPlaidErrorStatus(fallback)).toBeUndefined();
+  });
+
+  it("returns undefined for non-Plaid errors", () => {
+    // A Supabase PostgrestError shape: has `code`, but not a Plaid error_code.
+    const supabaseError = {
+      code: "PGRST116",
+      message: "JSON object requested, multiple (or no) rows returned",
+      details: null,
+    };
+
+    expect(getPlaidErrorCode(supabaseError)).toBeUndefined();
+    expect(getPlaidErrorCode(new Error("something else broke"))).toBeUndefined();
+    expect(getPlaidErrorCode("just a string")).toBeUndefined();
+    expect(getPlaidErrorCode(null)).toBeUndefined();
+    expect(getPlaidErrorCode(undefined)).toBeUndefined();
+    expect(getPlaidErrorStatus(null)).toBeUndefined();
+  });
+
+  it("ignores a non-string error_code and a non-number status", () => {
+    const error = makeAxiosLikeError({
+      responseData: { error_code: { nested: SENTINEL_SECRET } },
+    });
+    (error.response as Record<string, unknown>).status = "400";
+
+    expect(getPlaidErrorCode(error)).toBeUndefined();
+    expect(getPlaidErrorStatus(error)).toBeUndefined();
+  });
+
+  it("never throws, even on an object whose getters throw", () => {
+    // Every call site is inside a catch block: a throw here would replace the
+    // error being diagnosed and lose the original.
+    const hostile = {} as Record<string, unknown>;
+    Object.defineProperty(hostile, "plaidDiagnostics", {
+      get() {
+        throw new Error("hostile getter");
+      },
+      enumerable: true,
+    });
+
+    expect(() => getPlaidErrorCode(hostile)).not.toThrow();
+    expect(getPlaidErrorCode(hostile)).toBeUndefined();
+    expect(() => getPlaidErrorStatus(hostile)).not.toThrow();
+    expect(getPlaidErrorStatus(hostile)).toBeUndefined();
+  });
+
+  it("does not mutate the error it reads", () => {
+    const error = makeAxiosLikeError();
+    const before = JSON.parse(JSON.stringify(error));
+
+    getPlaidErrorCode(error);
+    getPlaidErrorStatus(error);
+
+    expect(JSON.parse(JSON.stringify(error))).toEqual(before);
   });
 });
