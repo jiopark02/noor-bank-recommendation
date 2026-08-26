@@ -4,9 +4,9 @@ import { plaidClient, isPlaidConfigured, PlaidAccount } from "@/lib/plaid";
 import {
   authenticate,
   getAllPlaidConnections,
-  updatePlaidConnectionStatus,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
+import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,19 +103,20 @@ export async function POST(request: NextRequest) {
 
         anySuccess = true;
       } catch (plaidError: unknown) {
-        const errorMessage =
-          plaidError instanceof Error ? plaidError.message : "Unknown error";
-        if (
-          errorMessage.includes("ITEM_LOGIN_REQUIRED") ||
-          errorMessage.includes("invalid access token")
-        ) {
-          // Mark just this connection broken and keep going — one expired bank
-          // must not sink the whole response for a multi-bank user.
-          await updatePlaidConnectionStatus(
-            userId,
-            connection.item_id,
-            "error"
-          );
+        // Judge on the Plaid error_code, never on the message. axios builds the
+        // message as "Request failed with status code <n>", so the previous
+        // message-matching branch here could never fire: every expired bank
+        // fell through to the outer catch and was reported as a 500.
+        const code = getPlaidErrorCode(plaidError);
+        if (code === "ITEM_LOGIN_REQUIRED" || code === "INVALID_ACCESS_TOKEN") {
+          // Skip just this connection and keep going — one expired bank must
+          // not sink the whole response for a multi-bank user.
+          //
+          // Deliberately NOT marking the row "error" here. That would drop it
+          // out of the active set on the next read, flipping hasActive false,
+          // which replaces the re-link affordance with the "connect a bank"
+          // card and can mint a duplicate connection row. Marking has to land
+          // together with that frontend contract, not ahead of it.
           anyLoginRequired = true;
           continue;
         }

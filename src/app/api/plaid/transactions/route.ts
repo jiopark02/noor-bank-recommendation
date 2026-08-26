@@ -9,9 +9,9 @@ import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
   getAllPlaidConnections,
-  updatePlaidConnectionStatus,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
+import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
 
 type ApiSubscription = {
   id: string;
@@ -115,6 +115,8 @@ export async function POST(request: NextRequest) {
 
     const allTransactions: PlaidTransaction[] = [];
     const recurringSubscriptions = new Map<string, ApiSubscription>();
+    let anySuccess = false;
+    let anyLoginRequired = false;
 
     for (const connection of activeConnections) {
       const accessToken = connection.access_token;
@@ -205,18 +207,38 @@ export async function POST(request: NextRequest) {
         } catch {
           // Fallback handled later.
         }
+
+        // transactionsGet succeeded; the recurring-streams call above is
+        // best-effort and swallows its own errors, so it does not count here.
+        anySuccess = true;
       } catch (plaidError: unknown) {
-        const errorMessage =
-          plaidError instanceof Error ? plaidError.message : "Unknown error";
-        if (
-          errorMessage.includes("ITEM_LOGIN_REQUIRED") ||
-          errorMessage.includes("invalid access token")
-        ) {
-          await updatePlaidConnectionStatus(userId, connection.item_id, "error");
+        // Same judgment as /api/plaid/accounts: read the Plaid error_code, not
+        // error.message, which axios sets to "Request failed with status code
+        // <n>" and which therefore never contained the code being matched.
+        const code = getPlaidErrorCode(plaidError);
+        if (code === "ITEM_LOGIN_REQUIRED" || code === "INVALID_ACCESS_TOKEN") {
+          // Skip this connection only. Not marking the row "error" — see the
+          // note in the accounts route for why that has to move with the
+          // frontend's hasActive contract.
+          anyLoginRequired = true;
           continue;
         }
         throw plaidError;
       }
+    }
+
+    // Every active connection needed re-auth and none returned data. Without
+    // this, a fully expired set returned 200 with empty arrays, so "your bank
+    // needs re-authentication" was displayed as "you have no transactions".
+    // money/page.tsx already reads errorType on this response.
+    if (!anySuccess && anyLoginRequired) {
+      return NextResponse.json(
+        {
+          error: "Bank connection expired. Please re-link your account.",
+          errorType: "ITEM_LOGIN_REQUIRED",
+        },
+        { status: 401 }
+      );
     }
 
     const transactions = Array.from(
