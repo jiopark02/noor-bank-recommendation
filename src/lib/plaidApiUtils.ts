@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "./supabase";
 import { getAuthenticatedUserIdFromRequest } from "./apiAuth";
+import { getPlaidErrorCode, getPlaidErrorStatus } from "./plaidErrorRedaction";
 import { asPlainObject, readRequestJson } from "@/lib/requestJson";
 
 /**
@@ -257,32 +258,127 @@ export async function deleteAllPlaidConnections(userId: string): Promise<boolean
 }
 
 /**
- * Handle common error responses for Plaid API errors
+ * The re-auth signal the frontend keys on. `money`'s fetchData shows its
+ * "Re-link bank" affordance on exactly this string, so it is a contract, not a
+ * label — do not rename it without changing every consumer.
+ */
+const RELINK_ERROR_TYPE = "ITEM_LOGIN_REQUIRED";
+
+/**
+ * User-facing strings. These are rendered VERBATIM: every consumer reads the
+ * response body's `error` key through `readErrorMessage` and puts it straight
+ * on screen. That is why an internal message must never reach this object — the
+ * defect this mapping replaces surfaced axios' own "Request failed with status
+ * code 400" to users. The raw error is still logged by each route before it
+ * gets here, so nothing is lost for diagnosis.
+ */
+const RELINK_MESSAGE = "Bank connection expired. Please re-link your account.";
+const GENERIC_MESSAGE = "There was a problem reaching your bank. Please try again.";
+
+type MappedPlaidError = {
+  status: number;
+  errorType?: string;
+  message: string;
+};
+
+/**
+ * Map a Plaid error_code to an HTTP response shape.
+ *
+ * Allow-list by construction: only the codes named here get a specific
+ * treatment, and only the two re-auth codes are allowed to produce
+ * RELINK_ERROR_TYPE. An unrecognised code can never acquire it by accident,
+ * which is what keeps a configuration failure from being presented to the user
+ * as "your bank connection expired" (see INVALID_API_KEYS below).
+ */
+function mapPlaidError(
+  code: string | undefined,
+  status: number | undefined
+): MappedPlaidError {
+  // Not a Plaid API error at all — a Supabase failure, a runtime TypeError, a
+  // thrown primitive. Nothing to diagnose from the client's side.
+  if (code === undefined) {
+    return { status: 500, message: GENERIC_MESSAGE };
+  }
+
+  switch (code) {
+    // Both mean "the user must re-authenticate with their bank", so they are
+    // normalised onto one errorType and the frontend needs only one branch.
+    case "ITEM_LOGIN_REQUIRED":
+    case "INVALID_ACCESS_TOKEN":
+      return {
+        status: 401,
+        errorType: RELINK_ERROR_TYPE,
+        message: RELINK_MESSAGE,
+      };
+
+    // OUR credentials are wrong (wrong secret, or a PLAID_ENV that does not
+    // match the key pair) — nothing about the USER's connection is broken.
+    // Deliberately NOT the re-link type and deliberately worded without any
+    // suggestion to reconnect: prompting a re-link here would send the user in
+    // a loop they cannot exit, and could mint a duplicate connection row.
+    case "INVALID_API_KEYS":
+      return {
+        status: 500,
+        errorType: "CONFIGURATION_ERROR",
+        message: "Bank data is temporarily unavailable. Please try again later.",
+      };
+
+    case "RATE_LIMIT_EXCEEDED":
+      return {
+        status: 429,
+        errorType: "RATE_LIMIT_EXCEEDED",
+        message:
+          "Too many requests to your bank. Please try again in a few minutes.",
+      };
+
+    default: {
+      // A Plaid error we have not mapped individually. Surface Plaid's own
+      // status when it is a 4xx (the client's request was refused); anything
+      // else — a Plaid 5xx, or a transport failure with no response — is our
+      // problem to report as a 500.
+      const isClientError =
+        typeof status === "number" && status >= 400 && status <= 499;
+      return {
+        status: isClientError ? status : 500,
+        errorType: "PLAID_ERROR",
+        message: GENERIC_MESSAGE,
+      };
+    }
+  }
+}
+
+/**
+ * Turn a caught Plaid error into the HTTP response for it.
+ *
+ * Judgment is made on the Plaid `error_code`, never on `error.message`: the SDK
+ * rejects with an AxiosError whose message axios builds as "Request failed with
+ * status code <n>", so the previous message-matching branches could not match
+ * and every Plaid failure collapsed into a 500.
+ *
+ * This function does NOT write connection state. Marking a connection as
+ * errored has to move together with the frontend's hasActive/connect-card
+ * contract, so it is deliberately absent here — a mapping that returned 401
+ * AND flipped a row to "error" would hide the re-link affordance on the next
+ * page load and could produce a duplicate connection row.
  */
 export function handlePlaidError(error: unknown): NextResponse {
-  const message = error instanceof Error ? error.message : "An error occurred";
+  const code = getPlaidErrorCode(error);
+  const mapped = mapPlaidError(code, getPlaidErrorStatus(error));
 
-  // Check if it's an ITEM_LOGIN_REQUIRED error
-  if (
-    message.includes("ITEM_LOGIN_REQUIRED") ||
-    message.includes("invalid access token")
-  ) {
-    return NextResponse.json(
-      { error: "Bank connection expired. Please re-link your account." },
-      { status: 401 }
-    );
-  }
-
-  // Check if it's an invalid token error
-  if (message.includes("invalid token") || message.includes("unauthorized")) {
-    return NextResponse.json(
-      { error: "Invalid or expired bank connection." },
-      { status: 401 }
-    );
-  }
+  // Named decision line for live verification. Both values are allow-listed by
+  // the redaction layer, so this cannot print a credential or a balance.
+  console.error(
+    `[plaid-error] code=${code ?? "none"} -> status=${mapped.status} errorType=${
+      mapped.errorType ?? "none"
+    }`
+  );
 
   return NextResponse.json(
-    { error: message || "An error occurred" },
-    { status: 500 }
+    {
+      error: mapped.message,
+      ...(mapped.errorType ? { errorType: mapped.errorType } : {}),
+      ...(code ? { errorCode: code } : {}),
+    },
+    { status: mapped.status }
   );
 }

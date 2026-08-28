@@ -281,3 +281,79 @@ export function redactPlaidAxiosError(error: unknown): unknown {
     return fallback;
   }
 }
+
+/**
+ * READ SIDE — the counterpart to the two functions above.
+ *
+ * WHY THIS EXISTS
+ * Callers used to decide "is this a re-auth error?" with
+ * `error.message.includes("ITEM_LOGIN_REQUIRED")`. That never matched: the Plaid
+ * SDK rejects with an AxiosError whose message is built by axios' own settle()
+ * as `"Request failed with status code " + status`, so the Plaid code lives in
+ * the response BODY and never in the message. Every Plaid failure therefore fell
+ * through to a generic 500 carrying an axios internal string.
+ *
+ * The code was never actually lost — `redactPlaidAxiosError` allow-lists
+ * `error_code` and writes it to two places. This reads them back, in the order
+ * they are produced:
+ *
+ *   1. `error.plaidDiagnostics.error_code` — the marker the interceptor attaches.
+ *   2. `error.response.data.error_code`    — the rebuilt axios-ish shape.
+ *
+ * The second is a genuine fallback, not decoration: an AxiosError that never
+ * passed through `plaidHttp` (a second PlaidApi built without the interceptor,
+ * or a direct axios call) still carries the code at the original location.
+ *
+ * NEVER THROWS. Every call site is inside a `catch` block, where a throw would
+ * replace the error being diagnosed with a new one and lose the original. A
+ * thrown value that is not an object, a redaction-failure fallback, a Supabase
+ * error, or an exotic object with a throwing getter all return `undefined`,
+ * which callers must treat as "not a Plaid API error".
+ */
+export function getPlaidErrorCode(error: unknown): string | undefined {
+  try {
+    const source = asRecord(error);
+    if (!source) return undefined;
+
+    const diagnostics = asRecord(source.plaidDiagnostics);
+    const fromDiagnostics = readString(diagnostics?.error_code);
+    if (fromDiagnostics !== undefined) {
+      return fromDiagnostics;
+    }
+
+    const response = asRecord(source.response);
+    const data = asRecord(response?.data);
+    return readString(data?.error_code);
+  } catch {
+    // A throwing getter or an exotic proxy. Undiagnosable is not fatal — the
+    // caller falls back to a generic 500, which is the correct answer here.
+    return undefined;
+  }
+}
+
+/**
+ * The HTTP status Plaid replied with, read from the same two locations and with
+ * the same no-throw contract as `getPlaidErrorCode`.
+ *
+ * Used only to decide whether a Plaid error that is not individually mapped
+ * should surface its own 4xx rather than collapse into a 500. Returns
+ * `undefined` when the error carries no response (a transport failure), which
+ * the caller treats as 500.
+ */
+export function getPlaidErrorStatus(error: unknown): number | undefined {
+  try {
+    const source = asRecord(error);
+    if (!source) return undefined;
+
+    const diagnostics = asRecord(source.plaidDiagnostics);
+    const fromDiagnostics = readNumber(diagnostics?.status);
+    if (fromDiagnostics !== undefined) {
+      return fromDiagnostics;
+    }
+
+    const response = asRecord(source.response);
+    return readNumber(response?.status);
+  } catch {
+    return undefined;
+  }
+}
