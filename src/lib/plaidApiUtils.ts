@@ -28,30 +28,6 @@ export async function authenticate(
 }
 
 /**
- * Get Plaid connection for a user from database
- */
-export async function getPlaidConnection(userId: string) {
-  try {
-    const supabase = createServerClient();
-    const { data, error } = await supabase
-      .from("plaid_connections")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("status", "active")
-      .single();
-
-    if (error || !data) {
-      return null;
-    }
-
-    return data;
-  } catch (error) {
-    console.error("Error fetching Plaid connection:", error);
-    return null;
-  }
-}
-
-/**
  * Get a single Plaid connection for a user by its item_id.
  *
  * Uses maybeSingle() (not single()): (user_id, item_id) is UNIQUE, so the result
@@ -116,25 +92,128 @@ export async function getActivePlaidConnectionByInstitution(
 }
 
 /**
- * Get all Plaid connections for a user
+ * The plaid_connections columns the callers of getAllPlaidConnections actually read.
+ *
+ * THIS IS NOT A SCHEMA DEFINITION. It is a view of the row, derived from the
+ * call sites rather than from the table: `select("*")` returns every column and
+ * this names only the four that are consumed. It is deliberately NOT exported,
+ * so no other module can pick it up and read it as a description of the table.
+ * A full-row type copied from supabase/migrations/ is the thing to avoid here —
+ * the migrations directory is not the source of truth for this table, and the
+ * interface this replaces contradicted those migration files in several ways at
+ * once. Note what that does and does not establish: the live database has never
+ * been queried here, so the old interface is known to disagree with the
+ * migrations, not known to disagree with the live table. Either way it was not a
+ * type anything could rely on.
+ *
+ * `access_token: string` is NOT a verified fact about the database. It is the
+ * assumption this code already makes — the value is passed straight to the Plaid
+ * SDK, which requires a string — written down so the compiler can see it.
+ *
+ * `status` is deliberately left as `string | null` rather than narrowed to
+ * "active" | "error": the live schema is unverified, and the CHECK constraint in
+ * the migration passes NULL. Callers compare it to "active" and that is enough.
  */
-export async function getAllPlaidConnections(userId: string) {
+interface PlaidConnectionView {
+  access_token: string;
+  item_id: string;
+  institution_name: string | null;
+  status: string | null;
+}
+
+/**
+ * Decide what a plaid_connections list read means, given what PostgREST returned.
+ *
+ * Pure and exported so the distinction below has a regression line that needs no
+ * database and no mock (mirroring the pure/IO split of plaidChatContext.ts and
+ * plaidChatState.ts).
+ *
+ *   null      = the read FAILED; nothing is known about this user's rows.
+ *   []        = the read SUCCEEDED and the user genuinely has no rows.
+ *   [rows...] = the read succeeded and returned these rows, unfiltered.
+ *
+ * A response that is neither an error nor an array is not a shape PostgREST
+ * produces for a list query. It is reported as a failure rather than as an empty
+ * result, because "we don't know" is the honest reading of an unexpected shape
+ * and is the direction that cannot invent a wrong answer.
+ */
+export function connectionRowsOrNull<T>(result: {
+  data: T[] | null;
+  error: unknown;
+}): T[] | null {
+  if (result.error) {
+    return null;
+  }
+  if (!Array.isArray(result.data)) {
+    return null;
+  }
+  return result.data;
+}
+
+/**
+ * Get all Plaid connections for a user, or null if the read failed.
+ *
+ * Returning null rather than [] on failure is the point of this helper. An empty
+ * array used to mean both "the query failed" and "this user has no bank
+ * connected", so every caller reported a database hiccup as "no bank connected"
+ * — which on the money screen shows the connect-a-bank card to an already
+ * connected user and pushes them toward a duplicate connection row, and on the
+ * dashboard clears the cached accounts and transactions.
+ *
+ * It returns null rather than throwing, and the reason is type-level, not
+ * behavioral. `PlaidConnectionView[] | null` puts the failure case in the return
+ * type, so a caller that ignores it does not compile; a throw is invisible to the
+ * compiler and gets absorbed by whatever outer catch happens to be in scope.
+ *
+ * It is NOT a difference in fail direction, and an earlier version of this
+ * comment claimed it was. Checked against all three callers: both data routes
+ * convert the null straight back into a throw and land in their own outer catch,
+ * so a failed read is answered with the 500 and the generic "There was a problem
+ * reaching your bank" that handlePlaidError produces for any error carrying no
+ * Plaid error_code — which is also what throwing from here would produce.
+ * /api/account/delete catches and carries on either way (its Plaid revocation is
+ * best-effort by design). The only observable difference across the three is
+ * which log line account/delete emits.
+ *
+ * What the null does buy at the routes is not the 500 — it is not emitting the
+ * 404. That 404's wording is string-matched by the money and dashboard screens;
+ * a generic 500 matches nothing, so the connect-a-bank card stays hidden and the
+ * cached data survives.
+ *
+ * Rows are returned UNFILTERED, including status != 'active'. Callers filter for
+ * themselves: /api/account/delete needs the inactive ones to revoke their Plaid
+ * Items, and filtering here in SQL would also re-merge "no rows" with "rows, none
+ * active" — the distinction this helper exists to keep.
+ */
+export async function getAllPlaidConnections(
+  userId: string
+): Promise<PlaidConnectionView[] | null> {
   try {
     const supabase = createServerClient();
-    const { data, error } = await supabase
+    const result = await supabase
       .from("plaid_connections")
       .select("*")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
-    if (error || !data) {
-      return [];
+    if (result.error) {
+      console.error("Error fetching Plaid connections:", result.error);
+    } else if (!Array.isArray(result.data)) {
+      // The other path connectionRowsOrNull folds to null. Without this line it
+      // is the one failure exit that logs nothing, leaving a caller's own
+      // "Failed to read Plaid connections" as the only trace and no clue as to
+      // why. Logs the SHAPE only, never the payload: a row carries a Plaid
+      // access token.
+      console.error(
+        "Error fetching Plaid connections: unexpected payload shape, data was",
+        result.data === null ? "null" : typeof result.data
+      );
     }
 
-    return data;
+    return connectionRowsOrNull<PlaidConnectionView>(result);
   } catch (error) {
     console.error("Error fetching Plaid connections:", error);
-    return [];
+    return null;
   }
 }
 

@@ -44,22 +44,70 @@ export async function POST(request: NextRequest) {
   if (isPlaidConfigured()) {
     try {
       const connections = await getAllPlaidConnections(authUserId);
-      for (const connection of connections) {
-        try {
-          await plaidClient.itemRemove({
-            access_token: connection.access_token,
-          });
-        } catch (err) {
-          console.error(
-            `account/delete: Plaid itemRemove failed for item_id=${connection.item_id}:`,
-            err
-          );
-          // continue — revocation is best-effort
+      if (connections === null) {
+        // The read reported failure, so we cannot know which Items to revoke.
+        // Deletion still proceeds. That is a CHOICE, not a forced move, and it
+        // has a cost — both of which an earlier version of this comment got
+        // wrong by asserting that blocking here would leave the user unable to
+        // delete their account. Step 2 below already blocks on its own failure
+        // (500, "please retry", nothing removed), so this route plainly can
+        // block for a Plaid-row problem when it decides to.
+        //
+        // The cost, in the case that matters — the read fails but the delete
+        // that follows succeeds: Step 2 destroys the rows, and the access token
+        // in them is the only copy held anywhere in this system. Skipping
+        // revocation and then deleting leaves the Plaid Item live on Plaid's
+        // side with nothing left to revoke it with, permanently. When the DB is
+        // broken enough that Step 2 fails too, that does not arise — the request
+        // 500s and a retry can still revoke.
+        //
+        // Chosen anyway: revocation is best-effort here by design, the deletion
+        // is the user's own request, and the behavior is unchanged from before
+        // this branch existed — a failed read was previously indistinguishable
+        // from "this user had none" and took the same path. The branch exists to
+        // say which of the two happened, in the log, not to change what happens.
+        console.error(
+          "account/delete: Plaid connection read reported failure (returned null); " +
+            "skipping revocation"
+        );
+      } else {
+        for (const connection of connections) {
+          try {
+            await plaidClient.itemRemove({
+              access_token: connection.access_token,
+            });
+          } catch (err) {
+            console.error(
+              `account/delete: Plaid itemRemove failed for item_id=${connection.item_id}:`,
+              err
+            );
+            // continue — revocation is best-effort
+          }
         }
       }
     } catch (err) {
+      // NO CURRENT PATH REACHES THIS, AND IT IS KEPT DELIBERATELY.
+      //
+      // getAllPlaidConnections reports every failure by RETURNING null: its try
+      // block spans the whole function body, createServerClient() included (that
+      // call throws on missing env, and is caught there, not here). So the null
+      // branch above is the only way a failed read arrives, and nothing else left
+      // in this try can throw — the loop is over an array the helper guarantees,
+      // and each itemRemove has its own catch.
+      //
+      // This is therefore a defense that rests on a CONTRACT of the helper, not
+      // on a property of this file. It stays because account deletion is the
+      // wrong place to discover that the contract changed: if the helper is ever
+      // made to throw, this is what keeps a best-effort revocation step from
+      // failing the entire deletion request.
+      //
+      // Distinct event from the branch above — keep the two log lines
+      // distinguishable. That one is a read that failed and said so; this one is
+      // a read that broke the return-null contract.
       console.error(
-        "account/delete: failed to list Plaid connections for revocation:",
+        "account/delete: unexpected throw while listing Plaid connections " +
+          "(getAllPlaidConnections is contracted to return null on failure); " +
+          "skipping revocation:",
         err
       );
       // continue — revocation is best-effort

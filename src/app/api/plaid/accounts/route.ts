@@ -29,6 +29,28 @@ export async function POST(request: NextRequest) {
     // when a user has >1 active connection and previously produced a spurious
     // 404). Aggregate accounts across every active connection.
     const allConnections = await getAllPlaidConnections(userId);
+
+    // null means the read itself failed — we do NOT know whether this user has a
+    // bank connected. Answering with the 404 below would state that they have
+    // none. Both screens string-match that wording, and they do DIFFERENT things
+    // with it, so neither description covers the other:
+    //   money/page.tsx      shows the connect-a-bank card — shouldShowConnectCard
+    //                       keys on this message — pushing an already connected
+    //                       user toward a duplicate connection row. It
+    //                       deliberately does not clear its connection cache.
+    //   dashboard/page.tsx  has no connect card on this path (its only connect
+    //                       affordance is a link to /money). It flips
+    //                       hasBankConnection false and clears the cached
+    //                       accounts and transactions from both state and
+    //                       localStorage.
+    // Hand it to the outer catch instead: handlePlaidError maps an error carrying
+    // no Plaid error_code to a generic 500, which is the direction this route
+    // already takes for any other unexpected failure and, being generic, is a
+    // message neither screen matches on.
+    if (allConnections === null) {
+      throw new Error("Failed to read Plaid connections");
+    }
+
     const activeConnections = allConnections.filter(
       (c) => c.status === "active"
     );

@@ -128,22 +128,6 @@ export interface PlaidTransaction {
   created_at: string;
 }
 
-export interface PlaidConnection {
-  id: string;
-  user_id: string;
-  item_id: string;
-  access_token: string;
-  institution_id: string | null;
-  institution_name: string | null;
-  status: "active" | "error" | "pending";
-  error_code: string | null;
-  error_message: string | null;
-  consent_expiration: string | null;
-  last_successful_update: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface Subscription {
   id: string;
   user_id: string;
