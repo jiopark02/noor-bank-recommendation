@@ -28,30 +28,6 @@ export async function authenticate(
 }
 
 /**
- * Get Plaid connection for a user from database
- */
-export async function getPlaidConnection(userId: string) {
-  try {
-    const supabase = createServerClient();
-    const { data, error } = await supabase
-      .from("plaid_connections")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("status", "active")
-      .single();
-
-    if (error || !data) {
-      return null;
-    }
-
-    return data;
-  } catch (error) {
-    console.error("Error fetching Plaid connection:", error);
-    return null;
-  }
-}
-
-/**
  * Get a single Plaid connection for a user by its item_id.
  *
  * Uses maybeSingle() (not single()): (user_id, item_id) is UNIQUE, so the result
