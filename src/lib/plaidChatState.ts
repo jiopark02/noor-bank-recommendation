@@ -14,9 +14,13 @@
 //    a single broken item must not sink the turn.
 //  - DB error on the connection read THROWS (so the route emits an explicit
 //    "state unknown" block) — distinct from an empty result ("no connections").
-//    We deliberately do NOT use the shared getAllPlaidConnections helper here
-//    because it swallows DB errors into [], which would misreport a transient
-//    failure as "no bank connected".
+//    This does not use the shared getAllPlaidConnections helper. The reason
+//    originally recorded here — that the helper swallows DB errors into [] — is
+//    no longer true: it now reports a failed read by returning null. What
+//    remains are two differences, neither of them decisive: this path needs a
+//    throw rather than a returned null, so it would have to convert; and it
+//    reads three columns where the helper selects the whole row. Treat the
+//    separation as unsettled rather than as a rule.
 //  - Null/undefined Plaid balances are preserved as "unavailable", never 0.
 //  - Does NOT touch the shared /api/plaid/accounts route (dashboard regression
 //    avoidance) — this is a dedicated in-process read.

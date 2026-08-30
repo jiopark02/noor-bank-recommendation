@@ -94,6 +94,18 @@ export async function POST(request: NextRequest) {
 
     // Get active connections from database (all linked institutions)
     const allConnections = await getAllPlaidConnections(userId);
+
+    // null means the read failed, not that the user has no banks. Falling through
+    // to the 404 below would report a database hiccup as "no bank connected" —
+    // a string money/page.tsx matches on to show the connect-a-bank card, and
+    // dashboard/page.tsx to clear its cached accounts and transactions. Same
+    // handling as the accounts route, whose comment carries the full account:
+    // throw to the outer catch, which maps an error with no Plaid error_code to a
+    // generic 500 that neither screen matches.
+    if (allConnections === null) {
+      throw new Error("Failed to read Plaid connections");
+    }
+
     const activeConnections = allConnections.filter((c) => c.status === "active");
     if (activeConnections.length === 0) {
       return NextResponse.json(

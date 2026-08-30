@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { handlePlaidError } from "../plaidApiUtils";
+import { connectionRowsOrNull, handlePlaidError } from "../plaidApiUtils";
 import { redactPlaidAxiosError } from "../plaidErrorRedaction";
 
 /**
@@ -243,5 +243,66 @@ describe("handlePlaidError — response body never carries credentials", () => {
       "errorType",
     ]);
     expect(JSON.stringify(body)).not.toContain("FAKE_SECRET_never_real");
+  });
+});
+
+/**
+ * The distinction this suite exists to hold: a failed connection read and a user
+ * with no connections are different states. They used to be the same empty
+ * array, so every caller reported a database hiccup as "no bank connected" —
+ * which on the money screen shows the connect-a-bank card to an already
+ * connected user and invites a duplicate connection row, and on the dashboard
+ * clears the cached accounts and transactions.
+ *
+ * connectionRowsOrNull is the pure decision behind getAllPlaidConnections, so
+ * these assertions need no database and no mock. Revert the helper to the old
+ * `if (error || !data) return []` and the first two cases below demand the same
+ * value for opposite inputs — at least one must go red.
+ */
+describe("connectionRowsOrNull — a failed read is not an empty one", () => {
+  it("reports a query error as a failure, not as an empty result", () => {
+    const supabaseError = {
+      code: "PGRST301",
+      message: "JWT expired",
+      details: null,
+    };
+
+    expect(connectionRowsOrNull({ data: null, error: supabaseError })).toBeNull();
+  });
+
+  it("reports a genuine zero-row read as an empty success", () => {
+    // Distinguishable from the case above: [] is a value, null is the absence
+    // of one. A caller can branch on it; it could not branch on [] vs [].
+    expect(connectionRowsOrNull({ data: [], error: null })).toEqual([]);
+  });
+
+  it("prefers failure over empty when an error arrives alongside rows", () => {
+    expect(
+      connectionRowsOrNull({ data: [{ item_id: "item_1" }], error: new Error("boom") })
+    ).toBeNull();
+  });
+
+  it("returns the rows unchanged and in order", () => {
+    const rows = [{ item_id: "newest" }, { item_id: "oldest" }];
+
+    expect(connectionRowsOrNull({ data: rows, error: null })).toEqual(rows);
+  });
+
+  it("keeps inactive rows — filtering is the caller's job", () => {
+    // account/delete depends on this: it revokes the Plaid Item for every
+    // connection, including ones marked errored, and the row is deleted straight
+    // afterwards, so a connection dropped here can never be revoked at all.
+    const rows = [
+      { item_id: "item_1", status: "active" },
+      { item_id: "item_2", status: "error" },
+    ];
+
+    expect(connectionRowsOrNull({ data: rows, error: null })).toHaveLength(2);
+  });
+
+  it("treats a response that is neither an error nor an array as a failure", () => {
+    // Not a shape PostgREST produces for a list query. "We don't know" is the
+    // only honest reading, and it is the direction that cannot invent an answer.
+    expect(connectionRowsOrNull({ data: null, error: null })).toBeNull();
   });
 });
