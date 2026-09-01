@@ -20,7 +20,8 @@ import {
   clearLocalAuthState,
   purgeAllNoorLocalState,
 } from '@/lib/validation';
-import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
+import { supabase, getSupabaseBearerHeaders, getSessionSafe } from '@/lib/supabase-browser';
+import type { AuthError } from '@supabase/supabase-js';
 import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supabaseAuthHeaders';
 import {
   UniversitySearchField,
@@ -45,7 +46,7 @@ interface UserProfile {
   monthlyExpenses?: number;
 }
 
-type ModalType = 'delete' | 'changePassword' | 'changeEmail' | 'editProfile' | 'resetChecklist' | null;
+type ModalType = 'delete' | 'changePassword' | 'editProfile' | 'resetChecklist' | null;
 
 const PROFILE_FIELD_LABELS: Record<string, string> = {
   firstName: 'First name',
@@ -63,6 +64,91 @@ function getInitials(firstName?: string, lastName?: string): string {
   const f = firstName?.trim()?.[0]?.toUpperCase() ?? '';
   const l = lastName?.trim()?.[0]?.toUpperCase() ?? '';
   return (f + l) || '?';
+}
+
+const SESSION_EXPIRED_MESSAGE =
+  'Your session has expired. Please sign in again to change your password.';
+
+// What the user is told when the CURRENT-password check fails.
+//
+// Deliberately not describePasswordUpdateError. That function maps the codes
+// updateUser returns — weak_password, same_password, reauthentication_needed —
+// none of which signInWithPassword can produce, and its default branch hands
+// back the server's own wording, which is the wrong call here (see below). The
+// two failures share a shape, not a vocabulary.
+//
+// Keyed on error.code for the same reason as that function: the codes are the
+// library's published contract (@supabase/auth-js lib/error-codes.d.ts), the
+// wording is not.
+function describeReauthError(error: AuthError): string {
+  switch (error.code) {
+    case 'invalid_credentials':
+      // The only code that actually means "that password is wrong". Every
+      // failure used to say this unconditionally, so a rate-limited user was
+      // told their correct password was incorrect — and stayed told it, since
+      // retrying is what sustains the rate limit.
+      return 'Current password is incorrect.';
+    case 'over_request_rate_limit':
+      return 'Too many attempts. Please wait a moment and try again.';
+    case 'captcha_failed':
+      // Inert unless the project turns CAPTCHA protection on, in the same way
+      // reauthentication_needed below is inert while "Secure password change"
+      // is off. Listed because the generic default would misdescribe it as a
+      // failed password check, which is the defect this function exists to fix.
+      return 'Verification failed. Please reload the page and try again.';
+    default:
+      // Generic, and the server's message is dropped on purpose.
+      //
+      // The email this sign-in targets comes from getSession(), which does not
+      // verify the JWT signature, so it is editable from the browser. Echoing
+      // the server's wording verbatim would make this modal an oracle: point
+      // the stored session at any address and read back whether it answers
+      // email_not_confirmed, user_banned or invalid_credentials. GoTrue already
+      // collapses "no such user" into "wrong password" to prevent exactly that;
+      // relaying the rest of its vocabulary would undo it.
+      //
+      // This is the opposite of describePasswordUpdateError's default, and the
+      // difference is what the wording carries. There the server is the only
+      // party that knows which password policy fired (HIBP has no client-side
+      // counterpart), so its text IS the message. Here it only names an account
+      // state the user cannot act on from this modal, and naming it is the leak.
+      return 'Could not verify your current password. Please try again.';
+  }
+}
+
+// What the user is told when updateUser refuses the new password.
+//
+// Keyed on error.code, never on the message text. The codes are the library's
+// published contract (@supabase/auth-js lib/error-codes.d.ts); the wording is
+// the server's and can change under us without a release here, so matching on
+// it would silently reclassify failures into the default branch.
+function describePasswordUpdateError(error: AuthError): string {
+  switch (error.code) {
+    case 'weak_password':
+      // The server's own wording, verbatim, and deliberately so. This branch is
+      // reachable in ordinary use: the project has "prevent use of leaked
+      // passwords" (HIBP) enabled server-side and validatePassword has no
+      // breach-list counterpart, so a password can satisfy every rule the
+      // strength meter shows and still be refused here. Only the server knows
+      // which policy fired, so only the server can explain it.
+      return error.message;
+    case 'same_password':
+      return 'Your new password must be different from your current one.';
+    case 'session_expired':
+    case 'session_not_found':
+      return SESSION_EXPIRED_MESSAGE;
+    case 'over_request_rate_limit':
+      return 'Too many attempts. Please wait a moment and try again.';
+    case 'reauthentication_needed':
+      // Reachable only if the project's "Secure password change" setting is
+      // turned on. It was read as OFF on 2026-09-01, which is what makes the
+      // single-step flow below correct. If this message ever appears, the
+      // setting changed and this handler needs the two-step shape instead:
+      // reauthenticate() -> emailed code -> updateUser({ password, nonce }).
+      return 'Password change needs extra verification. Please contact support.';
+    default:
+      return error.message || 'Failed to change password. Please try again.';
+  }
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -360,9 +446,6 @@ export default function SettingsPage() {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
 
-  const [newEmail, setNewEmail] = useState('');
-  const [emailPassword, setEmailPassword] = useState('');
-
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const [editFirstName, setEditFirstName] = useState('');
@@ -459,42 +542,102 @@ export default function SettingsPage() {
       setError('Please ensure password meets requirements and matches');
       return;
     }
+    if (!supabase) {
+      setError('Cannot reach the authentication service. Please reload the page and try again.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // The account email comes from the session read and from nowhere else —
+      // in particular not from userProfile, which is parsed out of the
+      // noor_user_profile localStorage key.
+      //
+      // Not because the session read is trustworthy. getSessionSafe() wraps
+      // getSession(), which deserializes the stored session and does NOT verify
+      // its JWT signature — getUser() is the verified read — so this email is
+      // editable from the browser too. What makes the flow sound is the step
+      // below: signInWithPassword is checked server-side, so a tampered email
+      // only aims the check at an account whose password the tamperer would
+      // still have to know. Reading userProfile as well would add a second
+      // editable source for no gain; one source keeps the reasoning about it in
+      // one place.
+      const session = await getSessionSafe();
+      const accountEmail = session?.user?.email;
+      if (!accountEmail) {
+        setError(SESSION_EXPIRED_MESSAGE);
+        return;
+      }
+
+      // An account with no email identity has no password, so the re-auth below
+      // would answer invalid_credentials and the user would be told their
+      // current password is wrong — forever, with no password that could ever
+      // be right. Say what is actually true instead, before any network call.
+      // Falls through to the normal flow when neither field is populated:
+      // absent metadata is not evidence that a password is missing.
+      const providers =
+        session.user.app_metadata?.providers ??
+        session.user.identities?.map((identity) => identity.provider);
+      if (providers && providers.length > 0 && !providers.includes('email')) {
+        setError(
+          `This account signs in with ${providers.join(' / ')} and has no password to change.`
+        );
+        return;
+      }
+
+      // Verify the CURRENT password by signing in with it. There is no
+      // current-password field to pass: UserAttributes carries only email,
+      // phone, password, nonce and data, and reauthenticate() sends an emailed
+      // one-time code rather than checking a password. Signing in is the only
+      // way this library can prove knowledge of the existing credential — and
+      // the project requires that proof ("Require current password when
+      // updating" is on), so this step is load-bearing, not decorative.
+      //
+      // A wrong guess costs the user nothing: signInWithPassword returns its
+      // error before touching the stored session, so they stay signed in.
+      const normalizedEmail = accountEmail.trim().toLowerCase();
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: currentPassword,
+      });
+      if (reauthError) {
+        setError(describeReauthError(reauthError));
+        return;
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (updateError) {
+        // Surface the server's refusal. Never let the user walk away believing
+        // the password changed when it did not — the same rule handleDeleteAccount
+        // states, and the reason the fake setTimeout that used to sit here was a
+        // defect rather than a placeholder.
+        setError(describePasswordUpdateError(updateError));
+        return;
+      }
+
+      // Reached only by falling past both error checks, each of which returns.
+      // Everything between the two library calls and showSuccess is
+      // unconditional, so there is no path on which a server rejection reports
+      // as success.
+      //
+      // The session is deliberately kept. forgot-password/page.tsx signs out
+      // globally after a RESET because the old password may be compromised;
+      // here the user just proved they know it, which is evidence of the
+      // opposite. Step 3 also issued a fresh session, so the token in hand is
+      // already current.
       setActiveModal(null);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
       showSuccess('Password changed successfully');
     } catch {
+      // Reachable for the first time: a network failure inside either call.
+      // Auth rejections do not land here — GoTrueClient catches its own
+      // AuthErrors and returns them in the result object.
       setError('Failed to change password. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleChangeEmail = async () => {
-    if (!newEmail || !emailPassword) {
-      setError('Please fill in all fields');
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      if (userProfile) {
-        const updated = { ...userProfile, email: newEmail };
-        localStorage.setItem('noor_user_profile', JSON.stringify(updated));
-        setUserProfile(updated);
-      }
-      setActiveModal(null);
-      setNewEmail('');
-      setEmailPassword('');
-      showSuccess('Verification email sent to ' + newEmail);
-    } catch {
-      setError('Failed to update email. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -824,13 +967,6 @@ export default function SettingsPage() {
       <SectionLabel>Security</SectionLabel>
       <SettingsCard>
         <SettingsRow
-          icon={Ico.mail}
-          label="Change Email"
-          description="Requires email verification"
-          chevron
-          onClick={() => setActiveModal('changeEmail')}
-        />
-        <SettingsRow
           icon={Ico.lock}
           label="Change Password"
           description="Use a strong, unique password"
@@ -1055,41 +1191,6 @@ export default function SettingsPage() {
                 style={{ background: '#000', fontFamily: FONT }}
               >
                 {isLoading ? 'Saving…' : 'Update Password'}
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {/* Change Email */}
-        {activeModal === 'changeEmail' && (
-          <Modal onClose={() => { setActiveModal(null); setError(null); }}>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.06)' }}>
-                {Ico.mail}
-              </div>
-              <div>
-                <h3 className="text-[16px] font-semibold text-black" style={{ fontFamily: FONT }}>Change Email</h3>
-                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>You'll need to verify your new address</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <ModalInput label="New Email" type="email" value={newEmail} onChange={setNewEmail} placeholder="your@email.com" autoFocus />
-              <ModalInput label="Confirm Password" type="password" value={emailPassword} onChange={setEmailPassword} placeholder="Your current password" />
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
-                Cancel
-              </button>
-              <button
-                onClick={handleChangeEmail}
-                disabled={isLoading || !newEmail || !emailPassword}
-                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
-                style={{ background: '#000', fontFamily: FONT }}
-              >
-                {isLoading ? 'Sending…' : 'Send Verification'}
               </button>
             </div>
           </Modal>
