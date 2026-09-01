@@ -411,6 +411,32 @@ export function clearLocalAuthState(): void {
   localStorage.removeItem('noor_plaid_transactions');
 }
 
+// Drops the browser's cached Plaid data. Called on a CONFIRMED disconnect — the
+// server returned 200, which /api/plaid/disconnect does only after the row
+// deletion succeeded — so the removal answers a confirmed fact, not an inferred
+// one. That distinction is the whole reason this exists as its own function:
+// dashboard/page.tsx and money/page.tsx both carry comments forbidding this
+// cleanup when the signal is a FAILED read, because destroying local state on a
+// transient error produced a "connected but shows disconnected" loop. A user's
+// explicit removal, acknowledged by the server, is the opposite situation.
+//
+// All three keys go, none of them pruned per item:
+//   - accounts / transactions are the dashboard's caches and are not keyed per
+//     item, so the removed bank's balances sit inside them and would be
+//     rehydrated on the next dashboard visit.
+//   - connections is written by PlaidLink's own read-modify-write dedupe step
+//     and read by nothing else; the duplicate check that matters is the
+//     server's (DB lookup -> 409), so removing the array costs nothing and
+//     leaves no stale institution name for a connection just deleted.
+//
+// No typeof window guard, matching clearLocalAuthState above: the callers are
+// click handlers.
+export function clearPlaidLocalState(): void {
+  localStorage.removeItem('noor_plaid_connections');
+  localStorage.removeItem('noor_plaid_accounts');
+  localStorage.removeItem('noor_plaid_transactions');
+}
+
 // ============================================
 // NOOR LOCAL STORAGE KEY REGISTRY (documentation + logout-subset reference)
 // ============================================
