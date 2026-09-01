@@ -20,7 +20,8 @@ import {
   clearLocalAuthState,
   purgeAllNoorLocalState,
 } from '@/lib/validation';
-import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
+import { supabase, getSupabaseBearerHeaders, getSessionSafe } from '@/lib/supabase-browser';
+import type { AuthError } from '@supabase/supabase-js';
 import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supabaseAuthHeaders';
 import {
   UniversitySearchField,
@@ -63,6 +64,44 @@ function getInitials(firstName?: string, lastName?: string): string {
   const f = firstName?.trim()?.[0]?.toUpperCase() ?? '';
   const l = lastName?.trim()?.[0]?.toUpperCase() ?? '';
   return (f + l) || '?';
+}
+
+const SESSION_EXPIRED_MESSAGE =
+  'Your session has expired. Please sign in again to change your password.';
+
+// What the user is told when updateUser refuses the new password.
+//
+// Keyed on error.code, never on the message text. The codes are the library's
+// published contract (@supabase/auth-js lib/error-codes.d.ts); the wording is
+// the server's and can change under us without a release here, so matching on
+// it would silently reclassify failures into the default branch.
+function describePasswordUpdateError(error: AuthError): string {
+  switch (error.code) {
+    case 'weak_password':
+      // The server's own wording, verbatim, and deliberately so. This branch is
+      // reachable in ordinary use: the project has "prevent use of leaked
+      // passwords" (HIBP) enabled server-side and validatePassword has no
+      // breach-list counterpart, so a password can satisfy every rule the
+      // strength meter shows and still be refused here. Only the server knows
+      // which policy fired, so only the server can explain it.
+      return error.message;
+    case 'same_password':
+      return 'Your new password must be different from your current one.';
+    case 'session_expired':
+    case 'session_not_found':
+      return SESSION_EXPIRED_MESSAGE;
+    case 'over_request_rate_limit':
+      return 'Too many attempts. Please wait a moment and try again.';
+    case 'reauthentication_needed':
+      // Reachable only if the project's "Secure password change" setting is
+      // turned on. It was read as OFF on 2026-09-01, which is what makes the
+      // single-step flow below correct. If this message ever appears, the
+      // setting changed and this handler needs the two-step shape instead:
+      // reauthenticate() -> emailed code -> updateUser({ password, nonce }).
+      return 'Password change needs extra verification. Please contact support.';
+    default:
+      return error.message || 'Failed to change password. Please try again.';
+  }
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -456,16 +495,93 @@ export default function SettingsPage() {
       setError('Please ensure password meets requirements and matches');
       return;
     }
+    if (!supabase) {
+      setError('Cannot reach the authentication service. Please reload the page and try again.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // The account email comes from the verified session and from nowhere
+      // else. userProfile is parsed out of the noor_user_profile localStorage
+      // key, which is unsigned and editable from DevTools — driving a sign-in
+      // with it would let a tampered value aim this credential check at another
+      // account entirely.
+      const session = await getSessionSafe();
+      const accountEmail = session?.user?.email;
+      if (!accountEmail) {
+        setError(SESSION_EXPIRED_MESSAGE);
+        return;
+      }
+
+      // An account with no email identity has no password, so the re-auth below
+      // would answer invalid_credentials and the user would be told their
+      // current password is wrong — forever, with no password that could ever
+      // be right. Say what is actually true instead, before any network call.
+      // Falls through to the normal flow when neither field is populated:
+      // absent metadata is not evidence that a password is missing.
+      const providers =
+        session.user.app_metadata?.providers ??
+        session.user.identities?.map((identity) => identity.provider);
+      if (providers && providers.length > 0 && !providers.includes('email')) {
+        setError(
+          `This account signs in with ${providers.join(' / ')} and has no password to change.`
+        );
+        return;
+      }
+
+      // Verify the CURRENT password by signing in with it. There is no
+      // current-password field to pass: UserAttributes carries only email,
+      // phone, password, nonce and data, and reauthenticate() sends an emailed
+      // one-time code rather than checking a password. Signing in is the only
+      // way this library can prove knowledge of the existing credential — and
+      // the project requires that proof ("Require current password when
+      // updating" is on), so this step is load-bearing, not decorative.
+      //
+      // A wrong guess costs the user nothing: signInWithPassword returns its
+      // error before touching the stored session, so they stay signed in.
+      const normalizedEmail = accountEmail.trim().toLowerCase();
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: currentPassword,
+      });
+      if (reauthError) {
+        setError('Current password is incorrect.');
+        return;
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (updateError) {
+        // Surface the server's refusal. Never let the user walk away believing
+        // the password changed when it did not — the same rule handleDeleteAccount
+        // states, and the reason the fake setTimeout that used to sit here was a
+        // defect rather than a placeholder.
+        setError(describePasswordUpdateError(updateError));
+        return;
+      }
+
+      // Reached only by falling past both error checks, each of which returns.
+      // Everything between the two library calls and showSuccess is
+      // unconditional, so there is no path on which a server rejection reports
+      // as success.
+      //
+      // The session is deliberately kept. forgot-password/page.tsx signs out
+      // globally after a RESET because the old password may be compromised;
+      // here the user just proved they know it, which is evidence of the
+      // opposite. Step 3 also issued a fresh session, so the token in hand is
+      // already current.
       setActiveModal(null);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
       showSuccess('Password changed successfully');
     } catch {
+      // Reachable for the first time: a network failure inside either call.
+      // Auth rejections do not land here — GoTrueClient catches its own
+      // AuthErrors and returns them in the result object.
       setError('Failed to change password. Please try again.');
     } finally {
       setIsLoading(false);
