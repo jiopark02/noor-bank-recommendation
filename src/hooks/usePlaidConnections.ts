@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
+import { clearPlaidLocalState } from "@/lib/validation";
 
 export interface PlaidConnection {
   itemId: string;
@@ -160,6 +161,15 @@ export function usePlaidConnections(userId: string | null) {
             message: readErrorMessage(payload) || DISCONNECT_FALLBACK_MESSAGE,
           };
         }
+
+        // Only past the !ok throw, so this runs on a CONFIRMED deletion and
+        // never in the catch or a finally: if the POST failed the row still
+        // exists and the connection is still live, and clearing the caches
+        // would present a failed operation as a partial success.
+        //
+        // Before the refetch, so a slow or failing reload cannot leave the
+        // stale caches sitting there in the meantime.
+        clearPlaidLocalState();
 
         // Re-pull authoritative state from the DB instead of mutating a local
         // cache (localStorage is no longer the source of truth). The row is gone
