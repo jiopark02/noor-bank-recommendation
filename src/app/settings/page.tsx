@@ -69,6 +69,53 @@ function getInitials(firstName?: string, lastName?: string): string {
 const SESSION_EXPIRED_MESSAGE =
   'Your session has expired. Please sign in again to change your password.';
 
+// What the user is told when the CURRENT-password check fails.
+//
+// Deliberately not describePasswordUpdateError. That function maps the codes
+// updateUser returns — weak_password, same_password, reauthentication_needed —
+// none of which signInWithPassword can produce, and its default branch hands
+// back the server's own wording, which is the wrong call here (see below). The
+// two failures share a shape, not a vocabulary.
+//
+// Keyed on error.code for the same reason as that function: the codes are the
+// library's published contract (@supabase/auth-js lib/error-codes.d.ts), the
+// wording is not.
+function describeReauthError(error: AuthError): string {
+  switch (error.code) {
+    case 'invalid_credentials':
+      // The only code that actually means "that password is wrong". Every
+      // failure used to say this unconditionally, so a rate-limited user was
+      // told their correct password was incorrect — and stayed told it, since
+      // retrying is what sustains the rate limit.
+      return 'Current password is incorrect.';
+    case 'over_request_rate_limit':
+      return 'Too many attempts. Please wait a moment and try again.';
+    case 'captcha_failed':
+      // Inert unless the project turns CAPTCHA protection on, in the same way
+      // reauthentication_needed below is inert while "Secure password change"
+      // is off. Listed because the generic default would misdescribe it as a
+      // failed password check, which is the defect this function exists to fix.
+      return 'Verification failed. Please reload the page and try again.';
+    default:
+      // Generic, and the server's message is dropped on purpose.
+      //
+      // The email this sign-in targets comes from getSession(), which does not
+      // verify the JWT signature, so it is editable from the browser. Echoing
+      // the server's wording verbatim would make this modal an oracle: point
+      // the stored session at any address and read back whether it answers
+      // email_not_confirmed, user_banned or invalid_credentials. GoTrue already
+      // collapses "no such user" into "wrong password" to prevent exactly that;
+      // relaying the rest of its vocabulary would undo it.
+      //
+      // This is the opposite of describePasswordUpdateError's default, and the
+      // difference is what the wording carries. There the server is the only
+      // party that knows which password policy fired (HIBP has no client-side
+      // counterpart), so its text IS the message. Here it only names an account
+      // state the user cannot act on from this modal, and naming it is the leak.
+      return 'Could not verify your current password. Please try again.';
+  }
+}
+
 // What the user is told when updateUser refuses the new password.
 //
 // Keyed on error.code, never on the message text. The codes are the library's
@@ -503,11 +550,19 @@ export default function SettingsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      // The account email comes from the verified session and from nowhere
-      // else. userProfile is parsed out of the noor_user_profile localStorage
-      // key, which is unsigned and editable from DevTools — driving a sign-in
-      // with it would let a tampered value aim this credential check at another
-      // account entirely.
+      // The account email comes from the session read and from nowhere else —
+      // in particular not from userProfile, which is parsed out of the
+      // noor_user_profile localStorage key.
+      //
+      // Not because the session read is trustworthy. getSessionSafe() wraps
+      // getSession(), which deserializes the stored session and does NOT verify
+      // its JWT signature — getUser() is the verified read — so this email is
+      // editable from the browser too. What makes the flow sound is the step
+      // below: signInWithPassword is checked server-side, so a tampered email
+      // only aims the check at an account whose password the tamperer would
+      // still have to know. Reading userProfile as well would add a second
+      // editable source for no gain; one source keeps the reasoning about it in
+      // one place.
       const session = await getSessionSafe();
       const accountEmail = session?.user?.email;
       if (!accountEmail) {
@@ -547,7 +602,7 @@ export default function SettingsPage() {
         password: currentPassword,
       });
       if (reauthError) {
-        setError('Current password is incorrect.');
+        setError(describeReauthError(reauthError));
         return;
       }
 
