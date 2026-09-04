@@ -7,10 +7,19 @@ import {
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
+import {
+  decryptPlaidAccessToken,
+  isPlaidTokenCryptoConfigured,
+} from "@/lib/plaidTokenCrypto";
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isPlaidConfigured()) {
+    if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
+      // Without PLAID_TOKEN_ENCRYPTION_KEY the stored access tokens cannot be
+      // decrypted, so this route cannot do its job. Answering 503 here — the
+      // same answer an unconfigured Plaid already gets — reports the
+      // configuration fault at the front door instead of as a 500 thrown from
+      // inside the connection loop below.
       return NextResponse.json(
         { error: "Plaid is not configured" },
         { status: 503 }
@@ -71,7 +80,22 @@ export async function POST(request: NextRequest) {
     let anyLoginRequired = false;
 
     for (const connection of activeConnections) {
-      const accessToken = connection.access_token;
+      // Decrypt OUTSIDE the try below, deliberately. That catch skips a single
+      // connection on ITEM_LOGIN_REQUIRED so one expired bank does not sink a
+      // multi-bank response — but a decrypt failure is a different class of
+      // event. It means the key is wrong or the row is corrupt, i.e. EVERY row
+      // is probably unreadable, and skipping would surface as "no accounts
+      // found": the same false negative the null-read handling above exists to
+      // prevent. Throwing here reaches the outer catch, which maps an error
+      // carrying no Plaid error_code to a generic 500.
+      //
+      // userId comes from the verified token (authenticate() ignores any
+      // client-supplied userId) and is passed unmodified — it is the AAD the
+      // ciphertext was bound to at write time.
+      const accessToken = decryptPlaidAccessToken(
+        connection.access_token,
+        userId
+      );
       try {
         const accountsResponse = await plaidClient.accountsGet({
           access_token: accessToken,

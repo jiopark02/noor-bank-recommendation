@@ -7,10 +7,17 @@ import {
   getActivePlaidConnectionByInstitution,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
+import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isPlaidConfigured()) {
+    if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
+      // Refuse BEFORE the exchange, not after. Without
+      // PLAID_TOKEN_ENCRYPTION_KEY the token cannot be stored, and
+      // storePlaidConnection would throw — but by then a real Plaid Item has
+      // already been minted and there is nothing holding its access token, so
+      // it could never be revoked. Checking here means the failure costs
+      // nothing.
       return NextResponse.json(
         { error: "Plaid is not configured" },
         { status: 503 }

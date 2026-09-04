@@ -29,6 +29,7 @@
 
 import { plaidClient, isPlaidConfigured } from "@/lib/plaid";
 import { createServerClient } from "@/lib/supabase";
+import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
 import type {
   PlaidChatAccount,
   PlaidChatConnection,
@@ -65,16 +66,25 @@ function mapAccountKind(
  * failing item (e.g. ITEM_LOGIN_REQUIRED, expired token) is skipped, not fatal.
  * Balances are preserved exactly — a null/undefined current balance becomes
  * balanceStatus "unavailable" (never coerced to 0).
+ *
+ * ⚠️ Takes PLAINTEXT access tokens, already decrypted by the caller. The
+ * parameter is deliberately `string[]` rather than the connection rows: the
+ * per-connection catch below swallows anything thrown inside the loop into a
+ * warn-and-skip, so decrypting in here would turn a wrong-key fault into a
+ * silent "no accounts" — exactly the kind of false negative this file's header
+ * commits to avoiding. Keeping the rows out of this function makes that mistake
+ * impossible to make locally. See getPlaidChatState for where the decrypt
+ * happens instead.
  */
 async function fetchShallowAccounts(
-  activeConnections: Array<{ access_token: string }>
+  accessTokens: string[]
 ): Promise<PlaidChatAccount[]> {
   const accounts: PlaidChatAccount[] = [];
 
-  for (const conn of activeConnections) {
+  for (const accessToken of accessTokens) {
     try {
       const res = await plaidClient.accountsGet({
-        access_token: conn.access_token,
+        access_token: accessToken,
       });
 
       for (const a of res.data.accounts) {
@@ -112,11 +122,17 @@ async function fetchShallowAccounts(
  *   shallow accounts (when connected and Plaid is configured).
  *
  * The connection read is in-process (DB) and the accounts read uses the stored
- * access tokens directly, so no request/headers need to be threaded in.
+ * access tokens (decrypted here — see below), so no request/headers need to be
+ * threaded in.
  *
  * A DB error on the connection read throws; the route wraps this call in
  * try/catch and falls back to an explicit "state unknown" (readError) block.
- * An empty result is NOT an error — it is a genuine "no connections".
+ * An empty result is NOT an error — it is a genuine "no connections". A decrypt
+ * failure throws the same way, and for the same reason: an explicit unknown
+ * beats a confident wrong answer.
+ *
+ * @param userId  Also the additional authenticated data for decryption, so it
+ *   must be the verified-token value passed through unmodified.
  */
 export async function getPlaidChatState(
   userId: string,
@@ -159,9 +175,19 @@ export async function getPlaidChatState(
   // L2 — shallow balances. Only when explicitly at depth "balances", connected,
   // and Plaid is configured. Live fetch, no storage, no cache.
   if (opts.depth === "balances" && connected && isPlaidConfigured()) {
-    state.accounts = await fetchShallowAccounts(
-      activeRows.map((r) => ({ access_token: r.access_token }))
+    // Decrypt HERE, outside fetchShallowAccounts, so a crypto failure cannot be
+    // absorbed by its per-connection catch and reported as "this user has no
+    // accounts". A throw from this map propagates out of getPlaidChatState, and
+    // the chat route's existing wrapper turns it into the explicit "state
+    // unknown" block — the same direction the DB-error throw above takes, and
+    // the reason both are throws rather than empty results.
+    //
+    // userId is the caller's verified-token value, unmodified: it is the AAD
+    // each ciphertext was bound to at write time.
+    const accessTokens = activeRows.map((r) =>
+      decryptPlaidAccessToken(r.access_token, userId)
     );
+    state.accounts = await fetchShallowAccounts(accessTokens);
   }
 
   return state;

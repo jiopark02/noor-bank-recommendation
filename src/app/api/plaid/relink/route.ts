@@ -12,10 +12,16 @@ import {
   updatePlaidConnectionStatus,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
+import {
+  decryptPlaidAccessToken,
+  isPlaidTokenCryptoConfigured,
+} from "@/lib/plaidTokenCrypto";
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isPlaidConfigured()) {
+    if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
+      // Re-linking needs the EXISTING access token to build an update-mode link
+      // token, so without PLAID_TOKEN_ENCRYPTION_KEY this route cannot run.
       return NextResponse.json(
         { error: "Plaid is not configured" },
         { status: 503 }
@@ -51,6 +57,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Decrypt ABOVE the try, deliberately. The catch below re-throws every
+    // error, so a decrypt failure would reach the same place either way — but
+    // the log line it passes through on the way ("Error creating update link
+    // token") would then name the wrong step. Hoisting it keeps a configuration
+    // fault from being recorded as a Plaid API fault.
+    //
+    // userId is the verified-token value, unmodified: it is the AAD this
+    // ciphertext was bound to when the connection was stored.
+    const accessToken = decryptPlaidAccessToken(
+      connection.access_token,
+      userId
+    );
+
     // Create a new link token in "update" mode using the existing access token
     // This allows the user to re-authenticate their bank login
     try {
@@ -63,7 +82,7 @@ export async function POST(request: NextRequest) {
         country_codes: PLAID_COUNTRY_CODES,
         language: "en",
         redirect_uri: process.env.PLAID_REDIRECT_URI,
-        access_token: connection.access_token, // This makes it an "update" mode link
+        access_token: accessToken, // This makes it an "update" mode link
       });
 
       // Mark connection as active again (user will complete re-auth in Plaid Link)
