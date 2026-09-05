@@ -6,6 +6,7 @@ import {
   getAllPlaidConnections,
   deleteAllPlaidConnections,
 } from "@/lib/plaidApiUtils";
+import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
 
 export const dynamic = "force-dynamic";
 
@@ -72,9 +73,41 @@ export async function POST(request: NextRequest) {
         );
       } else {
         for (const connection of connections) {
+          // THE ONE DELIBERATE EXCEPTION to PL1's fail-closed rule.
+          //
+          // Everywhere else a decrypt failure throws and the request fails,
+          // because silently skipping it would misreport a key problem as "no
+          // data". Here it is caught and the loop continues, because this step
+          // is best-effort by design (see the header above) and account
+          // deletion is the user's own request — refusing to delete their
+          // account because a token cannot be decrypted would be a worse
+          // outcome, and it would not buy anything: a token that cannot be
+          // decrypted cannot be used to revoke the Item either. The Item is
+          // already unrevokable at that point, which is the same end state
+          // CLAUDE.md already records for a deleted row.
+          //
+          // Its own try, and its own log line: a decrypt failure and an
+          // itemRemove failure are different events and must stay
+          // distinguishable in the logs.
+          let accessToken: string;
+          try {
+            accessToken = decryptPlaidAccessToken(
+              connection.access_token,
+              authUserId
+            );
+          } catch (err) {
+            console.error(
+              `account/delete: could not decrypt the stored Plaid access token ` +
+                `for item_id=${connection.item_id}; skipping revocation for it ` +
+                `(the Plaid Item will remain live and can no longer be revoked):`,
+              err instanceof Error ? err.message : err
+            );
+            continue; // best-effort — deletion must still proceed
+          }
+
           try {
             await plaidClient.itemRemove({
-              access_token: connection.access_token,
+              access_token: accessToken,
             });
           } catch (err) {
             console.error(

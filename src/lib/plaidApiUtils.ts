@@ -3,6 +3,7 @@ import { createServerClient } from "./supabase";
 import { getAuthenticatedUserIdFromRequest } from "./apiAuth";
 import { getPlaidErrorCode, getPlaidErrorStatus } from "./plaidErrorRedaction";
 import { asPlainObject, readRequestJson } from "@/lib/requestJson";
+import { encryptPlaidAccessToken } from "./plaidTokenCrypto";
 
 /**
  * Authenticate Plaid API requests via Supabase Bearer JWT.
@@ -106,9 +107,21 @@ export async function getActivePlaidConnectionByInstitution(
  * migrations, not known to disagree with the live table. Either way it was not a
  * type anything could rely on.
  *
- * `access_token: string` is NOT a verified fact about the database. It is the
- * assumption this code already makes — the value is passed straight to the Plaid
- * SDK, which requires a string — written down so the compiler can see it.
+ * ⚠️ `access_token` holds CIPHERTEXT, not a usable Plaid token (PL1). Every
+ * value in this column is `v<n>:<iv>:<authTag>:<ciphertext>` produced by
+ * plaidTokenCrypto.ts, and the database enforces that shape with a CHECK
+ * constraint. It CANNOT be handed to the Plaid SDK: it must first go through
+ * `decryptPlaidAccessToken(row.access_token, userId)`, with a userId taken
+ * verbatim from the verified token, because that userId is the additional
+ * authenticated data the ciphertext is bound to.
+ *
+ * An earlier version of this comment said the opposite — that the value "is
+ * passed straight to the Plaid SDK, which requires a string" — and that was
+ * true when it was written. The type is still `string` because that is what
+ * PostgREST returns for a TEXT column; the string is simply no longer a
+ * credential. The compile-time type cannot express the difference, so the
+ * guarantee that no route passes this field to the SDK undecrypted is held by
+ * src/lib/__tests__/plaidTokenReadSites.test.ts instead.
  *
  * `status` is deliberately left as `string | null` rather than narrowed to
  * "active" | "error": the live schema is unverified, and the CHECK constraint in
@@ -218,7 +231,26 @@ export async function getAllPlaidConnections(
 }
 
 /**
- * Store Plaid connection in database
+ * Store Plaid connection in database.
+ *
+ * THIS FUNCTION IS THE ENCRYPTION BOUNDARY (PL1). It is the only place in the
+ * repo that writes plaid_connections.access_token, so encrypting here — rather
+ * than at the one caller — means a future second caller cannot forget to. The
+ * `accessToken` parameter is PLAINTEXT, as Plaid issued it; what reaches the
+ * database is ciphertext.
+ *
+ * `userId` is doing two jobs: it is the row's owner AND the additional
+ * authenticated data the ciphertext is bound to. It must be the value from the
+ * verified token, unmodified — no trim, no casing change — because every read
+ * site has to reproduce it byte-for-byte to decrypt.
+ *
+ * Encryption failures are NOT caught by the try below: encryptPlaidAccessToken
+ * throws before the insert is built, so a missing or malformed
+ * PLAID_TOKEN_ENCRYPTION_KEY propagates to the caller instead of being folded
+ * into this function's `return null` ("Failed to save connection"). That is
+ * deliberate — a configuration fault and a database fault are different events
+ * and must not arrive as the same one. The route's outer catch turns it into
+ * the generic 500. There is no branch here that stores a plaintext token.
  */
 export async function storePlaidConnection(
   userId: string,
@@ -227,13 +259,15 @@ export async function storePlaidConnection(
   institutionName: string,
   institutionId: string | null
 ) {
+  const encryptedAccessToken = encryptPlaidAccessToken(accessToken, userId);
+
   try {
     const supabase = createServerClient();
     const { data, error } = await supabase
       .from("plaid_connections")
       .insert({
         user_id: userId,
-        access_token: accessToken,
+        access_token: encryptedAccessToken,
         item_id: itemId,
         institution_name: institutionName,
         institution_id: institutionId,
