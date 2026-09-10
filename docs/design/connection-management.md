@@ -4,6 +4,8 @@
 **Risk tier:** HIGH (includes a schema migration + connect/exchange pipeline change). Ships only with the two-layer review **plus** live verification — no exceptions (see §8).
 **Related:** builds on `714f075` (DB-backed connection state) and references `docs/design/B-1-plaid-chat-capability-scaffold.md` for the chat-side Plaid boundary.
 
+> **⚠️ PARTIALLY SUPERSEDED — 2026-09-10.** The revoke roadmap item in §9 has been implemented: removal now calls Plaid `itemRemove` and deletes the DB row **only** if that succeeded. §0 Non-goals, §0.1, §1, §4.1, §6 and §11 were written before that and no longer match the code. A full revision is a separate track; until it lands, read those sections as history, not as current behaviour. See also the warning added to §10.
+
 ---
 
 ## 0. Scope
@@ -223,6 +225,8 @@ using (
 where p.id = ranked.id and ranked.rn > 1;
 ```
 ⚠️ Deleted rows' Plaid Items are **not** revoked here — hand off to the revoke roadmap item (§9). Balance/token implications: multiple access_tokens may be live for the same institution; deleting rows leaves those Items orphaned on Plaid until revoked.
+
+> **⚠️ RE-EVALUATE BEFORE RUNNING — added 2026-09-10.** Running this DELETE destroys the only copy of the access token for every row it removes. For any row whose Plaid Item has not been revoked, that Item can then never be revoked by anyone — which is exactly the outcome the 2026-09-10 change stops the code paths from producing (removal now revokes first and deletes the row only on success). The "hand off to the revoke roadmap item (§9)" pointer above no longer leads anywhere: §9 is implemented, and it is implemented precisely by refusing to do what this SQL does. Whether to run this at all is an open decision, not a documented-and-accepted cost.
 
 ---
 
