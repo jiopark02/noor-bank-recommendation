@@ -29,31 +29,88 @@ export async function authenticate(
 }
 
 /**
+ * The three states a single-row read can be in.
+ *
+ * This is the single-row mirror of what getAllPlaidConnections does with
+ * `T[] | null`, and it exists for the same reason: "the query failed" and "this
+ * row does not exist" are different facts, and a `T | null` return can only
+ * carry one of them.
+ *
+ * It is a discriminated union rather than another nullable because `ok` has to
+ * be read before `connection` can be. A caller that forgets the failure case
+ * does not compile — which is the property the list helper gets from its return
+ * type too, and the property the previous `row | null` shape did not have.
+ *
+ *   { ok: false }                   the read FAILED; nothing is known
+ *   { ok: true,  connection: null } the read succeeded; there is no such row
+ *   { ok: true,  connection: row }  the read succeeded and returned this row
+ */
+export type ConnectionLookup<T> =
+  | { ok: true; connection: T | null }
+  | { ok: false };
+
+/**
+ * Decide what a single-row plaid_connections read means.
+ *
+ * Pure and exported for the same reason connectionRowsOrNull is: the decision
+ * gets a regression line that needs no database and no mock.
+ *
+ * A PostgREST error is a failure. `null` data with no error is what maybeSingle
+ * returns for zero rows, and that is an absence, not a failure. There is no
+ * "unexpected shape" branch here, unlike the list version — maybeSingle has no
+ * shape to get wrong, it either resolves a row object or null.
+ */
+export function connectionRowOrFailure<T>(result: {
+  data: T | null;
+  error: unknown;
+}): ConnectionLookup<T> {
+  if (result.error) {
+    return { ok: false };
+  }
+  return { ok: true, connection: result.data ?? null };
+}
+
+/**
  * Get a single Plaid connection for a user by its item_id.
  *
  * Uses maybeSingle() (not single()): (user_id, item_id) is UNIQUE, so the result
  * is 0 or 1 row and maybeSingle() never errors on "not exactly one" the way
- * single() does when a user has multiple connections. Returns null when the
- * item does not exist for this user.
+ * single() does when a user has multiple connections.
+ *
+ * ⚠️ THIS USED TO RETURN `row | null` AND FOLD A FAILED QUERY INTO THE null.
+ * That made a database hiccup indistinguishable from "this connection is
+ * already gone", and /api/plaid/disconnect read the null as the latter and
+ * answered 200 { success: true } — telling the user their bank was removed
+ * while the row and its live Plaid Item both survived. Under the revoke-before-
+ * delete rule that is the worst possible answer to a failed read, and it is the
+ * same defect getAllPlaidConnections' nullable return exists to prevent on the
+ * list side. The distinction has to live HERE because this function is the only
+ * place that ever sees `error`; a caller cannot recover it afterwards.
+ *
+ * The catch is a failure too, not an absence: createServerClient() throws on
+ * missing env, and reporting that as "no such row" would resurrect the same bug
+ * through the other door.
  */
 export async function getPlaidConnectionByItemId(userId: string, itemId: string) {
   try {
     const supabase = createServerClient();
-    const { data, error } = await supabase
+    const result = await supabase
       .from("plaid_connections")
       .select("*")
       .eq("user_id", userId)
       .eq("item_id", itemId)
       .maybeSingle();
 
-    if (error || !data) {
-      return null;
+    if (result.error) {
+      console.error("Error fetching Plaid connection by item_id:", result.error);
     }
 
-    return data;
+    return connectionRowOrFailure(result);
   } catch (error) {
     console.error("Error fetching Plaid connection by item_id:", error);
-    return null;
+    // `as const` keeps `ok` a literal type, so the union this function returns
+    // stays discriminated and callers can still narrow on it.
+    return { ok: false } as const;
   }
 }
 
@@ -178,15 +235,21 @@ export function connectionRowsOrNull<T>(result: {
  * type, so a caller that ignores it does not compile; a throw is invisible to the
  * compiler and gets absorbed by whatever outer catch happens to be in scope.
  *
- * It is NOT a difference in fail direction, and an earlier version of this
- * comment claimed it was. Checked against all three callers: both data routes
- * convert the null straight back into a throw and land in their own outer catch,
- * so a failed read is answered with the 500 and the generic "There was a problem
- * reaching your bank" that handlePlaidError produces for any error carrying no
- * Plaid error_code — which is also what throwing from here would produce.
- * /api/account/delete catches and carries on either way (its Plaid revocation is
- * best-effort by design). The only observable difference across the three is
- * which log line account/delete emits.
+ * The fail direction now differs across the three callers, and it did not
+ * always. Both data routes convert the null straight back into a throw and land
+ * in their own outer catch, so a failed read is answered with the 500 and the
+ * generic "There was a problem reaching your bank" that handlePlaidError
+ * produces for any error carrying no Plaid error_code — which is also what
+ * throwing from here would produce.
+ *
+ * /api/account/delete used to catch and carry on either way, because its Plaid
+ * revocation was best-effort. It no longer does: a row is now deleted only after
+ * its Plaid Item has actually been revoked, so a read that failed cannot report
+ * whether an un-revoked connection is about to be destroyed. That route answers
+ * the null by REFUSING to delete the account. If this helper is ever changed to
+ * report a failed read as [], that route silently starts deleting accounts whose
+ * bank connections were never revoked — with the tokens that could have revoked
+ * them.
  *
  * What the null does buy at the routes is not the 500 — it is not emitting the
  * 404. That 404's wording is string-matched by the money and dashboard screens;
@@ -338,34 +401,6 @@ export async function deletePlaidConnection(userId: string, itemId: string) {
     return true;
   } catch (error) {
     console.error("Error deleting connection:", error);
-    return false;
-  }
-}
-
-/**
- * Delete ALL Plaid connections for a user in a single idempotent statement.
- *
- * Used by account deletion. plaid_connections has no FK to public.users and its
- * user_id column is TEXT, so it is not covered by any ON DELETE CASCADE and must
- * be removed explicitly. One filtered delete (not a per-row loop) — removing
- * zero rows is still success, so a retry after a partial failure converges.
- */
-export async function deleteAllPlaidConnections(userId: string): Promise<boolean> {
-  try {
-    const supabase = createServerClient();
-    const { error } = await supabase
-      .from("plaid_connections")
-      .delete()
-      .eq("user_id", userId);
-
-    if (error) {
-      console.error("Error deleting all Plaid connections:", error);
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.error("Error deleting all Plaid connections:", error);
     return false;
   }
 }

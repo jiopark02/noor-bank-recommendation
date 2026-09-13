@@ -68,8 +68,13 @@ const CONSUMING_SITES = [
   "app/api/plaid/accounts/route.ts",
   "app/api/plaid/transactions/route.ts",
   "app/api/plaid/relink/route.ts",
-  "app/api/account/delete/route.ts",
   "lib/plaidChatState.ts",
+  // liveRevocationDeps() decrypts a stored token and hands the plaintext
+  // straight to plaidClient.itemRemove. The revocation logic above it takes
+  // that decrypt as an injected dependency (so the revoke-before-delete
+  // ordering can be tested by executing it), but the production wiring lives
+  // here, which is what makes this a consuming site.
+  "lib/plaidRevocation.ts",
 ];
 
 /**
@@ -88,12 +93,6 @@ const NON_CONSUMING_SITES: Record<string, string> = {
   // Comments only — these files name the identifier to say they exclude it.
   "app/api/plaid/connections/route.ts": "comment: deliberately not selected",
   "app/api/account/export/route.ts": "comment: deliberately not exported",
-  // Comment only. This route deletes the row and never reads the column — it
-  // imports neither plaidClient nor any read helper. The comment describes the
-  // itemRemove call it does NOT make; that gap is tracked separately and is
-  // deliberately untouched here.
-  "app/api/plaid/disconnect/route.ts":
-    "comment: describes an itemRemove this route does not perform",
   "lib/plaid.ts": "comment: axios error redaction rationale",
   "lib/plaidErrorRedaction.ts": "comment: axios error redaction rationale",
   // Supabase SESSION tokens. Same spelling, unrelated to plaid_connections —

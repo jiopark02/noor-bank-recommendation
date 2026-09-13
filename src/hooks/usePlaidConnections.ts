@@ -11,6 +11,25 @@ export interface PlaidConnection {
   createdAt?: string;
 }
 
+/**
+ * What `disconnect` reports back.
+ *
+ * `message` carries the SERVER's wording verbatim when there is one. The
+ * disconnect route now answers two different kinds of failure with two
+ * different messages — one that asks the user to retry, one that says the fault
+ * is ours and deliberately does not — and the caller must not try to reconstruct
+ * that distinction from a status or a `code`. Render the string.
+ */
+export interface DisconnectResult {
+  ok: boolean;
+  message: string | null;
+}
+
+/** Used only when the server sent no message at all (or the fetch failed). */
+const DISCONNECT_FALLBACK_MESSAGE =
+  "We couldn't disconnect this bank. Please try again in a moment. " +
+  "If this keeps happening, please contact support.";
+
 export function usePlaidConnections(userId: string | null) {
   const [connections, setConnections] = useState<PlaidConnection[]>([]);
   // Starts true so consumers don't flash a "not connected" state (and prompt a
@@ -106,12 +125,19 @@ export function usePlaidConnections(userId: string | null) {
     }
   }, [userId]);
 
-  // Disconnect a bank
+  // Disconnect a bank.
+  //
+  // A failure here is REPORTED TO THE CALLER, never written into this hook's
+  // shared `error`. That field means "loading the connection list failed", and
+  // money/page.tsx reads it as a boolean to decide whether to suppress the
+  // connect-a-bank card. Putting a disconnect failure in it would conflate two
+  // unrelated conditions in a value that is only ever read for its truthiness —
+  // and it would still not be displayed anywhere, which is how a failed
+  // disconnect used to reach the user as silence.
   const disconnect = useCallback(
-    async (itemId: string) => {
+    async (itemId: string): Promise<DisconnectResult> => {
       if (!userId) {
-        setError("Please log in first");
-        return false;
+        return { ok: false, message: "Please log in first" };
       }
 
       try {
@@ -126,19 +152,27 @@ export function usePlaidConnections(userId: string | null) {
 
         const payload = asPlainObject(await response.json());
         if (!response.ok) {
-          throw new Error(readErrorMessage(payload) || "Failed to disconnect");
+          // The server's own wording, unmodified. It has already chosen between
+          // "try again" and "this is our fault"; the `code` it also sends is for
+          // logs and support, not for the caller to branch on.
+          return {
+            ok: false,
+            message: readErrorMessage(payload) || DISCONNECT_FALLBACK_MESSAGE,
+          };
         }
 
         // Re-pull authoritative state from the DB instead of mutating a local
-        // cache (localStorage is no longer the source of truth).
+        // cache (localStorage is no longer the source of truth). The row is gone
+        // only when the Plaid Item was actually revoked, so this refetch is what
+        // shows the user whether the removal really happened.
         await fetchConnections();
 
-        return true;
+        return { ok: true, message: null };
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to disconnect";
-        setError(message);
-        return false;
+        // A transport failure, or a response with no JSON body (an unhandled
+        // 500 answers with neither `error` nor `code`).
+        console.error("Error disconnecting bank:", err);
+        return { ok: false, message: DISCONNECT_FALLBACK_MESSAGE };
       }
     },
     [userId, fetchConnections]

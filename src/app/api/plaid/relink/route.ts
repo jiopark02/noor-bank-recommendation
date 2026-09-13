@@ -49,13 +49,25 @@ export async function POST(request: NextRequest) {
     // not found") whenever the user had more than one connection. Looking up by
     // (user_id, item_id) — which is UNIQUE — also makes the old item_id mismatch
     // check redundant.
-    const connection = await getPlaidConnectionByItemId(userId, itemId);
-    if (!connection) {
+    const lookup = await getPlaidConnectionByItemId(userId, itemId);
+
+    // BEHAVIOUR DELIBERATELY UNCHANGED. The helper now separates a failed read
+    // from an absent row, and this route maps both onto the 404 it has always
+    // answered — so nothing observable about relink moves in the change that
+    // introduced the distinction (it was made for /api/plaid/disconnect, where
+    // folding the two together was answering a database failure with "removed").
+    //
+    // Whether relink SHOULD answer a failed read differently is a real question
+    // and an open one: telling a user "Connection not found" when the query
+    // failed is the same class of silent-failure, and it is left alone here only
+    // to keep that decision out of an unrelated fix. It is logged, not forgotten.
+    if (!lookup.ok || !lookup.connection) {
       return NextResponse.json(
         { error: "Connection not found" },
         { status: 404 }
       );
     }
+    const connection = lookup.connection;
 
     // Decrypt ABOVE the try, deliberately. The catch below re-throws every
     // error, so a decrypt failure would reach the same place either way — but

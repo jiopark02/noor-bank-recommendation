@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
-import { isPlaidConfigured, plaidClient } from "@/lib/plaid";
+import { isPlaidConfigured } from "@/lib/plaid";
+import { getAllPlaidConnections } from "@/lib/plaidApiUtils";
+import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import {
-  getAllPlaidConnections,
-  deleteAllPlaidConnections,
-} from "@/lib/plaidApiUtils";
-import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
+  liveRevocationDeps,
+  revokeAndDeleteConnections,
+} from "@/lib/plaidRevocation";
+import { deleteAccountForUser } from "@/lib/accountDeletion";
 
 export const dynamic = "force-dynamic";
 
@@ -16,21 +19,49 @@ export const dynamic = "force-dynamic";
  * Identity comes ONLY from the verified Bearer JWT. No id is read from the
  * request body — it is neither accepted nor trusted.
  *
- * There is no single transaction available: this spans an external API (Plaid)
- * plus two internal systems (the public schema and Supabase Auth). Steps are
- * therefore ordered from "external / recoverable" to "irreversible", and each
- * is individually idempotent so a retry after a partial failure converges:
+ * WHAT REPLACED THE "BEST-EFFORT REVOCATION" RULE, AND WHY
+ * This route used to revoke each Plaid Item best-effort and then delete every
+ * connection row regardless of the outcome. A decrypt failure in particular was
+ * caught and skipped, under a rule recorded here and in CLAUDE.md as the one
+ * deliberate exception to PL1's fail-closed discipline. The argument for it was
+ * that skipping "would not buy anything: a token that cannot be decrypted
+ * cannot be used to revoke the Item either."
  *
- *   1. Plaid itemRemove per connection  (best-effort; revokes external access)
- *   2. Delete plaid_connections rows    (TEXT user_id, no cascade -> explicit)
- *   3. DELETE public.users              (FK ON DELETE CASCADE removes 9 children)
- *   4. auth.admin.deleteUser            (most irreversible -> last; deleting the
- *                                        auth user first would invalidate the
- *                                        token and block remaining cleanup)
+ * That argument rests on a premise that is false. A token that cannot be
+ * decrypted TODAY is usually not lost — the dominant cause is a key
+ * configuration accident (a rotation that left the old key behind, Production
+ * and Preview carrying different values, a mistyped env var), and every one of
+ * those is reversible. Recover the key and the row decrypts again, and the Item
+ * can be revoked then. Deleting the row throws that away: the ciphertext is the
+ * only copy of the token, so the recovery path dies with it and the Item stays
+ * live on Plaid's side permanently.
  *
- * A partial failure (e.g. step 3 succeeds, step 4 fails) MUST surface as an
- * explicit 500 — never a silent success — so the user is not told "deleted"
- * while a login record still exists.
+ * So a row whose Item was not revoked is now kept, and the account deletion
+ * stops rather than proceeding. That is a real cost to the user — their
+ * deletion does not complete on that attempt — and it is the smaller one: for a
+ * transient failure the retry converges, while a discarded token does not come
+ * back.
+ *
+ * ⚠️ "THE RETRY CONVERGES" IS NOT UNCONDITIONAL, and this header used to say it
+ * as though it were. Two failures repeat forever — a row whose Item was revoked
+ * but whose delete failed both attempts, and a row whose ciphertext is corrupt
+ * under a working key — and a user holding either CANNOT complete an account
+ * deletion at all. They are named in full on revokeAndDeleteConnections in
+ * plaidRevocation.ts, and the gate in accountDeletion.ts repeats the warning
+ * where it refuses. There is no recovery path in the code today. Do not cite
+ * convergence as the reason this trade is acceptable without also citing them.
+ *
+ * THIS FILE IS WIRING, NOT DECISION. Every branch lives in
+ * src/lib/accountDeletion.ts, and the ordering rationale is documented there.
+ * The split exists because the guarantee that matters is a negative one — when
+ * a bank connection could not be revoked, the user's rows are NOT deleted — and
+ * a negative guarantee has to be observed as a call that did not happen. This
+ * route cannot be executed offline (it authenticates first, and nothing in the
+ * suite fakes that boundary), so the decision moved to where it can be:
+ * accountDeletion.test.ts runs every branch with injected fakes.
+ *
+ * Keep it that way. A branch added here instead of there is a branch nothing
+ * tests.
  */
 export async function POST(request: NextRequest) {
   const authUserId = await getAuthenticatedUserIdFromRequest(request);
@@ -38,174 +69,64 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Step 1: best-effort revocation of external Plaid access. Failures are
-  // logged (with item_id) and skipped — they must not block DB/auth deletion,
-  // and step 2 is what actually removes our stored access tokens. If Plaid is
-  // not configured, skip the whole step.
-  if (isPlaidConfigured()) {
-    try {
-      const connections = await getAllPlaidConnections(authUserId);
-      if (connections === null) {
-        // The read reported failure, so we cannot know which Items to revoke.
-        // Deletion still proceeds. That is a CHOICE, not a forced move, and it
-        // has a cost — both of which an earlier version of this comment got
-        // wrong by asserting that blocking here would leave the user unable to
-        // delete their account. Step 2 below already blocks on its own failure
-        // (500, "please retry", nothing removed), so this route plainly can
-        // block for a Plaid-row problem when it decides to.
-        //
-        // The cost, in the case that matters — the read fails but the delete
-        // that follows succeeds: Step 2 destroys the rows, and the access token
-        // in them is the only copy held anywhere in this system. Skipping
-        // revocation and then deleting leaves the Plaid Item live on Plaid's
-        // side with nothing left to revoke it with, permanently. When the DB is
-        // broken enough that Step 2 fails too, that does not arise — the request
-        // 500s and a retry can still revoke.
-        //
-        // Chosen anyway: revocation is best-effort here by design, the deletion
-        // is the user's own request, and the behavior is unchanged from before
-        // this branch existed — a failed read was previously indistinguishable
-        // from "this user had none" and took the same path. The branch exists to
-        // say which of the two happened, in the log, not to change what happens.
-        console.error(
-          "account/delete: Plaid connection read reported failure (returned null); " +
-            "skipping revocation"
-        );
-      } else {
-        for (const connection of connections) {
-          // THE ONE DELIBERATE EXCEPTION to PL1's fail-closed rule.
-          //
-          // Everywhere else a decrypt failure throws and the request fails,
-          // because silently skipping it would misreport a key problem as "no
-          // data". Here it is caught and the loop continues, because this step
-          // is best-effort by design (see the header above) and account
-          // deletion is the user's own request — refusing to delete their
-          // account because a token cannot be decrypted would be a worse
-          // outcome, and it would not buy anything: a token that cannot be
-          // decrypted cannot be used to revoke the Item either. The Item is
-          // already unrevokable at that point, which is the same end state
-          // CLAUDE.md already records for a deleted row.
-          //
-          // Its own try, and its own log line: a decrypt failure and an
-          // itemRemove failure are different events and must stay
-          // distinguishable in the logs.
-          let accessToken: string;
-          try {
-            accessToken = decryptPlaidAccessToken(
-              connection.access_token,
-              authUserId
-            );
-          } catch (err) {
-            console.error(
-              `account/delete: could not decrypt the stored Plaid access token ` +
-                `for item_id=${connection.item_id}; skipping revocation for it ` +
-                `(the Plaid Item will remain live and can no longer be revoked):`,
-              err instanceof Error ? err.message : err
-            );
-            continue; // best-effort — deletion must still proceed
-          }
-
-          try {
-            await plaidClient.itemRemove({
-              access_token: accessToken,
-            });
-          } catch (err) {
-            console.error(
-              `account/delete: Plaid itemRemove failed for item_id=${connection.item_id}:`,
-              err
-            );
-            // continue — revocation is best-effort
-          }
-        }
-      }
-    } catch (err) {
-      // NO CURRENT PATH REACHES THIS, AND IT IS KEPT DELIBERATELY.
-      //
-      // getAllPlaidConnections reports every failure by RETURNING null: its try
-      // block spans the whole function body, createServerClient() included (that
-      // call throws on missing env, and is caught there, not here). So the null
-      // branch above is the only way a failed read arrives, and nothing else left
-      // in this try can throw — the loop is over an array the helper guarantees,
-      // and each itemRemove has its own catch.
-      //
-      // This is therefore a defense that rests on a CONTRACT of the helper, not
-      // on a property of this file. It stays because account deletion is the
-      // wrong place to discover that the contract changed: if the helper is ever
-      // made to throw, this is what keeps a best-effort revocation step from
-      // failing the entire deletion request.
-      //
-      // Distinct event from the branch above — keep the two log lines
-      // distinguishable. That one is a read that failed and said so; this one is
-      // a read that broke the return-null contract.
-      console.error(
-        "account/delete: unexpected throw while listing Plaid connections " +
-          "(getAllPlaidConnections is contracted to return null on failure); " +
-          "skipping revocation:",
-        err
-      );
-      // continue — revocation is best-effort
+  // Constructed lazily and at most once. createAdminClient() THROWS when
+  // SUPABASE_SERVICE_ROLE_KEY is missing, and the deletion flow refuses on
+  // isSupabaseAdminConfigured() before it revokes anything — so this must not
+  // run while the dependency object is being built, only inside the two steps
+  // that reach it after that check has passed.
+  let adminClient: SupabaseClient | null = null;
+  const admin = (): SupabaseClient => {
+    if (!adminClient) {
+      adminClient = createAdminClient();
     }
-  }
+    return adminClient;
+  };
 
-  const admin = createAdminClient();
+  const result = await deleteAccountForUser(authUserId, {
+    isPlaidConfigured,
+    isCryptoConfigured: isPlaidTokenCryptoConfigured,
+    isAdminConfigured: isSupabaseAdminConfigured,
 
-  // Step 2: delete Plaid connection rows (not covered by any cascade).
-  const plaidDeleted = await deleteAllPlaidConnections(authUserId);
-  if (!plaidDeleted) {
-    return NextResponse.json(
-      {
-        error:
-          "Failed to delete bank connections. No account data was removed; please retry.",
-      },
-      { status: 500 }
-    );
-  }
+    // getAllPlaidConnections is contracted to report every failure by returning
+    // null; the catch is here because this route is the wrong place to discover
+    // that the contract changed. A throw would otherwise escape POST entirely
+    // (there is no outer catch) and Next would answer with a bodiless 500,
+    // losing the named CONNECTION_READ_FAILED answer. Both directions refuse to
+    // delete, so this costs nothing and keeps the response legible.
+    listConnections: async (userId) => {
+      try {
+        return await getAllPlaidConnections(userId);
+      } catch (error) {
+        console.error(
+          "account/delete: getAllPlaidConnections threw, which its contract " +
+            "says it does not; treating as a failed read:",
+          error
+        );
+        return null;
+      }
+    },
 
-  // Step 3: delete the public.users row. FK ON DELETE CASCADE removes the 9
-  // child tables (survey_responses, recommendations_new, posts, comments,
-  // chat_sessions, chat_messages, user_facts, chat_summaries, admin_users).
-  //
-  // A genuine query error is fatal (500). But deleting 0 rows is NOT an error:
-  // on a retry after a partial failure (Step 3 succeeded, Step 4 failed) the
-  // users row is already gone, and this retry must still reach Step 4 to finish
-  // removing the auth user. Erroring on 0 rows would break that idempotent
-  // convergence. We log a warning instead so the "already absent" case is
-  // visible rather than silent.
-  const { data: deletedUsers, error: usersError } = await admin
-    .from("users")
-    .delete()
-    .eq("id", authUserId)
-    .select("id");
-  if (usersError) {
-    console.error(
-      "account/delete: failed to delete public.users row:",
-      usersError
-    );
-    return NextResponse.json(
-      { error: "Failed to delete account data. Please retry." },
-      { status: 500 }
-    );
-  }
-  if (!deletedUsers || deletedUsers.length === 0) {
-    console.warn(
-      `account/delete: users row already absent for ${authUserId} — idempotent retry or anomaly`
-    );
-  }
+    revokeAll: (userId, connections) =>
+      revokeAndDeleteConnections(userId, connections, liveRevocationDeps()),
 
-  // Step 4: delete the Supabase Auth user (most irreversible -> last).
-  const { error: authError } = await admin.auth.admin.deleteUser(authUserId);
-  if (authError) {
-    // Half-deleted state: the profile and children are gone but the login
-    // record remains. Surface it explicitly — never report success.
-    console.error("account/delete: failed to delete auth user:", authError);
-    return NextResponse.json(
-      {
-        error:
-          "Your account data was deleted, but the login record could not be removed. Please contact support to finish deletion.",
-      },
-      { status: 500 }
-    );
-  }
+    // The row count comes from .select("id"): a PostgREST delete returns the
+    // deleted rows when a representation is requested, so `data.length` IS the
+    // count. No separate count query, and no { count: "exact" } head request.
+    // Zero is not an error here — see step 4 in accountDeletion.ts.
+    deleteUsersRow: async (userId) => {
+      const { data, error } = await admin()
+        .from("users")
+        .delete()
+        .eq("id", userId)
+        .select("id");
+      return { deletedCount: data ? data.length : 0, error };
+    },
 
-  return NextResponse.json({ ok: true });
+    deleteAuthUser: async (userId) => {
+      const { error } = await admin().auth.admin.deleteUser(userId);
+      return { error };
+    },
+  });
+
+  return NextResponse.json(result.body, { status: result.status });
 }
