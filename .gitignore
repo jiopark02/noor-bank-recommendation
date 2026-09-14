@@ -40,6 +40,13 @@ next-env.d.ts
 .vercel
 .env*.local
 
-# Audit
-audit/L0-evidence.txt
+# Audit -- generated outputs and working notes stay local.
+audit/*.txt
+audit/.l0tmp
+audit/.l0btmp
 audit/results/
+audit/questions.md
+audit/plans/
+
+# Claude Code
+.claude/settings.local.json
