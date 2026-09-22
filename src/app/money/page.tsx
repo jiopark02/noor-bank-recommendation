@@ -54,6 +54,11 @@ export default function MoneyPage() {
   >(null);
   const [removingItemId, setRemovingItemId] = useState<string | null>(null);
   const [addBankNotice, setAddBankNotice] = useState<string | null>(null);
+  // Same pattern as addBankNotice, for the other direction. A failed removal had
+  // no channel to the user at all before this: the hook set its shared `error`,
+  // which this page reads only as a boolean, so the bank silently stayed in the
+  // list with no explanation.
+  const [removeNotice, setRemoveNotice] = useState<string | null>(null);
 
   // Date range for transactions
   const [startDate, setStartDate] = useState<string>(() => {
@@ -271,18 +276,26 @@ export default function MoneyPage() {
     [handleBankConnected, userId]
   );
 
-  // Remove a single connection from NOOR (deletes the DB row; does NOT revoke on
-  // Plaid — see docs/design/connection-management.md §9). The hook re-fetches
-  // connections on success; we ALSO call fetchData() explicitly because removing
-  // one of several banks leaves hasActive unchanged, so the hasActive-dependent
-  // fetch effect would not re-run on its own.
+  // Remove a single connection. The route now revokes the Plaid Item first and
+  // deletes the row only if that succeeded, so a failure means the bank is still
+  // connected — the list will still show it after the refetch, and the notice
+  // below is what explains why.
+  //
+  // The hook re-fetches connections on success; we ALSO call fetchData()
+  // explicitly because removing one of several banks leaves hasActive unchanged,
+  // so the hasActive-dependent fetch effect would not re-run on its own.
   const handleRemoveConnection = useCallback(
     async (itemId: string) => {
       setRemovingItemId(itemId);
+      setRemoveNotice(null);
       try {
-        const ok = await plaidConnections.disconnect(itemId);
-        if (ok) {
+        const result = await plaidConnections.disconnect(itemId);
+        if (result.ok) {
           await fetchData();
+        } else {
+          // The server's wording, rendered as-is. It has already picked between
+          // "try again" and "this one is on us"; do not re-derive that here.
+          setRemoveNotice(result.message);
         }
       } finally {
         setRemovingItemId(null);
@@ -664,12 +677,16 @@ export default function MoneyPage() {
                           }
                           className="text-xs font-medium text-gray-600 hover:text-red-600 px-2.5 py-1 rounded border border-gray-200 flex-shrink-0"
                         >
-                          Remove from NOOR
+                          Remove permanently
                         </button>
                       )}
                     </div>
                   ))}
                 </div>
+
+                {removeNotice && (
+                  <p className="text-xs text-gray-600 mt-2">{removeNotice}</p>
+                )}
 
                 {userId && (
                   <div className="mt-4">

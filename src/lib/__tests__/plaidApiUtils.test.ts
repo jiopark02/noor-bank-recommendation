@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { connectionRowsOrNull, handlePlaidError } from "../plaidApiUtils";
+import {
+  connectionRowOrFailure,
+  connectionRowsOrNull,
+  handlePlaidError,
+} from "../plaidApiUtils";
 import { redactPlaidAxiosError } from "../plaidErrorRedaction";
 
 /**
@@ -304,5 +308,76 @@ describe("connectionRowsOrNull — a failed read is not an empty one", () => {
     // Not a shape PostgREST produces for a list query. "We don't know" is the
     // only honest reading, and it is the direction that cannot invent an answer.
     expect(connectionRowsOrNull({ data: null, error: null })).toBeNull();
+  });
+});
+
+/**
+ * The same distinction, for the single-row read behind getPlaidConnectionByItemId.
+ *
+ * WHY THIS ONE EXISTS SEPARATELY. The single-row helper used to fold a query
+ * error into the same null it returns for "no such row" (`if (error || !data)
+ * return null`), and /api/plaid/disconnect read that null as "already
+ * disconnected" and answered 200 { success: true } — reporting a database
+ * failure as a completed removal, while the row and its live Plaid Item both
+ * survived. Under the revoke-before-delete rule that is the worst available
+ * answer, and it is the identical defect the list helper above was fixed for.
+ *
+ * Pure, so these need no database and no mock. Restore the old
+ * `if (error || !data) return null` shape and the first two cases below demand
+ * different verdicts for inputs that would collapse to one — at least one goes
+ * red.
+ */
+describe("connectionRowOrFailure — a failed read is not an absent row", () => {
+  it("reports a query error as a failure", () => {
+    const supabaseError = {
+      code: "PGRST301",
+      message: "JWT expired",
+      details: null,
+    };
+
+    expect(connectionRowOrFailure({ data: null, error: supabaseError })).toEqual({
+      ok: false,
+    });
+  });
+
+  it("reports a genuine zero-row read as a successful absence", () => {
+    // THE CASE THAT DIVERGES FROM connectionRowsOrNull. For a list query
+    // { data: null, error: null } is an impossible shape and is read as a
+    // failure; for maybeSingle it is exactly how zero rows arrive, and it must
+    // stay a success — otherwise disconnect answers 500 forever instead of
+    // being idempotent for a bank that is already gone.
+    expect(connectionRowOrFailure({ data: null, error: null })).toEqual({
+      ok: true,
+      connection: null,
+    });
+  });
+
+  it("prefers failure over the row when an error arrives alongside data", () => {
+    expect(
+      connectionRowOrFailure({
+        data: { item_id: "item_1" },
+        error: new Error("boom"),
+      })
+    ).toEqual({ ok: false });
+  });
+
+  it("returns the row unchanged", () => {
+    const row = { item_id: "item_1", access_token: "v1:iv:tag:ciphertext" };
+
+    expect(connectionRowOrFailure({ data: row, error: null })).toEqual({
+      ok: true,
+      connection: row,
+    });
+  });
+
+  it("makes the failure case unskippable at the type level", () => {
+    // The runtime half of what the discriminated union buys. `ok` has to be
+    // read before `connection` can be, so a caller cannot reach for the row
+    // without having decided what a failed read means — which is the mistake
+    // the previous `row | null` return allowed and disconnect made.
+    const failure = connectionRowOrFailure({ data: null, error: new Error("x") });
+
+    expect(failure.ok).toBe(false);
+    expect("connection" in failure).toBe(false);
   });
 });

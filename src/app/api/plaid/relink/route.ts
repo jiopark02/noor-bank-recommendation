@@ -12,10 +12,16 @@ import {
   updatePlaidConnectionStatus,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
+import {
+  decryptPlaidAccessToken,
+  isPlaidTokenCryptoConfigured,
+} from "@/lib/plaidTokenCrypto";
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isPlaidConfigured()) {
+    if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
+      // Re-linking needs the EXISTING access token to build an update-mode link
+      // token, so without PLAID_TOKEN_ENCRYPTION_KEY this route cannot run.
       return NextResponse.json(
         { error: "Plaid is not configured" },
         { status: 503 }
@@ -43,13 +49,38 @@ export async function POST(request: NextRequest) {
     // not found") whenever the user had more than one connection. Looking up by
     // (user_id, item_id) — which is UNIQUE — also makes the old item_id mismatch
     // check redundant.
-    const connection = await getPlaidConnectionByItemId(userId, itemId);
-    if (!connection) {
+    const lookup = await getPlaidConnectionByItemId(userId, itemId);
+
+    // BEHAVIOUR DELIBERATELY UNCHANGED. The helper now separates a failed read
+    // from an absent row, and this route maps both onto the 404 it has always
+    // answered — so nothing observable about relink moves in the change that
+    // introduced the distinction (it was made for /api/plaid/disconnect, where
+    // folding the two together was answering a database failure with "removed").
+    //
+    // Whether relink SHOULD answer a failed read differently is a real question
+    // and an open one: telling a user "Connection not found" when the query
+    // failed is the same class of silent-failure, and it is left alone here only
+    // to keep that decision out of an unrelated fix. It is logged, not forgotten.
+    if (!lookup.ok || !lookup.connection) {
       return NextResponse.json(
         { error: "Connection not found" },
         { status: 404 }
       );
     }
+    const connection = lookup.connection;
+
+    // Decrypt ABOVE the try, deliberately. The catch below re-throws every
+    // error, so a decrypt failure would reach the same place either way — but
+    // the log line it passes through on the way ("Error creating update link
+    // token") would then name the wrong step. Hoisting it keeps a configuration
+    // fault from being recorded as a Plaid API fault.
+    //
+    // userId is the verified-token value, unmodified: it is the AAD this
+    // ciphertext was bound to when the connection was stored.
+    const accessToken = decryptPlaidAccessToken(
+      connection.access_token,
+      userId
+    );
 
     // Create a new link token in "update" mode using the existing access token
     // This allows the user to re-authenticate their bank login
@@ -63,7 +94,7 @@ export async function POST(request: NextRequest) {
         country_codes: PLAID_COUNTRY_CODES,
         language: "en",
         redirect_uri: process.env.PLAID_REDIRECT_URI,
-        access_token: connection.access_token, // This makes it an "update" mode link
+        access_token: accessToken, // This makes it an "update" mode link
       });
 
       // Mark connection as active again (user will complete re-auth in Plaid Link)

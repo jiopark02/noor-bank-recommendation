@@ -199,6 +199,13 @@ describe("getAllPlaidConnections — the seam between the read and the decision"
   });
 
   it("returns the rows on a successful read", async () => {
+    // NOTE (PL1): these access_token values are NOT a valid stored shape. Since
+    // PL1 the column holds `v1:<iv>:<authTag>:<ciphertext>` and the database
+    // enforces it with a CHECK constraint. They stay as opaque strings here
+    // because getAllPlaidConnections neither decrypts nor inspects the field —
+    // it hands rows back verbatim, and the callers decrypt. Do not copy this
+    // shape into a test that exercises decryption; see plaidTokenCrypto.test.ts
+    // for real values.
     const rows = [
       { item_id: "item_1", access_token: "tok_1", status: "active" },
       { item_id: "item_2", access_token: "tok_2", status: "error" },

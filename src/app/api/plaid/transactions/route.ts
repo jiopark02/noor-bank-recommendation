@@ -12,6 +12,10 @@ import {
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
+import {
+  decryptPlaidAccessToken,
+  isPlaidTokenCryptoConfigured,
+} from "@/lib/plaidTokenCrypto";
 
 type ApiSubscription = {
   id: string;
@@ -75,7 +79,10 @@ function isCashFlowRelevantTransaction(txn: PlaidTransaction): boolean {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isPlaidConfigured()) {
+    if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
+      // See the accounts route: without PLAID_TOKEN_ENCRYPTION_KEY the stored
+      // access tokens cannot be decrypted, so report the configuration fault
+      // here as a 503 rather than as a 500 from inside the loop.
       return NextResponse.json(
         { error: "Plaid is not configured" },
         { status: 503 }
@@ -131,7 +138,16 @@ export async function POST(request: NextRequest) {
     let anyLoginRequired = false;
 
     for (const connection of activeConnections) {
-      const accessToken = connection.access_token;
+      // Decrypt OUTSIDE the try below — same reasoning as the accounts route.
+      // The per-connection catch is there to skip ONE expired bank; a decrypt
+      // failure means the key is wrong or the row is corrupt and every row is
+      // affected, so it must not be absorbed as a skipped connection and
+      // reported as "no transactions". userId comes from the verified token and
+      // is passed unmodified (it is the ciphertext's AAD).
+      const accessToken = decryptPlaidAccessToken(
+        connection.access_token,
+        userId
+      );
       try {
         const transactionsResponse = await plaidClient.transactionsGet({
           access_token: accessToken,
