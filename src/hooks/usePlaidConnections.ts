@@ -162,8 +162,8 @@ export function usePlaidConnections(userId: string | null) {
           };
         }
 
-        // Only past the !ok throw, so this runs on a CONFIRMED deletion and
-        // never in the catch or a finally: if the POST failed the row still
+        // Only past the !ok early return, so this runs on a CONFIRMED deletion
+        // and never in the catch or a finally: if the POST failed the row still
         // exists and the connection is still live, and clearing the caches
         // would present a failed operation as a partial success.
         //

@@ -26,7 +26,7 @@ import { describe, it, expect } from "vitest";
  *
  * WHAT THIS FILE PROVES AND DOES NOT PROVE
  * It reads source TEXT. It proves the call appears exactly once in the hook,
- * that it sits after the !response.ok throw and before the refetch, and that
+ * that it sits after the !response.ok guard and before the refetch, and that
  * neither the catch body nor any finally mentions it. It does NOT execute the
  * hook — no DOM environment exists in this repo, so no test here can touch
  * localStorage at all — so it cannot prove the three keys are the right three,
@@ -149,16 +149,28 @@ describe("plaid disconnect — local cache cleanup runs on success only", () => 
     expect(disconnectBody).not.toMatch(/\bfinally\b/);
   });
 
-  it("clears after the !response.ok throw and before the refetch", () => {
-    // Ordering is load-bearing in both directions. Before the throw, the
+  it("clears after the !response.ok guard and before the refetch", () => {
+    // Ordering is load-bearing in both directions. Before the guard, the
     // cleanup would run on a failed disconnect. After the refetch, a slow or
     // failing reload would leave the stale caches in place in the meantime.
-    const guardAt = HOOK_SOURCE.indexOf('"Failed to disconnect"');
-    const cleanupAt = HOOK_SOURCE.indexOf(CLEANUP_CALL);
-    const refetchAt = HOOK_SOURCE.indexOf(
-      "await fetchConnections();",
-      guardAt
-    );
+    //
+    // Anchored on the guard's CONTROL FLOW, not on the message it returns. The
+    // previous anchor was the user-facing literal "Failed to disconnect", which
+    // no longer exists — copy is the weakest possible anchor, because it
+    // changes for reasons that have nothing to do with this ordering. The
+    // `if (!response.ok)` shape is the fact under test, and it survived both
+    // that rewording and the throw-to-early-return change that replaced it.
+    //
+    // Bounded to `disconnect` for the same reason disconnectCatchBody is: five
+    // functions in this hook open with the identical guard, and an unbounded
+    // scan would match fetchConnections' one ~90 lines above the region and
+    // then compare offsets that mean nothing. All three indices below are taken
+    // from the SAME bounded string, or they are not comparable at all.
+    const body = disconnectSource(withoutComments(HOOK_SOURCE));
+
+    const guardAt = body.search(/if\s*\(\s*!response\.ok\s*\)/);
+    const cleanupAt = body.indexOf(CLEANUP_CALL);
+    const refetchAt = body.indexOf("await fetchConnections();", guardAt);
 
     expect(guardAt).toBeGreaterThan(-1);
     expect(cleanupAt).toBeGreaterThan(guardAt);
