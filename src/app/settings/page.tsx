@@ -45,7 +45,7 @@ interface UserProfile {
   monthlyExpenses?: number;
 }
 
-type ModalType = 'delete' | 'changePassword' | 'changeEmail' | 'editProfile' | 'resetChecklist' | null;
+type ModalType = 'delete' | 'changePassword' | 'editProfile' | 'resetChecklist' | null;
 
 const PROFILE_FIELD_LABELS: Record<string, string> = {
   firstName: 'First name',
@@ -207,11 +207,6 @@ const Ico = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />
     </svg>
   ),
-  mail: (
-    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-    </svg>
-  ),
   lock: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -360,9 +355,6 @@ export default function SettingsPage() {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
 
-  const [newEmail, setNewEmail] = useState('');
-  const [emailPassword, setEmailPassword] = useState('');
-
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const [editFirstName, setEditFirstName] = useState('');
@@ -470,31 +462,6 @@ export default function SettingsPage() {
       showSuccess('Password changed successfully');
     } catch {
       setError('Failed to change password. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleChangeEmail = async () => {
-    if (!newEmail || !emailPassword) {
-      setError('Please fill in all fields');
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      if (userProfile) {
-        const updated = { ...userProfile, email: newEmail };
-        localStorage.setItem('noor_user_profile', JSON.stringify(updated));
-        setUserProfile(updated);
-      }
-      setActiveModal(null);
-      setNewEmail('');
-      setEmailPassword('');
-      showSuccess('Verification email sent to ' + newEmail);
-    } catch {
-      setError('Failed to update email. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -824,13 +791,6 @@ export default function SettingsPage() {
       <SectionLabel>Security</SectionLabel>
       <SettingsCard>
         <SettingsRow
-          icon={Ico.mail}
-          label="Change Email"
-          description="Requires email verification"
-          chevron
-          onClick={() => setActiveModal('changeEmail')}
-        />
-        <SettingsRow
           icon={Ico.lock}
           label="Change Password"
           description="Use a strong, unique password"
@@ -1055,41 +1015,6 @@ export default function SettingsPage() {
                 style={{ background: '#000', fontFamily: FONT }}
               >
                 {isLoading ? 'Saving…' : 'Update Password'}
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {/* Change Email */}
-        {activeModal === 'changeEmail' && (
-          <Modal onClose={() => { setActiveModal(null); setError(null); }}>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.06)' }}>
-                {Ico.mail}
-              </div>
-              <div>
-                <h3 className="text-[16px] font-semibold text-black" style={{ fontFamily: FONT }}>Change Email</h3>
-                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>You'll need to verify your new address</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <ModalInput label="New Email" type="email" value={newEmail} onChange={setNewEmail} placeholder="your@email.com" autoFocus />
-              <ModalInput label="Confirm Password" type="password" value={emailPassword} onChange={setEmailPassword} placeholder="Your current password" />
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
-                Cancel
-              </button>
-              <button
-                onClick={handleChangeEmail}
-                disabled={isLoading || !newEmail || !emailPassword}
-                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
-                style={{ background: '#000', fontFamily: FONT }}
-              >
-                {isLoading ? 'Sending…' : 'Send Verification'}
               </button>
             </div>
           </Modal>
