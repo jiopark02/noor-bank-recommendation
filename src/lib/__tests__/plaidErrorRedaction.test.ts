@@ -4,6 +4,7 @@ import {
   buildSafePlaidErrorDiagnostics,
   getPlaidErrorCode,
   getPlaidErrorStatus,
+  getPlaidErrorType,
   redactPlaidAxiosError,
 } from "../plaidErrorRedaction";
 
@@ -541,6 +542,88 @@ describe("getPlaidErrorCode — H: reads the code the message never carried", ()
 
     getPlaidErrorCode(error);
     getPlaidErrorStatus(error);
+
+    expect(JSON.parse(JSON.stringify(error))).toEqual(before);
+  });
+});
+
+// H2 — the same read side, for the second field one decision needs.
+//
+// Only plaidRevocation.ts reads the type, and only to require ITEM_ERROR
+// alongside ITEM_NOT_FOUND before it treats a rejection as "the Item is already
+// gone". These assertions exist because that decision deletes a row: a reader
+// that silently returned undefined would turn the type condition into a
+// permanent no, and the row would never be deleted, with nothing failing.
+describe("getPlaidErrorType — H2: the type survives the same two hops", () => {
+  it("reads the type after the real redaction pipeline has run", () => {
+    // Through the same function the interceptor calls, so this proves the
+    // allow-list actually carries error_type rather than merely listing it.
+    const redacted = redactPlaidAxiosError(makeAxiosLikeError());
+
+    expect(getPlaidErrorType(redacted)).toBe("ITEM_ERROR");
+    expect(getPlaidErrorCode(redacted)).toBe("ITEM_LOGIN_REQUIRED");
+  });
+
+  it("falls back to response.data on an error that never met the interceptor", () => {
+    const raw = makeAxiosLikeError();
+    expect(raw.plaidDiagnostics).toBeUndefined();
+
+    expect(getPlaidErrorType(raw)).toBe("ITEM_ERROR");
+  });
+
+  it("prefers plaidDiagnostics over response.data when both are present", () => {
+    // The two locations can disagree only if something wrote the marker by hand.
+    // The order is the same as getPlaidErrorCode's, which is what keeps a code
+    // and a type read off one error from coming from different places.
+    const error = makeAxiosLikeError();
+    error.plaidDiagnostics = {
+      error_type: "INVALID_INPUT",
+      error_code: "INVALID_ACCESS_TOKEN",
+    };
+
+    expect(getPlaidErrorType(error)).toBe("INVALID_INPUT");
+    expect(getPlaidErrorCode(error)).toBe("INVALID_ACCESS_TOKEN");
+  });
+
+  it("ignores a non-string error_type", () => {
+    // The allow-list covers the value TYPE as well as the key name, and this is
+    // the reader's half of that: an object smuggled in under the name is not a
+    // type, and reporting it as one would put it into a log line.
+    const error = makeAxiosLikeError({
+      responseData: {
+        error_code: "ITEM_NOT_FOUND",
+        error_type: { nested: SENTINEL_SECRET },
+      },
+    });
+
+    expect(getPlaidErrorType(error)).toBeUndefined();
+    expect(getPlaidErrorCode(error)).toBe("ITEM_NOT_FOUND");
+  });
+
+  it("returns undefined for non-Plaid errors and never throws", () => {
+    // Every call site is inside a catch block. A throw here would replace the
+    // error being diagnosed and lose the original.
+    const hostile = {} as Record<string, unknown>;
+    Object.defineProperty(hostile, "plaidDiagnostics", {
+      get() {
+        throw new Error("hostile getter");
+      },
+      enumerable: true,
+    });
+
+    expect(getPlaidErrorType(new Error("something else broke"))).toBeUndefined();
+    expect(getPlaidErrorType("just a string")).toBeUndefined();
+    expect(getPlaidErrorType(null)).toBeUndefined();
+    expect(getPlaidErrorType(undefined)).toBeUndefined();
+    expect(() => getPlaidErrorType(hostile)).not.toThrow();
+    expect(getPlaidErrorType(hostile)).toBeUndefined();
+  });
+
+  it("does not mutate the error it reads", () => {
+    const error = makeAxiosLikeError();
+    const before = JSON.parse(JSON.stringify(error));
+
+    getPlaidErrorType(error);
 
     expect(JSON.parse(JSON.stringify(error))).toEqual(before);
   });
