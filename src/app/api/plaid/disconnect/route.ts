@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isPlaidConfigured } from "@/lib/plaid";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
+import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
@@ -68,6 +69,40 @@ export async function POST(request: NextRequest) {
     if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
       return NextResponse.json(
         { error: SERVER_FAULT_MESSAGE, code: "PLAID_CRYPTO_UNCONFIGURED" },
+        { status: 503 }
+      );
+    }
+
+    // The service-role key must exist BEFORE anything here reads the database.
+    //
+    // createServerClient() does not throw when SUPABASE_SERVICE_ROLE_KEY is
+    // missing — it falls back to the anon key (supabase.ts:31) — and it attaches
+    // no user JWT, so `auth.uid()` is NULL. Every policy on plaid_connections is
+    // `(auth.uid())::text = user_id` (live schema as observed 2026-09-25), so the
+    // lookup below matches zero rows, this route reads that as "the connection is
+    // already gone", and it answers 200 { success: true } while the row and its
+    // live Plaid Item both survive. The user is told their bank was removed when
+    // it was not — the exact outcome the revoke-before-delete rule exists to
+    // prevent.
+    //
+    // The delete below cannot reach a zero-row result this way, because it runs
+    // only after the lookup found the row through the same client; this gate is
+    // what makes that "same client" a service-role one. The deleted=0-is-success
+    // reading in plaidRevocation.ts leans on that.
+    //
+    // /api/account/delete already refuses on this condition before it revokes
+    // anything (accountDeletion.ts:144); this route had no equivalent. Same code
+    // string as that route, deliberately: one fault, one name in the logs. The
+    // 503 and the message match this route's other configuration branch above
+    // rather than that route's 500, because this route already answers every
+    // configuration fault that way and this body is rendered to the user verbatim.
+    //
+    // Checked before authenticate() because authenticate() is itself a read:
+    // getAuthenticatedUserIdFromRequest builds a createServerClient and calls
+    // auth.getUser (apiAuth.ts:25,29).
+    if (!isSupabaseAdminConfigured()) {
+      return NextResponse.json(
+        { error: SERVER_FAULT_MESSAGE, code: "ADMIN_UNCONFIGURED" },
         { status: 503 }
       );
     }

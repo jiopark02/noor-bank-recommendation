@@ -456,9 +456,11 @@ export async function revokeAndDeleteConnection(
   // It is not silently equivalent to 1 — the number is in the log, because the
   // two mean different things about what happened. Reaching 0 here means the row
   // was already gone, which on this path can only be a concurrent request: the
-  // row was read moments earlier under the same `.eq("user_id", ...)` filter the
-  // delete uses, and the decrypt that just succeeded proves the userId is
-  // byte-identical to the one the row was written with.
+  // row was read moments earlier through the same filter AND the same client
+  // construction the delete uses — both go through createServerClient with
+  // `.eq("user_id", userId)` — so anything the read could see, the delete can
+  // address. That is the load-bearing half; the decrypt that just succeeded adds
+  // that the userId is byte-identical to the one the row was written with.
   emit(
     deps,
     `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
