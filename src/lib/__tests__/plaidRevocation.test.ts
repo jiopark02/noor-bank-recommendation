@@ -639,12 +639,20 @@ describe("revokeAndDeleteConnection — what the log lines record", () => {
     expect(log).not.toContain("resolved=revoked");
   });
 
-  it("keeps a hostile Plaid field from breaking the line it is logged on", async () => {
+  it("stops a hostile Plaid field from forging a key or breaking the line", async () => {
     // The allow-list guarantees these fields are not credentials. It guarantees
-    // nothing about their LENGTH or their whitespace: the strings come from
-    // Plaid's response body, and a newline in one would split a single decision
-    // record into two lines — a half-line reads as a complete one, which is worse
-    // than losing the value.
+    // nothing about their LENGTH, their whitespace, or their punctuation: the
+    // strings come from Plaid's response body, and these lines are read as
+    // `key=value` pairs.
+    //
+    // TWO SEPARATE DEFECTS ARE PINNED HERE.
+    //  - A newline would split one decision record into two lines, and a half-line
+    //    reads as a complete one — worse than losing the value.
+    //  - A space plus an `=` would FORGE A FIELD. Collapsing whitespace alone was
+    //    not enough: `ITEM_NOT_FOUND resolved=item_not_found` would then parse as a
+    //    code plus a `resolved` field this module never wrote, and `resolved=` is
+    //    the field a reader uses to decide whether an Item was revoked. So `=` is
+    //    substituted too, and the forgery arrives as one unmistakable token.
     const hostileCode = "ITEM_NOT_FOUND\nINJECTED=yes";
     const hostileType = `  ITEM_ERROR${"X".repeat(80)}  `;
 
@@ -659,10 +667,31 @@ describe("revokeAndDeleteConnection — what the log lines record", () => {
     expect(lines).toHaveLength(1);
     const line = lines[0];
     expect(line).not.toContain("\n");
-    expect(line).toContain("error_code=ITEM_NOT_FOUND INJECTED=yes");
+    expect(line).toContain("error_code=ITEM_NOT_FOUND_INJECTED_yes");
+    // No second `=` inside the value, so no field was forged.
+    expect(line).not.toContain("INJECTED=yes");
     expect(line).toContain(`error_type=ITEM_ERROR${"X".repeat(22)}`);
     // 32 characters, so the 80 X's are cut and nothing after them survives.
     expect(line).not.toContain("X".repeat(23));
+  });
+
+  it("stops a hostile field from forging the field the fold is read from", async () => {
+    // The concrete forgery worth naming: `resolved=` is how a reader tells "we
+    // revoked this Item" from "it was already gone", and this line is a FAILURE —
+    // nothing was resolved. A code that could inject that key would let Plaid's
+    // response body write our own decision into the log.
+    const deps = depsWithTokenEnvironment("sandbox");
+    const lines = withLog(deps);
+    deps.itemRemove.mockRejectedValue(
+      plaidRejection("BAD resolved=revoked", 400, "ITEM_ERROR")
+    );
+
+    await revokeAndDeleteConnection("user_1", connection("item_1"), deps);
+
+    const line = lines.join("\n");
+    expect(line).toContain("failure=plaid");
+    expect(line).not.toContain("resolved=revoked");
+    expect(line).toContain("error_code=BAD_resolved_revoked");
   });
 
   it("puts the user id on every line it writes, on every path", async () => {

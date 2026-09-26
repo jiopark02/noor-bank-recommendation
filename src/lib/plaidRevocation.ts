@@ -252,9 +252,18 @@ function cryptoReasonOf(error: unknown): string {
  * record into two, which is worse than losing the value — a half-line reads as a
  * complete one.
  *
- * So: whitespace runs collapse to a single space, the result is trimmed, and it is
- * capped at 32 characters. Every real Plaid code and type is well under that, and
- * a request_id truncated to its first 32 characters is still enough to hand to
+ * ⚠️ IT ALSO REPLACES `=`, AND THAT IS NOT TIDINESS. These lines are read as
+ * `key=value` pairs, so a value containing a space and an equals sign can forge a
+ * field: `ITEM_NOT_FOUND resolved=item_not_found` would parse as a code plus a
+ * `resolved` field this module never wrote, and `resolved=` is exactly the field a
+ * reader uses to decide whether an Item was revoked. Collapsing whitespace alone
+ * left that open — a log record is a parsed format, and a value that can introduce
+ * a separator can introduce a key.
+ *
+ * So: the value is trimmed, then every run of whitespace OR `=` becomes a single
+ * `_`, then it is capped at 32 characters. A forged field arrives as one
+ * unmistakable token instead. Every real Plaid code and type is well under the cap,
+ * and a request_id truncated to its first 32 characters is still enough to hand to
  * Plaid support. `undefined`, `null`, a non-string, and a value that is nothing
  * but whitespace all become "none", which is what these fields already printed
  * when unreadable.
@@ -266,7 +275,9 @@ function cryptoReasonOf(error: unknown): string {
  */
 function logField(value: unknown): string {
   if (typeof value !== "string") return "none";
-  const flattened = value.replace(/\s+/g, " ").trim().slice(0, 32);
+  // Trimmed BEFORE the substitution, so surrounding whitespace disappears rather
+  // than becoming a leading or trailing underscore.
+  const flattened = value.trim().replace(/[\s=]+/g, "_").slice(0, 32);
   return flattened === "" ? "none" : flattened;
 }
 

@@ -406,9 +406,13 @@ export async function updatePlaidConnectionStatus(
  *
  * `dbErrorCode` is PostgREST's own `code` (or a thrown error's), and nothing
  * else — never `message`, `details` or `hint`, any of which can carry a value.
- * `null` means no code was readable, which covers the thrown path
- * (createServerClient() on missing env has no PostgREST code at all) and the
- * missing-representation path (no error object exists at all).
+ * `null` means no code was readable, and TWO different faults arrive that way: a
+ * thrown createServerClient (on missing env it throws, and the thrown Error has no
+ * PostgREST code at all) and a PostgREST error whose object carried no `code`. The
+ * missing-representation path carries the marker `"NO_REPRESENTATION"` instead of
+ * a null, so `db_error=` in the log tells those two apart — one is an environment
+ * or transport fault, the other is a query that answered without the count it was
+ * asked for. The marker's shape cannot collide with a SQLSTATE or a node errno.
  */
 export type PlaidRowDeletion =
   | { ok: true; deleted: number }
@@ -451,9 +455,10 @@ function postgrestErrorCode(error: unknown): string | null {
  * convenience: createServerClient prefers the service-role key and therefore
  * bypasses RLS. The userId must come from a verified token.
  *
- * The two console.error lines stay. They are the only trace that separates a
- * thrown createServerClient from a PostgREST error that carried no code —
- * `dbErrorCode` is null for both.
+ * The three console.error lines stay. `dbErrorCode` distinguishes the
+ * missing-representation case by marker, but a thrown createServerClient and a
+ * PostgREST error carrying no code both arrive as null, and these lines are the
+ * only trace that separates those two.
  */
 export async function deletePlaidConnection(
   userId: string,
@@ -489,7 +494,14 @@ export async function deletePlaidConnection(
         "Error deleting Plaid connection: no representation returned, data was",
         data === null ? "null" : typeof data
       );
-      return { ok: false, dbErrorCode: null };
+      // A MARKER, NOT A NULL. `null` means "a failure carrying no readable code",
+      // which is also what a thrown createServerClient produces — and those two
+      // need different answers from whoever reads `db_error=` in the log: one is a
+      // Supabase or environment fault, this one is a query that came back without
+      // the representation it was asked for. Underscores and capitals cannot
+      // collide with a PostgreSQL SQLSTATE (five alphanumerics) or a node errno
+      // (`ENOENT`-style), so the marker stays distinguishable from a real code.
+      return { ok: false, dbErrorCode: "NO_REPRESENTATION" };
     }
 
     return { ok: true, deleted: data.length };

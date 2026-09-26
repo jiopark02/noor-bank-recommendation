@@ -82,8 +82,7 @@ import { deletePlaidConnection } from "../plaidApiUtils";
  *
  * The terminal step is `select`, which is the whole point — remove
  * `.select("id")` from the production chain and the await lands on this builder
- * object instead of a promise, so `data` and `error` both come back undefined
- * and the count is silently 0 forever.
+ * object instead of a promise, so `data` and `error` both come back undefined.
  *
  * `from` and `eq` are spies rather than bare arrows, so the arguments are
  * recorded and can be asserted on. They still return the builder regardless of
@@ -176,27 +175,31 @@ describe("deletePlaidConnection — the delete reports its row count", () => {
 
     await expect(deletePlaidConnection("user_1", "item_1")).resolves.toEqual({
       ok: false,
-      dbErrorCode: null,
+      dbErrorCode: "NO_REPRESENTATION",
     });
   });
 
   it("reports a failure when the payload is an object rather than a list", async () => {
-    // ⚠️ THIS IS THE CASE THAT ACTUALLY PROVES THE Array.isArray GUARD, and the
-    // `data: null` test above does not. Measured: with the guard removed, `null`
-    // makes `data.length` THROW, the catch returns { ok: false, dbErrorCode: null }
-    // — a TypeError carries no `code` — and that test stays green while the guard
-    // is gone. `{}` has no such luck: `({}).length` is `undefined`, not an error,
-    // so without the guard this returns { ok: true, deleted: undefined } and the
-    // caller folds an unanswered delete into a cleared connection.
+    // WHY BOTH THIS AND THE `data: null` CASE, AND WHY THIS ONE IS THE SHARPER OF
+    // THE TWO. Remove the Array.isArray guard and they fail differently:
     //
-    // So the two tests are not redundant: one pins the answer for the shape
-    // PostgREST would plausibly send, and this one pins the guard itself.
+    //   data: null  ->  `null.length` THROWS, the catch returns
+    //                   { ok: false, dbErrorCode: null } — still a failure, but
+    //                   mislabelled. Caught only because the marker distinguishes
+    //                   it; before the marker existed, that case was identical to
+    //                   the guarded answer and proved nothing.
+    //   data: {}    ->  `({}).length` is `undefined`, NOT an error, so it returns
+    //                   { ok: true, deleted: undefined } — an unanswered delete
+    //                   reported as a cleared connection, which is the failure mode
+    //                   the guard exists to prevent.
+    //
+    // So this case is the one that distinguishes "wrong label" from "wrong answer".
     const { client } = clientDeleting({ data: {}, error: null });
     createServerClientMock.mockReturnValue(client);
 
     await expect(deletePlaidConnection("user_1", "item_1")).resolves.toEqual({
       ok: false,
-      dbErrorCode: null,
+      dbErrorCode: "NO_REPRESENTATION",
     });
   });
 

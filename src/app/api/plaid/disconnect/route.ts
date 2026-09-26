@@ -178,10 +178,24 @@ export async function POST(request: NextRequest) {
         );
       case "row_delete":
         // The Item is GONE — revoked by this call, or confirmed already absent —
-        // and only the row survived. Reported separately from REVOKE_FAILED
-        // because the two leave the system in different states and a retry
-        // behaves differently in each: from here the remote half is already in
-        // its target state, so a retry only has to get the delete through.
+        // and the row MAY still be there. Not "only the row survived": three paths
+        // land here and they do not agree on what happened to the row.
+        //   - a query error carrying a code: the delete almost certainly did not
+        //     take effect;
+        //   - a query error with no readable code, or createServerClient throwing:
+        //     same reading, with less to go on;
+        //   - a response that carried no representation: the delete may or may not
+        //     have removed the row, and nothing here can tell.
+        // `db_error=` in the log separates them — the third prints
+        // NO_REPRESENTATION.
+        //
+        // Reported separately from REVOKE_FAILED because the two leave the system
+        // in different states and a retry behaves differently in each: from here
+        // the remote half is already in its target state, so a retry only has to
+        // deal with the row. Note what a retry of THIS route actually does — it
+        // re-reads first, and if the row is in fact already gone the lookup above
+        // answers 200 without revoking or deleting anything, so the delete is never
+        // reached again.
         return NextResponse.json(
           { error: RETRYABLE_MESSAGE, code: "ROW_DELETE_FAILED" },
           { status: 500 }
