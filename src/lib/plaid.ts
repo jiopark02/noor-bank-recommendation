@@ -8,12 +8,54 @@ import {
 } from "plaid";
 import { redactPlaidAxiosError } from "./plaidErrorRedaction";
 
+/** The two environments this SDK version knows. There is no `development`. */
+export type PlaidEnvironmentName = "sandbox" | "production";
+
+/**
+ * The environment this deployment actually talks to.
+ *
+ * It is NOT simply PLAID_ENV. Read what the expression this replaced resolved
+ * to, traced through the installed SDK (plaid 41.0.0):
+ *
+ *   PLAID_ENV unset or ""   -> "sandbox"     (the `|| "sandbox"` default)
+ *   PLAID_ENV "sandbox"     -> "sandbox"
+ *   PLAID_ENV "production"  -> "production"
+ *   anything else           -> "production"  — PlaidEnvironments holds exactly
+ *                              two keys (dist/configuration.js:17-20), so the
+ *                              lookup is undefined, and BaseAPI's
+ *                              `configuration.basePath || this.basePath` with
+ *                              `basePath = BASE_PATH` substitutes
+ *                              "https://production.plaid.com"
+ *                              (dist/base.js:23,40,44).
+ *
+ * That last row is the trap worth naming: a typo in PLAID_ENV ("Production",
+ * "dev", a stray space) does not fail and does not fall back to sandbox — it
+ * points the whole deployment at PRODUCTION Plaid. tsc cannot see it either,
+ * because PlaidEnvironment is declared with an index signature returning
+ * `string`, so the undefined lookup type-checks clean.
+ *
+ * The URLs produced are the same ones the previous expression produced in all
+ * four rows above; the fourth now reaches that string explicitly instead of via
+ * the SDK default.
+ */
+export function resolvePlaidEnvironmentName(): PlaidEnvironmentName {
+  const raw = process.env.PLAID_ENV;
+  if (!raw) return "sandbox";
+  return raw === "sandbox" ? "sandbox" : "production";
+}
+
+/**
+ * Computed once, at import, and used for both the basePath below and the
+ * revocation module's environment check, so the two are the same value and
+ * cannot disagree. The function stays exported so its mapping can be tested
+ * without re-importing this module.
+ */
+export const PLAID_ENVIRONMENT: PlaidEnvironmentName =
+  resolvePlaidEnvironmentName();
+
 // Plaid configuration
 const configuration = new Configuration({
-  basePath:
-    PlaidEnvironments[
-      (process.env.PLAID_ENV as keyof typeof PlaidEnvironments) || "sandbox"
-    ],
+  basePath: PlaidEnvironments[PLAID_ENVIRONMENT],
   baseOptions: {
     headers: {
       "PLAID-CLIENT-ID": process.env.PLAID_CLIENT_ID || "",
