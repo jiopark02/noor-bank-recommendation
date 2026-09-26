@@ -459,3 +459,40 @@ export function getPlaidErrorStatus(error: unknown): number | undefined {
     return undefined;
   }
 }
+
+/**
+ * Plaid's `error_type`, read from the same two locations and with the same
+ * no-throw contract as `getPlaidErrorCode`.
+ *
+ * It needs no new plumbing: `error_type` is already on
+ * PLAID_DIAGNOSTIC_STRING_FIELDS, so `redactPlaidAxiosError` already copies it
+ * onto `plaidDiagnostics` AND into the rebuilt `response.data`. This reader just
+ * names the second field the allow-list was always carrying.
+ *
+ * WHY A SECOND FIELD IS READ AT ALL. The code alone is not enough for one
+ * decision: plaidRevocation.ts accepts ITEM_NOT_FOUND as "the Item is already
+ * gone" only when the type is ITEM_ERROR too, so that a code string appearing
+ * under a type we have never seen is not read as the one we mean. Everything
+ * else in the app still judges on the code alone — see mapPlaidError.
+ *
+ * `undefined` means "no type was readable", never "no type existed".
+ */
+export function getPlaidErrorType(error: unknown): string | undefined {
+  try {
+    const source = asRecord(error);
+    if (!source) return undefined;
+
+    const diagnostics = asRecord(source.plaidDiagnostics);
+    const fromDiagnostics = readString(diagnostics?.error_type);
+    if (fromDiagnostics !== undefined) {
+      return fromDiagnostics;
+    }
+
+    const response = asRecord(source.response);
+    const data = asRecord(response?.data);
+    return readString(data?.error_type);
+  } catch {
+    // A throwing getter or an exotic proxy, same as the two readers above.
+    return undefined;
+  }
+}

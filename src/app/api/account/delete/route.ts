@@ -42,14 +42,16 @@ export const dynamic = "force-dynamic";
  * transient failure the retry converges, while a discarded token does not come
  * back.
  *
- * ⚠️ "THE RETRY CONVERGES" IS NOT UNCONDITIONAL, and this header used to say it
- * as though it were. Two failures repeat forever — a row whose Item was revoked
- * but whose delete failed both attempts, and a row whose ciphertext is corrupt
- * under a working key — and a user holding either CANNOT complete an account
- * deletion at all. They are named in full on revokeAndDeleteConnections in
- * plaidRevocation.ts, and the gate in accountDeletion.ts repeats the warning
- * where it refuses. There is no recovery path in the code today. Do not cite
- * convergence as the reason this trade is acceptable without also citing them.
+ * ⚠️ "THE RETRY CONVERGES" HAS ONE EXCEPTION, and this header used to name two.
+ * A row whose ciphertext is corrupt under a working key fails identically on
+ * every attempt, and a user holding one CANNOT complete an account deletion at
+ * all. There is no recovery path in the code today. The other case — a row whose
+ * Item was revoked but whose delete failed — converges now (provided Plaid sends
+ * ITEM_ERROR with that code — see the provenance note in plaidRevocation.ts's
+ * header): a confirmed absent Item is folded into success by plaidRevocation.ts,
+ * so the retry reaches the delete again. It is named in full on
+ * revokeAndDeleteConnections there, and the gate in accountDeletion.ts repeats
+ * the warning where it refuses. Cite the remaining exception, not both.
  *
  * THIS FILE IS WIRING, NOT DECISION. Every branch lives in
  * src/lib/accountDeletion.ts, and the ordering rationale is documented there.

@@ -244,14 +244,17 @@ export async function deleteAccountForUser(
   // row and drops out of the next read — so for a transient failure a retry
   // converges on 0 and the deletion completes then.
   //
-  // ⚠️ NOT EVERY FAILURE IS TRANSIENT, and an earlier version of this comment
-  // asserted convergence without qualification. Two cases never converge (they
-  // are named in full on revokeAndDeleteConnections): a row whose Item was
-  // revoked but whose delete failed twice, and a row whose ciphertext is
-  // corrupt while the key is fine. Both fail identically on every retry, so
-  // this gate refuses forever and that user CANNOT complete an account
+  // ⚠️ NOT EVERY FAILURE IS TRANSIENT. One case never converges: a row whose
+  // ciphertext is corrupt while the key is fine. It fails identically on every
+  // retry, so this gate refuses forever and that user CANNOT complete an account
   // deletion. No recovery path exists in the code — it is an open item, not an
   // oversight, and not something to work around by loosening this gate.
+  //
+  // The other case this comment used to name — a row whose Item was revoked but
+  // whose delete failed — now clears on a retry (provided Plaid sends ITEM_ERROR
+  // with that code — see the provenance note in plaidRevocation.ts's header),
+  // because plaidRevocation.ts folds a confirmed absent Item into success and
+  // reaches the delete again.
   // ---------------------------------------------------------------------
   if (summary.remaining > 0) {
     emit(
