@@ -75,8 +75,14 @@ function passingDeps(): RevocationDeps & {
 } {
   return {
     decrypt: vi.fn((stored: string) => `plaintext-for-${stored}`),
-    itemRemove: vi.fn(async () => undefined),
+    // Resolves with a request_id, as the real itemRemove does. `null` is the
+    // other legal answer and gets its own test; `undefined` is neither, and a
+    // fake returning it would let a broken contract pass unnoticed — tsc does
+    // not check this file (tsconfig excludes __tests__), so the fake is the only
+    // place that shape is asserted at all.
+    itemRemove: vi.fn(async () => "req_fake_default"),
     deleteRow: vi.fn(async () => ({ ok: true as const, deleted: 1 })),
+    plaidEnvironment: "sandbox",
     log: () => {},
   };
 }
@@ -114,6 +120,7 @@ describe("revokeAndDeleteConnections — only revoked connections lose their row
       if (token.indexOf("item_2") !== -1) {
         throw plaidRejection("INTERNAL_SERVER_ERROR", 500);
       }
+      return "req_fake_ok";
     });
 
     const summary = await revokeAndDeleteConnections(
@@ -137,6 +144,7 @@ describe("revokeAndDeleteConnections — only revoked connections lose their row
       if (token.indexOf("item_2") !== -1) {
         throw plaidRejection("INTERNAL_SERVER_ERROR", 500);
       }
+      return "req_fake_ok";
     });
 
     const summary = await revokeAndDeleteConnections(
@@ -395,6 +403,100 @@ describe("revokeAndDeleteConnection — the row delete", () => {
     await revokeAndDeleteConnection("user_1", connection("item_1"), deps);
 
     expect(lines.join("\n")).toContain("failure=row_delete db_error=none");
+  });
+});
+
+describe("revokeAndDeleteConnection — what the log lines record", () => {
+  it("records the request id of a successful revocation", async () => {
+    // A-11. The revocation is the one step here that cannot be undone, and until
+    // this line existed the only trace of it was the row disappearing — which
+    // says nothing in the case that matters, where the row does NOT disappear.
+    // request_id is the field a Plaid support conversation is keyed on.
+    const deps = passingDeps();
+    const lines = withLog(deps);
+    deps.itemRemove.mockResolvedValue("req_abc123");
+
+    await revokeAndDeleteConnection("user_1", connection("item_1"), deps);
+
+    expect(lines.join("\n")).toContain(
+      "item_id=item_1 resolved=revoked request_id=req_abc123"
+    );
+  });
+
+  it("says request_id=none when the response carried none", async () => {
+    // The SDK types request_id as required and as the only field on the
+    // response, so null means the response did not match its own type. That is
+    // not a reason to report a completed revocation as a failure: the line still
+    // says the Item was revoked, and the row is still deleted below.
+    const deps = passingDeps();
+    const lines = withLog(deps);
+    deps.itemRemove.mockResolvedValue(null);
+
+    const outcome = await revokeAndDeleteConnection(
+      "user_1",
+      connection("item_1"),
+      deps
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(lines.join("\n")).toContain("resolved=revoked request_id=none");
+  });
+
+  it("does not claim a revocation when itemRemove rejected", async () => {
+    // The pairing, from the log's side: `resolved=revoked` must never appear for
+    // a connection whose Item is still live. Moving the line above the try would
+    // type-check and read fine.
+    const deps = passingDeps();
+    const lines = withLog(deps);
+    deps.itemRemove.mockRejectedValue(plaidRejection("INTERNAL_SERVER_ERROR", 500));
+
+    await revokeAndDeleteConnection("user_1", connection("item_1"), deps);
+
+    const log = lines.join("\n");
+    expect(log).toContain("failure=plaid");
+    expect(log).not.toContain("resolved=revoked");
+  });
+
+  it("puts the user id on every line it writes, on every path", async () => {
+    // A-13. `item_id` alone cannot find the user whose account deletion is
+    // blocked: answering that from item_id means querying plaid_connections, and
+    // in the account-deletion case some of those rows are already gone. The id is
+    // the one from the verified token, passed through unmodified — the same value
+    // the decrypt AAD and the row filter use.
+    //
+    // Every path, because a line added later without the field is exactly how
+    // this regresses. The per-path counts are asserted rather than a total, so a
+    // path that stops logging entirely cannot hide behind another one's lines:
+    // crypto failure writes 1, Plaid failure writes 1, and the success run writes
+    // 3 (resolved=revoked + retrying=row_delete + deleted=).
+    const userId = "User_MixedCase_1";
+
+    const cryptoDeps = passingDeps();
+    const cryptoLines = withLog(cryptoDeps);
+    cryptoDeps.decrypt.mockImplementation(() => {
+      throw new PlaidTokenCryptoError("auth_failed", "no");
+    });
+    await revokeAndDeleteConnection(userId, connection("item_1"), cryptoDeps);
+
+    const plaidDeps = passingDeps();
+    const plaidLines = withLog(plaidDeps);
+    plaidDeps.itemRemove.mockRejectedValue(plaidRejection("ITEM_LOCKED"));
+    await revokeAndDeleteConnection(userId, connection("item_2"), plaidDeps);
+
+    const okDeps = passingDeps();
+    const okLines = withLog(okDeps);
+    okDeps.deleteRow
+      .mockResolvedValueOnce({ ok: false, dbErrorCode: "40001" })
+      .mockResolvedValueOnce({ ok: true, deleted: 1 });
+    await revokeAndDeleteConnection(userId, connection("item_3"), okDeps);
+
+    expect(cryptoLines).toHaveLength(1);
+    expect(plaidLines).toHaveLength(1);
+    expect(okLines).toHaveLength(3);
+
+    for (const line of [...cryptoLines, ...plaidLines, ...okLines]) {
+      expect(line, line).toContain(`user_id=${userId}`);
+    }
   });
 });
 

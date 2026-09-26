@@ -1,4 +1,4 @@
-import { plaidClient } from "./plaid";
+import { plaidClient, PLAID_ENVIRONMENT } from "./plaid";
 import { deletePlaidConnection, type PlaidRowDeletion } from "./plaidApiUtils";
 import { getPlaidErrorCode } from "./plaidErrorRedaction";
 import {
@@ -111,8 +111,20 @@ export type RevocationSummary = {
 export type RevocationDeps = {
   /** Plaintext out, ciphertext in. Throws on any failure — no fallback. */
   decrypt: (stored: string, userId: string) => string;
-  /** Revokes the Item. Resolves on success, rejects on any failure. */
-  itemRemove: (accessToken: string) => Promise<void>;
+  /**
+   * Revokes the Item. Rejects on any failure.
+   *
+   * Resolves with Plaid's `request_id` when the response carried one, and null
+   * when it did not. The SDK types it as required on ItemRemoveResponse
+   * (dist/api.d.ts, ItemRemoveResponse.request_id: string) and it is the only
+   * field that response has, so null means the response did not match its own
+   * type — never a reason to treat the revocation as anything but done.
+   *
+   * It is returned rather than logged here because this is the injected seam: the
+   * value has to cross it to reach the log line that records the one step of this
+   * operation that cannot be undone.
+   */
+  itemRemove: (accessToken: string) => Promise<string | null>;
   /**
    * Deletes the row and reports HOW MANY rows that removed.
    *
@@ -127,6 +139,17 @@ export type RevocationDeps = {
    * than a case that was indistinguishable.
    */
   deleteRow: (userId: string, itemId: string) => Promise<PlaidRowDeletion>;
+  /**
+   * The Plaid environment this deployment talks to — the PLAID_ENVIRONMENT
+   * constant from plaid.ts, which is also what the client's basePath is built
+   * from, so this is the same value the call actually goes to.
+   *
+   * Injected rather than read from process.env here so that a decision made
+   * against it can be executed in a test without touching the environment.
+   * Nothing reads it yet; the condition that does arrives with the already-
+   * removed fold.
+   */
+  plaidEnvironment: string;
   /** Defaults to console.error. Injected so tests stay quiet. */
   log?: (line: string) => void;
 };
@@ -229,14 +252,15 @@ export async function revokeAndDeleteConnection(
     const failure = classifyCryptoFailure(error);
     emit(
       deps,
-      `[plaid-revoke] item_id=${itemId} failure=${failure} ` +
+      `[plaid-revoke] user_id=${userId} item_id=${itemId} failure=${failure} ` +
         `reason=${cryptoReasonOf(error)}`
     );
     return { itemId, ok: false, failure };
   }
 
+  let requestId: string | null = null;
   try {
-    await deps.itemRemove(plaintextToken);
+    requestId = await deps.itemRemove(plaintextToken);
   } catch (error) {
     // The error code is RECORDED, never ACTED ON. No rejection is folded into
     // success regardless of what it says (see the module header) — the row stays
@@ -245,11 +269,23 @@ export async function revokeAndDeleteConnection(
     // evidence rather than from a guess.
     emit(
       deps,
-      `[plaid-revoke] item_id=${itemId} failure=plaid ` +
+      `[plaid-revoke] user_id=${userId} item_id=${itemId} failure=plaid ` +
         `error_code=${getPlaidErrorCode(error) ?? "none"}`
     );
     return { itemId, ok: false, failure: "plaid" };
   }
+
+  // THE IRREVERSIBLE STEP, RECORDED. Everything above this line can be retried
+  // with nothing spent; past it, the Item is gone from Plaid's side and no part
+  // of this codebase can bring it back. Until now the only trace of it was the
+  // row disappearing, which says nothing when the row does NOT disappear — the
+  // failure this module's retry exists for. request_id is what a Plaid support
+  // conversation is keyed on, so it is the field worth carrying across the seam.
+  emit(
+    deps,
+    `[plaid-revoke] user_id=${userId} item_id=${itemId} resolved=revoked ` +
+      `request_id=${requestId ?? "none"}`
+  );
 
   // The Item is gone but the row is not, and this is the one window where a
   // retry of the whole operation cannot converge: the next attempt's itemRemove
@@ -269,16 +305,16 @@ export async function revokeAndDeleteConnection(
     // logs.
     emit(
       deps,
-      `[plaid-revoke] item_id=${itemId} retrying=row_delete ` +
-        `db_error=${deletion.dbErrorCode ?? "none"}`
+      `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
+        `retrying=row_delete db_error=${deletion.dbErrorCode ?? "none"}`
     );
     deletion = await deps.deleteRow(userId, itemId);
   }
   if (!deletion.ok) {
     emit(
       deps,
-      `[plaid-revoke] item_id=${itemId} failure=row_delete ` +
-        `db_error=${deletion.dbErrorCode ?? "none"}`
+      `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
+        `failure=row_delete db_error=${deletion.dbErrorCode ?? "none"}`
     );
     return { itemId, ok: false, failure: "row_delete" };
   }
@@ -290,7 +326,11 @@ export async function revokeAndDeleteConnection(
   // row was read moments earlier under the same `.eq("user_id", ...)` filter the
   // delete uses, and the decrypt that just succeeded proves the userId is
   // byte-identical to the one the row was written with.
-  emit(deps, `[plaid-revoke] item_id=${itemId} deleted=${deletion.deleted}`);
+  emit(
+    deps,
+    `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
+      `deleted=${deletion.deleted}`
+  );
   return { itemId, ok: true };
 }
 
@@ -362,8 +402,23 @@ export function liveRevocationDeps(): RevocationDeps {
   return {
     decrypt: (stored, userId) => decryptPlaidAccessToken(stored, userId),
     itemRemove: async (accessToken) => {
-      await plaidClient.itemRemove({ access_token: accessToken });
+      const response = await plaidClient.itemRemove({
+        access_token: accessToken,
+      });
+      // Read as if request_id were optional, though the SDK types it as required
+      // and as the only field on the response. A response that does not match
+      // its own type is not a reason to report a completed revocation as a
+      // failure — the log line says "none" and the row still gets deleted.
+      const requestId: unknown = response?.data?.request_id;
+      return typeof requestId === "string" && requestId !== ""
+        ? requestId
+        : null;
     },
     deleteRow: (userId, itemId) => deletePlaidConnection(userId, itemId),
+    // The same constant the client's basePath was built from, so the value any
+    // environment check compares against is the environment the call above
+    // actually goes to. Not re-derived here: two derivations of one fact are two
+    // things that can disagree.
+    plaidEnvironment: PLAID_ENVIRONMENT,
   };
 }
