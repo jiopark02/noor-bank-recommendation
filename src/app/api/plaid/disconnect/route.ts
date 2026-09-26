@@ -177,9 +177,11 @@ export async function POST(request: NextRequest) {
           { status: 503 }
         );
       case "row_delete":
-        // The Item IS revoked; only the row survived. Reported separately from
-        // REVOKE_FAILED because the two leave the system in different states and
-        // a retry behaves differently in each.
+        // The Item is GONE — revoked by this call, or confirmed already absent —
+        // and only the row survived. Reported separately from REVOKE_FAILED
+        // because the two leave the system in different states and a retry
+        // behaves differently in each: from here the remote half is already in
+        // its target state, so a retry only has to get the delete through.
         return NextResponse.json(
           { error: RETRYABLE_MESSAGE, code: "ROW_DELETE_FAILED" },
           { status: 500 }

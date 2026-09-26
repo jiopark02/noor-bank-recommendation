@@ -93,7 +93,9 @@ import { deletePlaidConnection } from "../plaidApiUtils";
  * WHAT IT NOTICES, AND WHAT IT CANNOT (measured against this stub):
  *
  *   SURFACES (TypeError)  calling a method the stub does not define.
- *   SURFACES              dropping `.select(...)` — the count collapses to 0.
+ *   SURFACES              dropping `.select(...)` — the await lands on the
+ *                         builder, so there is no representation and the result
+ *                         is a failure rather than a count.
  *   SURFACES              the table name — recorded and asserted.
  *   SURFACES              the user_id filter — dropped, or handed a constant
  *                         instead of the userId.
@@ -157,25 +159,54 @@ describe("deletePlaidConnection — the delete reports its row count", () => {
     });
   });
 
-  it("reports zero rather than crashing when no representation came back", async () => {
+  it("reports a failure when no representation came back", async () => {
     // `data: null` with no error is not a shape PostgREST produces for a delete
-    // that asked for a representation. Reading `data.length` off it would throw
-    // inside the try and be reported as a database failure, which is a worse
-    // answer than the honest 0.
+    // that asked for a representation — so the question this function was asked
+    // went unanswered.
+    //
+    // ⚠️ THIS USED TO EXPECT `{ ok: true, deleted: 0 }` AND THAT WAS WRONG. A
+    // missing count is not a count of zero. The caller folds ok: true into a
+    // cleared connection and /api/account/delete's gate is computed from exactly
+    // that, so the unanswered case would let a surviving row be counted as gone
+    // and the account around it deleted. "We do not know" has to fail, the same
+    // way connectionRowsOrNull reports an unexpected payload shape as a failed
+    // read rather than as an empty one.
     const { client } = clientDeleting({ data: null, error: null });
     createServerClientMock.mockReturnValue(client);
 
     await expect(deletePlaidConnection("user_1", "item_1")).resolves.toEqual({
-      ok: true,
-      deleted: 0,
+      ok: false,
+      dbErrorCode: null,
     });
   });
 
-  it("asks for a representation, or the count is always zero", async () => {
-    // The mutation this file exists for: drop `.select("id")` and every other
-    // assertion here starts reporting deleted: 0 with ok: true — a delete that
-    // removed the row, reported as one that matched nothing. Asserting on the
-    // call itself names the cause instead of the symptom.
+  it("reports a failure when the payload is an object rather than a list", async () => {
+    // ⚠️ THIS IS THE CASE THAT ACTUALLY PROVES THE Array.isArray GUARD, and the
+    // `data: null` test above does not. Measured: with the guard removed, `null`
+    // makes `data.length` THROW, the catch returns { ok: false, dbErrorCode: null }
+    // — a TypeError carries no `code` — and that test stays green while the guard
+    // is gone. `{}` has no such luck: `({}).length` is `undefined`, not an error,
+    // so without the guard this returns { ok: true, deleted: undefined } and the
+    // caller folds an unanswered delete into a cleared connection.
+    //
+    // So the two tests are not redundant: one pins the answer for the shape
+    // PostgREST would plausibly send, and this one pins the guard itself.
+    const { client } = clientDeleting({ data: {}, error: null });
+    createServerClientMock.mockReturnValue(client);
+
+    await expect(deletePlaidConnection("user_1", "item_1")).resolves.toEqual({
+      ok: false,
+      dbErrorCode: null,
+    });
+  });
+
+  it("asks for a representation, or there is no count at all", async () => {
+    // The mutation this file exists for: drop `.select("id")` and the await lands
+    // on the builder object instead of a response, so nothing comes back to
+    // count. That now reports a failure rather than a silent zero, which is the
+    // safe direction — but it also means every disconnect fails, which is a
+    // different defect from the one that used to hide here. Asserting on the call
+    // itself names the cause instead of either symptom.
     const { client, select } = clientDeleting({
       data: [{ id: "row_1" }],
       error: null,

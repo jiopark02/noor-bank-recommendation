@@ -391,16 +391,24 @@ export async function updatePlaidConnectionStatus(
  * NO rows is indistinguishable from one that removed the row, because PostgREST
  * reports neither an error nor a count for a zero-row delete.
  *
- * `deleted: 0` is NOT an error here. The caller decides what it means; see the
+ * `deleted: 0` is NOT an error here — it is a COUNTED zero, from a
+ * representation that came back empty. The caller decides what it means; see the
  * comment on the delete in plaidRevocation.ts. A count above 1 is not reachable
  * on the normal path either: `UNIQUE (user_id, item_id)` (live schema as
  * observed 2026-09-25) makes more than one matching row impossible, so a count
  * above 1 would mean the schema changed.
  *
+ * ⚠️ A MISSING representation is a FAILURE, not a zero. "The query returned no
+ * rows" and "the query did not tell us how many rows" are different facts, and
+ * only the first is safe to treat as success — the second would be folded into
+ * ok: true by the caller and counted as a cleared connection by the
+ * account-deletion gate, while the row may still be there.
+ *
  * `dbErrorCode` is PostgREST's own `code` (or a thrown error's), and nothing
  * else — never `message`, `details` or `hint`, any of which can carry a value.
- * `null` means no code was readable, which includes the thrown path
- * (createServerClient() on missing env has no PostgREST code at all).
+ * `null` means no code was readable, which covers the thrown path
+ * (createServerClient() on missing env has no PostgREST code at all) and the
+ * missing-representation path (no error object exists at all).
  */
 export type PlaidRowDeletion =
   | { ok: true; deleted: number }
@@ -436,7 +444,8 @@ function postgrestErrorCode(error: unknown): string | null {
  *
  * This function does not decide what 0 means. It is success at the only caller
  * (absence is the target state), and it is a DECISION made there with the
- * number in hand.
+ * number in hand. It does decide that a response carrying NO count is a failure
+ * rather than a zero — see the type above.
  *
  * ⚠️ `.eq("user_id", userId)` is the access-control boundary, not a
  * convenience: createServerClient prefers the service-role key and therefore
@@ -464,7 +473,26 @@ export async function deletePlaidConnection(
       return { ok: false, dbErrorCode: postgrestErrorCode(error) };
     }
 
-    return { ok: true, deleted: data ? data.length : 0 };
+    // NO REPRESENTATION IS "WE DO NOT KNOW", NOT "ZERO ROWS". `.select("id")`
+    // asks for one, so a response that is not an array did not answer the
+    // question this function was asked. Reporting it as deleted: 0 would be a
+    // success the caller folds into ok: true — and that is the number
+    // /api/account/delete's gate is computed from, so a row could survive while
+    // the account around it is deleted. Failing is the direction that cannot
+    // invent an answer, and it mirrors connectionRowsOrNull, which reports an
+    // unexpected payload shape as a failed read for the same reason.
+    //
+    // Logs the SHAPE only, never the payload: a plaid_connections row carries an
+    // access token.
+    if (!Array.isArray(data)) {
+      console.error(
+        "Error deleting Plaid connection: no representation returned, data was",
+        data === null ? "null" : typeof data
+      );
+      return { ok: false, dbErrorCode: null };
+    }
+
+    return { ok: true, deleted: data.length };
   } catch (error) {
     console.error("Error deleting connection:", error);
     return { ok: false, dbErrorCode: postgrestErrorCode(error) };

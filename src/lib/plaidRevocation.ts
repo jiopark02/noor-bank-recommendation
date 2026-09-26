@@ -1,4 +1,8 @@
-import { plaidClient, PLAID_ENVIRONMENT } from "./plaid";
+import {
+  plaidClient,
+  PLAID_ENVIRONMENT,
+  type PlaidEnvironmentName,
+} from "./plaid";
 import { deletePlaidConnection, type PlaidRowDeletion } from "./plaidApiUtils";
 import { getPlaidErrorCode, getPlaidErrorType } from "./plaidErrorRedaction";
 import {
@@ -54,6 +58,13 @@ import {
  * refute it. If the type is in fact something else, this fold never fires and the
  * convergence above does not exist — the tests cannot tell you that, because
  * their fixtures supply the type.
+ *
+ * Note what the environment condition does NOT cover: it compares environments,
+ * not Plaid ACCOUNTS, so a token issued to a different client_id in the same
+ * environment passes it. What keeps that case from being folded is Plaid's
+ * documented classification — such a token is INVALID_ACCESS_TOKEN, which is
+ * never folded — and that too is unobserved here. The defense for a
+ * rotated-credentials deployment therefore rests on the docs, not on this guard.
  *
  * Logging both is safe: every Plaid rejection reaches this module through the
  * plaidHttp interceptor in plaid.ts, which has already run
@@ -169,10 +180,8 @@ export type RevocationDeps = {
    *
    * Injected rather than read from process.env here so that a decision made
    * against it can be executed in a test without touching the environment.
-   * Nothing reads it yet; the condition that does arrives with the already-
-   * removed fold.
    */
-  plaidEnvironment: string;
+  plaidEnvironment: PlaidEnvironmentName;
   /** Defaults to console.error. Injected so tests stay quiet. */
   log?: (line: string) => void;
 };
@@ -229,6 +238,36 @@ export function classifyCryptoFailure(error: unknown): RevokeFailureKind {
  */
 function cryptoReasonOf(error: unknown): string {
   return isPlaidTokenCryptoError(error) ? error.reason : "unknown";
+}
+
+/**
+ * One field of one log line, bounded.
+ *
+ * Every value this module interpolates is allow-listed by shape — a Plaid
+ * error_code, an error_type, a request_id — so none of them is a credential. That
+ * is a statement about the KEY and the value TYPE, not about the contents: the
+ * strings come from Plaid's response body, and nothing in the redaction layer
+ * bounds their length or forbids a newline. An unbounded value would push the
+ * rest of the line out of a log viewer, and a newline would split one decision
+ * record into two, which is worse than losing the value — a half-line reads as a
+ * complete one.
+ *
+ * So: whitespace runs collapse to a single space, the result is trimmed, and it is
+ * capped at 32 characters. Every real Plaid code and type is well under that, and
+ * a request_id truncated to its first 32 characters is still enough to hand to
+ * Plaid support. `undefined`, `null`, a non-string, and a value that is nothing
+ * but whitespace all become "none", which is what these fields already printed
+ * when unreadable.
+ *
+ * Deliberately local, and NOT a change to plaidErrorRedaction's readString: that
+ * function feeds response bodies and mapping decisions too, where truncating a
+ * value would corrupt a comparison rather than tidy a log line. The bound belongs
+ * at the log site.
+ */
+function logField(value: unknown): string {
+  if (typeof value !== "string") return "none";
+  const flattened = value.replace(/\s+/g, " ").trim().slice(0, 32);
+  return flattened === "" ? "none" : flattened;
 }
 
 function emit(deps: RevocationDeps, line: string): void {
@@ -391,8 +430,8 @@ export async function revokeAndDeleteConnection(
       emit(
         deps,
         `[plaid-revoke] user_id=${userId} item_id=${itemId} failure=plaid ` +
-          `error_code=${getPlaidErrorCode(error) ?? "none"} ` +
-          `error_type=${getPlaidErrorType(error) ?? "none"}` +
+          `error_code=${logField(getPlaidErrorCode(error))} ` +
+          `error_type=${logField(getPlaidErrorType(error))}` +
           mismatch
       );
       return { itemId, ok: false, failure: "plaid" };
@@ -420,7 +459,7 @@ export async function revokeAndDeleteConnection(
       ? `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
           `resolved=item_not_found`
       : `[plaid-revoke] user_id=${userId} item_id=${itemId} resolved=revoked ` +
-          `request_id=${requestId ?? "none"}`
+          `request_id=${logField(requestId)}`
   );
 
   // One retry, because the delete is idempotent and filtered by user_id +

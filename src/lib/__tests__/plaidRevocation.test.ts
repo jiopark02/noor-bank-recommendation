@@ -639,6 +639,32 @@ describe("revokeAndDeleteConnection — what the log lines record", () => {
     expect(log).not.toContain("resolved=revoked");
   });
 
+  it("keeps a hostile Plaid field from breaking the line it is logged on", async () => {
+    // The allow-list guarantees these fields are not credentials. It guarantees
+    // nothing about their LENGTH or their whitespace: the strings come from
+    // Plaid's response body, and a newline in one would split a single decision
+    // record into two lines — a half-line reads as a complete one, which is worse
+    // than losing the value.
+    const hostileCode = "ITEM_NOT_FOUND\nINJECTED=yes";
+    const hostileType = `  ITEM_ERROR${"X".repeat(80)}  `;
+
+    const deps = depsWithTokenEnvironment("sandbox");
+    const lines = withLog(deps);
+    deps.itemRemove.mockRejectedValue(
+      plaidRejection(hostileCode, 400, hostileType)
+    );
+
+    await revokeAndDeleteConnection("user_1", connection("item_1"), deps);
+
+    expect(lines).toHaveLength(1);
+    const line = lines[0];
+    expect(line).not.toContain("\n");
+    expect(line).toContain("error_code=ITEM_NOT_FOUND INJECTED=yes");
+    expect(line).toContain(`error_type=ITEM_ERROR${"X".repeat(22)}`);
+    // 32 characters, so the 80 X's are cut and nothing after them survives.
+    expect(line).not.toContain("X".repeat(23));
+  });
+
   it("puts the user id on every line it writes, on every path", async () => {
     // A-13. `item_id` alone cannot find the user whose account deletion is
     // blocked: answering that from item_id means querying plaid_connections, and
@@ -721,7 +747,7 @@ describe("revokeAndDeleteConnection — a retry converges", () => {
     expect(lines.join("\n")).toContain("resolved=item_not_found");
   });
 
-  it("clears the account-deletion gate on the second attempt", async () => {
+  it("drives remaining to 0 on the second attempt", async () => {
     // A-18. The same thing one level up, where it actually bites: `remaining` is
     // what /api/account/delete refuses on, and a user in this state could not
     // complete a deletion at all. Two connections, so the count is not trivially
