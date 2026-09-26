@@ -382,26 +382,92 @@ export async function updatePlaidConnectionStatus(
 }
 
 /**
- * Delete Plaid connection
+ * What one plaid_connections delete did.
+ *
+ * `deleted` is the row count, taken from `.select("id")` — a PostgREST delete
+ * returns the deleted rows when a representation is requested, so `data.length`
+ * IS the count. Same construction /api/account/delete already uses for the
+ * public.users row, and for the same reason: without it, a delete that matched
+ * NO rows is indistinguishable from one that removed the row, because PostgREST
+ * reports neither an error nor a count for a zero-row delete.
+ *
+ * `deleted: 0` is NOT an error here. The caller decides what it means; see the
+ * comment on the delete in plaidRevocation.ts. A count above 1 is not reachable
+ * on the normal path either: `UNIQUE (user_id, item_id)` (live schema as
+ * observed 2026-09-25) makes more than one matching row impossible, so a count
+ * above 1 would mean the schema changed.
+ *
+ * `dbErrorCode` is PostgREST's own `code` (or a thrown error's), and nothing
+ * else — never `message`, `details` or `hint`, any of which can carry a value.
+ * `null` means no code was readable, which includes the thrown path
+ * (createServerClient() on missing env has no PostgREST code at all).
  */
-export async function deletePlaidConnection(userId: string, itemId: string) {
+export type PlaidRowDeletion =
+  | { ok: true; deleted: number }
+  | { ok: false; dbErrorCode: string | null };
+
+/**
+ * The error's `code` and nothing else, for a log line.
+ *
+ * Total by construction: every non-string, empty or absent code becomes null.
+ * Trimmed and capped because the value is interpolated into a single-line log
+ * record — a PostgREST code is symbolic ("42501", "PGRST301") and a node code
+ * is too ("ENOENT"), but this function must not be the place a multi-line or
+ * unbounded string gets into the logs.
+ */
+function postgrestErrorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const code = (error as Record<string, unknown>).code;
+  if (typeof code !== "string") return null;
+  const trimmed = code.trim().slice(0, 32);
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * Delete one Plaid connection row, and report how many rows that removed.
+ *
+ * The row count is the whole reason this returns a shape rather than a boolean.
+ * `.select("id")` asks PostgREST for a representation, so the deleted rows come
+ * back and `data.length` IS the count — the same construction
+ * /api/account/delete uses for the public.users row. Without it a delete that
+ * matched NO rows is indistinguishable from one that removed the row: PostgREST
+ * reports neither an error nor a count for a zero-row delete, so the previous
+ * `true` meant only "the query returned without an error".
+ *
+ * This function does not decide what 0 means. It is success at the only caller
+ * (absence is the target state), and it is a DECISION made there with the
+ * number in hand.
+ *
+ * ⚠️ `.eq("user_id", userId)` is the access-control boundary, not a
+ * convenience: createServerClient prefers the service-role key and therefore
+ * bypasses RLS. The userId must come from a verified token.
+ *
+ * The two console.error lines stay. They are the only trace that separates a
+ * thrown createServerClient from a PostgREST error that carried no code —
+ * `dbErrorCode` is null for both.
+ */
+export async function deletePlaidConnection(
+  userId: string,
+  itemId: string
+): Promise<PlaidRowDeletion> {
   try {
     const supabase = createServerClient();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("plaid_connections")
       .delete()
       .eq("user_id", userId)
-      .eq("item_id", itemId);
+      .eq("item_id", itemId)
+      .select("id");
 
     if (error) {
       console.error("Error deleting Plaid connection:", error);
-      return false;
+      return { ok: false, dbErrorCode: postgrestErrorCode(error) };
     }
 
-    return true;
+    return { ok: true, deleted: data ? data.length : 0 };
   } catch (error) {
     console.error("Error deleting connection:", error);
-    return false;
+    return { ok: false, dbErrorCode: postgrestErrorCode(error) };
   }
 }
 

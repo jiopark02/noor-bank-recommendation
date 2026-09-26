@@ -76,9 +76,27 @@ function passingDeps(): RevocationDeps & {
   return {
     decrypt: vi.fn((stored: string) => `plaintext-for-${stored}`),
     itemRemove: vi.fn(async () => undefined),
-    deleteRow: vi.fn(async () => true),
+    deleteRow: vi.fn(async () => ({ ok: true as const, deleted: 1 })),
     log: () => {},
   };
+}
+
+/**
+ * Point `deps.log` at an array and hand the array back.
+ *
+ * The log lines are not decoration on this path: `deleted=`, `db_error=` and
+ * `retrying=` are the only place the row count and the database code are
+ * recorded at all, so they get assertions like any other output. Note the limit
+ * — this captures what reaches `emit()`, which is everything this module writes,
+ * and nothing from inside deletePlaidConnection (never reached: deleteRow is a
+ * fake here).
+ */
+function withLog(deps: RevocationDeps): string[] {
+  const lines: string[] = [];
+  deps.log = (line: string) => {
+    lines.push(line);
+  };
+  return lines;
 }
 
 /** The item_ids handed to deleteRow, in order. */
@@ -259,7 +277,7 @@ describe("revokeAndDeleteConnection — the row delete", () => {
     // MUTATION MEASURED RED: ignoring deleteRow's return value and always
     // returning { ok: true } fails this test.
     const deps = passingDeps();
-    deps.deleteRow.mockResolvedValue(false);
+    deps.deleteRow.mockResolvedValue({ ok: false, dbErrorCode: "42501" });
 
     const outcome = await revokeAndDeleteConnection(
       "user_1",
@@ -283,8 +301,8 @@ describe("revokeAndDeleteConnection — the row delete", () => {
     // MUTATION MEASURED RED: removing the second deleteRow call fails this test.
     const deps = passingDeps();
     deps.deleteRow
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+      .mockResolvedValueOnce({ ok: false, dbErrorCode: "40001" })
+      .mockResolvedValueOnce({ ok: true, deleted: 1 });
 
     const outcome = await revokeAndDeleteConnection(
       "user_1",
@@ -302,6 +320,81 @@ describe("revokeAndDeleteConnection — the row delete", () => {
     await revokeAndDeleteConnection("user_1", connection("item_1"), deps);
 
     expect(deps.deleteRow).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a delete that matched no rows as success", async () => {
+    // A-7. THE ROW COUNT IS THE POINT. Absence IS the target state, so 0 is
+    // success — but it is success DECIDED with the number in hand, which the
+    // previous boolean could not express: a zero-row PostgREST delete reports
+    // neither an error nor a count, so it arrived as the same `true` as a delete
+    // that actually removed the row.
+    //
+    // No re-read to confirm the absence, and no retry: on this path the row was
+    // read moments earlier under the same user_id filter the delete uses, so 0
+    // can only mean a concurrent request got there first.
+    const deps = passingDeps();
+    const lines = withLog(deps);
+    deps.deleteRow.mockResolvedValue({ ok: true, deleted: 0 });
+
+    const outcome = await revokeAndDeleteConnection(
+      "user_1",
+      connection("item_1"),
+      deps
+    );
+
+    expect(outcome).toEqual({ itemId: "item_1", ok: true });
+    expect(deps.deleteRow).toHaveBeenCalledTimes(1);
+    expect(lines.join("\n")).toContain("item_id=item_1 deleted=0");
+  });
+
+  it("reports the count when the delete removed the row", async () => {
+    // A-8. The other half of the pair above: 0 and 1 are both success and the
+    // log says which happened. Collapse them and `deleted=` stops being evidence
+    // of anything.
+    const deps = passingDeps();
+    const lines = withLog(deps);
+
+    const outcome = await revokeAndDeleteConnection(
+      "user_1",
+      connection("item_1"),
+      deps
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(lines.join("\n")).toContain("item_id=item_1 deleted=1");
+  });
+
+  it("reports the database error code when the delete fails", async () => {
+    // A-9. `failure=row_delete` on its own said nothing about WHY — it was the
+    // only one of this module's failure lines carrying no detail. The retry line
+    // is separate on purpose: it must not say `failure=`, because the connection
+    // may still succeed on the second attempt.
+    const deps = passingDeps();
+    const lines = withLog(deps);
+    deps.deleteRow.mockResolvedValue({ ok: false, dbErrorCode: "42501" });
+
+    const outcome = await revokeAndDeleteConnection(
+      "user_1",
+      connection("item_1"),
+      deps
+    );
+
+    expect(outcome.failure).toBe("row_delete");
+    const log = lines.join("\n");
+    expect(log).toContain("retrying=row_delete db_error=42501");
+    expect(log).toContain("failure=row_delete db_error=42501");
+  });
+
+  it("says db_error=none when the failed delete carried no code", async () => {
+    // A-10. null is a real case, not a defensive branch: createServerClient()
+    // throws on missing env, and a thrown error has no PostgREST code at all.
+    const deps = passingDeps();
+    const lines = withLog(deps);
+    deps.deleteRow.mockResolvedValue({ ok: false, dbErrorCode: null });
+
+    await revokeAndDeleteConnection("user_1", connection("item_1"), deps);
+
+    expect(lines.join("\n")).toContain("failure=row_delete db_error=none");
   });
 });
 

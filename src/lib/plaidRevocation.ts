@@ -1,5 +1,5 @@
 import { plaidClient } from "./plaid";
-import { deletePlaidConnection } from "./plaidApiUtils";
+import { deletePlaidConnection, type PlaidRowDeletion } from "./plaidApiUtils";
 import { getPlaidErrorCode } from "./plaidErrorRedaction";
 import {
   decryptPlaidAccessToken,
@@ -113,8 +113,20 @@ export type RevocationDeps = {
   decrypt: (stored: string, userId: string) => string;
   /** Revokes the Item. Resolves on success, rejects on any failure. */
   itemRemove: (accessToken: string) => Promise<void>;
-  /** True when the row is gone (including when it was already absent). */
-  deleteRow: (userId: string, itemId: string) => Promise<boolean>;
+  /**
+   * Deletes the row and reports HOW MANY rows that removed.
+   *
+   * The count is load-bearing and the previous boolean could not carry it. A
+   * PostgREST delete that matches no rows reports neither an error nor a count,
+   * so "the row was removed" and "nothing matched the filter" arrived here as
+   * the same `true`, and this module promoted it to ok: true — which is what the
+   * account-deletion gate is computed from.
+   *
+   * `deleted: 0` is still success, because absence IS the target state, but it
+   * is now a DECISION made here with the number in hand and in the log, rather
+   * than a case that was indistinguishable.
+   */
+  deleteRow: (userId: string, itemId: string) => Promise<PlaidRowDeletion>;
   /** Defaults to console.error. Injected so tests stay quiet. */
   log?: (line: string) => void;
 };
@@ -247,15 +259,38 @@ export async function revokeAndDeleteConnection(
   // case of a single transient query failure. It does not close a sustained
   // database failure — but a sustained failure fails the surrounding account
   // deletion anyway.
-  let deleted = await deps.deleteRow(userId, itemId);
-  if (!deleted) {
-    deleted = await deps.deleteRow(userId, itemId);
+  let deletion = await deps.deleteRow(userId, itemId);
+  if (!deletion.ok) {
+    // The first attempt's database code is logged HERE rather than only on the
+    // final failure, because a retry that then succeeds would otherwise discard
+    // it — and an intermittent code is exactly what diagnoses a flaky delete.
+    // Deliberately not `failure=`: this connection may still succeed, and a
+    // failure line for a successful operation misleads anything watching the
+    // logs.
+    emit(
+      deps,
+      `[plaid-revoke] item_id=${itemId} retrying=row_delete ` +
+        `db_error=${deletion.dbErrorCode ?? "none"}`
+    );
+    deletion = await deps.deleteRow(userId, itemId);
   }
-  if (!deleted) {
-    emit(deps, `[plaid-revoke] item_id=${itemId} failure=row_delete`);
+  if (!deletion.ok) {
+    emit(
+      deps,
+      `[plaid-revoke] item_id=${itemId} failure=row_delete ` +
+        `db_error=${deletion.dbErrorCode ?? "none"}`
+    );
     return { itemId, ok: false, failure: "row_delete" };
   }
 
+  // A count of 0 is success: the row is in the state this call was asking for.
+  // It is not silently equivalent to 1 — the number is in the log, because the
+  // two mean different things about what happened. Reaching 0 here means the row
+  // was already gone, which on this path can only be a concurrent request: the
+  // row was read moments earlier under the same `.eq("user_id", ...)` filter the
+  // delete uses, and the decrypt that just succeeded proves the userId is
+  // byte-identical to the one the row was written with.
+  emit(deps, `[plaid-revoke] item_id=${itemId} deleted=${deletion.deleted}`);
   return { itemId, ok: true };
 }
 
