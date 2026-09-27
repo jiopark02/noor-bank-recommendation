@@ -54,9 +54,10 @@ function connection(itemId: string): RevocableConnection {
  * `type` is a parameter and not a constant because the fold below requires BOTH
  * the code and the type, so a fixture that can only produce one type can only
  * test half of that requirement. It defaults to ITEM_ERROR, which is the type
- * Plaid's published error reference gives for the codes used here — and which
- * this repo has NOT observed live. See the provenance note in plaidRevocation.ts:
- * a test supplying the type cannot tell you the live API sends it.
+ * Plaid's published error reference gives for the codes used here, and which this
+ * repo has now observed live on sandbox (2026-09-27); production is unobserved.
+ * See the provenance note in plaidRevocation.ts: a test supplying the type cannot
+ * tell you the live API sends it.
  */
 function plaidRejection(
   code: string,
@@ -263,11 +264,10 @@ describe("revokeAndDeleteConnection — the one rejection that is folded", () =>
     // A-2. MUTATION: removing the error_type condition from
     // classifyItemRemoveRejection makes this fold and fails here.
     //
-    // This is the condition the repo has NOT observed live, so it is the one most
-    // likely to be wrong in the permissive direction. If a future observation
-    // shows Plaid sending this code under another type, the fix is to widen the
-    // condition deliberately — not to discover it by having accepted the code
-    // alone all along.
+    // Sandbox has observed this code arriving under ITEM_ERROR (2026-09-27);
+    // production is unobserved. If a future observation shows Plaid sending this
+    // code under another type, the fix is to widen the condition deliberately —
+    // not to discover it by having accepted the code alone all along.
     const deps = depsWithTokenEnvironment("sandbox");
     const lines = withLog(deps);
     deps.itemRemove.mockRejectedValue(

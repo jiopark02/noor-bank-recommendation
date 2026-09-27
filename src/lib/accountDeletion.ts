@@ -251,8 +251,9 @@ export async function deleteAccountForUser(
   // oversight, and not something to work around by loosening this gate.
   //
   // The other case this comment used to name — a row whose Item was revoked but
-  // whose delete failed — now clears on a retry (provided Plaid sends ITEM_ERROR
-  // with that code — see the provenance note in plaidRevocation.ts's header),
+  // whose delete failed — now clears on a retry (observed on sandbox 2026-09-27;
+  // production unobserved — see the provenance note in plaidRevocation.ts's
+  // header),
   // because plaidRevocation.ts folds a confirmed absent Item into success and
   // reaches the delete again.
   // ---------------------------------------------------------------------

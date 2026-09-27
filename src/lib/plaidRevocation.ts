@@ -49,15 +49,20 @@ import {
  * deletion. The two halves of this operation are now each idempotent: "already
  * revoked" and "row already absent" are both success.
  *
- * PROVENANCE, STATED PRECISELY BECAUSE THE TWO HALVES DIFFER. The error_code was
- * observed live on sandbox on 2026-09-13: a re-issued /item/remove on an
+ * PROVENANCE. Both halves are observed live on sandbox, on different dates. The
+ * error_code was observed on 2026-09-13: a re-issued /item/remove on an
  * already-removed Item returned ITEM_NOT_FOUND, through this module's own
- * `failure=plaid error_code=` log line. The error_type ITEM_ERROR comes from
- * Plaid's published error reference and had NOT been observed when this was
- * written; the failure log line's `error_type=` field is what will confirm or
- * refute it. If the type is in fact something else, this fold never fires and the
- * convergence above does not exist — the tests cannot tell you that, because
- * their fixtures supply the type.
+ * `failure=plaid error_code=` log line. The error_type ITEM_ERROR was observed on
+ * 2026-09-27, and the observation is the fold firing on /item/remove itself:
+ * `resolved=item_not_found` is reachable only when all three conditions on
+ * classifyItemRemoveRejection hold, one of which is error_type === "ITEM_ERROR",
+ * so that log line IS the evidence the type matched — it is no longer read off
+ * Plaid's published error reference. A /accounts/get on the same Item
+ * independently returned error_type ITEM_ERROR / error_code ITEM_NOT_FOUND.
+ * PRODUCTION IS UNOBSERVED. If production classifies the same rejection under
+ * another type, this fold never fires there and the convergence above does not
+ * exist there — the tests cannot tell you that, because their fixtures supply
+ * the type.
  *
  * Note what the environment condition does NOT cover: it compares environments,
  * not Plaid ACCOUNTS, so a token issued to a different client_id in the same
@@ -332,10 +337,11 @@ export type ItemRemoveVerdict =
  * ALL THREE CONDITIONS MUST HOLD. Any one of them failing leaves the row alone:
  *
  *   1. error_code === "ITEM_NOT_FOUND"
- *   2. error_type === "ITEM_ERROR" — the code alone could appear under a type we
- *      have never observed, and requiring both keeps the accepted shape the one
- *      that was actually described. See the provenance note in the module header
- *      for which of the two was observed and which was not.
+ *   2. error_type === "ITEM_ERROR" — the code alone could appear under a type
+ *      nothing here has observed, and requiring both keeps the accepted shape the
+ *      one actually observed. See the provenance note in the module header: the
+ *      code and the type are both observed on sandbox, and neither is observed on
+ *      production.
  *   3. the token's environment segment equals the environment this deployment is
  *      configured for. A token from another environment can be reported as not
  *      found HERE while its Item is alive THERE, and deleting that row would
@@ -384,8 +390,9 @@ export function classifyItemRemoveRejection(
  *    the state this call was asking for, and is treated as success.
  *
  * So the case this docblock used to name as permanent — itemRemove succeeded and
- * the delete failed twice — now clears on a retry (provided Plaid sends
- * ITEM_ERROR with that code — see the provenance note in this file's header):
+ * the delete failed twice — now clears on a retry (observed on sandbox
+ * 2026-09-27; production unobserved — see the provenance note in this file's
+ * header):
  * the second attempt's itemRemove is folded and the delete runs again. What does NOT clear is a row
  * whose ciphertext will not decrypt under a working key; that one fails
  * crypto_row on every attempt, by definition, and is named on
@@ -541,9 +548,10 @@ export async function revokeAndDeleteConnection(
  *   is what this module exists to refuse.
  *
  * The second permanent case this comment used to name — itemRemove succeeded and
- * both deleteRow attempts failed — is no longer permanent (provided Plaid sends
- * ITEM_ERROR with that code — see the provenance note in this file's header; if
- * it does not, the fold never fires and that case stays permanent too). Folding a
+ * both deleteRow attempts failed — is no longer permanent (observed on sandbox
+ * 2026-09-27; production unobserved — see the provenance note in this file's
+ * header; where the type differs, the fold never fires and that case stays
+ * permanent there too). Folding a
  * confirmed absent Item into success is what closed it; a retry now reaches the
  * delete again.
  */
