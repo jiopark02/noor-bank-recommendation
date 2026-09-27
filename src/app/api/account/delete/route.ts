@@ -46,9 +46,10 @@ export const dynamic = "force-dynamic";
  * A row whose ciphertext is corrupt under a working key fails identically on
  * every attempt, and a user holding one CANNOT complete an account deletion at
  * all. There is no recovery path in the code today. The other case — a row whose
- * Item was revoked but whose delete failed — converges now (provided Plaid sends
- * ITEM_ERROR with that code — see the provenance note in plaidRevocation.ts's
- * header): a confirmed absent Item is folded into success by plaidRevocation.ts,
+ * Item was revoked but whose delete failed — converges now (observed on sandbox
+ * 2026-09-27; production unobserved — see the provenance note in
+ * plaidRevocation.ts's header): a confirmed absent Item is folded into success by
+ * plaidRevocation.ts,
  * so the retry reaches the delete again. It is named in full on
  * revokeAndDeleteConnections there, and the gate in accountDeletion.ts repeats
  * the warning where it refuses. Cite the remaining exception, not both.
