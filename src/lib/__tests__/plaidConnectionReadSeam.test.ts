@@ -130,7 +130,7 @@ import { getAllPlaidConnections } from "../plaidApiUtils";
  * THEM:
  *
  *   .eq("user_id", userId) is the access-control boundary for this query, not a
- *   convenience. createServerClient prefers the service-role key in production
+ *   convenience. createServerClient runs as service-role — it requires that key
  *   and therefore bypasses RLS, which makes that filter the first line of
  *   defense rather than a second one. Delete it and this query returns every
  *   user's connection rows — access tokens included — and every assertion below

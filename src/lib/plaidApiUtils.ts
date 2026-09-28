@@ -452,8 +452,8 @@ function postgrestErrorCode(error: unknown): string | null {
  * rather than a zero — see the type above.
  *
  * ⚠️ `.eq("user_id", userId)` is the access-control boundary, not a
- * convenience: createServerClient prefers the service-role key and therefore
- * bypasses RLS. The userId must come from a verified token.
+ * convenience: createServerClient runs as service-role and therefore bypasses
+ * RLS. The userId must come from a verified token.
  *
  * The three console.error lines stay. `dbErrorCode` distinguishes the
  * missing-representation case by marker, but a thrown createServerClient and a
