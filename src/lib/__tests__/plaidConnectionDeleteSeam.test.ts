@@ -107,7 +107,7 @@ import { deletePlaidConnection } from "../plaidApiUtils";
  *                         receive, or what RLS would do with it.
  *
  * THE user_id FILTER IS THE ACCESS-CONTROL BOUNDARY FOR THIS QUERY, not a
- * convenience — createServerClient prefers the service-role key in production
+ * convenience — createServerClient runs as service-role, it requires that key
  * and therefore bypasses RLS, so this filter is the first line of defense rather
  * than a second one. Delete it and this statement removes EVERY user's row with
  * a matching item_id. "scopes the statement to one table and to the owning user"
@@ -223,8 +223,8 @@ describe("deletePlaidConnection — the delete reports its row count", () => {
 
   it("scopes the statement to one table and to the owning user", async () => {
     // WHY THIS IS HERE AND NOT FILED UNDER TIDINESS. This function issues a
-    // DELETE through createServerClient, which prefers the service-role key in
-    // production and therefore bypasses RLS. `.eq("user_id", userId)` is
+    // DELETE through createServerClient, which runs as service-role and
+    // therefore bypasses RLS. `.eq("user_id", userId)` is
     // consequently the access-control boundary for the statement, not a
     // convenience filter: without it the statement removes every user's row
     // carrying this item_id, and the userId argument — the one value here that

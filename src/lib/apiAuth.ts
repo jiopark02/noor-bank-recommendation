@@ -4,6 +4,13 @@ import { createServerClient, createAdminClient, isSupabaseConfigured } from "@/l
 /**
  * Resolve the authenticated Supabase user id from a Bearer access token.
  * Do not trust client-supplied userId in body or query string.
+ *
+ * ⚠️ isSupabaseConfigured() does not cover createServerClient() below. The
+ * predicate asks about the URL and the anon key; the constructor also requires
+ * the service role key and throws without it. That throw is caught here and
+ * reported as null, which its callers answer with a 401 — so a deployment
+ * missing only the service role key looks to the user like a sign-in problem.
+ * Fail-closed is the right direction; the misleading status is the cost.
  */
 export async function getAuthenticatedUserIdFromRequest(
   request: NextRequest
@@ -73,8 +80,15 @@ export async function getAuthenticatedUserIdFromRequest(
  *          null as "forbidden" (HTTP 403) and must NOT fall back to any
  *          client-provided identity.
  *
- * Security: the admin_users lookup uses the service-role client
- * (createAdminClient) because admin_users is RLS-locked to service role only.
+ * Security: the admin_users lookup needs a service-role client because
+ * admin_users is RLS-locked to service role only. createAdminClient provides
+ * one; createServerClient is service-role too, so the choice records intent
+ * rather than granting anything extra.
+ *
+ * ⚠️ Same gap as getAuthenticatedUserIdFromRequest: isSupabaseConfigured() does
+ * not cover the createServerClient() below, which also requires the service role
+ * key. A missing key throws, is caught here, and returns null — which callers
+ * answer with a 403.
  */
 export async function requireAdmin(
   request: NextRequest
@@ -94,7 +108,8 @@ export async function requireAdmin(
   try {
     // Step 1: verify the JWT and resolve the user (id, email, confirmation).
     // createServerClient is fine here: getUser(token) validates the token
-    // regardless of which key the client holds.
+    // itself, so holding the service role key grants nothing extra at this step
+    // — the authorization decision is step 2.
     const authClient = createServerClient();
     const {
       data: { user },

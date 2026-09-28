@@ -75,20 +75,25 @@ export async function POST(request: NextRequest) {
 
     // The service-role key must exist BEFORE anything here reads the database.
     //
-    // createServerClient() does not throw when SUPABASE_SERVICE_ROLE_KEY is
-    // missing — it falls back to the anon key (supabase.ts:31) — and it attaches
-    // no user JWT, so `auth.uid()` is NULL. Every policy on plaid_connections is
-    // `(auth.uid())::text = user_id` (live schema as observed 2026-09-25), so the
-    // lookup below matches zero rows, this route reads that as "the connection is
-    // already gone", and it answers 200 { success: true } while the row and its
-    // live Plaid Item both survive. The user is told their bank was removed when
-    // it was not — the exact outcome the revoke-before-delete rule exists to
-    // prevent.
+    // createServerClient() now throws when SUPABASE_SERVICE_ROLE_KEY is
+    // missing. Without this gate a missing key would surface as a 401 from
+    // authenticate() — that throw is caught there and reported as "no user" —
+    // and read as a sign-in problem. This gate names the fault instead, before
+    // anything reads the database.
+    //
+    // It was written against the behaviour that preceded that throw. The client
+    // fell back to the anon key, which attaches no user JWT, so `auth.uid()` was
+    // NULL. Every policy on plaid_connections is `(auth.uid())::text = user_id`
+    // (live schema as observed 2026-09-25), so the lookup below matched zero
+    // rows, this route read that as "the connection is already gone", and it
+    // answered 200 { success: true } while the row and its live Plaid Item both
+    // survived. The user was told their bank was removed when it was not — the
+    // exact outcome the revoke-before-delete rule exists to prevent.
     //
     // The delete below cannot reach a zero-row result this way, because it runs
-    // only after the lookup found the row through the same client; this gate is
-    // what makes that "same client" a service-role one. The deleted=0-is-success
-    // reading in plaidRevocation.ts leans on that.
+    // only after the lookup found the row through the same client, and that
+    // client is a service-role one or it does not exist. The
+    // deleted=0-is-success reading in plaidRevocation.ts leans on that.
     //
     // /api/account/delete already refuses on this condition before it revokes
     // anything (accountDeletion.ts:144); this route had no equivalent. Same code
@@ -97,9 +102,10 @@ export async function POST(request: NextRequest) {
     // rather than that route's 500, because this route already answers every
     // configuration fault that way and this body is rendered to the user verbatim.
     //
-    // Checked before authenticate() because authenticate() is itself a read:
-    // getAuthenticatedUserIdFromRequest builds a createServerClient and calls
-    // auth.getUser (apiAuth.ts:25,29).
+    // Checked before authenticate() because authenticate() would answer first
+    // and answer wrong: getAuthenticatedUserIdFromRequest builds a
+    // createServerClient, so a missing key throws there, is caught, and comes
+    // back as "no user" — a 401 that blames the caller's session.
     if (!isSupabaseAdminConfigured()) {
       return NextResponse.json(
         { error: SERVER_FAULT_MESSAGE, code: "ADMIN_UNCONFIGURED" },

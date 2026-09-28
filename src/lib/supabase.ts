@@ -22,15 +22,27 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const noStoreFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, cache: "no-store" });
 
-// Server-side client (uses service role key if available, falls back to anon key)
+// Server-side client. Requires the service role key: there is deliberately no
+// anon-key fallback. An anon client attaches no user JWT, so `auth.uid()` is
+// NULL and every RLS-scoped read returns zero rows — a configuration fault that
+// reads as "the row does not exist". Failing to construct is the only answer
+// this constructor can give that is not data. A caller that catches the throw
+// and serves substitute data can still hide it.
 export function createServerClient(): SupabaseClient {
+  // This client does not use the anon key. The check stays so that a missing
+  // URL or anon key keeps failing with the same message, at the same point, as
+  // it always has. Note that isSupabaseConfigured() returning true does NOT
+  // imply this constructor will succeed: it reads these two values and not the
+  // service role key.
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Supabase URL and anon key are required");
   }
 
-  const key = supabaseServiceKey || supabaseAnonKey;
+  if (!supabaseServiceKey) {
+    throw new Error("Supabase service role key is required");
+  }
 
-  return createClient(supabaseUrl, key, {
+  return createClient(supabaseUrl, supabaseServiceKey, {
     global: { fetch: noStoreFetch },
   });
 }

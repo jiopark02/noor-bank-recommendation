@@ -7,13 +7,18 @@ import { describe, it, expect } from "vitest";
  * key is missing.
  *
  * WHAT THE GATE IS FOR
- * createServerClient() does not throw on a missing service-role key — it falls
- * back to the anon key (supabase.ts:31) — and it attaches no user JWT, so
- * `auth.uid()` is NULL. Every policy on plaid_connections is
- * `(auth.uid())::text = user_id` (live schema as observed 2026-09-25), so in that
- * deployment the row lookup matches zero rows, this route reads that as "already
- * gone", and answers 200 { success: true } while the row and its live Plaid Item
- * both survive. The user is told their bank was removed when it was not.
+ * createServerClient() now throws on a missing service-role key. Without this
+ * gate that throw lands inside authenticate(), which catches it and reports "no
+ * user", so the route answers 401 and the fault reads as the caller's sign-in
+ * problem rather than as our configuration. The gate names it instead.
+ *
+ * The gate was written against the behaviour that preceded that throw: the
+ * client fell back to the anon key and attached no user JWT, so `auth.uid()` was
+ * NULL. Every policy on plaid_connections is `(auth.uid())::text = user_id`
+ * (live schema as observed 2026-09-25), so in that deployment the row lookup
+ * matched zero rows, this route read that as "already gone", and answered
+ * 200 { success: true } while the row and its live Plaid Item both survived.
+ * The user was told their bank was removed when it was not.
  *
  * /api/account/delete has refused on exactly this condition since before the
  * revocation work (accountDeletion.ts, step 1a). This route did not, and the
@@ -133,10 +138,12 @@ describe("/api/plaid/disconnect — the service-role key is a precondition", () 
 
   it("checks the key before anything reads the database", () => {
     // ORDERING IS THE WHOLE GUARANTEE and it is invisible to the type checker.
-    // authenticate() is itself a read — getAuthenticatedUserIdFromRequest builds
-    // a createServerClient and calls auth.getUser — so a gate placed after it has
-    // already made the anon-key round trip it exists to prevent, and a gate after
-    // the lookup is worthless: the lookup is where the wrong answer is produced.
+    // authenticate() builds a createServerClient of its own, so a gate placed
+    // after it never runs on a deployment missing the key — the construction
+    // throws there, is caught, and the route has already answered 401 under a
+    // name that blames the caller. A gate after the lookup is worthless for the
+    // same reason plus one more: the lookup is where a wrong answer would be
+    // produced.
     //
     // MUTATION: moving the guard below `authenticate(request)` fails this.
     const source = read(DISCONNECT_SOURCE);
@@ -157,10 +164,10 @@ describe("/api/plaid/disconnect — the service-role key is a precondition", () 
   });
 
   it("asks the predicate rather than reading the variable itself", () => {
-    // isSupabaseAdminConfigured reads the same module-scope value
-    // createServerClient decides on, so the gate and the fallback it guards
-    // cannot disagree. Re-reading the environment here would be a second source
-    // of truth for one fact.
+    // isSupabaseAdminConfigured reads the same module-scope service role key
+    // that createServerClient requires, so the two cannot disagree about that
+    // key. Re-reading the environment here would be a second source of truth
+    // for one fact.
     //
     // Asserted over the code only: the gate's comment names the variable
     // deliberately, and that is documentation, not a read.
