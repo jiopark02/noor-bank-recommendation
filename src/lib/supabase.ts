@@ -26,7 +26,8 @@ const noStoreFetch: typeof fetch = (input, init) =>
 // anon-key fallback. An anon client attaches no user JWT, so `auth.uid()` is
 // NULL and every RLS-scoped read returns zero rows — a configuration fault that
 // reads as "the row does not exist". Failing to construct is the only answer
-// that cannot be mistaken for data.
+// this constructor can give that is not data. A caller that catches the throw
+// and serves substitute data can still hide it.
 export function createServerClient(): SupabaseClient {
   // This client does not use the anon key. The check stays so that a missing
   // URL or anon key keeps failing with the same message, at the same point, as

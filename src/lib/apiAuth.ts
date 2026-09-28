@@ -80,8 +80,10 @@ export async function getAuthenticatedUserIdFromRequest(
  *          null as "forbidden" (HTTP 403) and must NOT fall back to any
  *          client-provided identity.
  *
- * Security: the admin_users lookup uses the service-role client
- * (createAdminClient) because admin_users is RLS-locked to service role only.
+ * Security: the admin_users lookup needs a service-role client because
+ * admin_users is RLS-locked to service role only. createAdminClient provides
+ * one; createServerClient is service-role too, so the choice records intent
+ * rather than granting anything extra.
  *
  * ⚠️ Same gap as getAuthenticatedUserIdFromRequest: isSupabaseConfigured() does
  * not cover the createServerClient() below, which also requires the service role
