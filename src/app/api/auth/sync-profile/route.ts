@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Sync profile API error:", error);
+    console.error("Sync profile API error:", toLogSafeError(error));
     return NextResponse.json(
       { success: false, message: "Something went wrong" },
       { status: 500 }

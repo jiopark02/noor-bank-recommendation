@@ -3,8 +3,9 @@ import { AuthApiError } from "@supabase/supabase-js";
 import { toLogSafeError } from "../logSafeError";
 
 /**
- * toLogSafeError — the allow-list every server log line routes an external
- * error object through.
+ * toLogSafeError — the allow-list a log line applies when it routes an external
+ * error object through the helper. Which lines do so is serverLogEmailProbe's
+ * concern, not this file's.
  *
  * WHAT IT EXISTS TO PREVENT
  * Logging a Supabase, Auth or Resend error object whole writes every field it
@@ -293,6 +294,64 @@ describe("normalization", () => {
       name: "Type Error",
       code: "A B",
     });
+  });
+
+  it("finishes a 100,000-character run with no delimiter inside 1000ms (no '@')", () => {
+    // EXPECTED MUTATION: without the pre-cut the address pattern backtracks
+    // quadratically over the whole run; on 100,000 characters that measured
+    // about 4.5 seconds, so this fails on its assertion rather than hanging CI.
+    const input = "x".repeat(100_000);
+    const started = Date.now();
+    const result = normalized(input);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(result.length).toBeLessThanOrEqual(LIMIT);
+  });
+
+  it("finishes a 100,000-character run ending in '@' inside 1000ms", () => {
+    // EXPECTED MUTATION: without the pre-cut this also fails on its assertion.
+    // A trailing "@" with nothing after it means every start position fails to
+    // match, so the backtracking is quadratic: about 4.5 seconds measured. (A
+    // run ending in "@x" would not guard anything — it matches in one pass.)
+    const input = "x".repeat(100_000) + "@";
+    const started = Date.now();
+    const result = normalized(input);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(result.length).toBeLessThanOrEqual(LIMIT);
+  });
+
+  // The pre-cut at 2000 ends on a token boundary. The fixture makes masking
+  // SHRINK the text in front of the cut: a 1990-character address collapses to
+  // "[email]", so anything left of a second address past position 2000 would
+  // slide inside the final 500. Each offset puts that second address across or
+  // just past the cut; none of it may survive.
+  it.each([1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005])(
+    "leaves no fragment of an address that starts at offset %i",
+    (offset) => {
+      const longAddress = "x".repeat(1985) + "@y.co";
+      const input =
+        longAddress + " ".repeat(offset - longAddress.length) + "sungwon.chang@example.com";
+      const result = normalized(input);
+      const keptSpaces = Math.min(offset, 2000) - longAddress.length;
+      expect(result).toBe("[email]" + " ".repeat(keptSpaces));
+    }
+  );
+
+  it("never leaves half a surrogate pair at the pre-cut", () => {
+    // The pair occupies 1999-2000, so a plain cut at 2000 would keep its high
+    // half; the shrinking address in front brings that into the final 500.
+    const longAddress = "x".repeat(1985) + "@y.co";
+    const input = longAddress + " " + "y".repeat(8) + "\uD83D\uDE00" + " tail";
+    const result = normalized(input);
+    expect(result).toBe("[email] ");
+  });
+
+  it("reports a value whose only token exceeded the pre-cut as [omitted]", () => {
+    // EXPECTED MUTATION: without the "[omitted]" substitution this is "".
+    expect(normalized("z".repeat(3000))).toBe("[omitted]");
+  });
+
+  it("keeps a value that was empty to begin with as the empty string", () => {
+    expect(normalized("")).toBe("");
   });
 
   it("over-matches by design", () => {

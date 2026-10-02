@@ -24,13 +24,17 @@ import { describe, it, expect } from "vitest";
  *
  * WHAT IT PROVES AND WHAT IT DOES NOT
  * It proves that no console call in the five files names an email-bearing
- * identifier, that each listed error line wraps its error in toLogSafeError,
- * and that the Resend client is constructed inside a try. It does NOT follow a
- * value through an alias (`const e = email; console.error(e)`), cannot see an
- * address inside an object logged whole (a row, a payload), and does not look
- * at files outside the list. The masker does not understand regex literals; a
- * regex containing a quote or a backtick in one of these files would confuse
- * it, and (c) below is what would notice the extractor going blind.
+ * identifier, that every value a console call prints — each non-literal
+ * argument and each `${...}` — is either toLogSafeError(...) or one of a few
+ * approved forms, that each listed error line wraps its error in
+ * toLogSafeError, and that the Resend client is constructed inside a try. It
+ * does NOT follow a value through an alias (`const e = email;
+ * console.error(e)` passes the email check, though the general rule in (b)
+ * rejects the bare `e`), and does not look at files outside the list. The
+ * masker does not understand regex literals; a regex containing a quote or a
+ * backtick in one of these files would confuse it. (c) pins the number of
+ * console calls per file, so an extractor that misses a call — or a new call
+ * nobody reviewed — fails there.
  *
  * (e) is a different kind of check: no literal control, bidi or zero-width
  * character in any file this change touches. They render as nothing, so a
@@ -226,12 +230,28 @@ describe("extractor", () => {
 });
 
 // ---------------------------------------------------------------------------
-// (c) the extractor sees each file
+// (c) the extractor sees exactly the calls each file has
 // ---------------------------------------------------------------------------
 
-describe("(c) every probed file has console calls the extractor can see", () => {
-  it.each(Object.entries(FILES))("%s", (_name, file) => {
-    expect(extractConsoleCalls(read(file)).length).toBeGreaterThan(0);
+/**
+ * Pinned, not derived. A count that went down means the extractor stopped
+ * seeing a call (or one was deleted); a count that went up means a new call
+ * that (a) and (b) have not been reviewed against. Either way, update the
+ * number only after reading the calls.
+ */
+const CONSOLE_CALL_COUNTS: Record<keyof typeof FILES, number> = {
+  cronRuns: 3,
+  survey: 8,
+  waitlist: 3,
+  syncProfile: 2,
+  email: 4,
+};
+
+describe("(c) each probed file has exactly its pinned number of console calls", () => {
+  it.each(Object.entries(FILES))("%s", (name, file) => {
+    expect(extractConsoleCalls(read(file))).toHaveLength(
+      CONSOLE_CALL_COUNTS[name as keyof typeof FILES]
+    );
   });
 });
 
@@ -312,6 +332,98 @@ describe("(b) listed error lines route the error through toLogSafeError", () => 
       expect(outsideHelper, matches[0].raw).not.toMatch(identifier(anchor.errorIdentifier));
     }
   );
+});
+
+/**
+ * Every value a call prints, as source text: each argument that is not a plain
+ * string literal, and each `${...}` inside a template-literal argument.
+ * Structure (commas, braces) is read from the masked span so that punctuation
+ * inside strings cannot split anything; the text returned is the raw span, so
+ * a literal inside an expression (the "none" in `x || "none"`) is compared as
+ * written. Whitespace is collapsed.
+ */
+function printedValues(call: ConsoleCall): string[] {
+  const open = call.code.indexOf("(");
+  const close = call.code.length - 1;
+  const pieces: Array<[number, number]> = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let k = open + 1; k < close; k++) {
+    const ch = call.code[k];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "," && depth === 0) {
+      pieces.push([start, k]);
+      start = k + 1;
+    }
+  }
+  pieces.push([start, close]);
+
+  const collapse = (text: string): string => text.replace(/\s+/g, " ").trim();
+  const values: string[] = [];
+  for (const [from, to] of pieces) {
+    const raw = call.raw.slice(from, to).trim();
+    if (raw === "") continue;
+    if (/^"[^"]*"$/.test(raw) || /^'[^']*'$/.test(raw)) continue;
+    if (raw.charAt(0) !== "`") {
+      values.push(collapse(raw));
+      continue;
+    }
+    // A template literal: the masked span keeps only `${`, the expression and
+    // its closing `}`, so each expression is found by brace depth.
+    const masked = call.code.slice(from, to);
+    let k = masked.indexOf("${");
+    while (k !== -1) {
+      let level = 0;
+      let end = k + 2;
+      for (; end < masked.length; end++) {
+        if (masked[end] === "{") level++;
+        else if (masked[end] === "}") {
+          if (level === 0) break;
+          level--;
+        }
+      }
+      values.push(collapse(call.raw.slice(from + k + 2, from + end)));
+      k = masked.indexOf("${", end);
+    }
+  }
+  return values;
+}
+
+/** Form 1, allowed in every probed file. */
+const HELPER_CALL = /^toLogSafeError\([A-Za-z_$][\w$]*\)$/;
+
+/** Forms 2-4, each allowed only in the file that uses it. */
+const ALLOWED_BY_FILE: Record<keyof typeof FILES, string[]> = {
+  email: ['toLogSafeError(error).name ?? "none"'],
+  survey: ['userId || "none"'],
+  cronRuns: ['admin.userId || "none"'],
+  waitlist: [],
+  syncProfile: [],
+};
+
+const CALLS_BY_FILE: Array<[string, keyof typeof FILES, ConsoleCall]> = [];
+for (const [name, file] of Object.entries(FILES)) {
+  for (const call of extractConsoleCalls(read(file))) {
+    CALLS_BY_FILE.push([`${name}:${call.line}`, name as keyof typeof FILES, call]);
+  }
+}
+
+describe("(b) general rule: every printed value is toLogSafeError(...) or an approved form", () => {
+  it("reads values out of arguments and template expressions", () => {
+    const [call] = extractConsoleCalls(
+      'console.error(`a ${userId || "none"} b`, "lit", toLogSafeError(e), x);'
+    );
+    expect(printedValues(call)).toEqual(['userId || "none"', "toLogSafeError(e)", "x"]);
+  });
+
+  it.each(CALLS_BY_FILE)("%s", (label, file, call) => {
+    const allowed = ALLOWED_BY_FILE[file];
+    const violations = printedValues(call).filter(
+      (value) => !HELPER_CALL.test(value) && allowed.indexOf(value) === -1
+    );
+    expect(violations.map((value) => `${label}: ${value}`)).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

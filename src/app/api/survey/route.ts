@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
       if (profileUpdateError) {
         console.error(
           "Profile update error (authenticated survey):",
-          profileUpdateError
+          toLogSafeError(profileUpdateError)
         );
         return NextResponse.json(
           { success: false, message: "Failed to update user profile record" },
@@ -329,7 +329,7 @@ export async function POST(request: NextRequest) {
 
       if (profileInsertError) {
         await supabaseAdmin.auth.admin.deleteUser(userId).catch((err) => {
-          console.error("Rollback delete auth user failed:", err);
+          console.error("Rollback delete auth user failed:", toLogSafeError(err));
         });
 
         console.error("Profile insert error:", toLogSafeError(profileInsertError));
@@ -433,7 +433,7 @@ export async function POST(request: NextRequest) {
       message: "Account created successfully",
     });
   } catch (error) {
-    console.error("Survey API error:", error);
+    console.error("Survey API error:", toLogSafeError(error));
     return NextResponse.json(
       { success: false, message: "Something went wrong. Please try again." },
       { status: 500 }

@@ -92,9 +92,11 @@ describe("sendEmail with a key that is not a valid header value", () => {
     await expect(m.sendEmail(ARGS)).resolves.toBe(false);
   });
 
-  it("writes neither part of the key, nor the recipient, to any console method", async () => {
-    // EXPECTED MUTATION: logging toLogSafeError(error) whole in the
-    // construction catch prints the Headers message, which quotes the key.
+  it("the construction catch does not print the error message (mutation d guard)", async () => {
+    // What this guards is the catch's own output: logging toLogSafeError(error)
+    // whole there would print the Headers message, which quotes the key. The
+    // original leak path — the error escaping sendEmail to a route that logged
+    // it whole — is closed by the resolves-false case above and by probe (b).
     const m = await load();
     await m.sendEmail(ARGS).catch(() => undefined);
     expect(output()).not.toContain(KEY_HEAD);

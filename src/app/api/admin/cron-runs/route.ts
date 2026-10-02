@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/apiAuth";
 import { createAdminClient } from "@/lib/supabase";
+import { toLogSafeError } from "@/lib/logSafeError";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
       .limit(limit);
 
     if (error) {
-      console.error("admin/cron-runs: query failed:", error);
+      console.error("admin/cron-runs: query failed:", toLogSafeError(error));
       return NextResponse.json(
         { error: "Failed to load cron runs" },
         { status: 500 }
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ runs: data ?? [] });
   } catch (err) {
-    console.error("admin/cron-runs: unexpected error:", err);
+    console.error("admin/cron-runs: unexpected error:", toLogSafeError(err));
     return NextResponse.json(
       { error: "Failed to load cron runs" },
       { status: 500 }
