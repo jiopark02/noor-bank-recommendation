@@ -21,8 +21,8 @@
 // what the tag does and does not identify: it names a key VERSION, never a key
 // VALUE. Two deployments configured with different key values but the same
 // version produce ciphertext that is indistinguishable by tag and mutually
-// undecryptable — see the same warning on PLAID_TOKEN_ENCRYPTION_KEY in
-// CLAUDE.md, which is why Production and Preview must carry the SAME value.
+// undecryptable whenever they write the same table — see
+// PLAID_TOKEN_ENCRYPTION_KEY in CLAUDE.md.
 //
 // KEY ROTATION IS NOT IMPLEMENTED. Read that literally: the tag exists so that
 // rotation CAN be built later without a data migration, and nothing more. As of

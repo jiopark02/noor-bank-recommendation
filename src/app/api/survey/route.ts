@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { sendWelcomeEmail } from "@/lib/email";
 import { sanitizeNameField } from "@/lib/validation";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
+import { toLogSafeError } from "@/lib/logSafeError";
 
 // Temporary signup pause (fail-open). Gates ONLY the unauthenticated
 // email/password signup path below; the authenticated OAuth
@@ -209,7 +210,7 @@ export async function POST(request: NextRequest) {
       if (profileUpdateError) {
         console.error(
           "Profile update error (authenticated survey):",
-          profileUpdateError
+          toLogSafeError(profileUpdateError)
         );
         return NextResponse.json(
           { success: false, message: "Failed to update user profile record" },
@@ -297,7 +298,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        console.error("Supabase auth signup error:", createAuthError);
+        console.error("Supabase auth signup error:", toLogSafeError(createAuthError));
         return NextResponse.json(
           {
             success: false,
@@ -328,10 +329,10 @@ export async function POST(request: NextRequest) {
 
       if (profileInsertError) {
         await supabaseAdmin.auth.admin.deleteUser(userId).catch((err) => {
-          console.error("Rollback delete auth user failed:", err);
+          console.error("Rollback delete auth user failed:", toLogSafeError(err));
         });
 
-        console.error("Profile insert error:", profileInsertError);
+        console.error("Profile insert error:", toLogSafeError(profileInsertError));
         return NextResponse.json(
           { success: false, message: "Failed to create user profile record" },
           { status: 500 }
@@ -386,7 +387,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (surveyWriteError) {
-      console.error("Survey write error:", surveyWriteError);
+      console.error("Survey write error:", toLogSafeError(surveyWriteError));
       return NextResponse.json(
         {
           success: false,
@@ -406,10 +407,15 @@ export async function POST(request: NextRequest) {
       try {
         const sent = await sendWelcomeEmail(signupEmail, firstName || "User");
         if (!sent) {
-          console.error(`Failed to send welcome email to ${signupEmail}`);
+          console.error(
+            `Failed to send welcome email (returned false) user_id=${userId || "none"}`
+          );
         }
       } catch (err) {
-        console.error(`Failed to send welcome email to ${signupEmail}:`, err);
+        console.error(
+          `Failed to send welcome email (threw) user_id=${userId || "none"}:`,
+          toLogSafeError(err)
+        );
       }
     }
 
@@ -427,7 +433,7 @@ export async function POST(request: NextRequest) {
       message: "Account created successfully",
     });
   } catch (error) {
-    console.error("Survey API error:", error);
+    console.error("Survey API error:", toLogSafeError(error));
     return NextResponse.json(
       { success: false, message: "Something went wrong. Please try again." },
       { status: 500 }
