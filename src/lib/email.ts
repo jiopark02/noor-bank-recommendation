@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { toLogSafeError } from "@/lib/logSafeError";
 
 let resend: Resend | null = null;
 
@@ -25,7 +26,21 @@ export async function sendEmail({
   html,
   text,
 }: EmailOptions): Promise<boolean> {
-  const client = getResendClient();
+  let client: Resend | null;
+  try {
+    client = getResendClient();
+  } catch (error) {
+    // Construction failure. The error's message can carry the API key verbatim
+    // (Headers rejects an invalid Authorization value by quoting it), so only a
+    // fixed phrase and the error name are logged — never the message. A failed
+    // construction is not cached, so the next call tries again.
+    console.error(
+      `Failed to send email: mail client construction failed name=${
+        toLogSafeError(error).name ?? "none"
+      }`
+    );
+    return false;
+  }
   if (!client) {
     console.error("Failed to send email: RESEND_API_KEY is not configured");
     return false;
@@ -43,7 +58,7 @@ export async function sendEmail({
     console.log("Email sent successfully");
     return true;
   } catch (error) {
-    console.error("Failed to send email:", error);
+    console.error("Failed to send email:", toLogSafeError(error));
     return false;
   }
 }

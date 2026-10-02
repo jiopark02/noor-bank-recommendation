@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   // Lightweight access log (also keeps `admin` referenced).
-  console.info(`admin/cron-runs: accessed by ${admin.email}`);
+  console.info(`admin/cron-runs: accessed by user_id=${admin.userId || "none"}`);
 
   // --- Parse a bounded limit from the query string (optional). ---
   // Defensive: clamp to [1, MAX_LIMIT]; fall back to DEFAULT_LIMIT on garbage.

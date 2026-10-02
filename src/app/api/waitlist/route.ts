@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase';
 import { sendWaitlistConfirmationEmail } from '@/lib/email';
+import { toLogSafeError } from '@/lib/logSafeError';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
     if (error.code === '23505') {
       return NextResponse.json({ message: 'already_registered' }, { status: 409 });
     }
-    console.error('Waitlist insert error:', error);
+    console.error('Waitlist insert error:', toLogSafeError(error));
     return NextResponse.json({ message: 'Something went wrong. Please try again.' }, { status: 500 });
   }
 
@@ -56,10 +57,13 @@ export async function POST(request: NextRequest) {
   try {
     const emailSent = await sendWaitlistConfirmationEmail(email, rawName ?? undefined);
     if (!emailSent) {
-      console.error('Waitlist confirmation email failed to send (returned false) for:', email);
+      console.error('Waitlist confirmation email failed to send: kind=returned_false');
     }
   } catch (emailError) {
-    console.error('Waitlist confirmation email threw for:', email, emailError);
+    console.error(
+      'Waitlist confirmation email failed to send: kind=threw',
+      toLogSafeError(emailError)
+    );
   }
 
   return NextResponse.json({ success: true }, { status: 200 });

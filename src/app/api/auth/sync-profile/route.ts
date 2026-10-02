@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { sanitizeNameField } from "@/lib/validation";
+import { toLogSafeError } from "@/lib/logSafeError";
 
 export async function POST(request: NextRequest) {
   try {
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
       .upsert(payload, { onConflict: "id" });
 
     if (error) {
-      console.error("Profile sync error:", error);
+      console.error("Profile sync error:", toLogSafeError(error));
       return NextResponse.json(
         { success: false, message: "Failed to sync user profile" },
         { status: 500 }
