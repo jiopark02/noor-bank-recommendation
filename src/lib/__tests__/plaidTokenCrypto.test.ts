@@ -4,10 +4,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
  * PL1 — the crypto boundary for plaid_connections.access_token.
  *
  * This file carries the ENTIRE negative surface of the change. The missing-key,
- * wrong-key, tampered-ciphertext and AAD-mismatch directions are deliberately
- * not exercised against a deployment: Preview and Production share one Supabase
- * project, so a preview running without the key would be operating on the live
- * table. They are proven here or nowhere.
+ * wrong-key, tampered-ciphertext and AAD-mismatch directions are not exercised
+ * against any deployment. Do not assume a Preview run would be harmless: which
+ * Supabase project each Vercel scope points at is live state, so check it
+ * before running one there. Until such a run exists, they are proven here or
+ * nowhere.
  *
  * WHY THE DYNAMIC IMPORT
  * plaidTokenCrypto caches the parsed key in module scope. A static import would

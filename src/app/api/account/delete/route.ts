@@ -29,8 +29,8 @@ export const dynamic = "force-dynamic";
  *
  * That argument rests on a premise that is false. A token that cannot be
  * decrypted TODAY is usually not lost — the dominant cause is a key
- * configuration accident (a rotation that left the old key behind, Production
- * and Preview carrying different values, a mistyped env var), and every one of
+ * configuration accident (a rotation that left the old key behind, one table
+ * written under two different keys, a mistyped env var), and every one of
  * those is reversible. Recover the key and the row decrypts again, and the Item
  * can be revoked then. Deleting the row throws that away: the ciphertext is the
  * only copy of the token, so the recovery path dies with it and the Item stays
