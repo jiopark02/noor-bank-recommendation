@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import type { User } from "@supabase/supabase-js";
 import { createServerClient, createAdminClient, isSupabaseConfigured } from "@/lib/supabase";
 
 /**
@@ -40,6 +41,49 @@ export async function getAuthenticatedUserIdFromRequest(
     }
 
     return user.id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same verification as getAuthenticatedUserIdFromRequest, but returns the
+ * verified user object rather than its id, for a caller that needs other
+ * fields of the token's user (email, user_metadata). Every failure returns
+ * null, exactly as there.
+ *
+ * Supabase is reached only inside the function body. Some tests mock the
+ * supabase module with a partial set of exports and import this file
+ * transitively; a module-scope call would break them.
+ */
+export async function getAuthenticatedUserFromRequest(
+  request: NextRequest
+): Promise<User | null> {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  const authHeader = request.headers.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : "";
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const supabase = createServerClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      return null;
+    }
+
+    return user;
   } catch {
     return null;
   }
