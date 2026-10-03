@@ -8,10 +8,27 @@ import { toLogSafeError } from "./logSafeError";
  * fakes.
  *
  * WHERE EACH VALUE COMES FROM
- * The identity values — id, email, and the auth metadata blob — come from the
- * user the Bearer token was verified against, never from the request body. The
- * body supplies only display names, which are sanitized here. A body id that
- * names a different user is refused; a body email or metadata blob is ignored.
+ * id and email are the values Supabase Auth returns for the user the Bearer
+ * token was verified against; neither is read from the request body. A body id
+ * that names a different user is refused, and a body email is ignored.
+ *
+ * The metadata blob is also taken from that user, but it is NOT an identity
+ * value: user_metadata is writable by the user through the Auth API
+ * (auth.updateUser). It is stored as profile data on first insert, and nothing
+ * should authorize on it.
+ *
+ * NAMES
+ * First and last name are written as a pair from one source, never mixed.
+ * The body supplies a candidate pair, sanitized here.
+ *   - An existing row with a stored name keeps its stored pair as it is, even
+ *     when its last name is empty. A stored first name counts as a name when it
+ *     is non-empty and not DEFAULT_FIRST_NAME, the placeholder this function
+ *     writes when it has no name.
+ *   - Otherwise the body's pair is written: its first name, or
+ *     DEFAULT_FIRST_NAME, and its last name, or null.
+ *   - Except that when the body carries no name at all, an existing row keeps
+ *     its stored pair, with DEFAULT_FIRST_NAME in place of an empty first name.
+ * The success response reports the pair that was written.
  *
  * A FAILED LOOKUP IS NOT A MISSING ROW
  * The existing-row read decides whether this is a first insert, and a first
@@ -19,8 +36,8 @@ import { toLogSafeError } from "./logSafeError";
  * row" would reset created_at on an existing profile, so a read error stops
  * here and nothing is written.
  *
- * Response bodies are built from literal strings only; no error content
- * reaches them.
+ * Failure bodies are built from literal strings only; no error content reaches
+ * them.
  */
 
 const EMAIL_REQUIRED_MESSAGE = "email is required";
@@ -28,12 +45,18 @@ const FORBIDDEN_MESSAGE = "Forbidden";
 const ADMIN_UNCONFIGURED_MESSAGE = "Supabase admin is not configured";
 const SYNC_FAILED_MESSAGE = "Failed to sync user profile";
 
+/** Written as first_name when no name is available; see NAMES above. */
+export const DEFAULT_FIRST_NAME = "User";
+
 export type ProfileSyncIdentity = {
   /** user.id of the verified token's user. */
   id: string;
   /** user.email of the verified token's user; may be absent. */
   email: string | undefined;
-  /** user.user_metadata of the verified token's user. */
+  /**
+   * user.user_metadata of the verified token's user. User-writable through the
+   * Auth API, so profile data only — not an identity value.
+   */
   userMetadata: unknown;
 };
 
@@ -102,8 +125,8 @@ export async function syncProfileForUser(
   const firstName = sanitizeNameField(input.first_name) || null;
   const lastName = sanitizeNameField(input.last_name) || null;
 
-  // Read any existing row so a re-login never resets created_at and keeps the
-  // stored name when the incoming value is empty.
+  // Read any existing row so a re-login never resets created_at and keeps
+  // stored names as NAMES above describes.
   const existing = await deps.findExisting(identity.id);
   if (existing.error) {
     emit(
@@ -115,12 +138,31 @@ export async function syncProfileForUser(
   }
   const row = existing.row;
 
+  // The name pair comes from one source; see NAMES above.
+  const hasStoredName =
+    !!row && !!row.first_name && row.first_name !== DEFAULT_FIRST_NAME;
+  const bodyHasName = !!firstName || !!lastName;
+  let names: { first_name: string; last_name: string | null };
+  if (row && hasStoredName) {
+    names = {
+      first_name: row.first_name as string,
+      last_name: row.last_name ?? null,
+    };
+  } else if (bodyHasName || !row) {
+    names = { first_name: firstName || DEFAULT_FIRST_NAME, last_name: lastName };
+  } else {
+    names = {
+      first_name: row.first_name || DEFAULT_FIRST_NAME,
+      last_name: row.last_name ?? null,
+    };
+  }
+
   const now = deps.now();
   const payload: Record<string, unknown> = {
     id: identity.id,
     email,
-    first_name: firstName || row?.first_name || "User",
-    last_name: lastName ?? row?.last_name ?? null,
+    first_name: names.first_name,
+    last_name: names.last_name,
     updated_at: now,
   };
 
@@ -136,5 +178,5 @@ export async function syncProfileForUser(
     return failure(500, SYNC_FAILED_MESSAGE);
   }
 
-  return { status: 200, body: { success: true } };
+  return { status: 200, body: { success: true, ...names } };
 }

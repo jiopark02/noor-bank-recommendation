@@ -8,10 +8,12 @@ import { toLogSafeError } from "@/lib/logSafeError";
 /**
  * POST /api/auth/sync-profile — writes the caller's own public.users row.
  *
- * This file is wiring. Every branch lives in src/lib/profileSync.ts. The
- * identity values written to the row (id, email, metadata) are taken from the
- * user the Bearer token was verified against; the request body is passed on
- * only for its display names and its optional id check.
+ * This file is wiring. Every branch lives in src/lib/profileSync.ts. The id
+ * and email written to the row are the values Supabase Auth returns for the
+ * verified token. The metadata blob comes from the same user but is
+ * user-writable through the Auth API, so it is profile data, not identity. The
+ * request body is passed on only for its display names and its optional id
+ * check.
  */
 export async function POST(request: NextRequest) {
   try {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  DEFAULT_FIRST_NAME,
   syncProfileForUser,
   type ExistingProfileRow,
   type ProfileSyncDeps,
@@ -20,6 +21,15 @@ import {
  *   M8  first-insert-only condition removed                 -> T10
  *   M9  error content placed in a response body             -> T14
  *   M10 the admin-configured check removed                  -> T7
+ *   M11 the stored-name branch skipped                      -> T11a, T11f
+ *   M12 body names never used on an existing row            -> T11b, T11e
+ *   M13 kept empty stored last name replaced with null      -> T11c
+ *   M14 the placeholder-counts-as-empty exception removed   -> T11e
+ *   M15 stored last name filled from the body               -> T11f
+ *   M16 the no-body-names exception removed                 -> T11c, T11g, T11h
+ *   M17 kept empty stored first name written as is          -> T11h
+ *   M18 a last-name-only body treated as having no names    -> T11i
+ *   M19 success body reports the body's names               -> T15, T13
  *
  * Nothing here executes the route; syncProfileRouteWiring.test.ts reads its
  * source.
@@ -72,7 +82,10 @@ describe("syncProfileForUser — email comes from the verified token", () => {
   it("T2 succeeds without a body email and writes the token email", async () => {
     const d = deps();
     const result = await syncProfileForUser(TOKEN_USER, { first_name: "Ana" }, d);
-    expect(result).toEqual({ status: 200, body: { success: true } });
+    expect(result).toEqual({
+      status: 200,
+      body: { success: true, first_name: "Ana", last_name: null },
+    });
     expect(writtenPayload(d).email).toBe("owner@example.com");
   });
 
@@ -190,18 +203,48 @@ describe("syncProfileForUser — first insert versus existing row", () => {
     expect(payload.updated_at).toBe(NOW);
   });
 
-  it("T11 keeps stored names when the body's are empty, and sanitizes supplied ones", async () => {
-    const kept = deps({ first_name: "Stored", last_name: "Name" });
-    await syncProfileForUser(TOKEN_USER, { first_name: "", last_name: "" }, kept);
-    expect(writtenPayload(kept)).toMatchObject({
+  it("T11a on an existing row keeps stored non-empty names over the body's", async () => {
+    const d = deps({ first_name: "Stored", last_name: "Name" });
+    await syncProfileForUser(
+      TOKEN_USER,
+      { first_name: "Google", last_name: "Profile" },
+      d
+    );
+    expect(writtenPayload(d)).toMatchObject({
       first_name: "Stored",
       last_name: "Name",
     });
+  });
 
+  it.each([
+    ["null", { first_name: null, last_name: null }],
+    ["empty", { first_name: "", last_name: "" }],
+  ])("T11b on an existing row with %s stored names takes the body's", async (_label, stored) => {
+    const d = deps(stored);
+    await syncProfileForUser(TOKEN_USER, { first_name: "Ana", last_name: "Kim" }, d);
+    expect(writtenPayload(d)).toMatchObject({ first_name: "Ana", last_name: "Kim" });
+  });
+
+  it.each([
+    ["null", { first_name: null, last_name: null }, null],
+    ["empty", { first_name: "", last_name: "" }, ""],
+  ])(
+    "T11c on an existing row with %s stored names and no body names writes the default and keeps the stored last name",
+    async (_label, stored, expectedLast) => {
+      const d = deps(stored);
+      await syncProfileForUser(TOKEN_USER, {}, d);
+      expect(writtenPayload(d)).toMatchObject({
+        first_name: DEFAULT_FIRST_NAME,
+        last_name: expectedLast,
+      });
+    }
+  );
+
+  it("T11d on a new row writes sanitized body names, or the defaults", async () => {
     const fresh = deps(null);
     await syncProfileForUser(TOKEN_USER, {}, fresh);
     expect(writtenPayload(fresh)).toMatchObject({
-      first_name: "User",
+      first_name: DEFAULT_FIRST_NAME,
       last_name: null,
     });
 
@@ -215,6 +258,49 @@ describe("syncProfileForUser — first insert versus existing row", () => {
     expect(payload.first_name).not.toMatch(/\n/);
     expect(payload.first_name).toMatch(/^José/);
     expect(payload.last_name).toBe("Kim");
+  });
+
+  it("T11e on an existing row treats a stored placeholder first name as empty and writes the body's pair", async () => {
+    const d = deps({ first_name: DEFAULT_FIRST_NAME, last_name: "Name" });
+    await syncProfileForUser(TOKEN_USER, { first_name: "Ana" }, d);
+    expect(writtenPayload(d)).toMatchObject({ first_name: "Ana", last_name: null });
+  });
+
+  it("T11f on an existing row with a stored name and no stored last name does not take the body's last name", async () => {
+    const d = deps({ first_name: "Ana", last_name: null });
+    await syncProfileForUser(
+      TOKEN_USER,
+      { first_name: "Anastasia", last_name: "Smith" },
+      d
+    );
+    expect(writtenPayload(d)).toMatchObject({ first_name: "Ana", last_name: null });
+  });
+
+  it("T11g on an existing row with a placeholder and no body names keeps the stored pair", async () => {
+    const d = deps({ first_name: DEFAULT_FIRST_NAME, last_name: "Lee" });
+    await syncProfileForUser(TOKEN_USER, {}, d);
+    expect(writtenPayload(d)).toMatchObject({
+      first_name: DEFAULT_FIRST_NAME,
+      last_name: "Lee",
+    });
+  });
+
+  it("T11h on an existing row with an empty stored first name and no body names writes the default with the stored last name", async () => {
+    const d = deps({ first_name: "", last_name: "Lee" });
+    await syncProfileForUser(TOKEN_USER, {}, d);
+    expect(writtenPayload(d)).toMatchObject({
+      first_name: DEFAULT_FIRST_NAME,
+      last_name: "Lee",
+    });
+  });
+
+  it("T11i a body with only a last name is the body's pair", async () => {
+    const d = deps({ first_name: DEFAULT_FIRST_NAME, last_name: "Lee" });
+    await syncProfileForUser(TOKEN_USER, { last_name: "Kim" }, d);
+    expect(writtenPayload(d)).toMatchObject({
+      first_name: DEFAULT_FIRST_NAME,
+      last_name: "Kim",
+    });
   });
 });
 
@@ -232,8 +318,27 @@ describe("syncProfileForUser — the write and the response", () => {
   it("T13 answers 200 with success and writes exactly once", async () => {
     const d = deps();
     const result = await syncProfileForUser(TOKEN_USER, {}, d);
-    expect(result).toEqual({ status: 200, body: { success: true } });
+    expect(result).toEqual({
+      status: 200,
+      body: { success: true, first_name: DEFAULT_FIRST_NAME, last_name: null },
+    });
     expect(d.upsertProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["an existing row", { first_name: "Stored", last_name: "Name" }],
+    ["a new row", null],
+  ])("T15 on %s the success body reports the names written", async (_label, stored) => {
+    const d = deps(stored);
+    const result = await syncProfileForUser(
+      TOKEN_USER,
+      { first_name: "Google", last_name: "Profile" },
+      d
+    );
+    const payload = writtenPayload(d);
+    expect(result.status).toBe(200);
+    expect(result.body.first_name).toBe(payload.first_name);
+    expect(result.body.last_name).toBe(payload.last_name);
   });
 
   it("T14 failure bodies carry only success and message, and no error content", async () => {

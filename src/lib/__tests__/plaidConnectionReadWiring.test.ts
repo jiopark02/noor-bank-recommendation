@@ -82,8 +82,9 @@ import { describe, it, expect } from "vitest";
  * suite; that stopped being true the moment that file existed, and saying it here
  * would now be a description of the suite that the suite contradicts.
  *
- * What has NOT changed is the auth seam. Nothing anywhere fakes `authenticate()`
- * or the token verification behind it, and the existence of one mock elsewhere is
+ * What has NOT changed is the auth seam. apiAuth.test.ts fakes the server-client
+ * factory to test token verification itself; no route's auth is faked, and the
+ * existence of one mock elsewhere is
  * not an argument for adding that one — the reason it was left alone is that
  * faking an auth boundary in order to test a route is a much larger decision than
  * faking a client factory in order to test a database read. That remains a
