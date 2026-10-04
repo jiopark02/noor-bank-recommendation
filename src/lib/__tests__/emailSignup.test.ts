@@ -43,6 +43,8 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M22 the duplicate path deleting or creating anything         -> B1, B2, B3
  *   M23 the SURVEY_SAVE_FAILED code missing from the failure     -> F3
  *   M24 the placeholder returned to the client as a name         -> P1
+ *   M25 a failed rollback changing the response                  -> R1, R3, R5
+ *   M26 a users insert error logged without toLogSafeError       -> L1
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -293,6 +295,12 @@ describe("survey save failure code", () => {
   });
 });
 
+/** A failed rollback must not change what the client is told. */
+const PROFILE_FAILURE_BODY = {
+  success: false,
+  message: "Failed to create user profile record",
+};
+
 describe("rollback of the Auth user", () => {
   it("R1 a returned error is read and logged once with its code and the user id", async () => {
     const d = failingProfileDeps(async () => ({
@@ -300,6 +308,7 @@ describe("rollback of the Auth user", () => {
     }));
     const result = await createEmailAccount(input(), d);
     expect(result.status).toBe(500);
+    expect(result.body).toEqual(PROFILE_FAILURE_BODY);
     expect(d.deleteAuthUser).toHaveBeenCalledTimes(1);
     expect(rollbackLines(d)).toEqual([
       "[signup] rollback of auth user failed: code=unexpected_failure user_id=" +
@@ -322,7 +331,8 @@ describe("rollback of the Auth user", () => {
     const d = failingProfileDeps(async () => ({
       error: new AuthRetryableFetchError("bad gateway", 502),
     }));
-    await createEmailAccount(input(), d);
+    const result = await createEmailAccount(input(), d);
+    expect(result.body).toEqual(PROFILE_FAILURE_BODY);
     expect(d.deleteAuthUser).toHaveBeenCalledTimes(2);
     expect(rollbackLines(d)).toEqual([
       "[signup] rollback of auth user failed: code=none user_id=" + USER_ID,
@@ -343,6 +353,7 @@ describe("rollback of the Auth user", () => {
     });
     const result = await createEmailAccount(input(), d);
     expect(result.status).toBe(500);
+    expect(result.body).toEqual(PROFILE_FAILURE_BODY);
     expect(d.deleteAuthUser).toHaveBeenCalledTimes(1);
     expect(rollbackLines(d)).toEqual([
       "[signup] rollback of auth user failed: code=none user_id=" + USER_ID,
@@ -382,6 +393,17 @@ describe("log lines", () => {
       deps({
         insertSurveyResponse: vi.fn(async () => ({
           error: { code: "23505", message: "Key (email)=(" + NORMALIZED + ") exists" },
+        })),
+      }),
+      deps({
+        insertProfile: vi.fn(async () => ({
+          error: {
+            code: "23505",
+            message:
+              'duplicate key value violates unique constraint "users_email_key" for ' +
+              NORMALIZED,
+            details: "Key (email)=(" + NORMALIZED + ") already exists.",
+          },
         })),
       }),
     ];

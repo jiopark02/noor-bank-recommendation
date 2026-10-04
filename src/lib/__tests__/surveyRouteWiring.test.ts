@@ -25,6 +25,7 @@ import { describe, it, expect } from "vitest";
  *   R13 users inserted or upserted on the signed-in path       -> W7
  *   R14 the placeholder written as a literal in the route      -> W8
  *   R15 the signed-in response skipping firstNameForClient     -> W8
+ *   R16 the signed-in path's start marker renamed or removed   -> W7
  *
  * Two masked views of the source are used, as in
  * syncProfileRouteWiring.test.ts: `code` has comments and string contents
@@ -151,7 +152,7 @@ describe("survey route wiring: signed-in names", () => {
   );
 
   it("W7 reads the stored names, stops on a failed read, and writes only what decideNameUpdate returns", () => {
-    expect(signedIn.length).toBeGreaterThan(0);
+    expect(codeWithStrings).toContain("const userId = authUserId;");
     const lookup = signedIn.search(
       /\.from\("users"\) ?\.select\("first_name, last_name"\) ?\.eq\("id", ?userId ?\) ?\.maybeSingle\(\)/
     );

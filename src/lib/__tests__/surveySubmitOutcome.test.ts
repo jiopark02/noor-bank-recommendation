@@ -5,6 +5,7 @@ import {
   DEFAULT_SUBMIT_FAILURE_MESSAGE,
   RESAVE_PROMPT_MESSAGE,
   SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE,
+  staySignedInAfterSubmit,
   type ResumeDeps,
 } from "../surveySubmitOutcome";
 import { SURVEY_SAVE_FAILED } from "../signupCodes";
@@ -22,6 +23,11 @@ import { SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M7  staySignedIn hardcoded or taken from elsewhere        -> S1, S2
  *   M8  success decided on the error alone (no session)       -> F2
  *   M9  credentials altered on the way to signIn              -> S3
+ *   M10 the password not cleared after a successful sign-in   -> S1
+ *   M11 the password cleared when sign-in fails               -> F1, F2
+ *   M12 a recovered choice ignored on the resubmit            -> K1
+ *   M13 the form's choice used for a signed-in arrival        -> K2
+ *   M14 the form's choice ignored for a new signup            -> K3
  */
 
 describe("surveyFailureAction", () => {
@@ -73,15 +79,19 @@ function fakeDeps(signInResult: { session: FakeSession | null; error: unknown })
     recordSignedInUser: vi.fn(() => {
       calls.push("record");
     }),
+    clearPassword: vi.fn(() => {
+      calls.push("clear");
+    }),
   };
   return { deps: deps as ResumeDeps<FakeSession> & typeof deps, calls };
 }
 
 describe("resumeAfterSurveySaveFailure", () => {
-  it("S1 signs in, then adopts the session, then records that user with the form's choice", async () => {
+  it("S1 signs in, then adopts the session, records that user with the form's choice, then clears the password", async () => {
     const { deps, calls } = fakeDeps({ session: SESSION, error: null });
     const result = await resumeAfterSurveySaveFailure(INPUT, deps);
-    expect(calls).toEqual(["signIn", "adopt", "record"]);
+    expect(calls).toEqual(["signIn", "adopt", "record", "clear"]);
+    expect(deps.clearPassword).toHaveBeenCalledTimes(1);
     expect(deps.adoptSession).toHaveBeenCalledWith(SESSION);
     expect(deps.recordSignedInUser).toHaveBeenCalledWith("user_signed_in_1", false);
     expect(result).toEqual({ ok: true, message: RESAVE_PROMPT_MESSAGE });
@@ -102,7 +112,7 @@ describe("resumeAfterSurveySaveFailure", () => {
     });
   });
 
-  it("F1 a sign-in error adopts and records nothing", async () => {
+  it("F1 a sign-in error adopts, records and clears nothing", async () => {
     const { deps, calls } = fakeDeps({
       session: null,
       error: { code: "invalid_credentials" },
@@ -111,6 +121,7 @@ describe("resumeAfterSurveySaveFailure", () => {
     expect(calls).toEqual(["signIn"]);
     expect(deps.adoptSession).not.toHaveBeenCalled();
     expect(deps.recordSignedInUser).not.toHaveBeenCalled();
+    expect(deps.clearPassword).not.toHaveBeenCalled();
     expect(result).toEqual({ ok: false, message: SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE });
   });
 
@@ -118,6 +129,38 @@ describe("resumeAfterSurveySaveFailure", () => {
     const { deps, calls } = fakeDeps({ session: null, error: null });
     const result = await resumeAfterSurveySaveFailure(INPUT, deps);
     expect(calls).toEqual(["signIn"]);
+    expect(deps.clearPassword).not.toHaveBeenCalled();
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("staySignedInAfterSubmit", () => {
+  it("K1 a resubmit after recovery keeps the choice recorded then, whatever else is true", () => {
+    for (const formChoice of [true, false]) {
+      expect(
+        staySignedInAfterSubmit({ isAuthed: true, recoveredChoice: false, formChoice })
+      ).toBe(false);
+      expect(
+        staySignedInAfterSubmit({ isAuthed: true, recoveredChoice: true, formChoice })
+      ).toBe(true);
+    }
+  });
+
+  it("K2 a signed-in arrival without recovery stays signed in, whatever the form says", () => {
+    expect(
+      staySignedInAfterSubmit({ isAuthed: true, recoveredChoice: null, formChoice: false })
+    ).toBe(true);
+    expect(
+      staySignedInAfterSubmit({ isAuthed: true, recoveredChoice: null, formChoice: true })
+    ).toBe(true);
+  });
+
+  it("K3 a new signup uses the form's choice", () => {
+    expect(
+      staySignedInAfterSubmit({ isAuthed: false, recoveredChoice: null, formChoice: false })
+    ).toBe(false);
+    expect(
+      staySignedInAfterSubmit({ isAuthed: false, recoveredChoice: null, formChoice: true })
+    ).toBe(true);
   });
 });

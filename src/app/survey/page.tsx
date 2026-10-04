@@ -23,6 +23,7 @@ import { COUNTRY_DISPLAY } from "@/lib/countryConfig";
 import {
   surveyFailureAction,
   resumeAfterSurveySaveFailure,
+  staySignedInAfterSubmit,
   SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE,
 } from "@/lib/surveySubmitOutcome";
 
@@ -386,6 +387,11 @@ export default function SurveyPage() {
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The "stay signed in" choice recorded when a failed survey save was
+  // recovered by signing in; null until that happens. The resubmit keeps it.
+  const [recoveredStaySignedIn, setRecoveredStaySignedIn] = useState<
+    boolean | null
+  >(null);
   // True when the user reaches /survey already authenticated (e.g. OAuth
   // profile completion). In that case we skip account creation and the password
   // fields, and submit the survey against their existing token.
@@ -652,7 +658,12 @@ export default function SurveyPage() {
               return { session: signInData.session, error };
             },
             adoptSession,
-            recordSignedInUser,
+            recordSignedInUser: (userId, staySignedIn) => {
+              recordSignedInUser(userId, staySignedIn);
+              setRecoveredStaySignedIn(staySignedIn);
+            },
+            clearPassword: () =>
+              setData((prev) => ({ ...prev, password: "", confirmPassword: "" })),
           }
         );
         setSubmitError(resumed.message);
@@ -677,7 +688,14 @@ export default function SurveyPage() {
       }
 
       // Save user ID and create session
-      recordSignedInUser(result.userId, isAuthed ? true : data.staySignedIn);
+      recordSignedInUser(
+        result.userId,
+        staySignedInAfterSubmit({
+          isAuthed,
+          recoveredChoice: recoveredStaySignedIn,
+          formChoice: data.staySignedIn,
+        })
+      );
       // Third layer of the consent gate, and the only one that is not UI: a user
       // who did not tick the box gets no acceptance record written at all.
       if (data.agreeToTerms) acceptTerms();

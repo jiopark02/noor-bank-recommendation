@@ -12,6 +12,7 @@ import { sanitizeNameField } from "../validation";
  *   M3  the stored last name carried over                 -> N6
  *   M4  the stored first name compared without sanitizing -> N7
  *   M5  the empty-body check removed                      -> N3
+ *   M6  a null stored first name treated as unchanged     -> N8
  */
 
 describe("decideNameUpdate", () => {
@@ -44,6 +45,13 @@ describe("decideNameUpdate", () => {
   it("N6 a changed first name clears a stored last name", () => {
     expect(decideNameUpdate({ first_name: "Ann", last_name: "Kim" }, "Carol")).toEqual({
       first_name: "Carol",
+      last_name: null,
+    });
+  });
+
+  it("N8 a stored row without a first name gets the submitted one", () => {
+    expect(decideNameUpdate({ first_name: null, last_name: null }, "Ann")).toEqual({
+      first_name: "Ann",
       last_name: null,
     });
   });
