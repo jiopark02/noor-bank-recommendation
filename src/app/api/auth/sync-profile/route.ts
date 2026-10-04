@@ -1,16 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
-import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
-import { sanitizeNameField } from "@/lib/validation";
+import { getAuthenticatedUserFromRequest } from "@/lib/apiAuth";
+import { syncProfileForUser } from "@/lib/profileSync";
 import { toLogSafeError } from "@/lib/logSafeError";
 
+/**
+ * POST /api/auth/sync-profile — writes the caller's own public.users row.
+ *
+ * This file is wiring. Every branch lives in src/lib/profileSync.ts. The id
+ * and email written to the row are the values Supabase Auth returns for the
+ * verified token. The metadata blob comes from the same user but is
+ * user-writable through the Auth API, so it is profile data, not identity. The
+ * request body is passed on only for its display names and its optional id
+ * check.
+ */
 export async function POST(request: NextRequest) {
   try {
-    // --- Authorization: verify the caller's JWT and only allow them to
-    // sync THEIR OWN profile row. Without this, anyone could upsert an
-    // arbitrary user_id via the service-role client (RLS is bypassed). ---
-    const authUserId = await getAuthenticatedUserIdFromRequest(request);
-    if (!authUserId) {
+    const user = await getAuthenticatedUserFromRequest(request);
+    if (!user) {
       return NextResponse.json(
         { success: false, message: "Unauthorized" },
         { status: 401 }
@@ -18,77 +26,48 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const bodyId = body?.id;
-    const email = (body?.email || "").toLowerCase().trim();
-    const firstName = sanitizeNameField(body?.first_name) || null;
-    const lastName = sanitizeNameField(body?.last_name) || null;
-    const rawMeta = body?.raw_user_meta_data || null;
 
-    if (!email) {
-      return NextResponse.json(
-        { success: false, message: "email is required" },
-        { status: 400 }
-      );
-    }
-
-    // Reject attempts to sync a profile for a different user id.
-    if (bodyId && bodyId !== authUserId) {
-      return NextResponse.json(
-        { success: false, message: "Forbidden" },
-        { status: 403 }
-      );
-    }
-
-    if (!isSupabaseAdminConfigured()) {
-      return NextResponse.json(
-        { success: false, message: "Supabase admin is not configured" },
-        { status: 500 }
-      );
-    }
-
-    const supabaseAdmin = createAdminClient();
-    const now = new Date().toISOString();
-
-    // Read any existing row so we can respect it on a re-login: never reset
-    // created_at, and keep the stored name when the incoming value is empty
-    // (a later OAuth login must not wipe a name the user set).
-    const { data: existing } = await supabaseAdmin
-      .from("users")
-      .select("first_name, last_name")
-      .eq("id", authUserId)
-      .maybeSingle();
-
-    // Always use the authenticated user id from the verified token,
-    // never a client-supplied id.
-    const payload: Record<string, unknown> = {
-      id: authUserId,
-      email,
-      first_name: firstName || existing?.first_name || "User",
-      last_name: lastName ?? existing?.last_name ?? null,
-      updated_at: now,
+    // Constructed lazily: createAdminClient() throws without the service-role
+    // key, and syncProfileForUser checks isSupabaseAdminConfigured() before it
+    // reaches either function below.
+    let adminClient: SupabaseClient | null = null;
+    const admin = (): SupabaseClient => {
+      if (!adminClient) {
+        adminClient = createAdminClient();
+      }
+      return adminClient;
     };
 
-    // created_at and the OAuth metadata blob are written only on first insert.
-    // Omitting them on update means a routine re-login neither resets the
-    // signup date nor re-clobbers raw_user_meta_data every time.
-    if (!existing) {
-      payload.created_at = now;
-      payload.raw_user_meta_data = rawMeta;
-    }
+    const result = await syncProfileForUser(
+      { id: user.id, email: user.email, userMetadata: user.user_metadata },
+      body,
+      {
+        isAdminConfigured: isSupabaseAdminConfigured,
 
-    const { error } = await supabaseAdmin
-      .from("users")
-      .upsert(payload, { onConflict: "id" });
+        findExisting: async (userId) => {
+          const { data, error } = await admin()
+            .from("users")
+            .select("first_name, last_name")
+            .eq("id", userId)
+            .maybeSingle();
+          return { row: data ?? null, error };
+        },
 
-    if (error) {
-      console.error("Profile sync error:", toLogSafeError(error));
-      return NextResponse.json(
-        { success: false, message: "Failed to sync user profile" },
-        { status: 500 }
-      );
-    }
+        upsertProfile: async (payload) => {
+          const { error } = await admin()
+            .from("users")
+            .upsert(payload, { onConflict: "id" });
+          if (error) {
+            console.error("Profile sync error:", toLogSafeError(error));
+          }
+          return { error };
+        },
 
-    return NextResponse.json({ success: true });
+        now: () => new Date().toISOString(),
+      }
+    );
+
+    return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
     console.error("Sync profile API error:", toLogSafeError(error));
     return NextResponse.json(

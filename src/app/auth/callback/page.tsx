@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 import { createSession } from "@/lib/validation";
+import { namesFromSyncResponse } from "@/lib/syncProfileNames";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -80,16 +81,26 @@ export default function AuthCallbackPage() {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${session.access_token}`,
               },
+              // The server takes email and metadata from the verified token,
+              // so only the id and display names are sent.
               body: JSON.stringify({
                 id: user.id,
-                email: user.email,
                 first_name: profile.firstName,
                 last_name: profile.lastName,
-                raw_user_meta_data: user.user_metadata || null,
               }),
             });
             syncOk = syncRes.ok;
-            if (!syncOk) {
+            if (syncOk) {
+              // Store the names the server wrote, with its placeholder first
+              // name as empty, so the local profile follows the database.
+              // Without them, the names computed above are kept.
+              const syncedNames = namesFromSyncResponse(
+                await syncRes.json().catch(() => null)
+              );
+              if (syncedNames) {
+                profile = { ...profile, ...syncedNames };
+              }
+            } else {
               console.error(
                 "Profile sync failed:",
                 syncRes.status,

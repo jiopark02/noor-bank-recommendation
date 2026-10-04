@@ -1,9 +1,14 @@
 import { NextRequest } from "next/server";
+import type { User } from "@supabase/supabase-js";
 import { createServerClient, createAdminClient, isSupabaseConfigured } from "@/lib/supabase";
 
 /**
- * Resolve the authenticated Supabase user id from a Bearer access token.
- * Do not trust client-supplied userId in body or query string.
+ * Resolve the authenticated Supabase user from a Bearer access token.
+ * Do not trust client-supplied identity in body or query string.
+ *
+ * Every failure returns null: Supabase not configured, no Bearer token, a
+ * verification error (even when a user object comes back with it), no user,
+ * or a throw.
  *
  * ⚠️ isSupabaseConfigured() does not cover createServerClient() below. The
  * predicate asks about the URL and the anon key; the constructor also requires
@@ -11,10 +16,14 @@ import { createServerClient, createAdminClient, isSupabaseConfigured } from "@/l
  * reported as null, which its callers answer with a 401 — so a deployment
  * missing only the service role key looks to the user like a sign-in problem.
  * Fail-closed is the right direction; the misleading status is the cost.
+ *
+ * Supabase is reached only inside the function body. Some tests mock the
+ * supabase module with a partial set of exports and import this file
+ * transitively; a module-scope call would break them.
  */
-export async function getAuthenticatedUserIdFromRequest(
+export async function getAuthenticatedUserFromRequest(
   request: NextRequest
-): Promise<string | null> {
+): Promise<User | null> {
   if (!isSupabaseConfigured()) {
     return null;
   }
@@ -39,10 +48,21 @@ export async function getAuthenticatedUserIdFromRequest(
       return null;
     }
 
-    return user.id;
+    return user;
   } catch {
     return null;
   }
+}
+
+/**
+ * The id of the user getAuthenticatedUserFromRequest resolves, or null. The
+ * verification lives there; see its comment for the failure cases.
+ */
+export async function getAuthenticatedUserIdFromRequest(
+  request: NextRequest
+): Promise<string | null> {
+  const user = await getAuthenticatedUserFromRequest(request);
+  return user ? user.id : null;
 }
 
 // ============================================================================
