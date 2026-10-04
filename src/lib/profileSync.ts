@@ -1,5 +1,8 @@
 import { sanitizeNameField } from "./validation";
 import { toLogSafeError } from "./logSafeError";
+import { DEFAULT_FIRST_NAME } from "./defaultFirstName";
+
+export { DEFAULT_FIRST_NAME } from "./defaultFirstName";
 
 /**
  * The decision half of POST /api/auth/sync-profile — every branch, none of the
@@ -44,9 +47,6 @@ const EMAIL_REQUIRED_MESSAGE = "email is required";
 const FORBIDDEN_MESSAGE = "Forbidden";
 const ADMIN_UNCONFIGURED_MESSAGE = "Supabase admin is not configured";
 const SYNC_FAILED_MESSAGE = "Failed to sync user profile";
-
-/** Written as first_name when no name is available; see NAMES above. */
-export const DEFAULT_FIRST_NAME = "User";
 
 export type ProfileSyncIdentity = {
   /** user.id of the verified token's user. */
