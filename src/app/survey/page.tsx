@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -20,6 +20,11 @@ import {
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import type { Session } from "@supabase/supabase-js";
 import { COUNTRY_DISPLAY } from "@/lib/countryConfig";
+import {
+  surveyFailureAction,
+  resumeAfterSurveySaveFailure,
+  SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE,
+} from "@/lib/surveySubmitOutcome";
 
 interface SurveyData {
   firstName: string;
@@ -368,6 +373,13 @@ const ViewedMark = () => (
   </svg>
 );
 
+// The browser record of a signed-in user: written after a successful submit,
+// and right after the sign-in that follows a failed survey save.
+function recordSignedInUser(userId: string, staySignedIn: boolean): void {
+  localStorage.setItem("noor_user_id", userId);
+  createSession(staySignedIn);
+}
+
 export default function SurveyPage() {
   const router = useRouter();
   const { t } = useLanguage();
@@ -420,28 +432,33 @@ export default function SurveyPage() {
   // retake into the signup path. Pairing the read with an onAuthStateChange
   // subscription (same combination as ClientLayout) lets a session that arrives
   // late still be adopted.
-  useEffect(() => {
-    let mounted = true;
+  //
+  // adoptSession lives outside the effect because handleSubmit also calls it,
+  // after signing in a new account whose survey save failed.
+  const mountedRef = useRef(false);
 
-    // Adoption is deliberately one-way: it only ever turns isAuthed on. A null
-    // session is ignored rather than clearing the flag, so a refresh landing
-    // mid-submit cannot flip the form back to the account-creation path.
-    const adoptSession = (nextSession: Session | null) => {
-      if (!mounted || !nextSession?.user) return;
-      const session = nextSession;
-      setIsAuthed(true);
-      let stored: Record<string, unknown> = {};
-      try {
-        stored = JSON.parse(localStorage.getItem("noor_user_profile") || "{}");
-      } catch {
-        stored = {};
-      }
-      setData((prev) => ({
-        ...prev,
-        email: session.user.email || prev.email,
-        firstName: prev.firstName || (stored.firstName as string) || "",
-      }));
-    };
+  // Adoption is deliberately one-way: it only ever turns isAuthed on. A null
+  // session is ignored rather than clearing the flag, so a refresh landing
+  // mid-submit cannot flip the form back to the account-creation path.
+  const adoptSession = useCallback((nextSession: Session | null) => {
+    if (!mountedRef.current || !nextSession?.user) return;
+    const session = nextSession;
+    setIsAuthed(true);
+    let stored: Record<string, unknown> = {};
+    try {
+      stored = JSON.parse(localStorage.getItem("noor_user_profile") || "{}");
+    } catch {
+      stored = {};
+    }
+    setData((prev) => ({
+      ...prev,
+      email: session.user.email || prev.email,
+      firstName: prev.firstName || (stored.firstName as string) || "",
+    }));
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
 
     const syncSession = async () => {
       adoptSession(await getSessionSafe());
@@ -456,10 +473,10 @@ export default function SurveyPage() {
     ) || { data: { subscription: null } };
 
     return () => {
-      mounted = false;
+      mountedRef.current = false;
       authListener.subscription?.unsubscribe();
     };
-  }, []);
+  }, [adoptSession]);
 
   // Password validation
   const passwordValidation = useMemo(() => {
@@ -607,9 +624,38 @@ export default function SurveyPage() {
       const result = await response.json();
 
       if (!result.success) {
-        setSubmitError(
-          result.message || "Failed to create account. Please try again."
+        const action = surveyFailureAction(isAuthed, result);
+        if (action.kind === "message") {
+          setSubmitError(action.message);
+          return;
+        }
+
+        // The account was created but its answers were not saved. Sign it in
+        // with the credentials just used, switch this form to the signed-in
+        // path, and let the user press Submit again; that path saves a
+        // missing survey row.
+        if (!supabase) {
+          setSubmitError(SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE);
+          return;
+        }
+        const client = supabase;
+        const resumed = await resumeAfterSurveySaveFailure<Session>(
+          {
+            email: data.email.trim().toLowerCase(),
+            password: data.password,
+            staySignedIn: data.staySignedIn,
+          },
+          {
+            signIn: async (credentials) => {
+              const { data: signInData, error } =
+                await client.auth.signInWithPassword(credentials);
+              return { session: signInData.session, error };
+            },
+            adoptSession,
+            recordSignedInUser,
+          }
         );
+        setSubmitError(resumed.message);
         return;
       }
 
@@ -631,8 +677,7 @@ export default function SurveyPage() {
       }
 
       // Save user ID and create session
-      localStorage.setItem("noor_user_id", result.userId);
-      createSession(isAuthed ? true : data.staySignedIn);
+      recordSignedInUser(result.userId, isAuthed ? true : data.staySignedIn);
       // Third layer of the consent gate, and the only one that is not UI: a user
       // who did not tick the box gets no acceptance record written at all.
       if (data.agreeToTerms) acceptTerms();

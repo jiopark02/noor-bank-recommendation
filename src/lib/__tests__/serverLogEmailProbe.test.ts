@@ -512,6 +512,8 @@ const TOUCHED_FILES = [
   "./plaidTokenCrypto.test.ts",
   "../../app/api/account/delete/route.ts",
   "../emailSignup.ts",
+  "../signupCodes.ts",
+  "../surveySubmitOutcome.ts",
 ];
 
 describe("(e) touched files contain no literal control, bidi or zero-width character", () => {

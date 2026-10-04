@@ -11,7 +11,7 @@ import {
   type EmailSignupInput,
 } from "../emailSignup";
 import { DEFAULT_FIRST_NAME } from "../defaultFirstName";
-import { ACCOUNT_INCOMPLETE } from "../signupCodes";
+import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
 
 /**
  * The email/password signup decision, executed with injected fakes. Auth
@@ -41,6 +41,7 @@ import { ACCOUNT_INCOMPLETE } from "../signupCodes";
  *   M20 the duplicate-email profile lookup removed               -> B1, B4
  *   M21 a failed lookup treated as "no row"                      -> B3
  *   M22 the duplicate path deleting or creating anything         -> B1, B2, B3
+ *   M23 the SURVEY_SAVE_FAILED code missing from the failure     -> F3
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -255,6 +256,25 @@ describe("failures after the Auth user exists", () => {
     });
     expect(d.sendWelcomeEmail).not.toHaveBeenCalled();
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("survey save failure code", () => {
+  it("F3 carries SURVEY_SAVE_FAILED so the page can sign in and resave", async () => {
+    const d = deps({
+      insertSurveyResponse: vi.fn(async () => ({ error: { code: "22P02" } })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({
+      status: 500,
+      body: {
+        success: false,
+        message:
+          "Account was created, but saving survey data failed. Please contact support.",
+        userId: USER_ID,
+        code: SURVEY_SAVE_FAILED,
+      },
+    });
   });
 });
 

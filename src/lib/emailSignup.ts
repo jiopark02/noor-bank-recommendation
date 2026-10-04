@@ -1,7 +1,7 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { toLogSafeError } from "./logSafeError";
 import { DEFAULT_FIRST_NAME } from "./defaultFirstName";
-import { ACCOUNT_INCOMPLETE } from "./signupCodes";
+import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "./signupCodes";
 
 /**
  * The email/password signup half of POST /api/survey — every branch, none of
@@ -293,7 +293,12 @@ export async function createEmailAccount(
         " " +
         safeErrorText(surveyError)
     );
-    return failure(500, SURVEY_SAVE_FAILED_MESSAGE, { userId });
+    // The code lets the page sign the new account in and save the answers
+    // again through the signed-in path.
+    return failure(500, SURVEY_SAVE_FAILED_MESSAGE, {
+      userId,
+      code: SURVEY_SAVE_FAILED,
+    });
   }
 
   // An email that was only whitespace is empty here; as before this module
