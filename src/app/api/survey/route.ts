@@ -6,6 +6,8 @@ import { sanitizeNameField } from "@/lib/validation";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { toLogSafeError } from "@/lib/logSafeError";
 import { createEmailAccount } from "@/lib/emailSignup";
+import { decideNameUpdate } from "@/lib/surveyNameUpdate";
+import { DEFAULT_FIRST_NAME } from "@/lib/defaultFirstName";
 
 // Temporary signup pause (fail-open). Gates ONLY the unauthenticated
 // email/password signup path below; the authenticated OAuth
@@ -249,11 +251,31 @@ export async function POST(request: NextRequest) {
     const userId = authUserId;
 
     // Update the existing users row (sync-profile created it on callback),
-    // respecting it: never touch created_at/email, and only overwrite a name
-    // when a non-empty value was supplied.
-    const profileUpdate: Record<string, unknown> = { updated_at: now };
-    if (firstName) profileUpdate.first_name = firstName;
-    if (lastName) profileUpdate.last_name = lastName;
+    // respecting it: never touch created_at/email. The names are written only
+    // when the submitted first name differs from the stored one, as a pair
+    // (see decideNameUpdate). The stored names are read first; a failed read
+    // stops here rather than guessing, and nothing is written.
+    const { data: storedNames, error: lookupError } = await supabaseAdmin
+      .from("users")
+      .select("first_name, last_name")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error(
+        "Profile name lookup error (authenticated survey):",
+        toLogSafeError(lookupError)
+      );
+      return NextResponse.json(
+        { success: false, message: "Failed to update user profile record" },
+        { status: 500 }
+      );
+    }
+
+    const profileUpdate: Record<string, unknown> = {
+      updated_at: now,
+      ...(decideNameUpdate(storedNames, firstName) ?? {}),
+    };
 
     const { error: profileUpdateError } = await supabaseAdmin
       .from("users")
@@ -325,7 +347,7 @@ export async function POST(request: NextRequest) {
       success: true,
       userId,
       profile: {
-        firstName: firstName || "User",
+        firstName: firstName || DEFAULT_FIRST_NAME,
         lastName,
         institutionId: surveyData.institution_id || null,
         university: surveyData.university || null,

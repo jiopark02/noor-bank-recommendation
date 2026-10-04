@@ -242,7 +242,7 @@ describe("extractor", () => {
  */
 const CONSOLE_CALL_COUNTS: Record<keyof typeof FILES, number> = {
   cronRuns: 3,
-  survey: 3,
+  survey: 4,
   waitlist: 3,
   syncProfile: 2,
   email: 4,
@@ -295,6 +295,11 @@ type Anchor = {
 
 const ANCHORS: Anchor[] = [
   { file: "survey", leading: "\"Survey write error:\"", errorIdentifier: "surveyWriteError" },
+  {
+    file: "survey",
+    leading: "\"Profile name lookup error (authenticated survey):\"",
+    errorIdentifier: "lookupError",
+  },
   { file: "syncProfile", leading: "\"Profile sync error:\"", errorIdentifier: "error" },
   { file: "waitlist", leading: "'Waitlist insert error:'", errorIdentifier: "error" },
   {
@@ -514,6 +519,8 @@ const TOUCHED_FILES = [
   "../emailSignup.ts",
   "../signupCodes.ts",
   "../surveySubmitOutcome.ts",
+  "../surveyNameUpdate.ts",
+  "../defaultFirstName.ts",
 ];
 
 describe("(e) touched files contain no literal control, bidi or zero-width character", () => {

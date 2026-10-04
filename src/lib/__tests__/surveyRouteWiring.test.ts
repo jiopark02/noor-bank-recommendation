@@ -19,6 +19,11 @@ import { describe, it, expect } from "vitest";
  *   R7  the result status replaced with a constant             -> W1
  *   R8  users or survey_responses insert retargeted            -> W5
  *   R9  the duplicate-email lookup retargeted or its error lost -> W6
+ *   R10 the stored-name lookup removed or moved after the update -> W7
+ *   R11 a lookup error that does not return before any write  -> W7
+ *   R12 decideNameUpdate bypassed                              -> W7
+ *   R13 users inserted or upserted on the signed-in path       -> W7
+ *   R14 the placeholder written as a literal in the route      -> W8
  *
  * Two masked views of the source are used, as in
  * syncProfileRouteWiring.test.ts: `code` has comments and string contents
@@ -136,5 +141,42 @@ describe("survey route wiring: email/password signup", () => {
     );
     expect(block).toMatch(/return \{ found: !!data, error \}/);
     expect(block).not.toMatch(/\.(insert|upsert|update|delete)\(/);
+  });
+});
+
+describe("survey route wiring: signed-in names", () => {
+  const signedIn = codeWithStrings.slice(
+    codeWithStrings.indexOf("const userId = authUserId;")
+  );
+
+  it("W7 reads the stored names, stops on a failed read, and writes only what decideNameUpdate returns", () => {
+    expect(signedIn.length).toBeGreaterThan(0);
+    const lookup = signedIn.search(
+      /\.from\("users"\) ?\.select\("first_name, last_name"\) ?\.eq\("id", ?userId ?\) ?\.maybeSingle\(\)/
+    );
+    const stop = signedIn.indexOf("if (lookupError) {");
+    const update = signedIn.indexOf(".update(profileUpdate)");
+    const surveyWrite = signedIn.indexOf('.from("survey_responses")');
+    expect(lookup).toBeGreaterThan(-1);
+    expect(stop).toBeGreaterThan(lookup);
+    expect(update).toBeGreaterThan(stop);
+    expect(surveyWrite).toBeGreaterThan(update);
+
+    const stopBlock = between(signedIn, "if (lookupError) {", "const profileUpdate");
+    expect(stopBlock).toMatch(/return NextResponse\.json\(/);
+
+    expect(signedIn).toMatch(
+      /const profileUpdate: Record<string, unknown> = \{ updated_at: now, \.\.\.\(decideNameUpdate\( ?storedNames, ?firstName ?\) \?\? \{\}\), \};/
+    );
+    expect(signedIn).not.toMatch(/profileUpdate\.(first_name|last_name) =/);
+    expect(signedIn).not.toMatch(/\.from\("users"\)[^;]*\.(insert|upsert)\(/);
+  });
+
+  it("W8 the placeholder comes from the shared constant, never a literal", () => {
+    expect(codeWithStrings).not.toMatch(/"User"|'User'|`User`/);
+    expect(codeWithStrings).toMatch(
+      /import \{ DEFAULT_FIRST_NAME \} from "@\/lib\/defaultFirstName";/
+    );
+    expect(signedIn).toMatch(/firstName: firstName \|\| DEFAULT_FIRST_NAME,/);
   });
 });
