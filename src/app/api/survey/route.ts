@@ -7,7 +7,7 @@ import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { toLogSafeError } from "@/lib/logSafeError";
 import { createEmailAccount } from "@/lib/emailSignup";
 import { decideNameUpdate } from "@/lib/surveyNameUpdate";
-import { DEFAULT_FIRST_NAME } from "@/lib/defaultFirstName";
+import { DEFAULT_FIRST_NAME, firstNameForClient } from "@/lib/defaultFirstName";
 
 // Temporary signup pause (fail-open). Gates ONLY the unauthenticated
 // email/password signup path below; the authenticated OAuth
@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
       success: true,
       userId,
       profile: {
-        firstName: firstName || DEFAULT_FIRST_NAME,
+        firstName: firstNameForClient(firstName || DEFAULT_FIRST_NAME),
         lastName,
         institutionId: surveyData.institution_id || null,
         university: surveyData.university || null,

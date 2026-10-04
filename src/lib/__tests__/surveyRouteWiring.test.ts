@@ -24,6 +24,7 @@ import { describe, it, expect } from "vitest";
  *   R12 decideNameUpdate bypassed                              -> W7
  *   R13 users inserted or upserted on the signed-in path       -> W7
  *   R14 the placeholder written as a literal in the route      -> W8
+ *   R15 the signed-in response skipping firstNameForClient     -> W8
  *
  * Two masked views of the source are used, as in
  * syncProfileRouteWiring.test.ts: `code` has comments and string contents
@@ -175,8 +176,10 @@ describe("survey route wiring: signed-in names", () => {
   it("W8 the placeholder comes from the shared constant, never a literal", () => {
     expect(codeWithStrings).not.toMatch(/"User"|'User'|`User`/);
     expect(codeWithStrings).toMatch(
-      /import \{ DEFAULT_FIRST_NAME \} from "@\/lib\/defaultFirstName";/
+      /import \{ DEFAULT_FIRST_NAME, firstNameForClient \} from "@\/lib\/defaultFirstName";/
     );
-    expect(signedIn).toMatch(/firstName: firstName \|\| DEFAULT_FIRST_NAME,/);
+    expect(signedIn).toMatch(
+      /firstName: firstNameForClient\( ?firstName \|\| DEFAULT_FIRST_NAME ?\),/
+    );
   });
 });

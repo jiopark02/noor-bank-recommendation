@@ -1,6 +1,6 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { toLogSafeError } from "./logSafeError";
-import { DEFAULT_FIRST_NAME } from "./defaultFirstName";
+import { DEFAULT_FIRST_NAME, firstNameForClient } from "./defaultFirstName";
 import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "./signupCodes";
 
 /**
@@ -326,7 +326,7 @@ export async function createEmailAccount(
       success: true,
       userId,
       profile: {
-        firstName,
+        firstName: firstNameForClient(firstName),
         lastName: input.lastName,
         ...(email ? { email } : {}),
         institutionId: input.institutionId || null,

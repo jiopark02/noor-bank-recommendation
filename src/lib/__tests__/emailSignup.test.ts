@@ -42,6 +42,7 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M21 a failed lookup treated as "no row"                      -> B3
  *   M22 the duplicate path deleting or creating anything         -> B1, B2, B3
  *   M23 the SURVEY_SAVE_FAILED code missing from the failure     -> F3
+ *   M24 the placeholder returned to the client as a name         -> P1
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -214,6 +215,20 @@ describe("success path", () => {
     expect((await createEmailAccount(input(), threw)).status).toBe(200);
     expect(logLines(threw)).toHaveLength(1);
     expect(logLines(threw)[0]).toContain("(threw) user_id=" + USER_ID);
+  });
+});
+
+describe("placeholder first name in the response", () => {
+  it("P1 is returned as an empty name, while the stored row and metadata keep the placeholder", async () => {
+    const d = deps();
+    const result = await createEmailAccount(input({ firstName: null }), d);
+    expect(result.status).toBe(200);
+    expect((result.body.profile as Record<string, unknown>).firstName).toBe("");
+    expect(d.insertProfile.mock.calls[0][0].first_name).toBe(DEFAULT_FIRST_NAME);
+    expect(d.createAuthUser.mock.calls[0][0].user_metadata.first_name).toBe(
+      DEFAULT_FIRST_NAME
+    );
+    expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, DEFAULT_FIRST_NAME);
   });
 });
 

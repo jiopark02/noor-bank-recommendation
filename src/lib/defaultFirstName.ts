@@ -7,3 +7,11 @@
  * in server-side modules.
  */
 export const DEFAULT_FIRST_NAME = "User";
+
+/**
+ * A first name as a response hands it to the client: the placeholder becomes
+ * an empty name, so no screen greets the user as "User".
+ */
+export function firstNameForClient(firstName: string): string {
+  return firstName === DEFAULT_FIRST_NAME ? "" : firstName;
+}
