@@ -39,20 +39,33 @@ This file is loaded as baseline context in every session, so anything stale here
 - **PowerShell host:** when handing the operator a command to run directly, avoid `&&` and `curl -H` (use `Invoke-RestMethod`). Inside Claude Code's own Bash tool (Git Bash), `&&` is fine. `vercel env ls` is not available — env vars are read from the Vercel dashboard.
 - **`tsconfig` targets ES5** — beware `matchAll` and iterator spread.
 
-**Risk tiers (the tier decides who checks the work)**
-- **Low** (helpers, copy, non-security UI): write and apply; no separate review. If user-facing, live-verify.
-- **Medium** (general features, non-security refactors): one independent read before commit.
-- **High** (security, auth, RLS, migrations, Auth-user deletion, AI-pipeline behavior): two-layer review below, mandatory, **plus** live verification. Never skipped.
-- Risk can differ *per item inside one task*. Don't grade a task as a whole — grade the items. Some changes are hard to reverse (e.g. HSTS `max-age`, which browsers cache) even when the surrounding work is trivial.
+**Change-surface report (the operator assigns risk grades, not you)**
+- Do not assign a risk grade, and do not use Low / Medium / High as risk labels. The operator grades each item from the facts you report. Which plan, reviews, preview and live checks a change gets is set by the operator's prompt.
+- **Stop before editing** when a change you are about to make falls in any category below and the prompt has not already named that item and category. Report the item and the category, then wait. This applies to small changes and to sessions without a plan.
+- In every plan, and before every commit, report a table with one row per change item:
+  - **Item**: file + symbol.
+  - **Surface**: every category below that applies, each with concrete evidence (the call, the table, the key, the importer count).
+  - **Detection**: what would catch this item being wrong — `execution test` / `source probe only` / `live only` / `nothing`. For a test, name the file, the assertion, and the mutation that turns it red. Do not claim coverage without that evidence.
+- Categories. Report every one that applies; when unsure whether one applies, report it.
+  1. **DB writes**: insert / update / upsert / delete, naming the table, including indirect effects such as cascades.
+  2. **Schema**: migrations, RLS policies, grants, functions, triggers.
+  3. **Auth**: any `auth.*` call (name admin user creation and deletion explicitly), token or session handling, the shared auth helpers.
+  4. **Server reads of user data**, and any use of the service-role client.
+  5. **Personal data**: email, names, financial data — where it flows, including logs and response bodies.
+  6. **External calls and configuration**: Plaid, LLM providers, email, any outbound HTTP; env vars, `vercel.json`, Supabase or Vercel settings.
+  7. **AI pipeline**: prompts, model choice, tool use, and what data is sent to an LLM.
+  8. **Shared or global modules**: clients and widely imported helpers.
+  9. **Irreversible or public effects**: data deletion, data migrations, anything `git revert` does not undo, and anything that becomes public on push (this repository is public).
+  10. **User-facing**: screens and browser storage keys.
 
-**Role division.** Claude Code owns implementation: exploring the real repo, writing code, SQL, and migration files, debugging, committing, and pushing. Chat Claude owns direction, strategy, the "why," and the contextual cross-check. Review is split by tier below.
+**Role division.** Claude Code owns implementation: exploring the real repo, writing code, SQL, and migration files, debugging, committing, and pushing. Chat Claude owns direction, strategy, the "why," and the contextual cross-check. Which reviews a change gets is set by the operator's prompt.
 
-**Two-layer review (high risk).** The layers catch different classes of defect and are complementary:
+**Two-layer review (when the operator's prompt calls for it).** The layers catch different classes of defect and are complementary:
 - **Layer 1 — a fresh Claude Code session, separate from the implementing one, reviewing read-only.** Attach the diff directly in the prompt. Instruct it to trust no implementer claim, reason only from the diff and the real repo, and state the basis for each verdict. It owns *internal* defects: line-by-line comparison, regressions, logic.
 - **Layer 2 — a cross-check by chat Claude,** reconciling the change against accumulated context (master status doc, design history, live configuration). It owns *contextual* defects a diff cannot surface.
 - Structural weakness: implementer and reviewers share a model family, so blind spots can correlate. Offset by leaning harder on live verification.
 
-**Live verification is the final defense for every tier.** "The review passed" and "the code looks right" are first filters, never proof. Security changes are verified by attempting the thing that should fail (e.g. `set local role authenticated` plus the forbidden operation, expecting `42501`). Wiring confirmed is not delivery confirmed — check the receiving end. UI messages are not evidence of state; logs and the database are.
+**Live verification is the final defense.** "The review passed" and "the code looks right" are first filters, never proof. Security changes are verified by attempting the thing that should fail (e.g. `set local role authenticated` plus the forbidden operation, expecting `42501`). Wiring confirmed is not delivery confirmed — check the receiving end. UI messages are not evidence of state; logs and the database are.
 
 **Don't audit an entire surface in one pass.** Decompose into a layer map and go narrow and deep, one layer at a time. A single sweep across everything is the weakest form of review.
 
