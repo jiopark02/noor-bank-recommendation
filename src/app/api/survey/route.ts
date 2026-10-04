@@ -227,6 +227,15 @@ export async function POST(request: NextRequest) {
 
           sendWelcomeEmail,
 
+          findProfileByEmail: async (email) => {
+            const { data, error } = await supabaseAdmin
+              .from("users")
+              .select("id")
+              .eq("email", email)
+              .maybeSingle();
+            return { found: !!data, error };
+          },
+
           now: () => now,
         }
       );

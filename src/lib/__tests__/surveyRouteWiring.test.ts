@@ -18,6 +18,7 @@ import { describe, it, expect } from "vitest";
  *   R6  createEmailAccount bypassed                            -> W1
  *   R7  the result status replaced with a constant             -> W1
  *   R8  users or survey_responses insert retargeted            -> W5
+ *   R9  the duplicate-email lookup retargeted or its error lost -> W6
  *
  * Two masked views of the source are used, as in
  * syncProfileRouteWiring.test.ts: `code` has comments and string contents
@@ -125,5 +126,15 @@ describe("survey route wiring: email/password signup", () => {
     expect(profile).toMatch(/\.from\("users"\) ?\.insert\( ?row ?\)/);
     const survey = between(codeWithStrings, "insertSurveyResponse:", "sendWelcomeEmail");
     expect(survey).toMatch(/\.from\("survey_responses"\) ?\.insert\( ?buildSurveyRow\( ?userId, ?surveyData, ?now ?\) ?\)/);
+  });
+
+  it("W6 the duplicate-email lookup reads users by the email it is given and returns its error", () => {
+    const block = between(codeWithStrings, "findProfileByEmail:", "now:");
+    expect(block).toMatch(/async \( ?email ?\) =>/);
+    expect(block).toMatch(
+      /\.from\("users"\) ?\.select\("id"\) ?\.eq\("email", ?email ?\) ?\.maybeSingle\(\)/
+    );
+    expect(block).toMatch(/return \{ found: !!data, error \}/);
+    expect(block).not.toMatch(/\.(insert|upsert|update|delete)\(/);
   });
 });

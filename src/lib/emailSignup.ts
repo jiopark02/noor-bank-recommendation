@@ -1,6 +1,7 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { toLogSafeError } from "./logSafeError";
 import { DEFAULT_FIRST_NAME } from "./defaultFirstName";
+import { ACCOUNT_INCOMPLETE } from "./signupCodes";
 
 /**
  * The email/password signup half of POST /api/survey — every branch, none of
@@ -16,6 +17,12 @@ import { DEFAULT_FIRST_NAME } from "./defaultFirstName";
  *   2. Signups paused: 403, before any account is created.
  *   3. No email: 400.
  *   4. Create the Auth user. The attributes are built here, not by the caller.
+ *      A refusal is classified by its error code first (see
+ *      classifyCreateUserError). For a duplicate email, the public.users row
+ *      for that email is looked up: an Auth account without one cannot finish
+ *      signing up through this route, so the answer says so instead of
+ *      claiming an ordinary duplicate. Nothing is deleted or created here.
+ *      No response body carries Auth error text.
  *   5. Insert the public.users row. If that fails, delete the Auth user again
  *      (see ROLLBACK) and answer 500.
  *   6. Insert the survey_responses row.
@@ -41,7 +48,10 @@ const SIGNUP_PAUSED_MESSAGE =
   "New signups are temporarily paused. Please join the waitlist and we'll email you when signups reopen.";
 const EMAIL_REQUIRED_MESSAGE = "Email is required";
 const DUPLICATE_EMAIL_MESSAGE = "An account with this email already exists";
-const CREATE_AUTH_FAILED_MESSAGE = "Failed to create auth user";
+const ACCOUNT_INCOMPLETE_MESSAGE =
+  "An account with this email already exists, but its setup was not completed. Please contact support.";
+const WEAK_PASSWORD_MESSAGE = "Please choose a stronger password.";
+const CREATE_ACCOUNT_FAILED_MESSAGE = "Failed to create account. Please try again.";
 const PROFILE_INSERT_FAILED_MESSAGE = "Failed to create user profile record";
 const SURVEY_SAVE_FAILED_MESSAGE =
   "Account was created, but saving survey data failed. Please contact support.";
@@ -74,6 +84,10 @@ export type EmailSignupDeps = {
   createAuthUser: (
     attributes: CreateAuthUserAttributes
   ) => Promise<{ userId: string | null; error: unknown }>;
+  /** Whether a public.users row has this (normalized) email. */
+  findProfileByEmail: (
+    email: string
+  ) => Promise<{ found: boolean; error: unknown }>;
   insertProfile: (row: Record<string, unknown>) => Promise<{ error: unknown }>;
   /** May also throw; a throw is handled like a returned error. */
   deleteAuthUser: (userId: string) => Promise<{ error: unknown }>;
@@ -115,6 +129,30 @@ function errorField(error: unknown, field: "code" | "status" | "message"): unkno
   return (error as Record<string, unknown>)[field];
 }
 
+export type CreateUserRefusal = "duplicate" | "weak_password" | "failed";
+
+/**
+ * Why createUser refused. The error code decides when there is one; only an
+ * error without a code falls back to the message text.
+ */
+export function classifyCreateUserError(error: unknown): CreateUserRefusal {
+  const code = errorField(error, "code");
+  if (typeof code === "string" && code) {
+    if (code === "email_exists" || code === "user_already_exists") {
+      return "duplicate";
+    }
+    if (code === "weak_password") {
+      return "weak_password";
+    }
+    return "failed";
+  }
+  const message = String(errorField(error, "message") || "").toLowerCase();
+  if (message.includes("already") || message.includes("exists")) {
+    return "duplicate";
+  }
+  return "failed";
+}
+
 /** A delete that found no such user has reached the state the rollback wants. */
 function isAlreadyGone(error: unknown): boolean {
   return (
@@ -154,6 +192,30 @@ async function rollbackAuthUser(
   }
 }
 
+/**
+ * The answer to a duplicate email. Read-only: an Auth account without a
+ * profile row is reported, never repaired or removed.
+ */
+async function answerDuplicate(
+  email: string,
+  deps: EmailSignupDeps
+): Promise<EmailSignupResult> {
+  const { found, error } = await deps.findProfileByEmail(email);
+  if (error) {
+    emit(
+      deps,
+      "[signup] profile lookup for a duplicate email failed: code=" +
+        (toLogSafeError(error).code ?? "none")
+    );
+    return failure(409, DUPLICATE_EMAIL_MESSAGE);
+  }
+  if (!found) {
+    emit(deps, "[signup] duplicate email has an Auth account but no profile row");
+    return failure(409, ACCOUNT_INCOMPLETE_MESSAGE, { code: ACCOUNT_INCOMPLETE });
+  }
+  return failure(409, DUPLICATE_EMAIL_MESSAGE);
+}
+
 export async function createEmailAccount(
   input: EmailSignupInput,
   deps: EmailSignupDeps
@@ -185,19 +247,16 @@ export async function createEmailAccount(
   });
 
   if (createError || !userId) {
-    const message = String(errorField(createError, "message") || "").toLowerCase();
-    if (message.includes("already") || message.includes("exists")) {
-      return failure(409, DUPLICATE_EMAIL_MESSAGE);
-    }
+    emit(deps, "[signup] auth user creation refused: " + safeErrorText(createError));
 
-    emit(deps, "[signup] auth user creation failed: " + safeErrorText(createError));
-    const rawMessage = errorField(createError, "message");
-    return failure(
-      500,
-      typeof rawMessage === "string" && rawMessage
-        ? rawMessage
-        : CREATE_AUTH_FAILED_MESSAGE
-    );
+    const refusal = createError ? classifyCreateUserError(createError) : "failed";
+    if (refusal === "duplicate") {
+      return answerDuplicate(email, deps);
+    }
+    if (refusal === "weak_password") {
+      return failure(400, WEAK_PASSWORD_MESSAGE);
+    }
+    return failure(500, CREATE_ACCOUNT_FAILED_MESSAGE);
   }
 
   const { error: profileError } = await deps.insertProfile({

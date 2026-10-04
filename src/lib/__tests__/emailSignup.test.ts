@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
-import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 import {
+  AuthApiError,
+  AuthRetryableFetchError,
+  AuthWeakPasswordError,
+} from "@supabase/supabase-js";
+import {
+  classifyCreateUserError,
   createEmailAccount,
   type EmailSignupDeps,
   type EmailSignupInput,
 } from "../emailSignup";
 import { DEFAULT_FIRST_NAME } from "../defaultFirstName";
+import { ACCOUNT_INCOMPLETE } from "../signupCodes";
 
 /**
  * The email/password signup decision, executed with injected fakes. Auth
@@ -27,6 +33,14 @@ import { DEFAULT_FIRST_NAME } from "../defaultFirstName";
  *   M12 an email address or raw error object in a log line       -> L1, L2
  *   M13 a welcome email sent after a failed survey save          -> F2
  *   M14 an empty email put in the response or sent a welcome     -> S3
+ *   M15 classification by message text ahead of the code         -> D1, D2, D6
+ *   M16 the weak_password branch removed                         -> D3
+ *   M17 the message fallback removed for errors without a code   -> D4
+ *   M18 Auth error text placed in a response body                -> D7
+ *   M19 a createUser refusal not logged, or logged without code  -> D8
+ *   M20 the duplicate-email profile lookup removed               -> B1, B4
+ *   M21 a failed lookup treated as "no row"                      -> B3
+ *   M22 the duplicate path deleting or creating anything         -> B1, B2, B3
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -352,5 +366,177 @@ describe("log lines", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("[signup] profile insert failed: user_id=" + USER_ID);
     expect(lines[0]).toContain('"code":"23505"');
+  });
+});
+
+const SENTINEL = "SENTINEL_auth_text_never_in_a_body_51c3";
+
+/** Deps whose createUser refuses with `error`; the lookup answers `lookup`. */
+function refusingDeps(
+  error: unknown,
+  lookup: { found: boolean; error: unknown } = { found: true, error: null }
+): Spied & { findProfileByEmail: ReturnType<typeof vi.fn> } {
+  return deps({
+    createAuthUser: vi.fn(async () => ({ userId: null, error })),
+    findProfileByEmail: vi.fn(async () => lookup),
+  }) as Spied & { findProfileByEmail: ReturnType<typeof vi.fn> };
+}
+
+const DUPLICATE_BODY = {
+  success: false,
+  message: "An account with this email already exists",
+};
+
+describe("createUser refusals are classified by code first", () => {
+  it("D1 email_exists is a duplicate even when the message says nothing about it", async () => {
+    const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"));
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({ status: 409, body: DUPLICATE_BODY });
+    expect(d.findProfileByEmail).toHaveBeenCalledWith(NORMALIZED);
+  });
+
+  it("D2 user_already_exists is a duplicate too", async () => {
+    const d = refusingDeps(new AuthApiError("Conflict", 422, "user_already_exists"));
+    expect((await createEmailAccount(input(), d)).status).toBe(409);
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("D3 weak_password is a 400 with fixed text", async () => {
+    const d = refusingDeps(
+      new AuthWeakPasswordError("Password should be at least 6 characters", 422, ["length"])
+    );
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({
+      status: 400,
+      body: { success: false, message: "Please choose a stronger password." },
+    });
+    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+  });
+
+  it("D4 without a code, the message text still identifies a duplicate", async () => {
+    const d = refusingDeps({
+      message: "A user with this email address has already been registered",
+    });
+    expect((await createEmailAccount(input(), d)).status).toBe(409);
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("D5 without a code and without duplicate wording, it is a 500 with fixed text", async () => {
+    const d = refusingDeps({ message: "Database error creating new user" });
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({
+      status: 500,
+      body: { success: false, message: "Failed to create account. Please try again." },
+    });
+    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+  });
+
+  it("D6 a different code wins over duplicate wording in the message", async () => {
+    const d = refusingDeps(
+      new AuthApiError("user already exists in another region", 500, "unexpected_failure")
+    );
+    expect((await createEmailAccount(input(), d)).status).toBe(500);
+    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+    expect(
+      classifyCreateUserError(new AuthApiError("already exists", 500, "unexpected_failure"))
+    ).toBe("failed");
+  });
+
+  it("D7 no response body carries Auth error text", async () => {
+    const errors: unknown[] = [
+      new AuthApiError(SENTINEL, 422, "email_exists"),
+      new AuthWeakPasswordError(SENTINEL, 422, []),
+      new AuthApiError(SENTINEL, 500, "unexpected_failure"),
+      { message: SENTINEL },
+      new AuthRetryableFetchError(SENTINEL, 503),
+    ];
+    for (const error of errors) {
+      for (const lookup of [
+        { found: true, error: null },
+        { found: false, error: null },
+        { found: false, error: { code: "PGRST000", message: SENTINEL } },
+      ]) {
+        const result = await createEmailAccount(input(), refusingDeps(error, lookup));
+        expect(JSON.stringify(result.body)).not.toContain(SENTINEL);
+      }
+    }
+  });
+
+  it("D8 every refusal is logged once, with its code", async () => {
+    const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"));
+    await createEmailAccount(input(), d);
+    const refused = logLines(d).filter((line) => line.includes("auth user creation refused"));
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toContain('"code":"email_exists"');
+
+    const noUser = deps({ createAuthUser: vi.fn(async () => ({ userId: null, error: null })) });
+    const result = await createEmailAccount(input(), noUser);
+    expect(result.status).toBe(500);
+    expect(logLines(noUser).filter((l) => l.includes("auth user creation refused"))).toHaveLength(1);
+  });
+});
+
+describe("duplicate email: is there a profile row?", () => {
+  it("B1 no row: 409 ACCOUNT_INCOMPLETE with fixed text and one log line, nothing written or deleted", async () => {
+    const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
+      found: false,
+      error: null,
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({
+      status: 409,
+      body: {
+        success: false,
+        message:
+          "An account with this email already exists, but its setup was not completed. Please contact support.",
+        code: ACCOUNT_INCOMPLETE,
+      },
+    });
+    expect(
+      logLines(d).filter((line) => line.includes("no profile row"))
+    ).toEqual(["[signup] duplicate email has an Auth account but no profile row"]);
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+    expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+  });
+
+  it("B2 a row exists: the ordinary duplicate answer, no extra log line", async () => {
+    const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
+      found: true,
+      error: null,
+    });
+    expect(await createEmailAccount(input(), d)).toEqual({ status: 409, body: DUPLICATE_BODY });
+    expect(logLines(d)).toHaveLength(1);
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("B3 a failed lookup is not read as 'no row': ordinary duplicate answer, logged with its code", async () => {
+    const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
+      found: false,
+      error: { code: "PGRST000", message: "connection reset" },
+    });
+    expect(await createEmailAccount(input(), d)).toEqual({ status: 409, body: DUPLICATE_BODY });
+    expect(logLines(d)).toContain(
+      "[signup] profile lookup for a duplicate email failed: code=PGRST000"
+    );
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("B4 a lost creation response: the retry hits the duplicate and reports the unfinished account", async () => {
+    // First attempt: the user was created, but the response never arrived.
+    const first = refusingDeps(new AuthRetryableFetchError("network down", 0));
+    const firstResult = await createEmailAccount(input(), first);
+    expect(firstResult.status).toBe(500);
+    expect(first.insertProfile).not.toHaveBeenCalled();
+
+    // Second attempt: Auth now knows the email, public.users does not.
+    const second = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
+      found: false,
+      error: null,
+    });
+    const secondResult = await createEmailAccount(input(), second);
+    expect(secondResult.status).toBe(409);
+    expect(secondResult.body).toMatchObject({ code: ACCOUNT_INCOMPLETE });
   });
 });
