@@ -23,7 +23,7 @@ import { describe, it, expect } from "vitest";
  * literal) run on the raw text at the same span.
  *
  * WHAT IT PROVES AND WHAT IT DOES NOT
- * It proves that no console call in the five files names an email-bearing
+ * It proves that no console call in the six files names an email-bearing
  * identifier, that every value a console call prints — each non-literal
  * argument and each `${...}` — is either toLogSafeError(...) or one of a few
  * approved forms, that each listed error line wraps its error in
@@ -56,6 +56,7 @@ const FILES = {
   waitlist: "../../app/api/waitlist/route.ts",
   syncProfile: "../../app/api/auth/sync-profile/route.ts",
   email: "../email.ts",
+  emailSignup: "../emailSignup.ts",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -241,10 +242,11 @@ describe("extractor", () => {
  */
 const CONSOLE_CALL_COUNTS: Record<keyof typeof FILES, number> = {
   cronRuns: 3,
-  survey: 8,
+  survey: 4,
   waitlist: 3,
   syncProfile: 2,
   email: 4,
+  emailSignup: 1,
 };
 
 describe("(c) each probed file has exactly its pinned number of console calls", () => {
@@ -292,10 +294,12 @@ type Anchor = {
 };
 
 const ANCHORS: Anchor[] = [
-  { file: "survey", leading: "\"Supabase auth signup error:\"", errorIdentifier: "createAuthError" },
-  { file: "survey", leading: "\"Profile insert error:\"", errorIdentifier: "profileInsertError" },
   { file: "survey", leading: "\"Survey write error:\"", errorIdentifier: "surveyWriteError" },
-  { file: "survey", leading: "`Failed to send welcome email (threw)", errorIdentifier: "err" },
+  {
+    file: "survey",
+    leading: "\"Profile name lookup error (authenticated survey):\"",
+    errorIdentifier: "lookupError",
+  },
   { file: "syncProfile", leading: "\"Profile sync error:\"", errorIdentifier: "error" },
   { file: "waitlist", leading: "'Waitlist insert error:'", errorIdentifier: "error" },
   {
@@ -396,10 +400,11 @@ const HELPER_CALL = /^toLogSafeError\([A-Za-z_$][\w$]*\)$/;
 /** Forms 2-4, each allowed only in the file that uses it. */
 const ALLOWED_BY_FILE: Record<keyof typeof FILES, string[]> = {
   email: ['toLogSafeError(error).name ?? "none"'],
-  survey: ['userId || "none"'],
+  survey: [],
   cronRuns: ['admin.userId || "none"'],
   waitlist: [],
   syncProfile: [],
+  emailSignup: ["line"],
 };
 
 const CALLS_BY_FILE: Array<[string, keyof typeof FILES, ConsoleCall]> = [];
@@ -511,6 +516,11 @@ const TOUCHED_FILES = [
   "../plaidTokenCrypto.ts",
   "./plaidTokenCrypto.test.ts",
   "../../app/api/account/delete/route.ts",
+  "../emailSignup.ts",
+  "../signupCodes.ts",
+  "../surveySubmitOutcome.ts",
+  "../surveyNameUpdate.ts",
+  "../defaultFirstName.ts",
 ];
 
 describe("(e) touched files contain no literal control, bidi or zero-width character", () => {

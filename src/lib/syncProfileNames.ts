@@ -1,4 +1,4 @@
-import { DEFAULT_FIRST_NAME } from "./profileSync";
+import { DEFAULT_FIRST_NAME } from "./defaultFirstName";
 
 /**
  * The names a successful POST /api/auth/sync-profile reports having written,

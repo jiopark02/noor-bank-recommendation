@@ -5,6 +5,9 @@ import { sendWelcomeEmail } from "@/lib/email";
 import { sanitizeNameField } from "@/lib/validation";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { toLogSafeError } from "@/lib/logSafeError";
+import { createEmailAccount } from "@/lib/emailSignup";
+import { decideNameUpdate } from "@/lib/surveyNameUpdate";
+import { DEFAULT_FIRST_NAME, firstNameForClient } from "@/lib/defaultFirstName";
 
 // Temporary signup pause (fail-open). Gates ONLY the unauthenticated
 // email/password signup path below; the authenticated OAuth
@@ -162,7 +165,7 @@ export async function POST(request: NextRequest) {
   try {
     // A Bearer token switches this route into the authenticated
     // profile-completion path (OAuth users, who already have an auth account).
-    // Without a token, the legacy email/password signup path runs unchanged.
+    // Without a token, the email/password signup path runs.
     // Header-only read; does not consume the JSON body.
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
 
@@ -184,202 +187,143 @@ export async function POST(request: NextRequest) {
     const firstName = sanitizeNameField(surveyData.first_name) || null;
     const lastName = sanitizeNameField(surveyData.last_name) || null;
 
-    let userId: string;
-    // Only set for the brand-new email/password signup path; drives the welcome
-    // email and the email field of the response profile.
-    let signupEmail: string | null = null;
-
-    if (authUserId) {
-      // ---- AUTHENTICATED PATH (OAuth profile completion) ----
-      // Identity comes ONLY from the verified token. Any body id/email/password
-      // is ignored. No auth user is created and no password is required.
-      userId = authUserId;
-
-      // Update the existing users row (sync-profile created it on callback),
-      // respecting it: never touch created_at/email, and only overwrite a name
-      // when a non-empty value was supplied.
-      const profileUpdate: Record<string, unknown> = { updated_at: now };
-      if (firstName) profileUpdate.first_name = firstName;
-      if (lastName) profileUpdate.last_name = lastName;
-
-      const { error: profileUpdateError } = await supabaseAdmin
-        .from("users")
-        .update(profileUpdate)
-        .eq("id", userId);
-
-      if (profileUpdateError) {
-        console.error(
-          "Profile update error (authenticated survey):",
-          toLogSafeError(profileUpdateError)
-        );
-        return NextResponse.json(
-          { success: false, message: "Failed to update user profile record" },
-          { status: 500 }
-        );
-      }
-    } else {
-      // ---- UNAUTHENTICATED PATH (legacy email/password signup) ----
-      // A request with no Bearer token AND no password is not a signup attempt
-      // — it is an authenticated client whose token went missing on the way
-      // out. That happens: getSupabaseBearerHeaders() returns {} when the
-      // browser cannot read its session, and the request then arrives here
-      // looking anonymous. It is NOT anonymous in any other respect: the form
-      // pre-fills the email from the session, so `email` is populated and only
-      // `password` is empty. Keying this on the missing password is what
-      // separates the two cases; keying it on email would never fire.
-      //
-      // This must come before the signup-pause gate below, otherwise a signed-in
-      // user gets told "New signups are temporarily paused", which is both
-      // false and unactionable. Answer 401 instead: no credentials were
-      // presented. A real signup attempt carries a password and falls through
-      // to the gate unchanged.
-      if (!surveyData.password) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "AUTH_REQUIRED",
-            message:
-              "We couldn't verify your sign-in for this request. Please reload the page and try again.",
-          },
-          { status: 401 }
-        );
-      }
-
-      // Temporary signup pause: reject brand-new account creation BEFORE it
-      // reaches admin.createUser. Early-return so no auth user is ever created;
-      // this must never be a create-then-rollback path. Fail-open (see
-      // isSignupDisabled): only closes when SIGNUP_DISABLED === "true".
-      if (isSignupDisabled()) {
-        return NextResponse.json(
-          {
-            success: false,
-            message:
-              "New signups are temporarily paused. Please join the waitlist and we'll email you when signups reopen.",
-          },
-          { status: 403 }
-        );
-      }
-
-      // Email only. A missing password can no longer reach this line — the 401
-      // above returns on it — so testing for it here would be a disjunct that
-      // is never true, and the old "Email and password are required" wording
-      // would name a cause this branch can no longer have.
-      if (!surveyData.email) {
-        return NextResponse.json(
-          { success: false, message: "Email is required" },
-          { status: 400 }
-        );
-      }
-
-      const email = surveyData.email.toLowerCase().trim();
-      signupEmail = email;
-      const newUserFirstName = firstName || "User";
-
-      const { data: createdAuthUser, error: createAuthError } =
-        await supabaseAdmin.auth.admin.createUser({
-          email,
+    if (!authUserId) {
+      // ---- UNAUTHENTICATED PATH (email/password signup) ----
+      // Every branch lives in src/lib/emailSignup.ts; this is wiring.
+      const result = await createEmailAccount(
+        {
+          email: surveyData.email,
           password: surveyData.password,
-          email_confirm: true,
-          user_metadata: {
-            first_name: newUserFirstName,
-            last_name: lastName,
-          },
-        });
-
-      if (createAuthError || !createdAuthUser?.user) {
-        const message = (createAuthError?.message || "").toLowerCase();
-        if (message.includes("already") || message.includes("exists")) {
-          return NextResponse.json(
-            {
-              success: false,
-              message: "An account with this email already exists",
-            },
-            { status: 409 }
-          );
-        }
-
-        console.error("Supabase auth signup error:", toLogSafeError(createAuthError));
-        return NextResponse.json(
-          {
-            success: false,
-            message: createAuthError?.message || "Failed to create auth user",
-          },
-          { status: 500 }
-        );
-      }
-
-      userId = createdAuthUser.user.id;
-
-      const profileRow = {
-        id: userId,
-        email,
-        first_name: newUserFirstName,
-        last_name: lastName,
-        raw_user_meta_data: {
-          source: "survey_signup",
-          destination_country: surveyData.destination_country || null,
+          firstName,
+          lastName,
+          destinationCountry: surveyData.destination_country,
+          institutionId: surveyData.institution_id,
+          university: surveyData.university,
+          countryOfOrigin: surveyData.country_of_origin,
         },
-        created_at: now,
-        updated_at: now,
-      };
+        {
+          isSignupDisabled,
 
-      const { error: profileInsertError } = await supabaseAdmin
-        .from("users")
-        .insert(profileRow);
+          createAuthUser: async (attributes) => {
+            const { data, error } =
+              await supabaseAdmin.auth.admin.createUser(attributes);
+            return { userId: data?.user?.id ?? null, error };
+          },
 
-      if (profileInsertError) {
-        await supabaseAdmin.auth.admin.deleteUser(userId).catch((err) => {
-          console.error("Rollback delete auth user failed:", toLogSafeError(err));
-        });
+          insertProfile: async (row) => {
+            const { error } = await supabaseAdmin.from("users").insert(row);
+            return { error };
+          },
 
-        console.error("Profile insert error:", toLogSafeError(profileInsertError));
-        return NextResponse.json(
-          { success: false, message: "Failed to create user profile record" },
-          { status: 500 }
-        );
-      }
+          deleteAuthUser: async (userId) => {
+            const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+            return { error };
+          },
+
+          insertSurveyResponse: async (userId) => {
+            const { error } = await supabaseAdmin
+              .from("survey_responses")
+              .insert(buildSurveyRow(userId, surveyData, now));
+            return { error };
+          },
+
+          sendWelcomeEmail,
+
+          findProfileByEmail: async (email) => {
+            const { data, error } = await supabaseAdmin
+              .from("users")
+              .select("id")
+              .eq("email", email)
+              .maybeSingle();
+            return { found: !!data, error };
+          },
+
+          now: () => now,
+        }
+      );
+
+      return NextResponse.json(result.body, { status: result.status });
+    }
+
+    // ---- AUTHENTICATED PATH (OAuth profile completion) ----
+    // Identity comes ONLY from the verified token. Any body id/email/password
+    // is ignored. No auth user is created and no password is required.
+    const userId = authUserId;
+
+    // Update the existing users row (sync-profile created it on callback),
+    // respecting it: never touch created_at/email. The names are written only
+    // when the submitted first name differs from the stored one, as a pair
+    // (see decideNameUpdate). The stored names are read first; a failed read
+    // stops here rather than guessing, and nothing is written.
+    const { data: storedNames, error: lookupError } = await supabaseAdmin
+      .from("users")
+      .select("first_name, last_name")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error(
+        "Profile name lookup error (authenticated survey):",
+        toLogSafeError(lookupError)
+      );
+      return NextResponse.json(
+        { success: false, message: "Failed to update user profile record" },
+        { status: 500 }
+      );
+    }
+
+    const profileUpdate: Record<string, unknown> = {
+      updated_at: now,
+      ...(decideNameUpdate(storedNames, firstName) ?? {}),
+    };
+
+    const { error: profileUpdateError } = await supabaseAdmin
+      .from("users")
+      .update(profileUpdate)
+      .eq("id", userId);
+
+    if (profileUpdateError) {
+      console.error(
+        "Profile update error (authenticated survey):",
+        toLogSafeError(profileUpdateError)
+      );
+      return NextResponse.json(
+        { success: false, message: "Failed to update user profile record" },
+        { status: 500 }
+      );
     }
 
     // ---- survey_responses write ----
-    // Shared field mapping; the write strategy differs per path.
+    // Must be idempotent: a signed-in user can revisit /survey and re-submit,
+    // and survey_responses.user_id is UNIQUE (survey_responses_user_id_key), so
+    // a second insert would 500. If a row already exists we UPDATE it in place
+    // (treat re-submit as editing the answers); otherwise we insert. We do NOT
+    // use upsert(onConflict): the payload carries a fresh id/created_at that
+    // would clobber the existing row's id/created_at on conflict. The UNIQUE
+    // index still guards against a concurrent double-submit (the losing insert
+    // errors explicitly).
     const surveyRow = buildSurveyRow(userId, surveyData, now);
 
     let surveyWriteError: { message?: string } | null = null;
 
-    if (authUserId) {
-      // Authenticated path must be idempotent: a signed-in user can revisit
-      // /survey and re-submit, and survey_responses.user_id is UNIQUE
-      // (survey_responses_user_id_key), so a second insert would 500. If a row
-      // already exists we UPDATE it in place (treat re-submit as editing the
-      // answers); otherwise we insert. We do NOT use upsert(onConflict): the
-      // payload carries a fresh id/created_at that would clobber the existing
-      // row's id/created_at on conflict. The UNIQUE index still guards against a
-      // concurrent double-submit (the losing insert errors explicitly).
-      const { data: existingSurvey } = await supabaseAdmin
+    const { data: existingSurvey } = await supabaseAdmin
+      .from("survey_responses")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (existingSurvey) {
+      // Update only the columns the request actually carries. Overwriting the
+      // whole row would blank every column the caller omitted, which silently
+      // destroys answers the current form does not collect.
+      const surveyUpdate = buildSurveyUpdate(surveyRow, surveyData);
+
+      const { error } = await supabaseAdmin
         .from("survey_responses")
-        .select("id")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (existingSurvey) {
-        // Update only the columns the request actually carries. Overwriting the
-        // whole row would blank every column the caller omitted, which silently
-        // destroys answers the current form does not collect.
-        const surveyUpdate = buildSurveyUpdate(surveyRow, surveyData);
-
-        const { error } = await supabaseAdmin
-          .from("survey_responses")
-          .update(surveyUpdate)
-          .eq("user_id", userId);
-        surveyWriteError = error;
-      } else {
-        const { error } = await supabaseAdmin
-          .from("survey_responses")
-          .insert(surveyRow);
-        surveyWriteError = error;
-      }
+        .update(surveyUpdate)
+        .eq("user_id", userId);
+      surveyWriteError = error;
     } else {
-      // Unauthenticated signup: brand-new user, plain insert (unchanged).
       const { error } = await supabaseAdmin
         .from("survey_responses")
         .insert(surveyRow);
@@ -399,33 +343,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Welcome email only for brand-new email/password signups. Must be awaited:
-    // on serverless (Vercel) the function is frozen once the response returns,
-    // so a fire-and-forget promise is killed before the send reaches Resend.
-    // A send failure is logged but never blocks signup success.
-    if (signupEmail) {
-      try {
-        const sent = await sendWelcomeEmail(signupEmail, firstName || "User");
-        if (!sent) {
-          console.error(
-            `Failed to send welcome email (returned false) user_id=${userId || "none"}`
-          );
-        }
-      } catch (err) {
-        console.error(
-          `Failed to send welcome email (threw) user_id=${userId || "none"}:`,
-          toLogSafeError(err)
-        );
-      }
-    }
-
     return NextResponse.json({
       success: true,
       userId,
       profile: {
-        firstName: firstName || "User",
+        firstName: firstNameForClient(firstName || DEFAULT_FIRST_NAME),
         lastName,
-        ...(signupEmail ? { email: signupEmail } : {}),
         institutionId: surveyData.institution_id || null,
         university: surveyData.university || null,
         countryOfOrigin: surveyData.country_of_origin || null,
