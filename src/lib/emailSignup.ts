@@ -2,7 +2,7 @@ import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { toLogSafeError } from "./logSafeError";
 import { firstNameForClient } from "./defaultFirstName";
 import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "./signupCodes";
-import { validateEmail } from "./validation";
+import { sanitizeNameField, validateEmail } from "./validation";
 
 /**
  * The email/password signup half of POST /api/survey — every branch, none of
@@ -17,10 +17,12 @@ import { validateEmail } from "./validation";
  *      that signups are paused.
  *   2. Signups paused: 403, before any account is created and before any
  *      input is checked, so a paused signup answers 403 whatever it sends.
- *   3. Input, checked on trimmed values: an email that is missing, empty after
- *      trimming or not a string is 400; an email that fails the same format
- *      check the survey page uses is 400; a first name that is empty after
- *      the caller's sanitizing is 400. None of these carries a code.
+ *   3. Input, checked on cleaned values, email first: an email that is
+ *      missing, empty after trimming or not a string is 400; an email that
+ *      fails the same format check the survey page uses is 400. The first
+ *      name is sanitized here (sanitizeNameField), whatever the caller did,
+ *      and one that is empty after sanitizing is 400; the sanitized value is
+ *      the one stored, sent and returned. None of these carries a code.
  *   4. Create the Auth user. The attributes are built here, not by the caller.
  *      A refusal is classified by its error code first (see
  *      classifyCreateUserError). For a duplicate email, the public.users row
@@ -76,8 +78,9 @@ export type EmailSignupInput = {
   /** Raw request values; email and password are not yet validated. */
   email: unknown;
   password: unknown;
-  /** Already sanitized; null when empty. */
+  /** Sanitized again here before it is checked; null when empty. */
   firstName: string | null;
+  /** Already sanitized; null when empty. */
   lastName: string | null;
   destinationCountry: unknown;
   institutionId: unknown;
@@ -247,12 +250,12 @@ export async function createEmailAccount(
     return failure(400, EMAIL_INVALID_MESSAGE);
   }
 
-  if (!input.firstName) {
+  const firstName = sanitizeNameField(input.firstName);
+  if (!firstName) {
     return failure(400, NAME_REQUIRED_MESSAGE);
   }
 
   const password = input.password as string;
-  const firstName = input.firstName;
   const now = deps.now();
 
   const { userId, error: createError } = await deps.createAuthUser({

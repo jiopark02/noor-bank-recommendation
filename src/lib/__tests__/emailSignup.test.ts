@@ -50,6 +50,8 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M29 the email format check removed                           -> V4
  *   M30 the first-name check removed or replaced by a default    -> V5
  *   M31 the first name checked ahead of the email                -> V6
+ *   M32 the first name not sanitized in the module before it is
+ *       checked, or the raw value stored or sent                 -> V5, V8
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -224,7 +226,7 @@ describe("input checks after the gates", () => {
     }
   );
 
-  it.each([null, ""])(
+  it.each([null, "", "   ", "\u0001"])(
     "V5 an empty first name (%j) is 400 with fixed text and writes nothing",
     async (firstName) => {
       const d = deps();
@@ -243,6 +245,14 @@ describe("input checks after the gates", () => {
       success: false,
       message: "Please enter a valid email address",
     });
+  });
+
+  it("V8 the sanitized first name is the one stored, put in the metadata and sent", async () => {
+    const d = deps();
+    await createEmailAccount(input({ firstName: "  Ann   Lee " }), d);
+    expect(d.insertProfile.mock.calls[0][0].first_name).toBe("Ann Lee");
+    expect(d.createAuthUser.mock.calls[0][0].user_metadata.first_name).toBe("Ann Lee");
+    expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, "Ann Lee");
   });
 });
 
@@ -315,6 +325,7 @@ describe("a real first name equal to the placeholder", () => {
       DEFAULT_FIRST_NAME
     );
     expect((result.body.profile as Record<string, unknown>).firstName).toBe("");
+    expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, DEFAULT_FIRST_NAME);
   });
 });
 

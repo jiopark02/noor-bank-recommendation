@@ -11,6 +11,7 @@ import {
   getPasswordStrengthLabel,
   createSession,
   acceptTerms,
+  sanitizeNameField,
 } from "@/lib/validation";
 import {
   supabase,
@@ -493,9 +494,10 @@ export default function SurveyPage() {
   const passwordsMatch =
     data.password === data.confirmPassword && data.confirmPassword.length > 0;
 
-  // Trimmed, as the server checks them: a name of only spaces is missing, and
-  // the email must pass the same format check the server applies.
-  const firstNameMissing = !data.firstName.trim();
+  // Judged as the server judges them: a name that sanitizes to nothing (only
+  // spaces or control characters) is missing, and the email must pass the
+  // same format check the server applies.
+  const firstNameMissing = !sanitizeNameField(data.firstName);
   const emailValid = useMemo(
     () => validateEmail(data.email).isValid,
     [data.email]

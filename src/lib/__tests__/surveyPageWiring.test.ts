@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
  *   P3  the recovery record adapter recording a different value     -> W2
  *   P4  clearPassword leaving confirmPassword in place              -> W3
  *   P5  the success path ignoring the recovered choice              -> W4
- *   P6  the submit gate testing the untrimmed first name            -> W5
+ *   P6  the submit gate testing the unsanitized first name          -> W5
  *   P7  the submit gate dropping the email format check, or applying
  *       it to a signed-in submit                                    -> W5
  *   P8  the first-name field no longer marking itself touched       -> W6
@@ -148,7 +148,9 @@ function pageRegion(start: string, end: string): string {
 describe("survey page wiring: trimmed name and email checks", () => {
   it("W5 the submit gate uses the trimmed name, and the email format only before sign-in", () => {
     const derived = pageRegion("const passwordsMatch", "const handleSubmit = async");
-    expect(derived).toContain("const firstNameMissing = !data.firstName.trim();");
+    expect(derived).toContain(
+      "const firstNameMissing = !sanitizeNameField(data.firstName);"
+    );
     expect(derived).toMatch(
       /const emailValid = useMemo\( ?\(\) => validateEmail\(data\.email\)\.isValid, ?\[data\.email\] ?\);/
     );
