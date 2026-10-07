@@ -521,6 +521,8 @@ const TOUCHED_FILES = [
   "../surveySubmitOutcome.ts",
   "../surveyNameUpdate.ts",
   "../defaultFirstName.ts",
+  "../../app/login/page.tsx",
+  "./loginPageWiring.test.ts",
 ];
 
 describe("(e) touched files contain no literal control, bidi or zero-width character", () => {
