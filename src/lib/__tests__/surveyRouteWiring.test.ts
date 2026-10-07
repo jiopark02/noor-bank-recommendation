@@ -26,6 +26,10 @@ import { describe, it, expect } from "vitest";
  *   R14 the placeholder written as a literal in the route      -> W8
  *   R15 the signed-in response skipping firstNameForClient     -> W8
  *   R16 the signed-in path's start marker renamed or removed   -> W7
+ *   R17 the signed-in empty-name refusal removed               -> W9
+ *   R18 the refusal moved after the stored-name lookup, or not
+ *       returning a 400 with the shared message                -> W9
+ *   R19 the body names no longer sanitized before the branch   -> W10
  *
  * Two masked views of the source are used, as in
  * syncProfileRouteWiring.test.ts: `code` has comments and string contents
@@ -181,6 +185,33 @@ describe("survey route wiring: signed-in names", () => {
     );
     expect(signedIn).toMatch(
       /firstName: firstNameForClient\( ?firstName \|\| DEFAULT_FIRST_NAME ?\),/
+    );
+  });
+
+  it("W9 an empty first name is refused with 400 before the stored names are read", () => {
+    const refusal = signedIn.indexOf("if (!firstName) {");
+    const lookup = signedIn.search(/\.select\("first_name, last_name"\)/);
+    expect(refusal).toBeGreaterThan(-1);
+    expect(lookup).toBeGreaterThan(refusal);
+
+    const block = between(signedIn, "if (!firstName) {", "const { data: storedNames");
+    expect(block).toMatch(
+      /return NextResponse\.json\( ?\{ success: false, message: NAME_REQUIRED_MESSAGE \}, ?\{ status: 400 \} ?\);/
+    );
+    expect(codeWithStrings).toMatch(
+      /import \{ createEmailAccount, NAME_REQUIRED_MESSAGE \} from "@\/lib\/emailSignup";/
+    );
+  });
+
+  it("W10 both body names are sanitized before the path is chosen", () => {
+    const sanitized = codeWithStrings.indexOf(
+      "const firstName = sanitizeNameField(surveyData.first_name) || null;"
+    );
+    const branch = codeWithStrings.indexOf("if (!authUserId) {");
+    expect(sanitized).toBeGreaterThan(-1);
+    expect(branch).toBeGreaterThan(sanitized);
+    expect(codeWithStrings).toContain(
+      "const lastName = sanitizeNameField(surveyData.last_name) || null;"
     );
   });
 });
