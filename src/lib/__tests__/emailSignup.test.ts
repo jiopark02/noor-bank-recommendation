@@ -52,6 +52,9 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M31 the first name checked ahead of the email                -> V6
  *   M32 the first name not sanitized in the module before it is
  *       checked, or the raw value stored or sent                 -> V5, V8
+ *   M33 the raw first name returned to the client                -> V8
+ *   M34 the last name not sanitized in the module, or an empty
+ *       one kept instead of null                                 -> V9
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -249,10 +252,25 @@ describe("input checks after the gates", () => {
 
   it("V8 the sanitized first name is the one stored, put in the metadata and sent", async () => {
     const d = deps();
-    await createEmailAccount(input({ firstName: "  Ann   Lee " }), d);
+    const result = await createEmailAccount(input({ firstName: "  Ann   Lee " }), d);
     expect(d.insertProfile.mock.calls[0][0].first_name).toBe("Ann Lee");
     expect(d.createAuthUser.mock.calls[0][0].user_metadata.first_name).toBe("Ann Lee");
     expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, "Ann Lee");
+    expect((result.body.profile as Record<string, unknown>).firstName).toBe("Ann Lee");
+  });
+
+  it("V9 the last name is sanitized here, and one that sanitizes to nothing is null", async () => {
+    const d = deps();
+    const result = await createEmailAccount(input({ lastName: "  Lee \u0001 " }), d);
+    expect(d.createAuthUser.mock.calls[0][0].user_metadata.last_name).toBe("Lee");
+    expect(d.insertProfile.mock.calls[0][0].last_name).toBe("Lee");
+    expect((result.body.profile as Record<string, unknown>).lastName).toBe("Lee");
+
+    const blank = deps();
+    const blankResult = await createEmailAccount(input({ lastName: "   " }), blank);
+    expect(blank.createAuthUser.mock.calls[0][0].user_metadata.last_name).toBeNull();
+    expect(blank.insertProfile.mock.calls[0][0].last_name).toBeNull();
+    expect((blankResult.body.profile as Record<string, unknown>).lastName).toBeNull();
   });
 });
 

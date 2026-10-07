@@ -18,7 +18,7 @@ import { describe, it, expect } from "vitest";
  *   P7  the submit gate dropping the email format check, or applying
  *       it to a signed-in submit                                    -> W5
  *   P8  the first-name field no longer marking itself touched       -> W6
- *   P9  the first-name error testing the untrimmed name             -> W6
+ *   P9  the first-name error testing the unsanitized name           -> W6
  *
  * The masking matches surveyRouteWiring.test.ts: comments are blanked and,
  * in `code`, so are string contents; whitespace is collapsed. Besides
@@ -145,8 +145,8 @@ function pageRegion(start: string, end: string): string {
   return mask(source.slice(from, to), false).replace(/\s+/g, " ");
 }
 
-describe("survey page wiring: trimmed name and email checks", () => {
-  it("W5 the submit gate uses the trimmed name, and the email format only before sign-in", () => {
+describe("survey page wiring: sanitized name and email checks", () => {
+  it("W5 the submit gate uses the sanitized name, and the email format only before sign-in", () => {
     const derived = pageRegion("const passwordsMatch", "const handleSubmit = async");
     expect(derived).toContain(
       "const firstNameMissing = !sanitizeNameField(data.firstName);"
@@ -163,7 +163,7 @@ describe("survey page wiring: trimmed name and email checks", () => {
     expect(gate.split("!emailValid").length - 1).toBe(1);
   });
 
-  it("W6 the first-name field marks itself touched and shows its error on the trimmed name", () => {
+  it("W6 the first-name field marks itself touched and shows its error on the sanitized name", () => {
     const field = pageRegion(
       'placeholder={t("survey.step1.firstName")}',
       't("errors.required")'

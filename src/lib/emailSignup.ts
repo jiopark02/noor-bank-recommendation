@@ -19,10 +19,11 @@ import { sanitizeNameField, validateEmail } from "./validation";
  *      input is checked, so a paused signup answers 403 whatever it sends.
  *   3. Input, checked on cleaned values, email first: an email that is
  *      missing, empty after trimming or not a string is 400; an email that
- *      fails the same format check the survey page uses is 400. The first
- *      name is sanitized here (sanitizeNameField), whatever the caller did,
- *      and one that is empty after sanitizing is 400; the sanitized value is
- *      the one stored, sent and returned. None of these carries a code.
+ *      fails the same format check the survey page uses is 400. Both names
+ *      are sanitized here (sanitizeNameField), whatever the caller did: a
+ *      first name that is empty after sanitizing is 400, and a last name that
+ *      is empty after sanitizing becomes null. The sanitized values are the
+ *      ones stored, sent and returned. None of these carries a code.
  *   4. Create the Auth user. The attributes are built here, not by the caller.
  *      A refusal is classified by its error code first (see
  *      classifyCreateUserError). For a duplicate email, the public.users row
@@ -80,7 +81,7 @@ export type EmailSignupInput = {
   password: unknown;
   /** Sanitized again here before it is checked; null when empty. */
   firstName: string | null;
-  /** Already sanitized; null when empty. */
+  /** Sanitized again here; empty after sanitizing becomes null. */
   lastName: string | null;
   destinationCountry: unknown;
   institutionId: unknown;
@@ -254,6 +255,7 @@ export async function createEmailAccount(
   if (!firstName) {
     return failure(400, NAME_REQUIRED_MESSAGE);
   }
+  const lastName = sanitizeNameField(input.lastName) || null;
 
   const password = input.password as string;
   const now = deps.now();
@@ -262,7 +264,7 @@ export async function createEmailAccount(
     email,
     password,
     email_confirm: true,
-    user_metadata: { first_name: firstName, last_name: input.lastName },
+    user_metadata: { first_name: firstName, last_name: lastName },
   });
 
   if (createError || !userId) {
@@ -282,7 +284,7 @@ export async function createEmailAccount(
     id: userId,
     email,
     first_name: firstName,
-    last_name: input.lastName,
+    last_name: lastName,
     raw_user_meta_data: {
       source: "survey_signup",
       destination_country: input.destinationCountry || null,
@@ -342,7 +344,7 @@ export async function createEmailAccount(
       userId,
       profile: {
         firstName: firstNameForClient(firstName),
-        lastName: input.lastName,
+        lastName,
         email,
         institutionId: input.institutionId || null,
         university: input.university || null,
