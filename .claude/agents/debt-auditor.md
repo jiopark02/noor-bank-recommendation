@@ -3,7 +3,7 @@ name: debt-auditor
 description: Reports the current factual state of the codebase in answer to a fixed question set. Read-only fact reporter, not a reviewer and not an implementer. Use when such a question set needs to be answered with file:line evidence.
 tools: Read, Grep, Glob
 disallowedTools: Write, Edit, NotebookEdit, Bash
-model: claude-sonnet-5-5
+model: sonnet
 maxTurns: 40
 color: cyan
 ---
