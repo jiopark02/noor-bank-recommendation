@@ -13,6 +13,7 @@ import {
 } from "@/lib/validation";
 import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
+import { firstNameForClient } from "@/lib/defaultFirstName";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -116,13 +117,16 @@ export default function LoginPage() {
         }
 
         const user = authData.user;
+        // The placeholder first name is stored as empty, as the other writers
+        // of the local profile do, so no screen greets the user by it.
         let profile: Record<string, unknown> = {
           id: user.id,
           email: user.email || normalizedEmail,
-          firstName:
+          firstName: firstNameForClient(
             user.user_metadata?.first_name ||
-            user.user_metadata?.full_name?.split(" ")[0] ||
-            "",
+              user.user_metadata?.full_name?.split(" ")[0] ||
+              ""
+          ),
           lastName:
             user.user_metadata?.last_name ||
             user.user_metadata?.full_name?.split(" ").slice(1).join(" ") ||
@@ -139,7 +143,7 @@ export default function LoginPage() {
           profile = {
             id: profileRow.id,
             email: profileRow.email,
-            firstName: profileRow.first_name,
+            firstName: firstNameForClient(profileRow.first_name),
             lastName: profileRow.last_name || "",
             ...(profileRow.raw_user_meta_data || {}),
           };

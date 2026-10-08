@@ -5,7 +5,7 @@ import { sendWelcomeEmail } from "@/lib/email";
 import { sanitizeNameField } from "@/lib/validation";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { toLogSafeError } from "@/lib/logSafeError";
-import { createEmailAccount } from "@/lib/emailSignup";
+import { createEmailAccount, NAME_REQUIRED_MESSAGE } from "@/lib/emailSignup";
 import { decideNameUpdate } from "@/lib/surveyNameUpdate";
 import { DEFAULT_FIRST_NAME, firstNameForClient } from "@/lib/defaultFirstName";
 
@@ -249,6 +249,15 @@ export async function POST(request: NextRequest) {
     // Identity comes ONLY from the verified token. Any body id/email/password
     // is ignored. No auth user is created and no password is required.
     const userId = authUserId;
+
+    // A first name that is empty after sanitizing is refused before anything
+    // is read or written, with the same answer the signup path gives.
+    if (!firstName) {
+      return NextResponse.json(
+        { success: false, message: NAME_REQUIRED_MESSAGE },
+        { status: 400 }
+      );
+    }
 
     // Update the existing users row (sync-profile created it on callback),
     // respecting it: never touch created_at/email. The names are written only

@@ -27,12 +27,12 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M6  a throwing delete not caught                             -> R5
  *   M7  email_confirm removed from the createUser attributes     -> C1
  *   M8  email lower-casing or trimming removed                   -> C1, S1
- *   M9  the metadata names changed or the placeholder replaced   -> C1, C2
+ *   M9  the metadata names changed                               -> C1, C2
  *   M10 the pause gate ignored or made constant false            -> G2
  *   M11 the password check moved after the pause gate            -> G1
  *   M12 an email address or raw error object in a log line       -> L1, L2
  *   M13 a welcome email sent after a failed survey save          -> F2
- *   M14 an empty email put in the response or sent a welcome     -> S3
+ *   M14 the email checked before it is trimmed                   -> V2
  *   M15 classification by message text ahead of the code         -> D1, D2, D6
  *   M16 the weak_password branch removed                         -> D3
  *   M17 the message fallback removed for errors without a code   -> D4
@@ -42,9 +42,19 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M21 a failed lookup treated as "no row"                      -> B3
  *   M22 the duplicate path deleting or creating anything         -> B1, B2, B3
  *   M23 the SURVEY_SAVE_FAILED code missing from the failure     -> F3
- *   M24 the placeholder returned to the client as a name         -> P1
+ *   M24 the response's first-name mapping changed                -> V7
  *   M25 a failed rollback changing the response                  -> R1, R3, R5
  *   M26 a users insert error logged without toLogSafeError       -> L1
+ *   M27 an input check moved ahead of the pause gate             -> V1
+ *   M28 a non-string email reaching the normalization            -> V3
+ *   M29 the email format check removed                           -> V4
+ *   M30 the first-name check removed or replaced by a default    -> V5
+ *   M31 the first name checked ahead of the email                -> V6
+ *   M32 the first name not sanitized in the module before it is
+ *       checked, or the raw value stored or sent                 -> V5, V8
+ *   M33 the raw first name returned to the client                -> V8
+ *   M34 the last name not sanitized in the module, or an empty
+ *       one kept instead of null                                 -> V9
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -154,17 +164,113 @@ describe("createUser attributes", () => {
     });
   });
 
-  it("C2 an empty first name becomes the placeholder; an empty last name stays null", async () => {
+  it("C2 an empty last name stays null", async () => {
     const d = deps();
-    await createEmailAccount(input({ firstName: null, lastName: null }), d);
+    await createEmailAccount(input({ firstName: "Ann", lastName: null }), d);
     expect(d.createAuthUser.mock.calls[0][0].user_metadata).toEqual({
-      first_name: DEFAULT_FIRST_NAME,
+      first_name: "Ann",
       last_name: null,
     });
     expect(d.insertProfile.mock.calls[0][0]).toMatchObject({
-      first_name: DEFAULT_FIRST_NAME,
+      first_name: "Ann",
       last_name: null,
     });
+  });
+});
+
+describe("input checks after the gates", () => {
+  it("V1 a paused signup answers 403 whatever the email and name are", async () => {
+    const invalid: Array<Partial<EmailSignupInput>> = [
+      { email: "   " },
+      { email: 42 },
+      { email: "a@b" },
+      { firstName: null },
+    ];
+    for (const overrides of invalid) {
+      const d = deps({ isSignupDisabled: vi.fn(() => true) });
+      const result = await createEmailAccount(input(overrides), d);
+      expect(result.status).toBe(403);
+      expect(d.createAuthUser).not.toHaveBeenCalled();
+    }
+  });
+
+  it("V2 an email of only whitespace is 400 Email is required and creates nothing", async () => {
+    const d = deps();
+    const result = await createEmailAccount(input({ email: "   " }), d);
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ success: false, message: "Email is required" });
+    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.sendWelcomeEmail).not.toHaveBeenCalled();
+  });
+
+  it.each([42, {}, ["a@b.co"]])(
+    "V3 a non-string email (%j) is 400 Email is required, not a throw",
+    async (email) => {
+      const d = deps();
+      const result = await createEmailAccount(input({ email }), d);
+      expect(result.status).toBe(400);
+      expect(result.body).toEqual({ success: false, message: "Email is required" });
+      expect(d.createAuthUser).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["a@b", "a b@c.co", "@x.co", "x@.co"])(
+    "V4 a malformed email (%j) is 400 with fixed text and creates nothing",
+    async (email) => {
+      const d = deps();
+      const result = await createEmailAccount(input({ email }), d);
+      expect(result.status).toBe(400);
+      expect(result.body).toEqual({
+        success: false,
+        message: "Please enter a valid email address",
+      });
+      expect(d.createAuthUser).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([null, "", "   ", "\u0001"])(
+    "V5 an empty first name (%j) is 400 with fixed text and writes nothing",
+    async (firstName) => {
+      const d = deps();
+      const result = await createEmailAccount(input({ firstName }), d);
+      expect(result.status).toBe(400);
+      expect(result.body).toEqual({ success: false, message: "First name is required" });
+      expect(d.createAuthUser).not.toHaveBeenCalled();
+      expect(d.insertProfile).not.toHaveBeenCalled();
+    }
+  );
+
+  it("V6 the email is checked before the first name", async () => {
+    const d = deps();
+    const result = await createEmailAccount(input({ email: "a@b", firstName: null }), d);
+    expect(result.body).toEqual({
+      success: false,
+      message: "Please enter a valid email address",
+    });
+  });
+
+  it("V8 the sanitized first name is the one stored, put in the metadata and sent", async () => {
+    const d = deps();
+    const result = await createEmailAccount(input({ firstName: "  Ann   Lee " }), d);
+    expect(d.insertProfile.mock.calls[0][0].first_name).toBe("Ann Lee");
+    expect(d.createAuthUser.mock.calls[0][0].user_metadata.first_name).toBe("Ann Lee");
+    expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, "Ann Lee");
+    expect((result.body.profile as Record<string, unknown>).firstName).toBe("Ann Lee");
+  });
+
+  it("V9 the last name is sanitized here, and one that sanitizes to nothing is null", async () => {
+    const d = deps();
+    const result = await createEmailAccount(input({ lastName: "  Lee \u0001 " }), d);
+    expect(d.createAuthUser.mock.calls[0][0].user_metadata.last_name).toBe("Lee");
+    expect(d.insertProfile.mock.calls[0][0].last_name).toBe("Lee");
+    expect((result.body.profile as Record<string, unknown>).lastName).toBe("Lee");
+
+    const blank = deps();
+    const blankResult = await createEmailAccount(input({ lastName: "   " }), blank);
+    expect(blank.createAuthUser.mock.calls[0][0].user_metadata.last_name).toBeNull();
+    expect(blank.insertProfile.mock.calls[0][0].last_name).toBeNull();
+    expect((blankResult.body.profile as Record<string, unknown>).lastName).toBeNull();
   });
 });
 
@@ -220,28 +326,24 @@ describe("success path", () => {
   });
 });
 
-describe("placeholder first name in the response", () => {
-  it("P1 is returned as an empty name, while the stored row and metadata keep the placeholder", async () => {
+describe("a real first name equal to the placeholder", () => {
+  // Records current behavior; it is not the intended one. The placeholder and
+  // a real first name that happens to equal it cannot be told apart, so this
+  // name is stored as given and returned to the client as empty. A change that
+  // resolves the collision turns this test red and should update it.
+  it("V7 records current behavior, a known collision: a real first name \"User\" is stored as is and returned empty", async () => {
     const d = deps();
-    const result = await createEmailAccount(input({ firstName: null }), d);
+    const result = await createEmailAccount(
+      input({ firstName: DEFAULT_FIRST_NAME }),
+      d
+    );
     expect(result.status).toBe(200);
-    expect((result.body.profile as Record<string, unknown>).firstName).toBe("");
     expect(d.insertProfile.mock.calls[0][0].first_name).toBe(DEFAULT_FIRST_NAME);
     expect(d.createAuthUser.mock.calls[0][0].user_metadata.first_name).toBe(
       DEFAULT_FIRST_NAME
     );
+    expect((result.body.profile as Record<string, unknown>).firstName).toBe("");
     expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, DEFAULT_FIRST_NAME);
-  });
-});
-
-describe("whitespace-only email", () => {
-  it("S3 leaves no email key in the response and sends no welcome email", async () => {
-    const d = deps();
-    const result = await createEmailAccount(input({ email: "   " }), d);
-    expect(result.status).toBe(200);
-    const profile = result.body.profile as Record<string, unknown>;
-    expect(Object.prototype.hasOwnProperty.call(profile, "email")).toBe(false);
-    expect(d.sendWelcomeEmail).not.toHaveBeenCalled();
   });
 });
 

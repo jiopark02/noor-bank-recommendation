@@ -14,11 +14,17 @@ import { describe, it, expect } from "vitest";
  *   P3  the recovery record adapter recording a different value     -> W2
  *   P4  clearPassword leaving confirmPassword in place              -> W3
  *   P5  the success path ignoring the recovered choice              -> W4
+ *   P6  the submit gate testing the unsanitized first name          -> W5
+ *   P7  the submit gate dropping the email format check, or applying
+ *       it to a signed-in submit                                    -> W5
+ *   P8  the first-name field no longer marking itself touched       -> W6
+ *   P9  the first-name error testing the unsanitized name           -> W6
  *
  * The masking matches surveyRouteWiring.test.ts: comments are blanked and,
- * in `code`, so are string contents; whitespace is collapsed. Only
- * handleSubmit is searched, so JSX text elsewhere in the file cannot
- * confuse the quote tracking.
+ * in `code`, so are string contents; whitespace is collapsed. Besides
+ * handleSubmit, only three short regions are searched (the derived input
+ * checks, the first-name field and the submit button's disabled condition),
+ * so JSX text elsewhere in the file cannot confuse the quote tracking.
  */
 
 const PAGE = fileURLToPath(new URL("../../app/survey/page.tsx", import.meta.url));
@@ -126,5 +132,45 @@ describe("survey page wiring: failed survey save", () => {
     expect(success).toMatch(
       /recordSignedInUser\( ?result\.userId, staySignedInAfterSubmit\(\{ isAuthed, recoveredChoice: recoveredStaySignedIn, formChoice: data\.staySignedIn,? \}\) ?\);/
     );
+  });
+});
+
+/** The page's text from `start` up to `end`, comments blanked, whitespace collapsed. */
+function pageRegion(start: string, end: string): string {
+  const source = readFileSync(PAGE, "utf8");
+  const from = source.indexOf(start);
+  expect(from, `${start} must be present`).not.toBe(-1);
+  const to = source.indexOf(end, from + start.length);
+  expect(to, `${end} must follow ${start}`).not.toBe(-1);
+  return mask(source.slice(from, to), false).replace(/\s+/g, " ");
+}
+
+describe("survey page wiring: sanitized name and email checks", () => {
+  it("W5 the submit gate uses the sanitized name, and the email format only before sign-in", () => {
+    const derived = pageRegion("const passwordsMatch", "const handleSubmit = async");
+    expect(derived).toContain(
+      "const firstNameMissing = !sanitizeNameField(data.firstName);"
+    );
+    expect(derived).toMatch(
+      /const emailValid = useMemo\( ?\(\) => validateEmail\(data\.email\)\.isValid, ?\[data\.email\] ?\);/
+    );
+
+    const gate = pageRegion("onClick={handleSubmit}", "className=");
+    expect(gate).toContain("firstNameMissing ||");
+    expect(gate).not.toContain("!data.firstName");
+    expect(gate).not.toContain("!data.email");
+    expect(gate).toMatch(/\(!isAuthed && \(!emailValid \|\|/);
+    expect(gate.split("!emailValid").length - 1).toBe(1);
+  });
+
+  it("W6 the first-name field marks itself touched and shows its error on the sanitized name", () => {
+    const field = pageRegion(
+      'placeholder={t("survey.step1.firstName")}',
+      't("errors.required")'
+    );
+    expect(field).toMatch(
+      /onChange=\{\(v\) => \{ updateField\("firstName", v\); markTouched\("firstName"\); \}\}/
+    );
+    expect(field).toContain('touchedFields.has("firstName") && firstNameMissing');
   });
 });

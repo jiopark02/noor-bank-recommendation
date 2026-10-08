@@ -1,7 +1,8 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { toLogSafeError } from "./logSafeError";
-import { DEFAULT_FIRST_NAME, firstNameForClient } from "./defaultFirstName";
+import { firstNameForClient } from "./defaultFirstName";
 import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "./signupCodes";
+import { sanitizeNameField, validateEmail } from "./validation";
 
 /**
  * The email/password signup half of POST /api/survey — every branch, none of
@@ -14,8 +15,15 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "./signupCodes";
  *      missing looks anonymous here, but it sends no password; a real signup
  *      does. This comes before the pause gate so a signed-in user is not told
  *      that signups are paused.
- *   2. Signups paused: 403, before any account is created.
- *   3. No email: 400.
+ *   2. Signups paused: 403, before any account is created and before any
+ *      input is checked, so a paused signup answers 403 whatever it sends.
+ *   3. Input, checked on cleaned values, email first: an email that is
+ *      missing, empty after trimming or not a string is 400; an email that
+ *      fails the same format check the survey page uses is 400. Both names
+ *      are sanitized here (sanitizeNameField), whatever the caller did: a
+ *      first name that is empty after sanitizing is 400, and a last name that
+ *      is empty after sanitizing becomes null. The sanitized values are the
+ *      ones stored, sent and returned. None of these carries a code.
  *   4. Create the Auth user. The attributes are built here, not by the caller.
  *      A refusal is classified by its error code first (see
  *      classifyCreateUserError). For a duplicate email, the public.users row
@@ -47,6 +55,9 @@ const AUTH_REQUIRED_MESSAGE =
 const SIGNUP_PAUSED_MESSAGE =
   "New signups are temporarily paused. Please join the waitlist and we'll email you when signups reopen.";
 const EMAIL_REQUIRED_MESSAGE = "Email is required";
+const EMAIL_INVALID_MESSAGE = "Please enter a valid email address";
+/** Also answered by the route's signed-in path for an empty first name. */
+export const NAME_REQUIRED_MESSAGE = "First name is required";
 const DUPLICATE_EMAIL_MESSAGE = "An account with this email already exists";
 const ACCOUNT_INCOMPLETE_MESSAGE =
   "An account with this email already exists, but its setup was not completed. Please contact support.";
@@ -68,8 +79,9 @@ export type EmailSignupInput = {
   /** Raw request values; email and password are not yet validated. */
   email: unknown;
   password: unknown;
-  /** Already sanitized; null when empty. */
+  /** Sanitized again here before it is checked; null when empty. */
   firstName: string | null;
+  /** Sanitized again here; empty after sanitizing becomes null. */
   lastName: string | null;
   destinationCountry: unknown;
   institutionId: unknown;
@@ -228,22 +240,31 @@ export async function createEmailAccount(
     return failure(403, SIGNUP_PAUSED_MESSAGE);
   }
 
-  if (!input.email) {
+  // Trimmed before it is checked, so an email of only whitespace is missing
+  // rather than an empty address. A non-string email counts as missing.
+  const email =
+    typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
+  if (!email) {
     return failure(400, EMAIL_REQUIRED_MESSAGE);
   }
+  if (!validateEmail(email).isValid) {
+    return failure(400, EMAIL_INVALID_MESSAGE);
+  }
 
-  // A non-string email or password throws here, as it did before this module
-  // existed; the route's catch answers it.
-  const email = (input.email as string).toLowerCase().trim();
+  const firstName = sanitizeNameField(input.firstName);
+  if (!firstName) {
+    return failure(400, NAME_REQUIRED_MESSAGE);
+  }
+  const lastName = sanitizeNameField(input.lastName) || null;
+
   const password = input.password as string;
-  const firstName = input.firstName || DEFAULT_FIRST_NAME;
   const now = deps.now();
 
   const { userId, error: createError } = await deps.createAuthUser({
     email,
     password,
     email_confirm: true,
-    user_metadata: { first_name: firstName, last_name: input.lastName },
+    user_metadata: { first_name: firstName, last_name: lastName },
   });
 
   if (createError || !userId) {
@@ -263,7 +284,7 @@ export async function createEmailAccount(
     id: userId,
     email,
     first_name: firstName,
-    last_name: input.lastName,
+    last_name: lastName,
     raw_user_meta_data: {
       source: "survey_signup",
       destination_country: input.destinationCountry || null,
@@ -301,23 +322,19 @@ export async function createEmailAccount(
     });
   }
 
-  // An email that was only whitespace is empty here; as before this module
-  // existed, no welcome email is attempted and the response carries no email.
-  if (email) {
-    try {
-      const sent = await deps.sendWelcomeEmail(email, firstName);
-      if (!sent) {
-        emit(deps, "[signup] welcome email not sent (returned false) user_id=" + userId);
-      }
-    } catch (error) {
-      emit(
-        deps,
-        "[signup] welcome email not sent (threw) user_id=" +
-          userId +
-          " " +
-          safeErrorText(error)
-      );
+  try {
+    const sent = await deps.sendWelcomeEmail(email, firstName);
+    if (!sent) {
+      emit(deps, "[signup] welcome email not sent (returned false) user_id=" + userId);
     }
+  } catch (error) {
+    emit(
+      deps,
+      "[signup] welcome email not sent (threw) user_id=" +
+        userId +
+        " " +
+        safeErrorText(error)
+    );
   }
 
   return {
@@ -327,8 +344,8 @@ export async function createEmailAccount(
       userId,
       profile: {
         firstName: firstNameForClient(firstName),
-        lastName: input.lastName,
-        ...(email ? { email } : {}),
+        lastName,
+        email,
         institutionId: input.institutionId || null,
         university: input.university || null,
         countryOfOrigin: input.countryOfOrigin || null,

@@ -11,6 +11,7 @@ import {
   getPasswordStrengthLabel,
   createSession,
   acceptTerms,
+  sanitizeNameField,
 } from "@/lib/validation";
 import {
   supabase,
@@ -493,6 +494,15 @@ export default function SurveyPage() {
   const passwordsMatch =
     data.password === data.confirmPassword && data.confirmPassword.length > 0;
 
+  // Judged as the server judges them: a name that sanitizes to nothing (only
+  // spaces or control characters) is missing, and the email must pass the
+  // same format check the server applies.
+  const firstNameMissing = !sanitizeNameField(data.firstName);
+  const emailValid = useMemo(
+    () => validateEmail(data.email).isValid,
+    [data.email]
+  );
+
   // Update email validation state
   useEffect(() => {
     if (data.email && touchedFields.has("email")) {
@@ -758,9 +768,12 @@ export default function SurveyPage() {
             <Input
               placeholder={t("survey.step1.firstName")}
               value={data.firstName}
-              onChange={(v) => updateField("firstName", v)}
+              onChange={(v) => {
+                updateField("firstName", v);
+                markTouched("firstName");
+              }}
               error={
-                touchedFields.has("firstName") && !data.firstName
+                touchedFields.has("firstName") && firstNameMissing
                   ? t("errors.required")
                   : null
               }
@@ -1224,11 +1237,11 @@ export default function SurveyPage() {
             disabled={
               isSubmitting ||
               !data.agreeToTerms ||
-              !data.firstName ||
+              firstNameMissing ||
               !data.monthlyIncome ||
               !data.monthlyExpenses ||
               (!isAuthed &&
-                (!data.email ||
+                (!emailValid ||
                   !passwordValidation.isValid ||
                   !passwordsMatch))
             }
