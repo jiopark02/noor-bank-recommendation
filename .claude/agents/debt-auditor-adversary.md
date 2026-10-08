@@ -3,7 +3,7 @@ name: debt-auditor-adversary
 description: "Second-pass reporter used only on questions a first pass answered ABSENT or PARTIAL. Carries the opposite burden of proof: it must actively search for evidence that the thing DOES exist. Read-only."
 tools: Read, Grep, Glob
 disallowedTools: Write, Edit, NotebookEdit, Bash
-model: claude-sonnet-5-5
+model: sonnet
 maxTurns: 40
 color: orange
 ---
