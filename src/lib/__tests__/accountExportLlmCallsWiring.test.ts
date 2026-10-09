@@ -93,8 +93,22 @@ describe("account export: llm_calls", () => {
 });
 
 describe("llm_calls migration: the DO block's expected CHECK names", () => {
+  it("leave no CHECK in the CREATE TABLE without a constraint name", () => {
+    // Every CHECK in this file sits on a `constraint <name>` line or on the
+    // line right after one. A CHECK anywhere else (a column-level CHECK, or one
+    // under a bare table-level CHECK) gets a generated name the DO block's list
+    // cannot know, so it is rejected here.
+    const lines = CREATE_TABLE.split("\n");
+    const unnamed = lines.filter((line, i) => {
+      if (!/\bcheck\s*\(/.test(line)) return false;
+      if (/^\s+constraint [a-z_]+\s+check\s*\(/.test(line)) return false;
+      return !(i > 0 && /^\s+constraint [a-z_]+\s*$/.test(lines[i - 1]));
+    });
+    expect(unnamed).toEqual([]);
+  });
+
   it("are exactly the constraints the CREATE TABLE defines", () => {
-    const defined = allMatches(CREATE_TABLE, /^ {2}constraint ([a-z_]+)$/gm);
+    const defined = allMatches(CREATE_TABLE, /^\s+constraint ([a-z_]+)\b/gm);
     expect(defined.length).toBeGreaterThan(0);
 
     const doStart = MIGRATION.indexOf("\ndo $$");
@@ -112,5 +126,9 @@ describe("llm_calls migration: the DO block's expected CHECK names", () => {
 
     expect(new Set(expected).size).toBe(expected.length);
     expect([...expected].sort()).toEqual([...defined].sort());
+  });
+
+  it("are the list the DO block's EXCEPT query compares against", () => {
+    expect(MIGRATION).toContain("select unnest(v_expected_checks)");
   });
 });
