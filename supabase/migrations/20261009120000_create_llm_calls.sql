@@ -17,12 +17,15 @@
 -- RLS is on with no policies, and every privilege is revoked from anon and
 -- authenticated. The DO block at the end checks the end state by property and
 -- rolls the whole file back unless all of these hold: neither anon nor
--- authenticated holds any table privilege (REFERENCES and TRIGGER included),
--- RLS is on, no policy exists, every CHECK constraint named below exists (so a
+-- authenticated holds any table privilege (REFERENCES and TRIGGER included)
+-- or any column-level SELECT, INSERT, UPDATE or REFERENCES, RLS is on, no policy exists, every CHECK constraint named below exists (so a
 -- pre-existing table of another shape, which `create table if not exists`
 -- would silently keep, is caught), and service_role can INSERT and SELECT.
 -- This file grants nothing; if service_role lacks either privilege, the file
--- stops here rather than leaving every insert to fail with 42501.
+-- stops here rather than leaving every insert to fail with 42501. The fix is
+--   grant select, insert on public.llm_calls to service_role;
+-- added above the DO block, then run the file again. It cannot be run on its
+-- own afterwards: the failure rolls the CREATE TABLE back with everything else.
 --
 -- Deletion: user_id cascades from public.users, so account deletion removes a
 -- user's rows with the rest of their data. session_id is set to NULL when a
@@ -145,12 +148,13 @@ comment on column public.llm_calls.succeeded is
   'user receives the fallback text). A real success is error_class IS NULL.';
 comment on column public.llm_calls.error_class is
   'Application-chosen classification, never provider text. invalid_json: the '
-  'body did not parse as JSON; on cron rows it also covers a connection '
-  'dropped while the body was being read.';
+  'body did not parse as JSON; on both chat and cron rows it also covers a '
+  'connection dropped while the body was being read.';
 comment on column public.llm_calls.has_balance_block is
   'True only when the Verified Balance Snapshot block was attached to the '
-  'system prompt; the no-snapshot fallback sentence does not count. NULL on '
-  'cron rows.';
+  'system prompt; the no-snapshot fallback sentence does not count. Under the '
+  'balances Plaid state mode, balances reach the model inside the capability '
+  'scaffold block and this flag stays false. NULL on cron rows.';
 comment on column public.llm_calls.has_plaid_scaffold_block is
   'True when the Plaid capability block was attached, including the '
   'unknown-state fallback block used when the Plaid state read failed. NULL on '
@@ -176,6 +180,7 @@ declare
     'llm_calls_block_flags_chat_only_check'
   ];
   v_remaining text;
+  v_column_grantees text;
   v_rls boolean;
   v_policies integer;
   v_missing text[];
@@ -193,6 +198,20 @@ begin
     raise exception
       'llm_calls: client roles still hold privileges after revoke: %',
       v_remaining;
+  end if;
+
+  -- has_table_privilege does not see column-level grants.
+  select string_agg(r.role_name, ', ')
+    into v_column_grantees
+    from unnest(array['anon', 'authenticated']) as r(role_name)
+   where has_any_column_privilege(
+           r.role_name, v_table, 'SELECT,INSERT,UPDATE,REFERENCES'
+         );
+
+  if v_column_grantees is not null then
+    raise exception
+      'llm_calls: client roles still hold column privileges after revoke: %',
+      v_column_grantees;
   end if;
 
   select c.relrowsecurity into v_rls from pg_class c where c.oid = v_table;
@@ -223,7 +242,7 @@ begin
   if not has_table_privilege('service_role', v_table, 'INSERT')
      or not has_table_privilege('service_role', v_table, 'SELECT') then
     raise exception
-      'llm_calls: service_role lacks INSERT or SELECT; this file grants nothing';
+      'llm_calls: service_role lacks INSERT or SELECT; this file grants nothing. To fix, add "grant select, insert on public.llm_calls to service_role;" above the DO block and run the file again (this failure rolled the table back)';
   end if;
 end
 $$;
