@@ -17,6 +17,13 @@ import { describe, it, expect } from "vitest";
  * text to the client. Each fixture below was copied from the route as it was
  * before telemetry, and must appear in the route exactly once.
  *
+ * The telemetry inputs are pinned too, because a wrong value there passes
+ * every CHECK and lands as quietly wrong data: the prompt-block flags and the
+ * attempt counter (LOOP_HEAD), the arguments of the row written once a
+ * response arrives (SUCCESS_ROW), and, in both crons, where the observed status
+ * and the parsed flag are assigned (STATUS_AFTER_FETCH,
+ * JSON_PARSED_AFTER_PARSE).
+ *
  * Two behaviors are kept on purpose and are guarded here: a fetch that throws
  * is not retried on the next model (callOpenRouter rethrows it), and the last
  * failed model's error text still reaches the client (fixture v).
@@ -127,9 +134,19 @@ const FIXTURE_V = `      return NextResponse.json(
       );
 `;
 
-// The loop head as wired: the counter and the call, and nothing between them
-// and the success branch (no try, no continue).
-const LOOP_HEAD = `      for (const model of modelsToTry) {
+// The loop head as wired: the prompt-block flags written into every chat row,
+// the counter starting at 0 and incremented once per model, the call, and
+// nothing between them and the success branch (no try, no continue).
+const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for llm_calls only.
+      const promptBlocks: ChatPromptBlocks = {
+        memory: memoryBlock !== "",
+        plaidScaffold: capabilityScaffoldDecision.allowed,
+        balance: balanceSnapshotInjected,
+        financialSnapshot: financialSnapshotInjected,
+      };
+      let attemptIndex = 0;
+
+      for (const model of modelsToTry) {
         attemptIndex++;
         const result = await callOpenRouter(
           openRouterApiKey,
@@ -144,6 +161,52 @@ const LOOP_HEAD = `      for (const model of modelsToTry) {
         );
 
         if (result.ok) {
+`;
+
+// The row callOpenRouter writes once a response arrives: the real HTTP status,
+// and response metadata only when the body parsed as JSON.
+const SUCCESS_ROW = `  await recordLlmCall(
+    buildLlmCallRow({
+      route: "chat",
+      attemptIndex: telemetry.attemptIndex,
+      requestModel: model,
+      startedAtMs,
+      latencyMs: Date.now() - startedAtMs,
+      userId: telemetry.userId,
+      sessionId: telemetry.sessionId,
+      httpStatus: res.status,
+      outcome: classifyLlmOutcome({
+        route: "chat",
+        httpStatus: res.status,
+        threw: false,
+        jsonParsed,
+        contentPresent: hasNonEmptyContent(data),
+      }),
+      meta: jsonParsed ? parseOpenRouterResponseMeta(data) : null,
+      blocks: telemetry.blocks,
+    })
+  );
+
+  return result;
+`;
+
+// In both crons' request functions: the status is observed as soon as fetch
+// returns, before the ok check can throw...
+const STATUS_AFTER_FETCH = `    }),
+  });
+  observed.httpStatus = response.status;
+
+  if (!response.ok) {
+`;
+
+// ...and jsonParsed is set only after the body has parsed, so a parse failure
+// is classified invalid_json rather than empty_content.
+const JSON_PARSED_AFTER_PARSE = `  try {
+    data = await response.json();
+  } catch {
+    throw new Error("OpenRouter response was not valid JSON");
+  }
+  observed.jsonParsed = true;
 `;
 
 describe("chat route: the branches that decide the response are unchanged", () => {
@@ -190,13 +253,28 @@ describe("chat route: callOpenRouter", () => {
     expect(recordAt).toBeGreaterThan(-1);
     expect(returnAt).toBeGreaterThan(recordAt);
   });
+
+  it("writes the response row with the real status and parsed-only metadata", () => {
+    expect(occurrences(body, norm(SUCCESS_ROW))).toBe(1);
+  });
 });
 
 describe.each([
-  ["summarize", SUMMARIZE, "callOpenRouterForSummary", "cron_summarize"],
-  ["extract-facts", EXTRACT, "callOpenRouterForExtraction", "cron_extract_facts"],
-])("%s cron", (_label, source, fn, route) => {
+  ["summarize", SUMMARIZE, "callOpenRouterForSummary", "requestSummary", "cron_summarize"],
+  ["extract-facts", EXTRACT, "callOpenRouterForExtraction", "requestExtraction", "cron_extract_facts"],
+])("%s cron", (_label, source, fn, requestFn, route) => {
   const body = functionBody(source, fn);
+  const requestBody = functionBody(source, requestFn);
+
+  it("observes the status right after fetch, before the ok check", () => {
+    expect(occurrences(requestBody, norm(STATUS_AFTER_FETCH))).toBe(1);
+    expect(occurrences(requestBody, "observed.httpStatus =")).toBe(1);
+  });
+
+  it("marks the body parsed only after JSON parsing succeeds", () => {
+    expect(occurrences(requestBody, norm(JSON_PARSED_AFTER_PARSE))).toBe(1);
+    expect(occurrences(requestBody, "observed.jsonParsed =")).toBe(1);
+  });
 
   it("records in a finally, so every exit writes a row", () => {
     const finallyAt = body.indexOf("} finally {");

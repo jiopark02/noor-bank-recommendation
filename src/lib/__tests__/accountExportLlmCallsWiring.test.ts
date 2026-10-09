@@ -7,9 +7,17 @@ import { describe, it, expect } from "vitest";
  * theirs.
  *
  * The select names its columns rather than using `*`, so a column added to
- * llm_calls later is not exported until someone decides it should be. Every
- * column except user_id is listed; the payload's top-level user_id already
- * carries that value.
+ * llm_calls later is not exported until someone decides it should be. The
+ * list must be the migration's columns, in order, minus user_id; the payload's
+ * top-level user_id already carries that value. Both sides are read from the
+ * files themselves, so a typo in the export list (which PostgREST would answer
+ * with a 400, failing every export) or a column added to the migration fails
+ * here rather than only live.
+ *
+ * The same migration's closing DO block lists the CHECK constraints it expects
+ * to find. That list must name exactly the constraints the CREATE TABLE
+ * defines, or the check would either miss a constraint or fail on a name that
+ * never exists.
  *
  * ⚠️ A SOURCE PROBE. It shows the query is written with the user filter and
  * the column list. It cannot show the table exists where the route runs: if it
@@ -17,13 +25,42 @@ import { describe, it, expect } from "vitest";
  * failed section fails the export. That is checked live.
  */
 
-const SOURCE = readFileSync(
-  fileURLToPath(new URL("../../app/api/account/export/route.ts", import.meta.url)),
-  "utf8"
-).replace(/\r\n?/g, "\n");
+function read(relativePath: string): string {
+  return readFileSync(
+    fileURLToPath(new URL(relativePath, import.meta.url)),
+    "utf8"
+  ).replace(/\r\n?/g, "\n");
+}
 
-const EXPORTED_COLUMNS =
-  "id, created_at, started_at, route, attempt_index, request_model, response_model, generation_id, succeeded, http_status, error_class, finish_reason, latency_ms, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, provider_cost, has_memory_block, has_plaid_scaffold_block, has_balance_block, has_financial_snapshot_block, engine_reason_code, session_id";
+const SOURCE = read("../../app/api/account/export/route.ts");
+const MIGRATION = read(
+  "../../../supabase/migrations/20261009120000_create_llm_calls.sql"
+);
+
+function allMatches(text: string, pattern: RegExp): string[] {
+  const found: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    found.push(match[1]);
+  }
+  return found;
+}
+
+/** The CREATE TABLE body, from its opening line to the closing `);`. */
+const CREATE_TABLE = (() => {
+  const start = MIGRATION.indexOf("create table if not exists public.llm_calls (");
+  expect(start, "CREATE TABLE not found").toBeGreaterThan(-1);
+  const end = MIGRATION.indexOf("\n);\n", start);
+  expect(end, "CREATE TABLE has no closing").toBeGreaterThan(start);
+  return MIGRATION.slice(start, end);
+})();
+
+/** Column names: two-space-indented lines before the first constraint. */
+const MIGRATION_COLUMNS = (() => {
+  const end = CREATE_TABLE.indexOf("\n  constraint ");
+  expect(end, "no constraint section in CREATE TABLE").toBeGreaterThan(-1);
+  return allMatches(CREATE_TABLE.slice(0, end), /^ {2}([a-z_]+) /gm);
+})();
 
 describe("account export: llm_calls", () => {
   const query = (() => {
@@ -37,19 +74,43 @@ describe("account export: llm_calls", () => {
     expect(query).toContain('.eq("user_id", authUserId)');
   });
 
-  it("selects the named columns, not *", () => {
-    expect(query).toContain(`"${EXPORTED_COLUMNS}"`);
-    expect(query).not.toContain('select("*")');
-  });
+  it("selects the migration's columns, in order, minus user_id", () => {
+    expect(MIGRATION_COLUMNS).toContain("id");
+    expect(MIGRATION_COLUMNS).toContain("user_id");
+    expect(MIGRATION_COLUMNS).toContain("session_id");
 
-  it("leaves out user_id only", () => {
-    const columns = EXPORTED_COLUMNS.split(", ");
-    expect(columns).not.toContain("user_id");
-    expect(columns).toContain("generation_id");
-    expect(columns).toContain("engine_reason_code");
+    const select = /\.select\(\s*"([^"]*)"\s*\)/.exec(query);
+    expect(select, "llm_calls select list not found").not.toBeNull();
+    const exported = (select as RegExpExecArray)[1].split(", ");
+
+    expect(exported).toEqual(MIGRATION_COLUMNS.filter((c) => c !== "user_id"));
+    expect(query).not.toContain('select("*")');
   });
 
   it("adds the section to the payload", () => {
     expect(SOURCE).toContain('["llm_calls", llmCallsRes]');
+  });
+});
+
+describe("llm_calls migration: the DO block's expected CHECK names", () => {
+  it("are exactly the constraints the CREATE TABLE defines", () => {
+    const defined = allMatches(CREATE_TABLE, /^ {2}constraint ([a-z_]+)$/gm);
+    expect(defined.length).toBeGreaterThan(0);
+
+    const doStart = MIGRATION.indexOf("\ndo $$");
+    expect(doStart, "DO block not found").toBeGreaterThan(-1);
+    const arrayStart = MIGRATION.indexOf(
+      "v_expected_checks text[] := array[",
+      doStart
+    );
+    expect(arrayStart, "expected CHECK array not found").toBeGreaterThan(-1);
+    const arrayEnd = MIGRATION.indexOf("];", arrayStart);
+    const expected = allMatches(
+      MIGRATION.slice(arrayStart, arrayEnd),
+      /'([a-z_]+)'/g
+    );
+
+    expect(new Set(expected).size).toBe(expected.length);
+    expect([...expected].sort()).toEqual([...defined].sort());
   });
 });
