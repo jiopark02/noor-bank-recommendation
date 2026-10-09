@@ -17,6 +17,12 @@ import {
   type UserFactCategory,
   type NewUserFact,
 } from "@/lib/aiMemory";
+import { asPlainObject } from "@/lib/requestJson";
+import {
+  buildCronLlmCallRow,
+  type ObservedLlmCall,
+} from "@/lib/llmCallTelemetry";
+import { recordLlmCall } from "@/lib/llmCallLog";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -75,11 +81,45 @@ function resolveOpenRouterApiKey(): string | null {
  *
  * PR4 callOpenRouterForSummary와 동일한 throw 기반 동작.
  * 실패 시 throw → 바깥 세션 try/catch가 받아 processFailed 처리.
+ *
+ * Every exit records one llm_calls row first. recordLlmCall never rejects
+ * (llmCallLog.ts), so the `finally` cannot replace the error this throws or the
+ * content it returns.
  */
 async function callOpenRouterForExtraction(
   apiKey: string,
   systemPrompt: string,
-  userContent: string
+  userContent: string,
+  ctx: { userId: string; sessionId: string }
+): Promise<string> {
+  const startedAtMs = Date.now();
+  const observed: ObservedLlmCall = {
+    httpStatus: null,
+    jsonParsed: false,
+    data: null,
+  };
+  try {
+    return await requestExtraction(apiKey, systemPrompt, userContent, observed);
+  } finally {
+    await recordLlmCall(
+      buildCronLlmCallRow({
+        route: "cron_extract_facts",
+        requestModel: EXTRACTION_MODEL,
+        startedAtMs,
+        latencyMs: Date.now() - startedAtMs,
+        userId: ctx.userId,
+        sessionId: ctx.sessionId,
+        observed,
+      })
+    );
+  }
+}
+
+async function requestExtraction(
+  apiKey: string,
+  systemPrompt: string,
+  userContent: string,
+  observed: ObservedLlmCall
 ): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -96,6 +136,7 @@ async function callOpenRouterForExtraction(
       ],
     }),
   });
+  observed.httpStatus = response.status;
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
@@ -112,6 +153,8 @@ async function callOpenRouterForExtraction(
   } catch {
     throw new Error("OpenRouter response was not valid JSON");
   }
+  observed.jsonParsed = true;
+  observed.data = asPlainObject(data);
 
   const content: unknown =
     (data as { choices?: Array<{ message?: { content?: unknown } }> })
@@ -515,7 +558,8 @@ async function extractOneSession(
   const rawOutput = await callOpenRouterForExtraction(
     apiKey,
     EXTRACTION_SYSTEM_PROMPT,
-    userContent
+    userContent,
+    { userId: session.user_id, sessionId: session.id }
   );
   if (!rawOutput.trim()) {
     throw new Error(

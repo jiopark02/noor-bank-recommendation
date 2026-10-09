@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
  *     institution_name / status / item_id are exported.
  *   - admin_users — internal access-control data, not user-owned content.
  *   - waitlist_signups — pre-signup data with no user_id link.
+ *   - llm_calls.user_id — the payload's top-level user_id already carries it.
  *
  * If any per-table read fails, the whole export returns 500 rather than
  * silently handing back an incomplete file the user believes is complete.
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
     postsRes,
     commentsRes,
     plaidRes,
+    llmCallsRes,
   ] = await Promise.all([
     admin.from("users").select("*").eq("id", authUserId),
     admin.from("survey_responses").select("*").eq("user_id", authUserId),
@@ -51,6 +53,13 @@ export async function GET(request: NextRequest) {
       .from("plaid_connections")
       .select("institution_name, status, item_id")
       .eq("user_id", authUserId),
+    // Columns listed so a column added later is not exported by default.
+    admin
+      .from("llm_calls")
+      .select(
+        "id, created_at, started_at, route, attempt_index, request_model, response_model, generation_id, succeeded, http_status, error_class, finish_reason, latency_ms, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, provider_cost, has_memory_block, has_plaid_scaffold_block, has_balance_block, has_financial_snapshot_block, engine_reason_code, session_id"
+      )
+      .eq("user_id", authUserId),
   ]);
 
   const sections = [
@@ -63,6 +72,7 @@ export async function GET(request: NextRequest) {
     ["posts", postsRes],
     ["comments", commentsRes],
     ["plaid_connections", plaidRes],
+    ["llm_calls", llmCallsRes],
   ] as const;
 
   const failed = sections.filter(([, res]) => res.error).map(([key]) => key);
