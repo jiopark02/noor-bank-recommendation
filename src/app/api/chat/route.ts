@@ -9,7 +9,6 @@ import {
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import {
   asPlainObject,
-  readFiniteNumber,
   readRequestJson,
 } from "@/lib/requestJson";
 import {
@@ -40,6 +39,19 @@ import {
   evaluatePlaidEgressDecision,
   logPlaidEgressDecision,
 } from "@/lib/plaidEgressPolicy";
+import {
+  readJsonBodyLeniently,
+  toOpenRouterResult,
+  type OpenRouterResult,
+} from "@/lib/openRouterChatResult";
+import {
+  buildLlmCallRow,
+  classifyLlmOutcome,
+  hasNonEmptyContent,
+  parseOpenRouterResponseMeta,
+  type ChatPromptBlocks,
+} from "@/lib/llmCallTelemetry";
+import { recordLlmCall } from "@/lib/llmCallLog";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -208,18 +220,6 @@ function parseChatMessages(raw: unknown): ChatMessage[] | null {
     out.push({ role: o.role, content: o.content });
   }
   return out.length > 0 ? out : null;
-}
-
-interface OpenRouterResult {
-  ok: boolean;
-  status: number;
-  message?: string;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
-  error?: string;
-  model: string;
 }
 
 interface PlaidAccountSummary {
@@ -713,74 +713,98 @@ function selectOpenRouterModels(messages: ChatMessage[]): string[] {
   return dedupeModels([primaryModel, fallbackModel]);
 }
 
+interface ChatLlmCallContext {
+  attemptIndex: number;
+  userId: string;
+  sessionId: string | null;
+  blocks: ChatPromptBlocks;
+}
+
+/**
+ * One OpenRouter attempt. Every exit records one llm_calls row first.
+ *
+ * recordLlmCall never rejects (llmCallLog.ts), so the row write cannot replace
+ * a thrown fetch error or alter the returned result. A fetch that throws is
+ * rethrown unchanged: it is still not retried on the next model, and it still
+ * reaches POST's outer catch as before.
+ */
 async function callOpenRouter(
   apiKey: string,
   model: string,
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  telemetry: ChatLlmCallContext
 ): Promise<OpenRouterResult> {
-  const res = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: 1024,
-    }),
-  });
-
-  const data = asPlainObject(await res.json().catch(() => ({})));
-
-  if (!res.ok) {
-    const errNested = data.error;
-    const errObj =
-      typeof errNested === "object" && errNested !== null
-        ? asPlainObject(errNested)
-        : {};
-    const errMsg =
-      (typeof errObj.message === "string" ? errObj.message : undefined) ||
-      (typeof data.message === "string" ? data.message : undefined) ||
-      "OpenRouter request failed";
-    return {
-      ok: false,
-      status: res.status,
-      error: errMsg,
-      model,
-    };
+  const startedAtMs = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: 1024,
+      }),
+    });
+  } catch (error) {
+    await recordLlmCall(
+      buildLlmCallRow({
+        route: "chat",
+        attemptIndex: telemetry.attemptIndex,
+        requestModel: model,
+        startedAtMs,
+        latencyMs: Date.now() - startedAtMs,
+        userId: telemetry.userId,
+        sessionId: telemetry.sessionId,
+        httpStatus: null,
+        outcome: classifyLlmOutcome({
+          route: "chat",
+          httpStatus: null,
+          threw: true,
+          jsonParsed: false,
+          contentPresent: false,
+        }),
+        meta: null,
+        blocks: telemetry.blocks,
+      })
+    );
+    throw error;
   }
 
-  const choices = data.choices;
-  const firstChoice =
-    Array.isArray(choices) && choices.length > 0
-      ? asPlainObject(choices[0])
-      : {};
-  const messageObj = asPlainObject(firstChoice.message);
-  const rawContent = messageObj.content;
-  const assistantContent = typeof rawContent === "string" ? rawContent : "";
-  const usageRaw = data.usage;
-  const usageObj =
-    typeof usageRaw === "object" && usageRaw !== null
-      ? asPlainObject(usageRaw)
-      : null;
-
-  return {
-    ok: true,
-    status: 200,
+  const { data, jsonParsed } = await readJsonBodyLeniently(res);
+  const result = toOpenRouterResult({
+    ok: res.ok,
+    status: res.status,
+    data,
     model,
-    message: assistantContent || "Sorry, I could not generate a response.",
-    usage: usageObj
-      ? {
-          input_tokens:
-            readFiniteNumber(usageObj, "prompt_tokens") ??
-            readFiniteNumber(usageObj, "input_tokens"),
-          output_tokens:
-            readFiniteNumber(usageObj, "completion_tokens") ??
-            readFiniteNumber(usageObj, "output_tokens"),
-        }
-      : undefined,
-  };
+  });
+
+  await recordLlmCall(
+    buildLlmCallRow({
+      route: "chat",
+      attemptIndex: telemetry.attemptIndex,
+      requestModel: model,
+      startedAtMs,
+      latencyMs: Date.now() - startedAtMs,
+      userId: telemetry.userId,
+      sessionId: telemetry.sessionId,
+      httpStatus: res.status,
+      outcome: classifyLlmOutcome({
+        route: "chat",
+        httpStatus: res.status,
+        threw: false,
+        jsonParsed,
+        contentPresent: hasNonEmptyContent(data),
+      }),
+      meta: jsonParsed ? parseOpenRouterResponseMeta(data) : null,
+      blocks: telemetry.blocks,
+    })
+  );
+
+  return result;
 }
 
 /**
@@ -1110,10 +1134,12 @@ export async function POST(request: NextRequest) {
       wantsBalance,
     });
     logPlaidEgressDecision(balanceKeywordDecision, { mode: plaidStateMode });
+    let balanceSnapshotInjected = false;
     if (balanceKeywordDecision.allowed) {
       const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(request);
 
       if (balanceSummary) {
+        balanceSnapshotInjected = true;
         systemPrompt += `\n\n## Verified Balance Snapshot\n${balanceSummary}\n\nIf the user asks about their balance, respond in one sentence using exactly this verified snapshot. Do not change the amounts and do not add other accounts unless asked.`;
       } else {
         systemPrompt +=
@@ -1127,10 +1153,12 @@ export async function POST(request: NextRequest) {
       wantsFinancialAnalysis,
     });
     logPlaidEgressDecision(financialAnalysisDecision, { mode: plaidStateMode });
+    let financialSnapshotInjected = false;
     if (financialAnalysisDecision.allowed) {
       const snapshot = await fetchFinancialSnapshotFromPlaidRoutes(request);
 
       if (snapshot) {
+        financialSnapshotInjected = true;
         // SECURITY (prompt injection): subscription/merchant names and the top
         // spending category are external free text. When the Plaid-state feature
         // is on, sanitize them and wrap the subscription list in the <bank_data>
@@ -1221,12 +1249,27 @@ export async function POST(request: NextRequest) {
 
       const modelsToTry = selectOpenRouterModels(formattedMessages);
       let lastFailure: OpenRouterResult | null = null;
+      // Which optional blocks the system prompt carries, for llm_calls only.
+      const promptBlocks: ChatPromptBlocks = {
+        memory: memoryBlock !== "",
+        plaidScaffold: capabilityScaffoldDecision.allowed,
+        balance: balanceSnapshotInjected,
+        financialSnapshot: financialSnapshotInjected,
+      };
+      let attemptIndex = 0;
 
       for (const model of modelsToTry) {
+        attemptIndex++;
         const result = await callOpenRouter(
           openRouterApiKey,
           model,
-          openRouterMessages
+          openRouterMessages,
+          {
+            attemptIndex,
+            userId: authUserId,
+            sessionId: activeSession?.id ?? null,
+            blocks: promptBlocks,
+          }
         );
 
         if (result.ok) {
