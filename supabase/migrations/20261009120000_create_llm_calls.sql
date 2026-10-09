@@ -16,7 +16,13 @@
 -- Access: service role only, the same shape as admin_users and cron_runs.
 -- RLS is on with no policies, and every privilege is revoked from anon and
 -- authenticated. The DO block at the end checks the end state by property and
--- rolls the whole file back if either role still holds a privilege.
+-- rolls the whole file back unless all of these hold: neither anon nor
+-- authenticated holds any table privilege (REFERENCES and TRIGGER included),
+-- RLS is on, no policy exists, every CHECK constraint named below exists (so a
+-- pre-existing table of another shape, which `create table if not exists`
+-- would silently keep, is caught), and service_role can INSERT and SELECT.
+-- This file grants nothing; if service_role lacks either privilege, the file
+-- stops here rather than leaving every insert to fail with 42501.
 --
 -- Deletion: user_id cascades from public.users, so account deletion removes a
 -- user's rows with the rest of their data. session_id is set to NULL when a
@@ -133,22 +139,91 @@ comment on column public.llm_calls.provider_cost is
   'As reported by OpenRouter usage.cost.';
 comment on column public.llm_calls.engine_reason_code is
   'Reserved for recommendation-engine reason codes. Nothing writes it yet.';
+comment on column public.llm_calls.succeeded is
+  'True when the route accepted the provider response as its reply. For chat '
+  'this includes a 2xx whose body was not JSON or whose content was empty (the '
+  'user receives the fallback text). A real success is error_class IS NULL.';
+comment on column public.llm_calls.error_class is
+  'Application-chosen classification, never provider text. invalid_json: the '
+  'body did not parse as JSON; on cron rows it also covers a connection '
+  'dropped while the body was being read.';
+comment on column public.llm_calls.has_balance_block is
+  'True only when the Verified Balance Snapshot block was attached to the '
+  'system prompt; the no-snapshot fallback sentence does not count. NULL on '
+  'cron rows.';
+comment on column public.llm_calls.has_plaid_scaffold_block is
+  'True when the Plaid capability block was attached, including the '
+  'unknown-state fallback block used when the Plaid state read failed. NULL on '
+  'cron rows.';
 
 do $$
 declare
+  v_table regclass := 'public.llm_calls'::regclass;
+  v_expected_checks text[] := array[
+    'llm_calls_route_check',
+    'llm_calls_attempt_index_check',
+    'llm_calls_request_model_length_check',
+    'llm_calls_response_model_length_check',
+    'llm_calls_generation_id_length_check',
+    'llm_calls_http_status_check',
+    'llm_calls_error_class_check',
+    'llm_calls_failure_has_class_check',
+    'llm_calls_finish_reason_check',
+    'llm_calls_latency_check',
+    'llm_calls_tokens_check',
+    'llm_calls_provider_cost_check',
+    'llm_calls_engine_reason_code_check',
+    'llm_calls_block_flags_chat_only_check'
+  ];
   v_remaining text;
+  v_rls boolean;
+  v_policies integer;
+  v_missing text[];
 begin
   select string_agg(format('%s %s', r.role_name, p.privilege), ', ')
     into v_remaining
     from unnest(array['anon', 'authenticated']) as r(role_name)
-   cross join unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'])
-           as p(privilege)
-   where has_table_privilege(r.role_name, 'public.llm_calls', p.privilege);
+   cross join unnest(array[
+           'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES',
+           'TRIGGER'
+         ]) as p(privilege)
+   where has_table_privilege(r.role_name, v_table, p.privilege);
 
   if v_remaining is not null then
     raise exception
       'llm_calls: client roles still hold privileges after revoke: %',
       v_remaining;
+  end if;
+
+  select c.relrowsecurity into v_rls from pg_class c where c.oid = v_table;
+  if v_rls is distinct from true then
+    raise exception 'llm_calls: row level security is not enabled';
+  end if;
+
+  select count(*) into v_policies
+    from pg_policies
+   where schemaname = 'public' and tablename = 'llm_calls';
+  if v_policies <> 0 then
+    raise exception 'llm_calls: expected no policies, found %', v_policies;
+  end if;
+
+  v_missing := array(
+    select unnest(v_expected_checks)
+    except
+    select conname::text
+      from pg_constraint
+     where conrelid = v_table and contype = 'c'
+  );
+  if cardinality(v_missing) > 0 then
+    raise exception
+      'llm_calls: expected CHECK constraints are missing (the table may predate this file): %',
+      array_to_string(v_missing, ', ');
+  end if;
+
+  if not has_table_privilege('service_role', v_table, 'INSERT')
+     or not has_table_privilege('service_role', v_table, 'SELECT') then
+    raise exception
+      'llm_calls: service_role lacks INSERT or SELECT; this file grants nothing';
   end if;
 end
 $$;
