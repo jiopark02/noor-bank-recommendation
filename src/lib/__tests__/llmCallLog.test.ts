@@ -41,13 +41,14 @@ describe("recordLlmCall", () => {
     const insert = async () => ({ error: { code: "23503", message: "fk" } });
     await expect(recordLlmCall(row, { insert })).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0][1]).toEqual({ route: "chat", code: "23503" });
   });
 
   it("resolves when insert rejects, and names the route", async () => {
     const insert = () => Promise.reject(new Error("connection reset"));
     await expect(recordLlmCall(row, { insert })).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(errorSpy.mock.calls)).toContain('"route":"chat"');
+    expect(errorSpy.mock.calls[0][1]).toEqual({ route: "chat", code: null });
   });
 
   it("resolves when insert throws synchronously, and names the route", async () => {
@@ -56,7 +57,7 @@ describe("recordLlmCall", () => {
     };
     await expect(recordLlmCall(row, { insert })).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(errorSpy.mock.calls)).toContain('"route":"chat"');
+    expect(errorSpy.mock.calls[0][1]).toEqual({ route: "chat", code: null });
   });
 
   it("logs the route and error code, and no other row value", async () => {
@@ -87,6 +88,52 @@ describe("recordLlmCall", () => {
     expect(logged).not.toContain("Key (");
   });
 
+  it("logs the error code and never the error message", async () => {
+    const insert = async () => ({
+      error: {
+        code: "22P02",
+        message: 'invalid input syntax for type uuid: "message-sentinel"',
+      },
+    });
+    await expect(recordLlmCall(row, { insert })).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).toContain('"code":"22P02"');
+    expect(logged).not.toContain("message-sentinel");
+  });
+
+  it("resolves and logs a non-string route when reading route throws", async () => {
+    const throwingRow = {
+      get route(): string {
+        throw new Error("route-getter-sentinel");
+      },
+    } as unknown as LlmCallRow;
+    const insert = vi.fn(async () => ({ error: null }));
+    await expect(
+      recordLlmCall(throwingRow, { insert })
+    ).resolves.toBeUndefined();
+
+    expect(insert).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).toContain('"route":"non-string"');
+    expect(logged).not.toContain("route-getter-sentinel");
+  });
+
+  it("resolves and logs a non-string route when route is an object", async () => {
+    const objectRow = {
+      route: { sentinel: "object-route-sentinel" },
+    } as unknown as LlmCallRow;
+    const insert = async () => ({ error: { code: "23514", message: "check" } });
+    await expect(recordLlmCall(objectRow, { insert })).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).toContain('"route":"non-string"');
+    expect(logged).not.toContain("object-route-sentinel");
+  });
+
   it("resolves at 500ms for a chat row when insert never settles", async () => {
     vi.useFakeTimers();
     const insert = () => new Promise<{ error: unknown }>(() => undefined);
@@ -101,7 +148,7 @@ describe("recordLlmCall", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(settled).toBe(true);
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(warnSpy.mock.calls)).toContain('"route":"chat"');
+    expect(warnSpy.mock.calls[0][1]).toEqual({ route: "chat" });
     await pending;
   });
 
@@ -122,7 +169,7 @@ describe("recordLlmCall", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(settled).toBe(true);
       expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(JSON.stringify(warnSpy.mock.calls)).toContain(`"route":"${route}"`);
+      expect(warnSpy.mock.calls[0][1]).toEqual({ route });
       await pending;
     }
   );

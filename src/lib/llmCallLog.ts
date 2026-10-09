@@ -12,8 +12,11 @@
  * Chat gets the shorter ceiling because the user is waiting on it, once per
  * model attempt, so a fallback pays it twice.
  *
- * Failure and timeout log lines name the row's route, and a failure carries the
- * error's code through toLogSafeError. No other row value is logged.
+ * Log lines carry only the row's route (the first 32 characters when it is a
+ * string, otherwise "non-string") and, on a failure, the error's code (when it
+ * is a string, capped at 16 characters, otherwise null). The error's message is
+ * never logged: a PostgreSQL message can quote the rejected input value. No
+ * other row value and no other error field is logged.
  *
  * Why it is awaited at all: Vercel freezes the function once the response is
  * returned, so an un-awaited insert may never be sent. `after()` would avoid
@@ -24,8 +27,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase";
-import { toLogSafeError } from "@/lib/logSafeError";
-import type { LlmCallRow } from "@/lib/llmCallTelemetry";
+import type { LlmCallRow, LlmRoute } from "@/lib/llmCallTelemetry";
 
 export const LLM_CALL_LOG_TIMEOUT_MS_CHAT = 500;
 export const LLM_CALL_LOG_TIMEOUT_MS_CRON = 1500;
@@ -41,21 +43,47 @@ const defaultDeps: LlmCallLogDeps = {
 
 const TIMED_OUT = Symbol("timed out");
 
+function ceilingFor(route: LlmRoute): number {
+  switch (route) {
+    case "chat":
+      return LLM_CALL_LOG_TIMEOUT_MS_CHAT;
+    case "cron_summarize":
+      return LLM_CALL_LOG_TIMEOUT_MS_CRON;
+    case "cron_extract_facts":
+      return LLM_CALL_LOG_TIMEOUT_MS_CRON;
+    default: {
+      // Compile-time exhaustiveness: a new LlmRoute member fails tsc here until
+      // it is given a ceiling. A row that reaches this at runtime anyway (a
+      // value TypeScript did not check) gets the shorter ceiling.
+      const _exhaustive: never = route;
+      return LLM_CALL_LOG_TIMEOUT_MS_CHAT;
+    }
+  }
+}
+
+/** The error's code when it is a string, capped; never its message. */
+function codeOf(error: unknown): string | null {
+  try {
+    const code = (error as { code?: unknown } | null | undefined)?.code;
+    return typeof code === "string" ? code.slice(0, 16) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function recordLlmCall(
   row: LlmCallRow,
   deps: LlmCallLogDeps = defaultDeps
 ): Promise<void> {
-  // Read once inside the try, so the catch never touches the row itself.
-  let route: unknown;
+  // Narrowed inside the try, so the catch only ever logs a short string.
+  let routeForLog = "non-string";
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    route = row.route;
-    const timeoutMs =
-      deps.timeoutMs ??
-      (route === "chat"
-        ? LLM_CALL_LOG_TIMEOUT_MS_CHAT
-        : LLM_CALL_LOG_TIMEOUT_MS_CRON);
+    const route = row.route;
+    routeForLog =
+      typeof route === "string" ? route.slice(0, 32) : "non-string";
+    const timeoutMs = deps.timeoutMs ?? ceilingFor(route);
 
     // Promise.resolve().then turns a synchronous throw from insert into a
     // rejection, so it reaches the catch below like any other failure.
@@ -73,18 +101,18 @@ export async function recordLlmCall(
     if (outcome === TIMED_OUT) {
       console.warn(
         `[llm-calls] insert did not finish within ${timeoutMs}ms; row not confirmed`,
-        { route }
+        { route: routeForLog }
       );
     } else if (outcome?.error) {
       console.error("[llm-calls] insert failed:", {
-        route,
-        error: toLogSafeError(outcome.error),
+        route: routeForLog,
+        code: codeOf(outcome.error),
       });
     }
   } catch (error) {
     console.error("[llm-calls] insert failed:", {
-      route,
-      error: toLogSafeError(error),
+      route: routeForLog,
+      code: codeOf(error),
     });
   } finally {
     if (timer !== undefined) clearTimeout(timer);
