@@ -11,47 +11,90 @@ import { redactPlaidAxiosError } from "./plaidErrorRedaction";
 /** The two environments this SDK version knows. There is no `development`. */
 export type PlaidEnvironmentName = "sandbox" | "production";
 
+export type PlaidEnvironmentResolution = {
+  /** The environment the client is built against. Never production unless asked for by name. */
+  name: PlaidEnvironmentName;
+  /** false when PLAID_ENV held a value this module does not recognize. */
+  recognized: boolean;
+};
+
 /**
- * The environment this deployment actually talks to.
+ * Which environment a PLAID_ENV value means, and whether it was recognized.
  *
- * It is NOT simply PLAID_ENV. Read what the expression this replaced resolved
- * to, traced through the installed SDK (plaid 41.0.0):
+ *   unset or ""     -> sandbox,    recognized  (the long-standing default)
+ *   "sandbox"       -> sandbox,    recognized
+ *   "production"    -> production, recognized
+ *   anything else   -> sandbox,    NOT recognized
  *
- *   PLAID_ENV unset or ""   -> "sandbox"     (the `|| "sandbox"` default)
- *   PLAID_ENV "sandbox"     -> "sandbox"
- *   PLAID_ENV "production"  -> "production"
- *   anything else           -> "production"  — PlaidEnvironments holds exactly
- *                              two keys (dist/configuration.js:17-20), so the
- *                              lookup is undefined, and BaseAPI's
- *                              `configuration.basePath || this.basePath` with
- *                              `basePath = BASE_PATH` substitutes
- *                              "https://production.plaid.com"
- *                              (dist/base.js:23,40,44).
+ * Exact match only: no trimming, no case folding. "Production", " sandbox" and
+ * "development" are all unrecognized.
  *
- * That last row is the trap worth naming: a typo in PLAID_ENV ("Production",
- * "dev", a stray space) does not fail and does not fall back to sandbox — it
- * points the whole deployment at PRODUCTION Plaid. tsc cannot see it either,
- * because PlaidEnvironment is declared with an index signature returning
- * `string`, so the undefined lookup type-checks clean.
+ * WHY THE LAST ROW IS NOT PRODUCTION. Before this, an unrecognized value pointed
+ * the whole deployment at PRODUCTION Plaid without a word: PlaidEnvironments
+ * holds exactly two keys, the lookup came back undefined, and the SDK
+ * substituted its own BASE_PATH, which is production (dist/base.js). A typo on
+ * the day PLAID_ENV is switched would have been silent. Now an unrecognized value
+ * makes isPlaidConfigured() false, so every Plaid route answers through its
+ * existing 503 branch, and a `[plaid-config]` line is logged at import.
  *
- * The URLs produced are the same ones the previous expression produced in all
- * four rows above; the fourth now reaches that string explicitly instead of via
- * the SDK default.
+ * The name stays "sandbox" for that row so that nothing built from it can reach
+ * production — not the client's basePath, and not a future call site that forgets
+ * the isPlaidConfigured() gate. It also keeps the revocation module's invariant:
+ * the environment it compares a token against is the environment the call went
+ * to. The routes that revoke refuse before revoking when isPlaidConfigured() is
+ * false; if one ever did not, a production token would be compared against
+ * "sandbox", come out as env_mismatch, and its row would be kept.
+ *
+ * Pure, so the mapping is tested by calling it with any input, without
+ * re-importing this module.
  */
-export function resolvePlaidEnvironmentName(): PlaidEnvironmentName {
-  const raw = process.env.PLAID_ENV;
-  if (!raw) return "sandbox";
-  return raw === "sandbox" ? "sandbox" : "production";
+export function resolvePlaidEnvironment(
+  raw: string | undefined
+): PlaidEnvironmentResolution {
+  if (!raw) return { name: "sandbox", recognized: true };
+  if (raw === "sandbox") return { name: "sandbox", recognized: true };
+  if (raw === "production") return { name: "production", recognized: true };
+  return { name: "sandbox", recognized: false };
 }
 
 /**
- * Computed once, at import, and used for both the basePath below and the
- * revocation module's environment check, so the two are the same value and
- * cannot disagree. The function stays exported so its mapping can be tested
- * without re-importing this module.
+ * PLAID_ENV is read once, at import, into this constant. The resolution and the
+ * `[plaid-config]` line both come from it, so the basePath, the revocation
+ * module's environment check, isPlaidConfigured() and the log cannot disagree.
  */
+const RAW_PLAID_ENV: string | undefined = process.env.PLAID_ENV;
+
+const PLAID_ENV_RESOLUTION = resolvePlaidEnvironment(RAW_PLAID_ENV);
+
 export const PLAID_ENVIRONMENT: PlaidEnvironmentName =
-  resolvePlaidEnvironmentName();
+  PLAID_ENV_RESOLUTION.name;
+
+export const PLAID_ENV_RECOGNIZED: boolean = PLAID_ENV_RESOLUTION.recognized;
+
+/**
+ * Which known name an unrecognized value is closest to, for the log only. Trimmed
+ * and lowercased, so "Production" and " sandbox" name their intended environment.
+ * This never feeds the resolution: a near match is still unrecognized.
+ */
+function nearestKnownPlaidEnvironment(
+  raw: string
+): PlaidEnvironmentName | "none" {
+  const folded = raw.trim().toLowerCase();
+  if (folded === "sandbox" || folded === "production") return folded;
+  return "none";
+}
+
+if (!PLAID_ENV_RECOGNIZED) {
+  // The raw value is never logged, not even a slice of it. This branch runs only
+  // when the value is not what was expected, which includes another variable's
+  // value pasted into the wrong field — a Plaid secret, for instance. Length and
+  // the nearest known name are enough to tell a typo from a misplaced value.
+  const raw = RAW_PLAID_ENV ?? "";
+  console.error(
+    "[plaid-config] PLAID_ENV not recognized; Plaid is treated as unconfigured " +
+      `length=${raw.length} near=${nearestKnownPlaidEnvironment(raw)}`
+  );
+}
 
 // Plaid configuration
 const configuration = new Configuration({
@@ -125,9 +168,13 @@ export const PLAID_PRODUCTS: Products[] = [
 // Country codes we support
 export const PLAID_COUNTRY_CODES: CountryCode[] = [CountryCode.Us];
 
-// Check if Plaid is configured
+// Check if Plaid is configured. An unrecognized PLAID_ENV counts as unconfigured,
+// so the routes refuse through their existing 503 branch instead of calling Plaid.
 export function isPlaidConfigured(): boolean {
-  return Boolean(process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET);
+  return (
+    Boolean(process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET) &&
+    PLAID_ENV_RECOGNIZED
+  );
 }
 
 // Types for our app
