@@ -101,7 +101,7 @@ describe("the revocation guard compares against the environment it calls", () =>
   });
 
   it("does not re-derive the environment at the deps", () => {
-    // The other shape of the same defect: calling resolvePlaidEnvironmentName()
+    // The other shape of the same defect: calling resolvePlaidEnvironment()
     // here would be correct today and is still wrong, because it is a SECOND
     // derivation of one fact. The constant is computed once, at import, and the
     // basePath is built from that same evaluation; a call here reads process.env
@@ -112,7 +112,7 @@ describe("the revocation guard compares against the environment it calls", () =>
       "liveRevocationDeps"
     );
 
-    expect(body).not.toContain("resolvePlaidEnvironmentName(");
+    expect(body).not.toContain("resolvePlaidEnvironment(");
     expect(body).not.toContain("process.env");
   });
 
@@ -120,21 +120,45 @@ describe("the revocation guard compares against the environment it calls", () =>
     // The far end. Without this, the guard can be comparing against a value that
     // has nothing to do with where the itemRemove request went.
     //
-    // MUTATION: `PlaidEnvironments[resolvePlaidEnvironmentName()]`, or any other
-    // basePath expression, fails here.
+    // MUTATION: `PlaidEnvironments[resolvePlaidEnvironment(...).name]`, or any
+    // other basePath expression, fails here.
     const source = read(PLAID_SOURCE);
 
     expect(source).toContain("basePath: PlaidEnvironments[PLAID_ENVIRONMENT]");
   });
 
   it("keeps the constant a single exported evaluation", () => {
-    // If PLAID_ENVIRONMENT stopped being one `const` initialised from the
-    // resolver, both assertions above could pass while the two ends read
-    // different things.
+    // If PLAID_ENVIRONMENT stopped coming from the one resolution of PLAID_ENV,
+    // both assertions above could pass while the two ends read different
+    // things. The resolution itself must be the only read of process.env.
     const source = read(PLAID_SOURCE);
 
     expect(source).toMatch(
-      /export const PLAID_ENVIRONMENT:\s*PlaidEnvironmentName\s*=\s*\n?\s*resolvePlaidEnvironmentName\(\);/
+      /const PLAID_ENV_RESOLUTION\s*=\s*resolvePlaidEnvironment\(process\.env\.PLAID_ENV\);/
     );
+    expect(source).toMatch(
+      /export const PLAID_ENVIRONMENT:\s*PlaidEnvironmentName\s*=\s*\n?\s*PLAID_ENV_RESOLUTION\.name;/
+    );
+    expect(source.match(/resolvePlaidEnvironment\(/g)).toHaveLength(2);
+  });
+});
+
+describe("an unrecognized PLAID_ENV disables Plaid", () => {
+  it("isPlaidConfigured reads the recognition flag from the same resolution", () => {
+    // plaidEnvironmentGate.test.ts executes this; the probe pins that the flag
+    // is the import-time constant and not a second read of process.env.PLAID_ENV.
+    // MUTATION: dropping `&& PLAID_ENV_RECOGNIZED` fails here.
+    const source = read(PLAID_SOURCE);
+    const body = blockAfter(
+      source,
+      /export function isPlaidConfigured\s*\(\s*\)\s*:\s*boolean\s*\{/,
+      "isPlaidConfigured"
+    );
+
+    expect(source).toMatch(
+      /export const PLAID_ENV_RECOGNIZED:\s*boolean\s*=\s*PLAID_ENV_RESOLUTION\.recognized;/
+    );
+    expect(body).toContain("PLAID_ENV_RECOGNIZED");
+    expect(body).not.toContain("process.env.PLAID_ENV");
   });
 });
