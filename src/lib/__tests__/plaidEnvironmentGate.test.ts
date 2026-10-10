@@ -56,7 +56,18 @@ afterEach(() => {
 });
 
 describe("an unrecognized PLAID_ENV, at import", () => {
-  for (const value of ["Production", " sandbox", "development"]) {
+  // A stand-in for another variable's value landing in PLAID_ENV: 30 hex
+  // characters, the shape of a Plaid secret. Fixed so the run is deterministic.
+  const SECRET_SHAPED = "0123456789abcdef0123456789abcd";
+
+  const rows: Array<[string, "sandbox" | "production" | "none"]> = [
+    ["Production", "production"],
+    [" sandbox", "sandbox"],
+    ["development", "none"],
+    [SECRET_SHAPED, "none"],
+  ];
+
+  for (const [value, near] of rows) {
     it(`treats ${JSON.stringify(value)} as unconfigured, on sandbox, and says so once`, async () => {
       const { plaid, configLines } = await importWith(value);
 
@@ -67,9 +78,23 @@ describe("an unrecognized PLAID_ENV, at import", () => {
       expect(plaid.isPlaidConfigured()).toBe(false);
       // MUTATION: removing the log fails here.
       expect(configLines).toHaveLength(1);
-      expect(configLines[0]).toContain(`value=${JSON.stringify(value)}`);
+      // MUTATION: dropping the trim or the lowercase fails the first two rows.
+      expect(configLines[0]).toContain(`length=${value.length} near=${near}`);
     });
   }
+
+  it("never writes any 8-character piece of a secret-shaped value", async () => {
+    // MUTATION: logging the value, or any slice of 8 or more characters of it,
+    // fails here.
+    expect(SECRET_SHAPED).toHaveLength(30);
+    const { configLines } = await importWith(SECRET_SHAPED);
+
+    expect(configLines).toHaveLength(1);
+    expect(configLines[0]).toContain("near=none");
+    for (let i = 0; i + 8 <= SECRET_SHAPED.length; i++) {
+      expect(configLines[0]).not.toContain(SECRET_SHAPED.slice(i, i + 8));
+    }
+  });
 });
 
 describe("a recognized PLAID_ENV, at import", () => {

@@ -134,7 +134,10 @@ describe("the revocation guard compares against the environment it calls", () =>
     const source = read(PLAID_SOURCE);
 
     expect(source).toMatch(
-      /const PLAID_ENV_RESOLUTION\s*=\s*resolvePlaidEnvironment\(process\.env\.PLAID_ENV\);/
+      /const RAW_PLAID_ENV:\s*string \| undefined\s*=\s*process\.env\.PLAID_ENV;/
+    );
+    expect(source).toMatch(
+      /const PLAID_ENV_RESOLUTION\s*=\s*resolvePlaidEnvironment\(RAW_PLAID_ENV\);/
     );
     expect(source).toMatch(
       /export const PLAID_ENVIRONMENT:\s*PlaidEnvironmentName\s*=\s*\n?\s*PLAID_ENV_RESOLUTION\.name;/
@@ -160,5 +163,16 @@ describe("an unrecognized PLAID_ENV disables Plaid", () => {
     );
     expect(body).toContain("PLAID_ENV_RECOGNIZED");
     expect(body).not.toContain("process.env.PLAID_ENV");
+  });
+
+  it("reads process.env.PLAID_ENV exactly once, and the log does not re-read it", () => {
+    // A second read is where the old log line quoted the raw value from. One
+    // read means the log can only see what the module-private constant holds.
+    // MUTATION: restoring `JSON.stringify(process.env.PLAID_ENV)` in the log, or
+    // any other second read, fails here.
+    const source = read(PLAID_SOURCE);
+
+    expect(source.match(/process\.env\.PLAID_ENV\b/g)).toHaveLength(1);
+    expect(source).not.toContain("JSON.stringify(process.env.PLAID_ENV)");
   });
 });

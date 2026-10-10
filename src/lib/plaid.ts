@@ -58,23 +58,41 @@ export function resolvePlaidEnvironment(
 }
 
 /**
- * PLAID_ENV is read once, at import, and both constants below come from that one
- * evaluation, so the basePath, the revocation module's environment check and
- * isPlaidConfigured() cannot disagree about it.
+ * PLAID_ENV is read once, at import, into this constant. The resolution and the
+ * `[plaid-config]` line both come from it, so the basePath, the revocation
+ * module's environment check, isPlaidConfigured() and the log cannot disagree.
  */
-const PLAID_ENV_RESOLUTION = resolvePlaidEnvironment(process.env.PLAID_ENV);
+const RAW_PLAID_ENV: string | undefined = process.env.PLAID_ENV;
+
+const PLAID_ENV_RESOLUTION = resolvePlaidEnvironment(RAW_PLAID_ENV);
 
 export const PLAID_ENVIRONMENT: PlaidEnvironmentName =
   PLAID_ENV_RESOLUTION.name;
 
 export const PLAID_ENV_RECOGNIZED: boolean = PLAID_ENV_RESOLUTION.recognized;
 
+/**
+ * Which known name an unrecognized value is closest to, for the log only. Trimmed
+ * and lowercased, so "Production" and " sandbox" name their intended environment.
+ * This never feeds the resolution: a near match is still unrecognized.
+ */
+function nearestKnownPlaidEnvironment(
+  raw: string
+): PlaidEnvironmentName | "none" {
+  const folded = raw.trim().toLowerCase();
+  if (folded === "sandbox" || folded === "production") return folded;
+  return "none";
+}
+
 if (!PLAID_ENV_RECOGNIZED) {
-  // The value is configuration, not a credential, and it is the whole diagnosis.
-  // JSON-quoted so stray whitespace is visible, and capped so it stays one line.
+  // The raw value is never logged, not even a slice of it. This branch runs only
+  // when the value is not what was expected, which includes another variable's
+  // value pasted into the wrong field — a Plaid secret, for instance. Length and
+  // the nearest known name are enough to tell a typo from a misplaced value.
+  const raw = RAW_PLAID_ENV ?? "";
   console.error(
     "[plaid-config] PLAID_ENV not recognized; Plaid is treated as unconfigured " +
-      `value=${JSON.stringify(process.env.PLAID_ENV).slice(0, 32)}`
+      `length=${raw.length} near=${nearestKnownPlaidEnvironment(raw)}`
   );
 }
 
