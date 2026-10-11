@@ -115,6 +115,99 @@ export async function getPlaidConnectionByItemId(userId: string, itemId: string)
 }
 
 /**
+ * A connection row as the webhook path needs it: the owner, the Item, and the
+ * stored (encrypted) token the revocation module decrypts.
+ */
+export type ItemOwnedConnection = {
+  user_id: string;
+  item_id: string;
+  access_token: string;
+};
+
+export type ItemConnectionsLookup =
+  | { ok: true; rows: ItemOwnedConnection[] }
+  | { ok: false };
+
+function isItemOwnedConnection(row: unknown): row is ItemOwnedConnection {
+  if (typeof row !== "object" || row === null) return false;
+  const record = row as Record<string, unknown>;
+  return (
+    typeof record.user_id === "string" &&
+    record.user_id !== "" &&
+    typeof record.item_id === "string" &&
+    typeof record.access_token === "string"
+  );
+}
+
+/**
+ * Decide what a by-item_id read means. Pure, for the same reason
+ * connectionRowsOrNull is.
+ *
+ * An error, a non-array, or ANY row missing one of the three fields is a
+ * failure, not a shorter list: the webhook route answers a failure with 500 so
+ * Plaid retries, while a dropped row would read as "unknown item" and be
+ * answered 200 — the webhook lost for good.
+ */
+export function connectionsByItemIdOrFailure(result: {
+  data: unknown;
+  error: unknown;
+}): ItemConnectionsLookup {
+  if (result.error) return { ok: false };
+  if (!Array.isArray(result.data)) return { ok: false };
+  const rows: ItemOwnedConnection[] = [];
+  for (let i = 0; i < result.data.length; i++) {
+    const row: unknown = result.data[i];
+    if (!isItemOwnedConnection(row)) return { ok: false };
+    rows.push({
+      user_id: row.user_id,
+      item_id: row.item_id,
+      access_token: row.access_token,
+    });
+  }
+  return { ok: true, rows };
+}
+
+/**
+ * Every connection row for one Plaid item_id, ACROSS USERS. At most two.
+ *
+ * ⚠️ THIS IS THE ONE plaid_connections READ WITH NO user_id FILTER, and it is
+ * deliberate. A Plaid webhook names an Item, not one of our users — its own
+ * `user_id` field is Plaid's, not ours — so the owner can only be learned from
+ * the row. The only input is an item_id from a payload whose Plaid signature has
+ * already verified (plaidWebhookVerification.ts); no request body or query
+ * reaches this function. Its single caller is the webhook route.
+ *
+ * Whether item_id is unique across users in the live table is unverified, so
+ * this reads two rows: one means the owner is known, two means it is not, and
+ * the caller acts on neither of the second.
+ *
+ * Logs the error shape only, never a row: a row carries a stored token.
+ */
+export async function getPlaidConnectionsByItemIdAcrossUsers(
+  itemId: string
+): Promise<ItemConnectionsLookup> {
+  try {
+    const supabase = createServerClient();
+    const result = await supabase
+      .from("plaid_connections")
+      .select("user_id,item_id,access_token")
+      .eq("item_id", itemId)
+      .limit(2);
+
+    if (result.error) {
+      console.error(
+        "Error fetching Plaid connections by item_id: code",
+        typeof result.error.code === "string" ? result.error.code : "none"
+      );
+    }
+    return connectionsByItemIdOrFailure(result);
+  } catch {
+    console.error("Error fetching Plaid connections by item_id: threw");
+    return { ok: false };
+  }
+}
+
+/**
  * Get an active Plaid connection for a user at a given institution, or null.
  *
  * Used for app-level duplicate detection (same user re-linking a bank they
