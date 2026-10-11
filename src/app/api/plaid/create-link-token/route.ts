@@ -6,6 +6,7 @@ import {
   isPlaidConfigured,
 } from "@/lib/plaid";
 import { authenticate, handlePlaidError } from "@/lib/plaidApiUtils";
+import { resolvePlaidWebhookUrl } from "@/lib/plaidWebhookConfig";
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,6 +32,9 @@ export async function POST(request: NextRequest) {
 
     const { userId } = auth;
 
+    // Registers /api/plaid/webhook on the new Item. Unset -> field omitted.
+    const webhook = resolvePlaidWebhookUrl(process.env.PLAID_WEBHOOK_URL);
+
     // Create a link token for the user
     // Note: redirect_uri is optional and only needed for OAuth institutions in production
     const response = await plaidClient.linkTokenCreate({
@@ -41,6 +45,7 @@ export async function POST(request: NextRequest) {
       products: PLAID_PRODUCTS,
       country_codes: PLAID_COUNTRY_CODES,
       language: "en",
+      ...(webhook ? { webhook } : {}),
     });
 
     return NextResponse.json({
