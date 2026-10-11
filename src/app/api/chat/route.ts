@@ -52,11 +52,15 @@ import {
   type ChatPromptBlocks,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import {
+  OPENROUTER_URL,
+  buildOpenRouterRequestBody,
+  resolveOpenRouterApiKey,
+} from "@/lib/openRouterRequest";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_SIMPLE_MODEL = "google/gemini-2.5-flash-lite";
 const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
 
@@ -180,14 +184,6 @@ function normalizeOpenRouterModelId(model: string): string {
   };
 
   return ALIASES[trimmed] ?? trimmed;
-}
-
-function resolveOpenRouterApiKey(): string | null {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key || key.trim() === "") {
-    return null;
-  }
-  return key.trim();
 }
 
 // Initialize Anthropic client only if API key exists (used when OpenRouter not set)
@@ -743,11 +739,9 @@ async function callOpenRouter(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: 1024,
-      }),
+      body: JSON.stringify(
+        buildOpenRouterRequestBody({ model, messages, maxTokens: 1024 })
+      ),
     });
   } catch (error) {
     await recordLlmCall(

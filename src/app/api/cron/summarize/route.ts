@@ -17,6 +17,11 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import {
+  OPENROUTER_URL,
+  buildOpenRouterRequestBody,
+  resolveOpenRouterApiKey,
+} from "@/lib/openRouterRequest";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -29,24 +34,11 @@ export const dynamic = "force-dynamic";
 // in the parser, not by pinning the model.
 const SUMMARY_MODEL =
   process.env.SUMMARY_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const MAX_MESSAGES_PER_SUMMARY = 200;
 const SUMMARY_MAX_TOKENS = 1024;
 const CLOSE_BATCH_LIMIT = 50;
 const SUMMARIZE_BATCH_LIMIT = 8;
-
-/**
- * OpenRouter API 키를 환경변수에서 읽어온다.
- * 없거나 빈 문자열이면 null.
- */
-function resolveOpenRouterApiKey(): string | null {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || apiKey.trim() === "") {
-    return null;
-  }
-  return apiKey.trim();
-}
 
 /**
  * OpenRouter chat completions를 호출해 요약 텍스트를 반환한다.
@@ -108,14 +100,16 @@ async function requestSummary(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: SUMMARY_MODEL,
-      max_tokens: SUMMARY_MAX_TOKENS,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: conversationText },
-      ],
-    }),
+    body: JSON.stringify(
+      buildOpenRouterRequestBody({
+        model: SUMMARY_MODEL,
+        maxTokens: SUMMARY_MAX_TOKENS,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: conversationText },
+        ],
+      })
+    ),
   });
   observed.httpStatus = response.status;
 

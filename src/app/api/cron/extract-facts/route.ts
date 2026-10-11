@@ -23,6 +23,11 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import {
+  OPENROUTER_URL,
+  buildOpenRouterRequestBody,
+  resolveOpenRouterApiKey,
+} from "@/lib/openRouterRequest";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -35,7 +40,6 @@ export const dynamic = "force-dynamic";
 // in the parser, not by pinning the model. (Same pattern as SUMMARY_MODEL in the summarize cron.)
 const EXTRACTION_MODEL =
   process.env.EXTRACTION_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // 한 세션에서 LLM에 넘기는 최대 메시지 수 (PR4와 동일).
 const MAX_MESSAGES_PER_EXTRACTION = 200;
@@ -63,18 +67,6 @@ const VALID_CATEGORIES: ReadonlyArray<UserFactCategory> = [
   "banking",
   "other",
 ];
-
-/**
- * OpenRouter API 키를 환경변수에서 읽어온다.
- * 없거나 빈 문자열이면 null. (PR4와 동일)
- */
-function resolveOpenRouterApiKey(): string | null {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || apiKey.trim() === "") {
-    return null;
-  }
-  return apiKey.trim();
-}
 
 /**
  * OpenRouter chat completions를 호출해 raw 문자열 응답을 반환한다.
@@ -127,14 +119,16 @@ async function requestExtraction(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: EXTRACTION_MODEL,
-      max_tokens: EXTRACTION_MAX_TOKENS,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-    }),
+    body: JSON.stringify(
+      buildOpenRouterRequestBody({
+        model: EXTRACTION_MODEL,
+        maxTokens: EXTRACTION_MAX_TOKENS,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+      })
+    ),
   });
   observed.httpStatus = response.status;
 

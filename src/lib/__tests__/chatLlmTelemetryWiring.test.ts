@@ -191,8 +191,10 @@ const SUCCESS_ROW = `  await recordLlmCall(
 `;
 
 // In both crons' request functions: the status is observed as soon as fetch
-// returns, before the ok check can throw...
-const STATUS_AFTER_FETCH = `    }),
+// returns, before the ok check can throw. The fetch call ends with the shared
+// request builder (openRouterRequest.ts) as its body...
+const STATUS_AFTER_FETCH = `      })
+    ),
   });
   observed.httpStatus = response.status;
 
