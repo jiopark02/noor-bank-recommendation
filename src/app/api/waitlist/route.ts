@@ -6,15 +6,26 @@ import { toLogSafeError } from '@/lib/logSafeError';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: NextRequest) {
-  let body: { email?: string; name?: string };
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ message: 'Invalid request body' }, { status: 400 });
   }
 
-  const rawEmail = body.email?.trim();
-  const rawName = body.name?.trim() || null;
+  // Only `email` is read. A `name` in the body is ignored: it is neither stored
+  // nor put into the confirmation email, because this route is unauthenticated
+  // and the waitlist page never sends one.
+  const emailField =
+    typeof body === 'object' && body !== null
+      ? (body as { email?: unknown }).email
+      : undefined;
+
+  if (emailField !== undefined && emailField !== null && typeof emailField !== 'string') {
+    return NextResponse.json({ message: 'Please enter a valid email address' }, { status: 400 });
+  }
+
+  const rawEmail = emailField?.trim();
 
   if (!rawEmail) {
     return NextResponse.json({ message: 'Email is required' }, { status: 400 });
@@ -34,7 +45,6 @@ export async function POST(request: NextRequest) {
   // record of who signed up.
   const { error } = await supabase.from('waitlist_signups').insert({
     email,
-    name: rawName,
     source: 'waitlist_page',
   });
 
@@ -55,7 +65,7 @@ export async function POST(request: NextRequest) {
   // sendWaitlistConfirmationEmail can signal failure by returning false rather
   // than throwing, so we check both the thrown case and the return value.
   try {
-    const emailSent = await sendWaitlistConfirmationEmail(email, rawName ?? undefined);
+    const emailSent = await sendWaitlistConfirmationEmail(email);
     if (!emailSent) {
       console.error('Waitlist confirmation email failed to send: kind=returned_false');
     }
