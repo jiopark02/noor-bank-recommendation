@@ -8,7 +8,9 @@ import { describe, it, expect } from "vitest";
  * The routes cannot be executed offline, so this file proves only what their
  * TEXT says: that the webhook route hands the request to the tested pipeline,
  * never touches the request URL, and wires the live dependencies the tests
- * assume. (The create-link-token probe lives in plaidWebhookConfig.test.ts.) The
+ * assume; and that the cross-user item_id read in plaidApiUtils.ts keeps its
+ * item_id filter and two-row limit. (The create-link-token probe lives in
+ * plaidWebhookConfig.test.ts.) The
  * behaviour behind that wiring is executed in plaidWebhookReceive.test.ts,
  * plaidWebhook.test.ts and plaidWebhookVerification.test.ts. Whether a deployed
  * Item actually receives webhooks is a live check, not something this file can
@@ -28,6 +30,15 @@ const ROUTE = code(read("../../app/api/plaid/webhook/route.ts"));
 const RECEIVE = code(read("../plaidWebhookReceive.ts"));
 const HANDLER = code(read("../plaidWebhook.ts"));
 const VERIFY = code(read("../plaidWebhookVerification.ts"));
+const API_UTILS = code(read("../plaidApiUtils.ts"));
+
+/** The body of one exported async function, up to the next top-level export. */
+function functionBody(source: string, name: string): string {
+  const start = source.indexOf(`export async function ${name}(`);
+  if (start === -1) return "";
+  const next = source.indexOf("\nexport ", start + 1);
+  return source.slice(start, next === -1 ? undefined : next);
+}
 
 describe("/api/plaid/webhook wiring", () => {
   it("passes the raw stream to the pipeline and never parses it itself", () => {
@@ -64,5 +75,20 @@ describe("/api/plaid/webhook wiring", () => {
       expect(source).not.toMatch(/request\.url|nextUrl|searchParams/);
       expect(source).not.toContain("new_webhook_url");
     }
+  });
+});
+
+describe("cross-user item_id read", () => {
+  it("filters by item_id and reads at most two rows", () => {
+    // Red if: the item_id filter or the two-row limit is removed or changed.
+    // This is the one plaid_connections read without a user_id filter, so the
+    // item_id filter is its whole scope, and the second row is what lets the
+    // handler see an ambiguous Item instead of acting on the first one.
+    const body = functionBody(API_UTILS, "getPlaidConnectionsByItemIdAcrossUsers");
+    expect(body).not.toBe("");
+    expect(body).toContain('.eq("item_id", itemId)');
+    expect(body).toContain(".limit(2)");
+    expect(body).not.toContain(".maybeSingle(");
+    expect(body).not.toContain(".single(");
   });
 });

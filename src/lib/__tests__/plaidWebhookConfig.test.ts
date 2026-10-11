@@ -27,6 +27,19 @@ describe("resolvePlaidWebhookUrl", () => {
     ).toBe("https://noor.example.test/api/plaid/webhook");
   });
 
+  it("returns the normalized URL, without surrounding whitespace, query kept", () => {
+    // Red if: the raw string is returned instead of the parsed URL's href.
+    const url = `https://preview.example.test/api/plaid/webhook?x-vercel-protection-bypass=${SECRET}`;
+    for (const raw of [`${url}\n`, `  ${url}  `, `\t${url}\r\n`]) {
+      const resolved = resolvePlaidWebhookUrl(raw, vi.fn());
+      expect(resolved).toBe(url);
+      expect(resolved).not.toMatch(/\s/);
+      expect(new URL(resolved as string).search).toBe(
+        `?x-vercel-protection-bypass=${SECRET}`
+      );
+    }
+  });
+
   it("omits a non-https or unparseable value and logs that, never the value", () => {
     // Red if: the protocol check is removed, or the value reaches the log.
     for (const raw of [

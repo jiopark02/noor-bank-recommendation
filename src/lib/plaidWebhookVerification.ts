@@ -24,7 +24,8 @@ import { logField } from "./plaidRevocation";
  *   1. Decode the JWT header WITHOUT trusting it; refuse any alg but ES256.
  *   2. Fetch the verification key named by `kid` from Plaid.
  *   3. Verify the ES256 signature with that key.
- *   4. Refuse a payload whose `iat` is older than five minutes.
+ *   4. Refuse a payload whose `iat` is older than five minutes, or more than
+ *      five minutes in the future.
  *   5. Compare the payload's `request_body_sha256` against the SHA-256 of the
  *      RAW body bytes, in constant time. Never a re-serialization: the hash is
  *      whitespace-sensitive.
@@ -292,11 +293,15 @@ export async function verifyPlaidWebhook(
   const claims = decodeJsonSegment(encodedPayload);
   if (!claims) return fail(401, "malformed");
 
+  // Five minutes either way: an iat far in the future would otherwise keep a
+  // captured request replayable until well after it was sent.
   const iat = claims.iat;
+  const ageSeconds = typeof iat === "number" ? deps.now() / 1000 - iat : NaN;
   if (
     typeof iat !== "number" ||
-    !isFinite(iat) ||
-    deps.now() / 1000 - iat > MAX_IAT_AGE_SECONDS
+    !isFinite(ageSeconds) ||
+    ageSeconds > MAX_IAT_AGE_SECONDS ||
+    ageSeconds < -MAX_IAT_AGE_SECONDS
   ) {
     return fail(401, "stale");
   }

@@ -5,7 +5,8 @@
  *                                  the link-token request is byte-identical to
  *                                  what it was before this variable existed
  *   not a URL, or not https:    -> undefined, plus one `[plaid-link]` line
- *   an https URL                -> returned as given
+ *   an https URL                -> its normalized form (URL.href): surrounding
+ *                                  whitespace and newlines removed, query kept
  *
  * THE VALUE IS NEVER LOGGED, NOT EVEN IN PART. On Preview it carries a Vercel
  * protection-bypass secret in its query string. An invalid value does not block
@@ -27,5 +28,7 @@ export function resolvePlaidWebhookUrl(
     log("[plaid-link] webhook_url=invalid reason=not_https");
     return undefined;
   }
-  return raw;
+  // The normalized form, never the raw string: a value pasted with a trailing
+  // newline or surrounding spaces must not reach Plaid with them.
+  return parsed.href;
 }

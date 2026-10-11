@@ -155,6 +155,25 @@ describe("verifyPlaidWebhook", () => {
     expect(await verifyPlaidWebhook(BODY, edge, d)).toEqual({ ok: true });
   });
 
+  it("rejects iat more than five minutes in the future, accepts exactly five", async () => {
+    // Red if: only the past side of the iat window is checked.
+    const { deps: d } = deps();
+    const future = jwt({
+      body: BODY,
+      claims: { iat: NOW_S + 301, request_body_sha256: sha256Hex(BODY) },
+    });
+    expect(await verifyPlaidWebhook(BODY, future, d)).toEqual({
+      ok: false,
+      status: 401,
+      reason: "stale",
+    });
+    const edge = jwt({
+      body: BODY,
+      claims: { iat: NOW_S + 300, request_body_sha256: sha256Hex(BODY) },
+    });
+    expect(await verifyPlaidWebhook(BODY, edge, d)).toEqual({ ok: true });
+  });
+
   it("rejects a non-numeric iat", async () => {
     // Red if: the typeof check on iat is removed.
     const { deps: d } = deps();
