@@ -30,11 +30,11 @@ export function generateSystemPrompt(
   // (AI_PLAID_STATE != "off"), we drop the unconditional "you have access to
   // financial data" claim — which is false on turns where no data was injected
   // — and point the model at the per-turn "What you can see this turn" block.
-  // When disabled, this is byte-for-byte the original line so `off` stays a
-  // clean, inert rollback target.
+  // When disabled ("off"), no bank data reaches the prompt on any path, so the
+  // line says so instead of claiming access the model does not have.
   const guideline2 = options?.plaidStateEnabled
     ? `2. **Only use context when relevant.** Bring up the user's profile or financial data only when their question directly relates to it. What financial data you can actually see this turn is stated below under "What you can see this turn" — rely on that, not on assumptions.`
-    : `2. **Only use context when relevant.** You have access to the user's profile and financial data, but ONLY bring it up when their question directly relates to it.`;
+    : `2. **Only use context when relevant.** You have access to the user's profile, but not to their bank data — no balances, accounts, or transactions are available to you. ONLY bring up profile details when their question directly relates to them, and if asked about balances or transactions, say you cannot see them right now.`;
 
   return `You are Noor AI, a friendly personal finance guide for people who are just getting started with managing their money.
 

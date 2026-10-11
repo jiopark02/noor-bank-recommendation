@@ -1086,10 +1086,13 @@ export async function POST(request: NextRequest) {
       !isGreeting && isSubscriptionQuestion(lastUserMessageText);
 
     // Plaid capability scaffold (B-1). AI_PLAID_STATE = off | connection | balances.
-    // "off" suppresses the scaffold block and leaves the base prompt unchanged.
-    // It does NOT mean everything below is unchanged: the balance-keyword block
-    // still runs under "off", and the financial-analysis block no longer runs
-    // under any mode because its egress channel denies on every input.
+    // "off" closes every path below that reads fresh bank data: the scaffold
+    // block, the balance-keyword block, and the financial-analysis block (which
+    // no longer runs under any mode because its egress channel denies on every
+    // input). The base prompt's guideline 2 also tells the model it has no bank
+    // data. Bank figures the model was given on earlier turns can still reach it
+    // through the conversation history and the memory block; "off" does not
+    // remove those.
     const plaidStateMode = resolvePlaidStateMode();
     const plaidStateEnabled = plaidStateMode !== "off";
 
@@ -1148,7 +1151,8 @@ export async function POST(request: NextRequest) {
     // Under "balances" mode the always-on L2 block already injected shallow
     // balances on substantive turns, so this keyword-gated balance path (and its
     // buggy buildBalanceSummary formatter) is retired to avoid double-stating the
-    // balance. Under "off"/"connection" it runs exactly as before.
+    // balance. Under "connection" it runs on a balance question; under "off" it
+    // does not run at all.
     const balanceKeywordDecision = evaluatePlaidEgressDecision({
       channel: "balance_keyword",
       plaidStateMode,
