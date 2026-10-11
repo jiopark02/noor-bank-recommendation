@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { generateSystemPrompt, UserContext } from "@/lib/noorAIPrompt";
 import {
   createAdminClient,
@@ -184,15 +183,6 @@ function normalizeOpenRouterModelId(model: string): string {
   };
 
   return ALIASES[trimmed] ?? trimmed;
-}
-
-// Initialize Anthropic client only if API key exists (used when OpenRouter not set)
-function getAnthropicClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey.trim() === "") {
-    return null;
-  }
-  return new Anthropic({ apiKey });
 }
 
 interface ChatMessage {
@@ -1233,7 +1223,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 1) Prefer OpenRouter when OPENROUTER_API_KEY is set
+    // OpenRouter is the only provider path: every request carries the routing
+    // preferences in openRouterRequest.ts. Without a key there is no other
+    // provider to fall back to, and the route answers 503 below.
     const openRouterApiKey = resolveOpenRouterApiKey();
     if (openRouterApiKey) {
       const openRouterMessages = [
@@ -1322,74 +1314,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2) Fallback to Anthropic if ANTHROPIC_API_KEY is set
-    const anthropic = getAnthropicClient();
-    if (anthropic) {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-5-20250929",
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: formattedMessages,
-      });
-
-      const assistantMessage =
-        response.content[0].type === "text" ? response.content[0].text : "";
-
-      try {
-        await persistTurnIfEnabled({
-          activeSession,
-          authUserId,
-          userContent: lastUserMessageText,
-          assistantContent: assistantMessage,
-          assistantModel: "claude-sonnet-4-5-20250929",
-          inputTokens: response.usage.input_tokens,
-          outputTokens: response.usage.output_tokens,
-        });
-      } catch (error) {
-        console.error("Failed to save messages (Anthropic branch):", error);
-        return NextResponse.json(
-          {
-            error:
-              "Could not save your conversation. Please try sending your message again.",
-            code: "SAVE_FAILED",
-          },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: assistantMessage,
-        model: "claude-sonnet-4-5-20250929",
-        sessionId: activeSession?.id ?? null,
-        usage: {
-          input_tokens: response.usage.input_tokens,
-          output_tokens: response.usage.output_tokens,
-        },
-      });
-    }
-
     return NextResponse.json(
       {
-        error:
-          "AI provider is not configured. Set OPENROUTER_API_KEY or ANTHROPIC_API_KEY.",
+        error: "AI provider is not configured. Set OPENROUTER_API_KEY.",
       },
       { status: 503 }
     );
   } catch (error) {
     console.error("Chat API error:", error);
-
-    if (error instanceof Anthropic.APIError) {
-      if (error.status === 401) {
-        return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
-      }
-      if (error.status === 429) {
-        return NextResponse.json(
-          { error: "Rate limit exceeded. Please try again later." },
-          { status: 429 }
-        );
-      }
-    }
 
     return NextResponse.json(
       { error: "Failed to get response from AI" },

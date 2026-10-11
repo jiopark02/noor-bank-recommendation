@@ -62,6 +62,18 @@ describe.each(CALL_SITES)("%s route", (_label, path) => {
   });
 });
 
+describe("provider SDKs", () => {
+  // A direct provider client would send prompts outside the routing
+  // preferences that every OpenRouter request carries.
+  it("are not imported by any route", () => {
+    const appDir = join(SRC_DIR, "app");
+    const hits = sourceFiles(appDir)
+      .filter((file) => readFileSync(file, "utf8").includes("@anthropic-ai/sdk"))
+      .map((file) => relative(SRC_DIR, file).split(sep).join("/"));
+    expect(hits).toEqual([]);
+  });
+});
+
 describe("the chat-completions endpoint", () => {
   it("is addressed only by openRouterRequest.ts", () => {
     const hits = sourceFiles(SRC_DIR)
