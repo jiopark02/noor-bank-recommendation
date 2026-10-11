@@ -28,6 +28,11 @@ import {
   buildOpenRouterRequestBody,
   resolveOpenRouterApiKey,
 } from "@/lib/openRouterRequest";
+import {
+  CRON_LLM_TIMEOUT_MS,
+  cronRunHasBudgetForAnotherCall,
+  logLlmTimeout,
+} from "@/lib/llmTimeouts";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -88,14 +93,25 @@ async function callOpenRouterForExtraction(
   ctx: { userId: string; sessionId: string }
 ): Promise<string> {
   const startedAtMs = Date.now();
+  const signal = AbortSignal.timeout(CRON_LLM_TIMEOUT_MS);
   const observed: ObservedLlmCall = {
     httpStatus: null,
     jsonParsed: false,
     data: null,
   };
   try {
-    return await requestExtraction(apiKey, systemPrompt, userContent, observed);
+    return await requestExtraction(
+      apiKey,
+      systemPrompt,
+      userContent,
+      observed,
+      signal
+    );
   } finally {
+    observed.timedOut = signal.aborted && !observed.jsonParsed;
+    if (observed.timedOut) {
+      logLlmTimeout("cron_extract_facts", EXTRACTION_MODEL, CRON_LLM_TIMEOUT_MS);
+    }
     await recordLlmCall(
       buildCronLlmCallRow({
         route: "cron_extract_facts",
@@ -114,10 +130,12 @@ async function requestExtraction(
   apiKey: string,
   systemPrompt: string,
   userContent: string,
-  observed: ObservedLlmCall
+  observed: ObservedLlmCall,
+  signal: AbortSignal
 ): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -702,6 +720,9 @@ export async function GET(request: NextRequest) {
     factsSuperseded: 0,
     factsExpired: 0,
     factsFailed: 0,
+    // Sessions not started because the run deadline was reached; they stay
+    // eligible and are picked up by the next run.
+    deferred: 0,
   };
 
   try {
@@ -709,6 +730,15 @@ export async function GET(request: NextRequest) {
       EXTRACT_BATCH_LIMIT
     );
     for (const session of toExtract) {
+      if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {
+        stats.deferred =
+          toExtract.length - (stats.processed + stats.processFailed);
+        console.warn(
+          `Extract cron: run deadline reached; ${stats.deferred} ` +
+            `session(s) left for the next run.`
+        );
+        break;
+      }
       const sessionStats: SessionFactStats = {
         saved: 0,
         skipped: 0,

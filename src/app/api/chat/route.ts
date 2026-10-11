@@ -56,6 +56,7 @@ import {
   buildOpenRouterRequestBody,
   resolveOpenRouterApiKey,
 } from "@/lib/openRouterRequest";
+import { CHAT_LLM_TIMEOUT_MS, logLlmTimeout } from "@/lib/llmTimeouts";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
@@ -713,6 +714,13 @@ interface ChatLlmCallContext {
  * a thrown fetch error or alter the returned result. A fetch that throws is
  * rethrown unchanged: it is still not retried on the next model, and it still
  * reaches POST's outer catch as before.
+ *
+ * The attempt is cut off after CHAT_LLM_TIMEOUT_MS. A timeout before the
+ * response arrives makes fetch throw, which takes the path above. A timeout
+ * while the body is still being read is not left to readJsonBodyLeniently,
+ * which would turn the cut-off body into an empty success and a stored
+ * "could not generate a response" turn; it is recorded as a failed attempt and
+ * thrown the same way.
  */
 async function callOpenRouter(
   apiKey: string,
@@ -721,10 +729,12 @@ async function callOpenRouter(
   telemetry: ChatLlmCallContext
 ): Promise<OpenRouterResult> {
   const startedAtMs = Date.now();
+  const signal = AbortSignal.timeout(CHAT_LLM_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(OPENROUTER_URL, {
       method: "POST",
+      signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -755,10 +765,37 @@ async function callOpenRouter(
         blocks: telemetry.blocks,
       })
     );
+    if (signal.aborted) logLlmTimeout("chat", model, CHAT_LLM_TIMEOUT_MS);
     throw error;
   }
 
   const { data, jsonParsed } = await readJsonBodyLeniently(res);
+  if (!jsonParsed && signal.aborted) {
+    await recordLlmCall(
+      buildLlmCallRow({
+        route: "chat",
+        attemptIndex: telemetry.attemptIndex,
+        requestModel: model,
+        startedAtMs,
+        latencyMs: Date.now() - startedAtMs,
+        userId: telemetry.userId,
+        sessionId: telemetry.sessionId,
+        httpStatus: res.status,
+        outcome: classifyLlmOutcome({
+          route: "chat",
+          httpStatus: res.status,
+          threw: true,
+          jsonParsed: false,
+          contentPresent: false,
+        }),
+        meta: null,
+        blocks: telemetry.blocks,
+      })
+    );
+    logLlmTimeout("chat", model, CHAT_LLM_TIMEOUT_MS);
+    throw new Error("OpenRouter response timed out while being read");
+  }
+
   const result = toOpenRouterResult({
     ok: res.ok,
     status: res.status,

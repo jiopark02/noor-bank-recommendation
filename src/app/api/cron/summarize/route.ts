@@ -22,6 +22,11 @@ import {
   buildOpenRouterRequestBody,
   resolveOpenRouterApiKey,
 } from "@/lib/openRouterRequest";
+import {
+  CRON_LLM_TIMEOUT_MS,
+  cronRunHasBudgetForAnotherCall,
+  logLlmTimeout,
+} from "@/lib/llmTimeouts";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -55,6 +60,10 @@ const SUMMARIZE_BATCH_LIMIT = 8;
  * Every exit records one llm_calls row first. recordLlmCall never rejects
  * (llmCallLog.ts), so the `finally` cannot replace the error this throws or the
  * content it returns.
+ *
+ * The call is cut off after CRON_LLM_TIMEOUT_MS. If that happened before the
+ * body was parsed, the row records it as a timeout (network_error) rather than
+ * as the invalid-JSON error the cut-off body read produces.
  */
 async function callOpenRouterForSummary(
   apiKey: string,
@@ -63,6 +72,7 @@ async function callOpenRouterForSummary(
   ctx: { userId: string; sessionId: string }
 ): Promise<string> {
   const startedAtMs = Date.now();
+  const signal = AbortSignal.timeout(CRON_LLM_TIMEOUT_MS);
   const observed: ObservedLlmCall = {
     httpStatus: null,
     jsonParsed: false,
@@ -73,9 +83,14 @@ async function callOpenRouterForSummary(
       apiKey,
       systemPrompt,
       conversationText,
-      observed
+      observed,
+      signal
     );
   } finally {
+    observed.timedOut = signal.aborted && !observed.jsonParsed;
+    if (observed.timedOut) {
+      logLlmTimeout("cron_summarize", SUMMARY_MODEL, CRON_LLM_TIMEOUT_MS);
+    }
     await recordLlmCall(
       buildCronLlmCallRow({
         route: "cron_summarize",
@@ -94,10 +109,12 @@ async function requestSummary(
   apiKey: string,
   systemPrompt: string,
   conversationText: string,
-  observed: ObservedLlmCall
+  observed: ObservedLlmCall,
+  signal: AbortSignal
 ): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -290,6 +307,9 @@ export async function GET(request: NextRequest) {
     closeFailed: 0,
     summarized: 0,
     summarizeFailed: 0,
+    // Sessions not started because the run deadline was reached; they stay
+    // eligible and are picked up by the next run.
+    deferred: 0,
   };
 
   try {
@@ -316,6 +336,15 @@ export async function GET(request: NextRequest) {
   try {
     const toSummarize = await getSessionsNeedingSummary(SUMMARIZE_BATCH_LIMIT);
     for (const session of toSummarize) {
+      if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {
+        stats.deferred =
+          toSummarize.length - (stats.summarized + stats.summarizeFailed);
+        console.warn(
+          `Summarize cron: run deadline reached; ${stats.deferred} ` +
+            `session(s) left for the next run.`
+        );
+        break;
+      }
       try {
         await summarizeOneSession(apiKey, session);
         stats.summarized++;

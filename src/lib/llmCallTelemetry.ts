@@ -235,12 +235,15 @@ export function classifyLlmOutcome(input: {
  * What a cron call has seen by the time it exits, set step by step inside the
  * call so a `finally` can build the row whichever way the call ended.
  * httpStatus stays null if fetch threw; data stays null unless the body parsed
- * as JSON.
+ * as JSON. timedOut is set when the call's timeout cut it off; such a call is
+ * recorded like a thrown fetch (network_error), even if a status had arrived,
+ * because the response never finished.
  */
 export interface ObservedLlmCall {
   httpStatus: number | null;
   jsonParsed: boolean;
   data: Record<string, unknown> | null;
+  timedOut?: boolean;
 }
 
 export function buildCronLlmCallRow(input: {
@@ -266,7 +269,7 @@ export function buildCronLlmCallRow(input: {
     outcome: classifyLlmOutcome({
       route: input.route,
       httpStatus: observed.httpStatus,
-      threw: observed.httpStatus === null,
+      threw: observed.httpStatus === null || observed.timedOut === true,
       jsonParsed: observed.jsonParsed,
       contentPresent: data !== null && hasNonEmptyContent(data),
     }),
