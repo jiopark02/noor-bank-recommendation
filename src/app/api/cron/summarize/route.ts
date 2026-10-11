@@ -26,12 +26,14 @@ import {
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// OpenRouter summarization model. Sonnet is used for summary quality (CTO decision).
-// Defaults to the "latest" alias (retire-immune); the tilde (~) prefix is required
-// for latest aliases on OpenRouter — without it the API returns "not a valid model ID".
-// Override via the SUMMARY_MODEL env var (e.g. pin to "anthropic/claude-sonnet-4.6")
-// if output stability ever requires it. Resilience to output-format drift is handled
-// in the parser, not by pinning the model.
+// Summarization model: the SUMMARY_MODEL env var when set, otherwise the
+// "latest" alias below. The tilde (~) prefix is required for latest aliases on
+// OpenRouter — without it the API returns "not a valid model ID".
+// Every request is routed under the provider preferences in openRouterRequest.ts,
+// so the model this resolves to must have an endpoint those preferences accept,
+// or each call fails. If the alias moves to a model without one, pin a specific
+// model id through SUMMARY_MODEL and redeploy. Resilience to output-format drift
+// is handled in the parser, not by pinning the model.
 const SUMMARY_MODEL =
   process.env.SUMMARY_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
 
