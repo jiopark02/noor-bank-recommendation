@@ -278,7 +278,7 @@ function cryptoReasonOf(error: unknown): string {
  * value would corrupt a comparison rather than tidy a log line. The bound belongs
  * at the log site.
  */
-function logField(value: unknown): string {
+export function logField(value: unknown): string {
   if (typeof value !== "string") return "none";
   // Trimmed BEFORE the substitution, so surrounding whitespace disappears rather
   // than becoming a leading or trailing underscore.
