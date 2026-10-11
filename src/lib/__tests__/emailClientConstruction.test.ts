@@ -119,7 +119,7 @@ describe("sendEmail with a key that is not a valid header value", () => {
 
   it("the waitlist and welcome senders resolve false and stay clean too", async () => {
     const m = await load();
-    await expect(m.sendWaitlistConfirmationEmail(PROBE, "Name")).resolves.toBe(false);
+    await expect(m.sendWaitlistConfirmationEmail(PROBE)).resolves.toBe(false);
     await expect(m.sendWelcomeEmail(PROBE, "Name")).resolves.toBe(false);
     expect(output()).not.toContain(KEY_HEAD);
     expect(output()).not.toContain(KEY_TAIL);
