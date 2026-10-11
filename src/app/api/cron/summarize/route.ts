@@ -169,7 +169,8 @@ You will receive a conversation between a user and Noor AI. Produce a concise su
 Your summary must:
 - Be one dense paragraph (roughly 80-150 words).
 - Capture concrete facts about the user (financial situation, goals, decisions made, and relevant circumstances like visa status or school if mentioned) — NOT generic advice Noor gave.
-- Preserve specifics: numbers, bank names, deadlines, and any visa types if present.
+- Preserve specifics the user states that a connected bank feed cannot know: money received from family or other people, rent or bills paid in cash, accounts or cards that are not connected, scholarship or aid amounts and dates, deadlines, and bank names.
+- Do NOT preserve live account balances or individual transaction amounts, even if they appear in the conversation. They are read fresh from the bank feed when needed, and a stored copy goes stale.
 - Be written in third person ("The user...").
 - Omit pleasantries, greetings, and small talk.
 - Never include full sensitive identifiers (e.g. a complete SSN or card number), even if they appear in the conversation.

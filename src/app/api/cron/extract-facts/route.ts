@@ -201,6 +201,7 @@ EXTRACT — durable, currently-true facts about the user:
 - Each fact must be in ENGLISH, one concise sentence.
 - category must be one of: financial, personal, goal, preference, visa, banking, other.
 - confidence is a number between 0 and 1.
+- Store a fact only if it would change the next piece of advice Noor gives. If knowing it would not change any advice, do not extract it.
 
 DO NOT EXTRACT:
 - Hypotheticals, hopes, vague future wishes — anything not currently in progress.
@@ -216,6 +217,12 @@ DO NOT EXTRACT:
 - Greetings and small talk.
 - Live financial figures that Plaid handles (account balances, transaction amounts).
   Even if the conversation mentions "I have $3000 in checking", do NOT make it a fact.
+- Anything the connected bank feed can provide (balances, transaction amounts, merchant
+  names, account lists). Do not remember what Plaid can provide. DO extract amounts and
+  schedules the user states that the bank feed cannot know (money from family abroad,
+  cash rent, unlinked accounts, scholarship dates).
+  OK: "User receives about $800 a month from family abroad, in cash."
+  NG: "User has $3,000 in checking."
 - Full sensitive identifiers (complete SSN, full card numbers).
 
 EXISTING FACTS — reconcile:
