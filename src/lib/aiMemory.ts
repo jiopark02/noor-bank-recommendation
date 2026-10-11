@@ -21,6 +21,10 @@ import {
   createAdminClient,
   isSupabaseAdminConfigured,
 } from "@/lib/supabase";
+import {
+  findSensitiveMatches,
+  maskSensitive,
+} from "@/lib/memoryOutputFilter";
 
 // -----------------------------------------------------------------------------
 // SECTION 1: Type Definitions
@@ -756,11 +760,51 @@ export async function assertFactBelongsToUser(
 }
 
 /**
+ * Thrown instead of storing a fact whose text contains an SSN-shaped or
+ * card-number-shaped string (memoryOutputFilter.ts). Its message never contains
+ * the fact text. Callers recognize it with {@link isSensitiveFactRejected}.
+ */
+export class SensitiveFactRejectedError extends Error {
+  readonly code = "SENSITIVE_FACT_REJECTED";
+
+  constructor() {
+    super("Fact not stored: it contains an SSN- or card-number-shaped string");
+    this.name = "SensitiveFactRejectedError";
+    // Keeps instanceof working when the class is compiled to ES5.
+    Object.setPrototypeOf(this, SensitiveFactRejectedError.prototype);
+  }
+}
+
+export function isSensitiveFactRejected(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    (error as { code?: unknown }).code === "SENSITIVE_FACT_REJECTED"
+  );
+}
+
+/**
+ * Throws SensitiveFactRejectedError when the fact text matches the output
+ * filter. Logs only the number of matches, never the text.
+ */
+function rejectSensitiveFact(text: string): void {
+  const counts = findSensitiveMatches(text);
+  const total = counts.ssn + counts.card;
+  if (total > 0) {
+    console.warn("[memory-filter] kind=fact masked=%d", total);
+    throw new SensitiveFactRejectedError();
+  }
+}
+
+/**
  * Inserts a new active fact. Will fail with a unique violation (code 23505)
  * if the user already has an active fact with the same lowercased text.
  *
  * PREFER {@link upsertUserFact} when duplicates are possible, or
  * {@link supersedeUserFact} when you want to replace an existing fact.
+ *
+ * A fact containing an SSN- or card-number-shaped string is not stored: this
+ * throws SensitiveFactRejectedError before any database call.
  *
  * @throws Error wrapping the underlying PostgrestError (cause preserved).
  */
@@ -771,6 +815,7 @@ export async function saveUserFact(
   if (!fact.fact || fact.fact.trim() === "") {
     throw new Error("saveUserFact: fact text must be a non-empty string");
   }
+  rejectSensitiveFact(fact.fact);
 
   const supabase = getAdmin();
   const { data, error } = await supabase
@@ -873,8 +918,13 @@ export async function upsertUserFact(
  *
  * SECURITY: Verifies that the old fact belongs to the user before mutation.
  *
+ * A replacement containing an SSN- or card-number-shaped string is rejected
+ * here, before step 1, so the old fact is never superseded by a fact that
+ * saveUserFact would then refuse to store.
+ *
  * @throws Error when ownership check fails, the new fact text is empty, or
- *   step 1 / step 2 fails.
+ *   step 1 / step 2 fails; SensitiveFactRejectedError before any database call
+ *   when the new fact text matches the output filter.
  */
 export async function supersedeUserFact(
   userId: string,
@@ -884,6 +934,7 @@ export async function supersedeUserFact(
   if (!newFact.fact || newFact.fact.trim() === "") {
     throw new Error("supersedeUserFact: new fact text must be a non-empty string");
   }
+  rejectSensitiveFact(newFact.fact);
 
   // SECURITY: verify ownership before any mutation.
   await assertFactBelongsToUser(oldFactId, userId);
@@ -1062,6 +1113,10 @@ export async function getSummaryBySessionId(
  *
  * SECURITY: Verifies session ownership before insert.
  *
+ * Every stored text field (summary, each topic, raw_backup) passes through the
+ * output filter first: SSN- and card-number-shaped strings are replaced with
+ * a mask. Only the number of masked strings is logged.
+ *
  * @throws Error when ownership check fails, summary text is empty, or the
  *   summary insert fails (other than duplicate session_id).
  */
@@ -1076,17 +1131,31 @@ export async function createSummary(
 
   await assertSessionBelongsToUser(sessionId, userId);
 
+  let masked = 0;
+  const mask = (text: string): string => {
+    const result = maskSensitive(text);
+    masked += result.masked;
+    return result.text;
+  };
+  const summaryText = mask(input.summary.trim());
+  const topics = (input.topics ?? []).map(mask);
+  const rawBackup =
+    input.rawBackup === undefined ? null : mask(input.rawBackup);
+  if (masked > 0) {
+    console.warn("[memory-filter] kind=summary masked=%d", masked);
+  }
+
   const supabase = getAdmin();
   const { data, error } = await supabase
     .from("chat_summaries")
     .insert({
       session_id: sessionId,
       user_id: userId,
-      summary: input.summary.trim(),
-      topics: input.topics ?? [],
+      summary: summaryText,
+      topics,
       message_count: input.messageCount ?? 0,
       generated_by_model: input.generatedByModel ?? null,
-      raw_backup: input.rawBackup ?? null,
+      raw_backup: rawBackup,
     })
     .select("*")
     .single();

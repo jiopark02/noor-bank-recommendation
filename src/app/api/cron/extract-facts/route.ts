@@ -9,6 +9,7 @@ import {
   supersedeUserFact,
   expireUserFact,
   isUniqueViolation,
+  isSensitiveFactRejected,
   recordCronRun,        // ← 추가
   deleteOldCronRuns,    // ← 추가
   type ChatSession,
@@ -517,6 +518,8 @@ interface SessionFactStats {
   superseded: number;
   expired: number;
   failed: number;
+  // Not stored because the text held an SSN- or card-number-shaped string.
+  filtered: number;
 }
 
 /**
@@ -607,6 +610,13 @@ async function extractOneSession(
       await supersedeUserFact(session.user_id, oldFact.id, payload);
       stats.superseded++;
     } catch (supersedeError) {
+      // A replacement holding an SSN- or card-shaped string is rejected before
+      // the old fact is touched, so there is nothing to recover: the old fact
+      // stays active and the replacement is not stored.
+      if (isSensitiveFactRejected(supersedeError)) {
+        stats.filtered++;
+        continue;
+      }
       // supersedeUserFact 내부 부분 실패 가능 (old superseded됐는데
       // new insert 실패). 동일 내용으로 saveUserFact 1회 복구 시도.
       try {
@@ -654,7 +664,10 @@ async function extractOneSession(
       await saveUserFact(session.user_id, payload);
       stats.saved++;
     } catch (saveError) {
-      if (isUniqueViolation(saveError)) {
+      if (isSensitiveFactRejected(saveError)) {
+        // Not stored: the fact holds an SSN- or card-shaped string.
+        stats.filtered++;
+      } else if (isUniqueViolation(saveError)) {
         // 동일 텍스트 active fact 이미 존재 — upsert와 동일하게 흡수.
         stats.skipped++;
       } else {
@@ -720,6 +733,7 @@ export async function GET(request: NextRequest) {
     factsSuperseded: 0,
     factsExpired: 0,
     factsFailed: 0,
+    factsFiltered: 0,
     // Sessions not started because the run deadline was reached; they stay
     // eligible and are picked up by the next run.
     deferred: 0,
@@ -745,6 +759,7 @@ export async function GET(request: NextRequest) {
         superseded: 0,
         expired: 0,
         failed: 0,
+        filtered: 0,
       };
       try {
         await extractOneSession(apiKey, session, sessionStats);
@@ -767,6 +782,7 @@ export async function GET(request: NextRequest) {
         stats.factsSuperseded += sessionStats.superseded;
         stats.factsExpired += sessionStats.expired;
         stats.factsFailed += sessionStats.failed;
+        stats.factsFiltered += sessionStats.filtered;
       }
     }
   } catch (error) {
