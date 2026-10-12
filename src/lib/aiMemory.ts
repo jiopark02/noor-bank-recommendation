@@ -1384,6 +1384,57 @@ export async function markFactsExtracted(
   }
 }
 
+/**
+ * For each given session, how many times a memory cron's LLM call for it got a
+ * response from the model: llm_calls rows for that route and session with a
+ * 2xx status and an error class other than network_error (a timeout is
+ * recorded as network_error). A 2xx whose content was empty or not JSON counts,
+ * because the model answered and the call was paid for. A routing error
+ * (503), any other non-2xx, a network error and a timeout do not count, so a
+ * configuration fault cannot push pending sessions over the retry bound.
+ *
+ * Cron-only, spans all users by design (like getSessionsNeedingSummary); reads
+ * only session ids. Sessions with no counted attempt are absent from the
+ * result. llm_calls rows are written best-effort, so a count can be low, never
+ * high.
+ *
+ * @throws Error when the database query fails. The crons treat that as "no
+ *   bound this run" and process sessions as before.
+ */
+export async function getRespondedAttemptCounts(
+  route: "cron_summarize" | "cron_extract_facts",
+  sessionIds: string[]
+): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  if (sessionIds.length === 0) return counts;
+
+  const supabase = getAdmin();
+  const { data, error } = await supabase
+    .from("llm_calls")
+    .select("session_id")
+    .eq("route", route)
+    .in("session_id", sessionIds)
+    .gte("http_status", 200)
+    .lte("http_status", 299)
+    // Not .neq(): SQL `<>` drops rows whose error_class is NULL, which are the
+    // real successes.
+    .or("error_class.is.null,error_class.neq.network_error");
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to count responded attempts: ${error.message}`,
+      error
+    );
+  }
+
+  for (const row of (data ?? []) as Array<{ session_id: string | null }>) {
+    if (typeof row.session_id === "string") {
+      counts[row.session_id] = (counts[row.session_id] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
 // ============================================================================
 // STEP A — aiMemory.ts 에 추가 (v2: Cursor 검토 반영)
 // ============================================================================

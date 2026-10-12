@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   isAiMemoryEnabled,
   getSessionsNeedingFactsExtraction,
+  getRespondedAttemptCounts,
   markFactsExtracted,
   getSessionMessages,
   getUserFacts,
@@ -24,6 +25,12 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import {
+  CRON_MAX_RESPONDED_ATTEMPTS,
+  SESSION_CANDIDATE_LIMIT,
+  applyGiveUps,
+  partitionByAttemptBound,
+} from "@/lib/cronRetryBound";
 import {
   OPENROUTER_URL,
   buildOpenRouterRequestBody,
@@ -741,15 +748,51 @@ export async function GET(request: NextRequest) {
     factsExpired: 0,
     factsFailed: 0,
     factsFiltered: 0,
+    // Sessions given up under the retry bound, and give-ups whose flag write
+    // failed (those are selected and given up again on a later run).
+    givenUp: 0,
+    giveUpFailed: 0,
     // Sessions not started because the run deadline was reached; they stay
     // eligible and are picked up by the next run.
     deferred: 0,
   };
 
   try {
-    const toExtract = await getSessionsNeedingFactsExtraction(
-      EXTRACT_BATCH_LIMIT
+    const candidates = await getSessionsNeedingFactsExtraction(
+      SESSION_CANDIDATE_LIMIT
     );
+    let toExtract = candidates.slice(0, EXTRACT_BATCH_LIMIT);
+
+    // Retry bound: give up on sessions whose extraction has already had the
+    // maximum number of answered attempts. If the counts cannot be read, the
+    // run goes ahead without the bound rather than giving up on anything.
+    let attemptCounts: Record<string, number> | null = null;
+    try {
+      attemptCounts = await getRespondedAttemptCounts(
+        "cron_extract_facts",
+        candidates.map((s) => s.id)
+      );
+    } catch (error) {
+      console.error(
+        "Extract cron: could not read attempt counts; running without the retry bound:",
+        error
+      );
+    }
+    if (attemptCounts) {
+      const { toProcess, toGiveUp } = partitionByAttemptBound(
+        candidates,
+        attemptCounts,
+        { max: CRON_MAX_RESPONDED_ATTEMPTS, limit: EXTRACT_BATCH_LIMIT }
+      );
+      const giveUps = await applyGiveUps(toGiveUp, attemptCounts, {
+        route: "cron_extract_facts",
+        mark: (s) => markFactsExtracted(s.id, s.user_id),
+      });
+      stats.givenUp = giveUps.givenUp;
+      stats.giveUpFailed = giveUps.giveUpFailed;
+      toExtract = toProcess;
+    }
+
     for (const session of toExtract) {
       if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {
         stats.deferred =
