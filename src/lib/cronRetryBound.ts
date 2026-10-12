@@ -7,14 +7,20 @@
  * newer sessions were never reached. Now:
  *   - a session is given up after CRON_MAX_RESPONDED_ATTEMPTS attempts in which
  *     the model actually responded (counted from llm_calls; see
- *     getRespondedAttemptCounts in aiMemory.ts). A routing error, a network
- *     error or a timeout is not counted, so a configuration fault cannot make
- *     pending sessions look poisoned;
+ *     getRespondedAttemptCounts in aiMemory.ts). A routing error, any other
+ *     non-2xx response, a network error or a timeout is not counted. A failure
+ *     after the model answered — a database write, parsing or validation in
+ *     our code, marking the session — is counted;
  *   - giving up sets the cron's own completion flag (summarized or
  *     facts_extracted), so the session leaves the queue; the session id and
- *     the count are logged so it can be re-queued by hand;
+ *     the count are logged. The count covers every llm_calls row for the
+ *     session, with no time window, so resetting the flag alone makes the next
+ *     run give the session up again. There is no supported re-queue path yet;
  *   - each run reads more candidates (SESSION_CANDIDATE_LIMIT) than it
- *     processes, so sessions still under the bound cannot crowd out newer ones.
+ *     processes, but only sessions at or over the bound leave the queue. A
+ *     session that keeps timing out is never counted, so it stays at the head
+ *     of the queue; with the run deadline, a run can end after that one
+ *     session.
  *
  * A completion flag that is true therefore means "processed, given up, or
  * empty" — not "a summary or fact row exists".

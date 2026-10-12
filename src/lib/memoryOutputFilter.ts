@@ -8,8 +8,11 @@
  * Text is first split into digit runs: digit groups joined by single spaces or
  * hyphens ("4111 1111 1111 1111", "123-45-6789", "94110"). A digit group that
  * is part of a larger number — a comma or period followed by a digit on either
- * side, as in "1,234,567" or "1234.56" — is set aside, so amounts never match;
- * the other groups of the same run are still tested ("paid $1,200 4111 …").
+ * side, as in "1,234,567" or "1234.56" — is set aside, so amounts written with
+ * a comma or decimal point do not match; the other groups of the same run are
+ * still tested ("paid $1,200 4111 …"). Digit groups separated only by spaces
+ * or hyphens are tested, so three space-separated numbers of 3, 2 and 4
+ * digits match as an SSN.
  * Inside a run, consecutive groups are tested left to right, longest first:
  *   - SSN: exactly three groups of 3, 2 and 4 digits with the same separator
  *     both times ("123-45-6789", "123 45 6789"; not "123-45 6789").
@@ -21,7 +24,8 @@
  *
  * WHAT IS DELIBERATELY NOT MATCHED
  * Account numbers (too many false positives; the prompts already forbid full
- * identifiers), phone numbers, ZIP codes, dates and amounts. A Luhn-valid
+ * identifiers), phone numbers, ZIP codes, dates and amounts written with a
+ * comma or decimal point. A Luhn-valid
  * 13–19 digit identifier that is not a card (an order or tracking number) is
  * matched; that false positive is accepted.
  */

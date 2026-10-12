@@ -1390,8 +1390,9 @@ export async function markFactsExtracted(
  * 2xx status and an error class other than network_error (a timeout is
  * recorded as network_error). A 2xx whose content was empty or not JSON counts,
  * because the model answered and the call was paid for. A routing error
- * (503), any other non-2xx, a network error and a timeout do not count, so a
- * configuration fault cannot push pending sessions over the retry bound.
+ * (503), any other non-2xx, a network error and a timeout do not count. A
+ * failure after the model answered — a database write, parsing or validation
+ * in our code, marking the session — is counted.
  *
  * Cron-only, spans all users by design (like getSessionsNeedingSummary); reads
  * only session ids. Sessions with no counted attempt are absent from the
