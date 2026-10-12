@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { generateSystemPrompt, UserContext } from "@/lib/noorAIPrompt";
 import {
   createAdminClient,
@@ -52,11 +51,16 @@ import {
   type ChatPromptBlocks,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import {
+  OPENROUTER_URL,
+  buildOpenRouterRequestBody,
+  resolveOpenRouterApiKey,
+} from "@/lib/openRouterRequest";
+import { CHAT_LLM_TIMEOUT_MS, logLlmTimeout } from "@/lib/llmTimeouts";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_SIMPLE_MODEL = "google/gemini-2.5-flash-lite";
 const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
 
@@ -180,23 +184,6 @@ function normalizeOpenRouterModelId(model: string): string {
   };
 
   return ALIASES[trimmed] ?? trimmed;
-}
-
-function resolveOpenRouterApiKey(): string | null {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key || key.trim() === "") {
-    return null;
-  }
-  return key.trim();
-}
-
-// Initialize Anthropic client only if API key exists (used when OpenRouter not set)
-function getAnthropicClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey.trim() === "") {
-    return null;
-  }
-  return new Anthropic({ apiKey });
 }
 
 interface ChatMessage {
@@ -727,6 +714,13 @@ interface ChatLlmCallContext {
  * a thrown fetch error or alter the returned result. A fetch that throws is
  * rethrown unchanged: it is still not retried on the next model, and it still
  * reaches POST's outer catch as before.
+ *
+ * The attempt is cut off after CHAT_LLM_TIMEOUT_MS. A timeout before the
+ * response arrives makes fetch throw, which takes the path above. A timeout
+ * while the body is still being read is not left to readJsonBodyLeniently,
+ * which would turn the cut-off body into an empty success and a stored
+ * "could not generate a response" turn; it is recorded as a failed attempt and
+ * thrown the same way.
  */
 async function callOpenRouter(
   apiKey: string,
@@ -735,19 +729,19 @@ async function callOpenRouter(
   telemetry: ChatLlmCallContext
 ): Promise<OpenRouterResult> {
   const startedAtMs = Date.now();
+  const signal = AbortSignal.timeout(CHAT_LLM_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(OPENROUTER_URL, {
       method: "POST",
+      signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: 1024,
-      }),
+      body: JSON.stringify(
+        buildOpenRouterRequestBody({ model, messages, maxTokens: 1024 })
+      ),
     });
   } catch (error) {
     await recordLlmCall(
@@ -771,10 +765,37 @@ async function callOpenRouter(
         blocks: telemetry.blocks,
       })
     );
+    if (signal.aborted) logLlmTimeout("chat", model, CHAT_LLM_TIMEOUT_MS);
     throw error;
   }
 
   const { data, jsonParsed } = await readJsonBodyLeniently(res);
+  if (!jsonParsed && signal.aborted) {
+    await recordLlmCall(
+      buildLlmCallRow({
+        route: "chat",
+        attemptIndex: telemetry.attemptIndex,
+        requestModel: model,
+        startedAtMs,
+        latencyMs: Date.now() - startedAtMs,
+        userId: telemetry.userId,
+        sessionId: telemetry.sessionId,
+        httpStatus: res.status,
+        outcome: classifyLlmOutcome({
+          route: "chat",
+          httpStatus: res.status,
+          threw: true,
+          jsonParsed: false,
+          contentPresent: false,
+        }),
+        meta: null,
+        blocks: telemetry.blocks,
+      })
+    );
+    logLlmTimeout("chat", model, CHAT_LLM_TIMEOUT_MS);
+    throw new Error("OpenRouter response timed out while being read");
+  }
+
   const result = toOpenRouterResult({
     ok: res.ok,
     status: res.status,
@@ -1065,10 +1086,13 @@ export async function POST(request: NextRequest) {
       !isGreeting && isSubscriptionQuestion(lastUserMessageText);
 
     // Plaid capability scaffold (B-1). AI_PLAID_STATE = off | connection | balances.
-    // "off" suppresses the scaffold block and leaves the base prompt unchanged.
-    // It does NOT mean everything below is unchanged: the balance-keyword block
-    // still runs under "off", and the financial-analysis block no longer runs
-    // under any mode because its egress channel denies on every input.
+    // "off" closes every path below that reads fresh bank data: the scaffold
+    // block, the balance-keyword block, and the financial-analysis block (which
+    // no longer runs under any mode because its egress channel denies on every
+    // input). The base prompt's guideline 2 also tells the model it has no bank
+    // data. Bank figures the model was given on earlier turns can still reach it
+    // through the conversation history and the memory block; "off" does not
+    // remove those.
     const plaidStateMode = resolvePlaidStateMode();
     const plaidStateEnabled = plaidStateMode !== "off";
 
@@ -1127,7 +1151,8 @@ export async function POST(request: NextRequest) {
     // Under "balances" mode the always-on L2 block already injected shallow
     // balances on substantive turns, so this keyword-gated balance path (and its
     // buggy buildBalanceSummary formatter) is retired to avoid double-stating the
-    // balance. Under "off"/"connection" it runs exactly as before.
+    // balance. Under "connection" it runs on a balance question; under "off" it
+    // does not run at all.
     const balanceKeywordDecision = evaluatePlaidEgressDecision({
       channel: "balance_keyword",
       plaidStateMode,
@@ -1239,7 +1264,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 1) Prefer OpenRouter when OPENROUTER_API_KEY is set
+    // OpenRouter is the only provider path: every request carries the routing
+    // preferences in openRouterRequest.ts. Without a key there is no other
+    // provider to fall back to, and the route answers 503 below.
     const openRouterApiKey = resolveOpenRouterApiKey();
     if (openRouterApiKey) {
       const openRouterMessages = [
@@ -1328,74 +1355,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2) Fallback to Anthropic if ANTHROPIC_API_KEY is set
-    const anthropic = getAnthropicClient();
-    if (anthropic) {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-5-20250929",
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: formattedMessages,
-      });
-
-      const assistantMessage =
-        response.content[0].type === "text" ? response.content[0].text : "";
-
-      try {
-        await persistTurnIfEnabled({
-          activeSession,
-          authUserId,
-          userContent: lastUserMessageText,
-          assistantContent: assistantMessage,
-          assistantModel: "claude-sonnet-4-5-20250929",
-          inputTokens: response.usage.input_tokens,
-          outputTokens: response.usage.output_tokens,
-        });
-      } catch (error) {
-        console.error("Failed to save messages (Anthropic branch):", error);
-        return NextResponse.json(
-          {
-            error:
-              "Could not save your conversation. Please try sending your message again.",
-            code: "SAVE_FAILED",
-          },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: assistantMessage,
-        model: "claude-sonnet-4-5-20250929",
-        sessionId: activeSession?.id ?? null,
-        usage: {
-          input_tokens: response.usage.input_tokens,
-          output_tokens: response.usage.output_tokens,
-        },
-      });
-    }
-
     return NextResponse.json(
       {
-        error:
-          "AI provider is not configured. Set OPENROUTER_API_KEY or ANTHROPIC_API_KEY.",
+        error: "AI provider is not configured. Set OPENROUTER_API_KEY.",
       },
       { status: 503 }
     );
   } catch (error) {
     console.error("Chat API error:", error);
-
-    if (error instanceof Anthropic.APIError) {
-      if (error.status === 401) {
-        return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
-      }
-      if (error.status === 429) {
-        return NextResponse.json(
-          { error: "Rate limit exceeded. Please try again later." },
-          { status: 429 }
-        );
-      }
-    }
 
     return NextResponse.json(
       { error: "Failed to get response from AI" },

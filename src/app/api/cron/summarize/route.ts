@@ -3,6 +3,7 @@ import {
   isAiMemoryEnabled,
   getSessionsToClose,
   getSessionsNeedingSummary,
+  getRespondedAttemptCounts,
   endSession,
   getSessionMessages,
   createSummary,
@@ -17,36 +18,41 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import {
+  CRON_MAX_RESPONDED_ATTEMPTS,
+  SESSION_CANDIDATE_LIMIT,
+  applyGiveUps,
+  partitionByAttemptBound,
+} from "@/lib/cronRetryBound";
+import {
+  OPENROUTER_URL,
+  buildOpenRouterRequestBody,
+  resolveOpenRouterApiKey,
+} from "@/lib/openRouterRequest";
+import {
+  CRON_LLM_TIMEOUT_MS,
+  cronRunHasBudgetForAnotherCall,
+  logLlmTimeout,
+} from "@/lib/llmTimeouts";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// OpenRouter summarization model. Sonnet is used for summary quality (CTO decision).
-// Defaults to the "latest" alias (retire-immune); the tilde (~) prefix is required
-// for latest aliases on OpenRouter — without it the API returns "not a valid model ID".
-// Override via the SUMMARY_MODEL env var (e.g. pin to "anthropic/claude-sonnet-4.6")
-// if output stability ever requires it. Resilience to output-format drift is handled
-// in the parser, not by pinning the model.
+// Summarization model: the SUMMARY_MODEL env var when set, otherwise the
+// "latest" alias below. The tilde (~) prefix is required for latest aliases on
+// OpenRouter — without it the API returns "not a valid model ID".
+// Every request is routed under the provider preferences in openRouterRequest.ts,
+// so the model this resolves to must have an endpoint those preferences accept,
+// or each call fails. If the alias moves to a model without one, pin a specific
+// model id through SUMMARY_MODEL and redeploy. Resilience to output-format drift
+// is handled in the parser, not by pinning the model.
 const SUMMARY_MODEL =
   process.env.SUMMARY_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const MAX_MESSAGES_PER_SUMMARY = 200;
 const SUMMARY_MAX_TOKENS = 1024;
 const CLOSE_BATCH_LIMIT = 50;
 const SUMMARIZE_BATCH_LIMIT = 8;
-
-/**
- * OpenRouter API 키를 환경변수에서 읽어온다.
- * 없거나 빈 문자열이면 null.
- */
-function resolveOpenRouterApiKey(): string | null {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || apiKey.trim() === "") {
-    return null;
-  }
-  return apiKey.trim();
-}
 
 /**
  * OpenRouter chat completions를 호출해 요약 텍스트를 반환한다.
@@ -61,6 +67,10 @@ function resolveOpenRouterApiKey(): string | null {
  * Every exit records one llm_calls row first. recordLlmCall never rejects
  * (llmCallLog.ts), so the `finally` cannot replace the error this throws or the
  * content it returns.
+ *
+ * The call is cut off after CRON_LLM_TIMEOUT_MS. If that happened before the
+ * body was parsed, the row records it as a timeout (network_error) rather than
+ * as the invalid-JSON error the cut-off body read produces.
  */
 async function callOpenRouterForSummary(
   apiKey: string,
@@ -69,6 +79,7 @@ async function callOpenRouterForSummary(
   ctx: { userId: string; sessionId: string }
 ): Promise<string> {
   const startedAtMs = Date.now();
+  const signal = AbortSignal.timeout(CRON_LLM_TIMEOUT_MS);
   const observed: ObservedLlmCall = {
     httpStatus: null,
     jsonParsed: false,
@@ -79,9 +90,14 @@ async function callOpenRouterForSummary(
       apiKey,
       systemPrompt,
       conversationText,
-      observed
+      observed,
+      signal
     );
   } finally {
+    observed.timedOut = signal.aborted && !observed.jsonParsed;
+    if (observed.timedOut) {
+      logLlmTimeout("cron_summarize", SUMMARY_MODEL, CRON_LLM_TIMEOUT_MS);
+    }
     await recordLlmCall(
       buildCronLlmCallRow({
         route: "cron_summarize",
@@ -100,22 +116,26 @@ async function requestSummary(
   apiKey: string,
   systemPrompt: string,
   conversationText: string,
-  observed: ObservedLlmCall
+  observed: ObservedLlmCall,
+  signal: AbortSignal
 ): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: SUMMARY_MODEL,
-      max_tokens: SUMMARY_MAX_TOKENS,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: conversationText },
-      ],
-    }),
+    body: JSON.stringify(
+      buildOpenRouterRequestBody({
+        model: SUMMARY_MODEL,
+        maxTokens: SUMMARY_MAX_TOKENS,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: conversationText },
+        ],
+      })
+    ),
   });
   observed.httpStatus = response.status;
 
@@ -156,7 +176,8 @@ You will receive a conversation between a user and Noor AI. Produce a concise su
 Your summary must:
 - Be one dense paragraph (roughly 80-150 words).
 - Capture concrete facts about the user (financial situation, goals, decisions made, and relevant circumstances like visa status or school if mentioned) — NOT generic advice Noor gave.
-- Preserve specifics: numbers, bank names, deadlines, and any visa types if present.
+- Preserve specifics the user states that a connected bank feed cannot know: money received from family or other people, rent or bills paid in cash, accounts or cards that are not connected, scholarship or aid amounts and dates, deadlines, and bank names.
+- Do NOT preserve live account balances or individual transaction amounts, even if they appear in the conversation. They are read fresh from the bank feed when needed, and a stored copy goes stale.
 - Be written in third person ("The user...").
 - Omit pleasantries, greetings, and small talk.
 - Never include full sensitive identifiers (e.g. a complete SSN or card number), even if they appear in the conversation.
@@ -294,6 +315,13 @@ export async function GET(request: NextRequest) {
     closeFailed: 0,
     summarized: 0,
     summarizeFailed: 0,
+    // Sessions given up under the retry bound, and give-ups whose flag write
+    // failed (those are selected and given up again on a later run).
+    givenUp: 0,
+    giveUpFailed: 0,
+    // Sessions not started because the run deadline was reached; they stay
+    // eligible and are picked up by the next run.
+    deferred: 0,
   };
 
   try {
@@ -318,8 +346,49 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const toSummarize = await getSessionsNeedingSummary(SUMMARIZE_BATCH_LIMIT);
+    const candidates = await getSessionsNeedingSummary(SESSION_CANDIDATE_LIMIT);
+    let toSummarize = candidates.slice(0, SUMMARIZE_BATCH_LIMIT);
+
+    // Retry bound: give up on sessions whose summary has already had the
+    // maximum number of answered attempts. If the counts cannot be read, the
+    // run goes ahead without the bound rather than giving up on anything.
+    let attemptCounts: Record<string, number> | null = null;
+    try {
+      attemptCounts = await getRespondedAttemptCounts(
+        "cron_summarize",
+        candidates.map((s) => s.id)
+      );
+    } catch (error) {
+      console.error(
+        "Summarize cron: could not read attempt counts; running without the retry bound:",
+        error
+      );
+    }
+    if (attemptCounts) {
+      const { toProcess, toGiveUp } = partitionByAttemptBound(
+        candidates,
+        attemptCounts,
+        { max: CRON_MAX_RESPONDED_ATTEMPTS, limit: SUMMARIZE_BATCH_LIMIT }
+      );
+      const giveUps = await applyGiveUps(toGiveUp, attemptCounts, {
+        route: "cron_summarize",
+        mark: (s) => markSessionSummarized(s.id, s.user_id),
+      });
+      stats.givenUp = giveUps.givenUp;
+      stats.giveUpFailed = giveUps.giveUpFailed;
+      toSummarize = toProcess;
+    }
+
     for (const session of toSummarize) {
+      if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {
+        stats.deferred =
+          toSummarize.length - (stats.summarized + stats.summarizeFailed);
+        console.warn(
+          `Summarize cron: run deadline reached; ${stats.deferred} ` +
+            `session(s) left for the next run.`
+        );
+        break;
+      }
       try {
         await summarizeOneSession(apiKey, session);
         stats.summarized++;

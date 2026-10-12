@@ -3,16 +3,24 @@ import type { PlaidStateMode } from "@/lib/plaidChatContext";
 // Shared decision surface for the three places in the chat route that decide
 // whether Plaid-derived data reaches the LLM prompt (the "capability
 // scaffold" block, the balance-keyword path, and the financial-analysis
-// keyword path). The capability-scaffold and balance-keyword formulas below
-// are copied verbatim from those channels' inline conditions in route.ts, so
-// this module only makes them observable and independently testable. The
-// financial-analysis channel is the exception: it no longer mirrors an inline
-// condition and is switched off outright — see its case for why.
+// keyword path). The capability-scaffold formula is copied from that channel's
+// original inline condition in route.ts. The balance-keyword formula is too,
+// except that it now also denies under "off": before that, "off" stopped the
+// scaffold but still let a balance question pull a live balance into the
+// prompt. The financial-analysis channel no longer mirrors an inline condition
+// and is switched off outright — see its case for why.
 
-export type PlaidEgressChannel =
-  | "capability_scaffold"
-  | "balance_keyword"
-  | "financial_analysis_keyword";
+// Under AI_PLAID_STATE=off every channel denies, so "off" is a working
+// emergency switch for fresh bank data reaching the model. The channel type is
+// derived from this list, so a new channel cannot exist without appearing here,
+// and the test that walks this list under "off" covers it.
+export const PLAID_EGRESS_CHANNELS = [
+  "capability_scaffold",
+  "balance_keyword",
+  "financial_analysis_keyword",
+] as const;
+
+export type PlaidEgressChannel = (typeof PLAID_EGRESS_CHANNELS)[number];
 
 export interface PlaidEgressPolicyInput {
   channel: PlaidEgressChannel;
@@ -51,6 +59,13 @@ export function evaluatePlaidEgressDecision(
           channel: input.channel,
           allowed: false,
           reason: "keyword_not_matched",
+        };
+      }
+      if (input.plaidStateMode === "off") {
+        return {
+          channel: input.channel,
+          allowed: false,
+          reason: "mode_off",
         };
       }
       const allowed = input.plaidStateMode !== "balances";

@@ -1,9 +1,33 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
+  PLAID_EGRESS_CHANNELS,
   evaluatePlaidEgressDecision,
   logPlaidEgressDecision,
   type PlaidEgressChannel,
 } from "../plaidEgressPolicy";
+
+// Every channel, with every keyword matched: under "off" nothing may pass.
+// The channel list is the one the type is derived from, so a new channel is
+// covered here without editing this test.
+describe("evaluatePlaidEgressDecision — off closes every channel", () => {
+  it.each(PLAID_EGRESS_CHANNELS)("%s denies under off", (channel) => {
+    const decision = evaluatePlaidEgressDecision({
+      channel,
+      plaidStateMode: "off",
+      wantsBalance: true,
+      wantsFinancialAnalysis: true,
+    });
+    expect(decision.allowed).toBe(false);
+  });
+
+  it("covers the three known channels", () => {
+    expect([...PLAID_EGRESS_CHANNELS].sort()).toEqual([
+      "balance_keyword",
+      "capability_scaffold",
+      "financial_analysis_keyword",
+    ]);
+  });
+});
 
 describe("evaluatePlaidEgressDecision — capability_scaffold", () => {
   it("denies when mode is off", () => {
@@ -83,7 +107,7 @@ describe("evaluatePlaidEgressDecision — balance_keyword", () => {
     });
   });
 
-  it("allows when wantsBalance is true and mode is off", () => {
+  it("denies when wantsBalance is true and mode is off — off is the emergency switch", () => {
     const decision = evaluatePlaidEgressDecision({
       channel: "balance_keyword",
       plaidStateMode: "off",
@@ -91,8 +115,8 @@ describe("evaluatePlaidEgressDecision — balance_keyword", () => {
     });
     expect(decision).toEqual({
       channel: "balance_keyword",
-      allowed: true,
-      reason: "keyword_matched_mode_not_balances",
+      allowed: false,
+      reason: "mode_off",
     });
   });
 

@@ -355,6 +355,49 @@ describe("buildCronLlmCallRow", () => {
     expect(row.error_class).toBe("invalid_json");
     expect(row.generation_id).toBeNull();
   });
+
+  it("records a timeout during the body read as network_error, keeping the status", () => {
+    const row = buildCronLlmCallRow({
+      ...base,
+      observed: {
+        httpStatus: 200,
+        jsonParsed: false,
+        data: null,
+        timedOut: true,
+      },
+    });
+    expect(row.succeeded).toBe(false);
+    expect(row.error_class).toBe("network_error");
+    expect(row.http_status).toBe(200);
+    expect(Object.keys(row).sort()).toEqual(ALLOWED_ROW_KEYS);
+  });
+
+  it("records a timeout before any response as network_error with no status", () => {
+    const row = buildCronLlmCallRow({
+      ...base,
+      observed: {
+        httpStatus: null,
+        jsonParsed: false,
+        data: null,
+        timedOut: true,
+      },
+    });
+    expect(row.error_class).toBe("network_error");
+    expect(row.http_status).toBeNull();
+  });
+
+  it("treats timedOut false the same as an absent flag", () => {
+    const row = buildCronLlmCallRow({
+      ...base,
+      observed: {
+        httpStatus: 200,
+        jsonParsed: false,
+        data: null,
+        timedOut: false,
+      },
+    });
+    expect(row.error_class).toBe("invalid_json");
+  });
 });
 
 describe("buildLlmCallRow", () => {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   isAiMemoryEnabled,
   getSessionsNeedingFactsExtraction,
+  getRespondedAttemptCounts,
   markFactsExtracted,
   getSessionMessages,
   getUserFacts,
@@ -9,6 +10,7 @@ import {
   supersedeUserFact,
   expireUserFact,
   isUniqueViolation,
+  isSensitiveFactRejected,
   recordCronRun,        // ← 추가
   deleteOldCronRuns,    // ← 추가
   type ChatSession,
@@ -23,19 +25,37 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import {
+  CRON_MAX_RESPONDED_ATTEMPTS,
+  SESSION_CANDIDATE_LIMIT,
+  applyGiveUps,
+  partitionByAttemptBound,
+} from "@/lib/cronRetryBound";
+import {
+  OPENROUTER_URL,
+  buildOpenRouterRequestBody,
+  resolveOpenRouterApiKey,
+} from "@/lib/openRouterRequest";
+import {
+  CRON_LLM_TIMEOUT_MS,
+  cronRunHasBudgetForAnotherCall,
+  logLlmTimeout,
+} from "@/lib/llmTimeouts";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// OpenRouter fact-extraction model. Sonnet is used for extraction accuracy (CTO decision).
-// Defaults to the "latest" alias (retire-immune); the tilde (~) prefix is required
-// for latest aliases on OpenRouter — without it the API returns "not a valid model ID".
-// Override via the EXTRACTION_MODEL env var (e.g. pin to "anthropic/claude-sonnet-4.6")
-// if output stability ever requires it. Resilience to output-format drift is handled
-// in the parser, not by pinning the model. (Same pattern as SUMMARY_MODEL in the summarize cron.)
+// Fact-extraction model: the EXTRACTION_MODEL env var when set, otherwise the
+// "latest" alias below. The tilde (~) prefix is required for latest aliases on
+// OpenRouter — without it the API returns "not a valid model ID".
+// Every request is routed under the provider preferences in openRouterRequest.ts,
+// so the model this resolves to must have an endpoint those preferences accept,
+// or each call fails. If the alias moves to a model without one, pin a specific
+// model id through EXTRACTION_MODEL and redeploy. Resilience to output-format
+// drift is handled in the parser, not by pinning the model. (Same pattern as
+// SUMMARY_MODEL in the summarize cron.)
 const EXTRACTION_MODEL =
   process.env.EXTRACTION_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // 한 세션에서 LLM에 넘기는 최대 메시지 수 (PR4와 동일).
 const MAX_MESSAGES_PER_EXTRACTION = 200;
@@ -65,18 +85,6 @@ const VALID_CATEGORIES: ReadonlyArray<UserFactCategory> = [
 ];
 
 /**
- * OpenRouter API 키를 환경변수에서 읽어온다.
- * 없거나 빈 문자열이면 null. (PR4와 동일)
- */
-function resolveOpenRouterApiKey(): string | null {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || apiKey.trim() === "") {
-    return null;
-  }
-  return apiKey.trim();
-}
-
-/**
  * OpenRouter chat completions를 호출해 raw 문자열 응답을 반환한다.
  *
  * PR4 callOpenRouterForSummary와 동일한 throw 기반 동작.
@@ -93,14 +101,25 @@ async function callOpenRouterForExtraction(
   ctx: { userId: string; sessionId: string }
 ): Promise<string> {
   const startedAtMs = Date.now();
+  const signal = AbortSignal.timeout(CRON_LLM_TIMEOUT_MS);
   const observed: ObservedLlmCall = {
     httpStatus: null,
     jsonParsed: false,
     data: null,
   };
   try {
-    return await requestExtraction(apiKey, systemPrompt, userContent, observed);
+    return await requestExtraction(
+      apiKey,
+      systemPrompt,
+      userContent,
+      observed,
+      signal
+    );
   } finally {
+    observed.timedOut = signal.aborted && !observed.jsonParsed;
+    if (observed.timedOut) {
+      logLlmTimeout("cron_extract_facts", EXTRACTION_MODEL, CRON_LLM_TIMEOUT_MS);
+    }
     await recordLlmCall(
       buildCronLlmCallRow({
         route: "cron_extract_facts",
@@ -119,22 +138,26 @@ async function requestExtraction(
   apiKey: string,
   systemPrompt: string,
   userContent: string,
-  observed: ObservedLlmCall
+  observed: ObservedLlmCall,
+  signal: AbortSignal
 ): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: EXTRACTION_MODEL,
-      max_tokens: EXTRACTION_MAX_TOKENS,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-    }),
+    body: JSON.stringify(
+      buildOpenRouterRequestBody({
+        model: EXTRACTION_MODEL,
+        maxTokens: EXTRACTION_MAX_TOKENS,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+      })
+    ),
   });
   observed.httpStatus = response.status;
 
@@ -185,6 +208,7 @@ EXTRACT — durable, currently-true facts about the user:
 - Each fact must be in ENGLISH, one concise sentence.
 - category must be one of: financial, personal, goal, preference, visa, banking, other.
 - confidence is a number between 0 and 1.
+- Store a fact only if it would change the next piece of advice Noor gives. If knowing it would not change any advice, do not extract it.
 
 DO NOT EXTRACT:
 - Hypotheticals, hopes, vague future wishes — anything not currently in progress.
@@ -200,6 +224,12 @@ DO NOT EXTRACT:
 - Greetings and small talk.
 - Live financial figures that Plaid handles (account balances, transaction amounts).
   Even if the conversation mentions "I have $3000 in checking", do NOT make it a fact.
+- Anything the connected bank feed can provide (balances, transaction amounts, merchant
+  names, account lists). Do not remember what Plaid can provide. DO extract amounts and
+  schedules the user states that the bank feed cannot know (money from family abroad,
+  cash rent, unlinked accounts, scholarship dates).
+  OK: "User receives about $800 a month from family abroad, in cash."
+  NG: "User has $3,000 in checking."
 - Full sensitive identifiers (complete SSN, full card numbers).
 
 EXISTING FACTS — reconcile:
@@ -502,6 +532,8 @@ interface SessionFactStats {
   superseded: number;
   expired: number;
   failed: number;
+  // Not stored because the text held an SSN- or card-number-shaped string.
+  filtered: number;
 }
 
 /**
@@ -592,6 +624,13 @@ async function extractOneSession(
       await supersedeUserFact(session.user_id, oldFact.id, payload);
       stats.superseded++;
     } catch (supersedeError) {
+      // A replacement holding an SSN- or card-shaped string is rejected before
+      // the old fact is touched, so there is nothing to recover: the old fact
+      // stays active and the replacement is not stored.
+      if (isSensitiveFactRejected(supersedeError)) {
+        stats.filtered++;
+        continue;
+      }
       // supersedeUserFact 내부 부분 실패 가능 (old superseded됐는데
       // new insert 실패). 동일 내용으로 saveUserFact 1회 복구 시도.
       try {
@@ -639,7 +678,10 @@ async function extractOneSession(
       await saveUserFact(session.user_id, payload);
       stats.saved++;
     } catch (saveError) {
-      if (isUniqueViolation(saveError)) {
+      if (isSensitiveFactRejected(saveError)) {
+        // Not stored: the fact holds an SSN- or card-shaped string.
+        stats.filtered++;
+      } else if (isUniqueViolation(saveError)) {
         // 동일 텍스트 active fact 이미 존재 — upsert와 동일하게 흡수.
         stats.skipped++;
       } else {
@@ -705,19 +747,69 @@ export async function GET(request: NextRequest) {
     factsSuperseded: 0,
     factsExpired: 0,
     factsFailed: 0,
+    factsFiltered: 0,
+    // Sessions given up under the retry bound, and give-ups whose flag write
+    // failed (those are selected and given up again on a later run).
+    givenUp: 0,
+    giveUpFailed: 0,
+    // Sessions not started because the run deadline was reached; they stay
+    // eligible and are picked up by the next run.
+    deferred: 0,
   };
 
   try {
-    const toExtract = await getSessionsNeedingFactsExtraction(
-      EXTRACT_BATCH_LIMIT
+    const candidates = await getSessionsNeedingFactsExtraction(
+      SESSION_CANDIDATE_LIMIT
     );
+    let toExtract = candidates.slice(0, EXTRACT_BATCH_LIMIT);
+
+    // Retry bound: give up on sessions whose extraction has already had the
+    // maximum number of answered attempts. If the counts cannot be read, the
+    // run goes ahead without the bound rather than giving up on anything.
+    let attemptCounts: Record<string, number> | null = null;
+    try {
+      attemptCounts = await getRespondedAttemptCounts(
+        "cron_extract_facts",
+        candidates.map((s) => s.id)
+      );
+    } catch (error) {
+      console.error(
+        "Extract cron: could not read attempt counts; running without the retry bound:",
+        error
+      );
+    }
+    if (attemptCounts) {
+      const { toProcess, toGiveUp } = partitionByAttemptBound(
+        candidates,
+        attemptCounts,
+        { max: CRON_MAX_RESPONDED_ATTEMPTS, limit: EXTRACT_BATCH_LIMIT }
+      );
+      const giveUps = await applyGiveUps(toGiveUp, attemptCounts, {
+        route: "cron_extract_facts",
+        mark: (s) => markFactsExtracted(s.id, s.user_id),
+      });
+      stats.givenUp = giveUps.givenUp;
+      stats.giveUpFailed = giveUps.giveUpFailed;
+      toExtract = toProcess;
+    }
+
     for (const session of toExtract) {
+      if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {
+        stats.deferred =
+          toExtract.length - (stats.processed + stats.processFailed);
+        console.warn(
+          `Extract cron: run deadline reached; ${stats.deferred} ` +
+            `session(s) left for the next run.`
+        );
+        break;
+      }
       const sessionStats: SessionFactStats = {
         saved: 0,
         skipped: 0,
         superseded: 0,
         expired: 0,
         failed: 0,
+        filtered: 0,
       };
       try {
         await extractOneSession(apiKey, session, sessionStats);
@@ -740,6 +832,7 @@ export async function GET(request: NextRequest) {
         stats.factsSuperseded += sessionStats.superseded;
         stats.factsExpired += sessionStats.expired;
         stats.factsFailed += sessionStats.failed;
+        stats.factsFiltered += sessionStats.filtered;
       }
     }
   } catch (error) {
