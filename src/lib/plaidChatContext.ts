@@ -12,7 +12,10 @@
 //
 // Feature flag: AI_PLAID_STATE = "off" | "connection" | "balances" (default off).
 // - off        -> resolvePlaidStateMode() returns "off"; the chat route injects
-//                 NOTHING from here and behaves exactly as before (rollback target).
+//                 nothing from here, and every other fresh bank-data path in the
+//                 route is closed too (plaidEgressPolicy.ts). It is the emergency
+//                 switch, not a "behave as before" mode: the base prompt also tells
+//                 the model it has no bank data.
 // - connection -> always-on connection scaffold (institution names, NO amounts).
 // - balances   -> connection scaffold + sealed shallow balances on substantive turns.
 //
