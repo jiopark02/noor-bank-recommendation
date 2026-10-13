@@ -237,44 +237,17 @@ export default function MoneyPage() {
     }
   }, [relinkItemId, plaidConnections]);
 
-  const handleRelinkSuccess = useCallback(
-    async (
-      publicToken: string,
-      metadata: { institution: { name: string; institution_id: string } }
-    ) => {
-      if (!userId) return;
-
-      try {
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
-        );
-        const response = await fetch("/api/plaid/exchange-token", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({
-            publicToken,
-            institutionId: metadata.institution.institution_id,
-            institutionName: metadata.institution.name,
-          }),
-        });
-
-        const data = asPlainObject(await response.json());
-        if (data.success !== true) {
-          throw new Error(
-            readErrorMessage(data) || "Failed to complete re-link"
-          );
-        }
-
-        setRelinkToken(null);
-        handleBankConnected();
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to complete re-link";
-        setError(message);
-      }
-    },
-    [handleBankConnected, userId]
-  );
+  // Update mode repairs the existing Item's login in place: its access token
+  // does not change, so there is nothing to exchange and nothing to store. The
+  // public token Link hands back here is deliberately not sent anywhere.
+  //
+  // fetchData() is called explicitly because a re-link leaves hasActive
+  // unchanged, so the hasActive-dependent fetch effect would not re-run.
+  const handleRelinkSuccess = useCallback(async () => {
+    setRelinkToken(null);
+    handleBankConnected();
+    await fetchData();
+  }, [handleBankConnected, fetchData]);
 
   // Remove a single connection. The route now revokes the Plaid Item first and
   // deletes the row only if that succeeded, so a failure means the bank is still
