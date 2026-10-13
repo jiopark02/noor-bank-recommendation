@@ -15,8 +15,20 @@ export const dynamic = "force-dynamic";
  * Identity comes ONLY from the verified Bearer JWT; the query is scoped by that
  * id. access_token is deliberately NOT selected — a live bank credential must
  * never leave the server (same principle as /api/account/export).
+ *
+ * Every response is marked `private, no-store`: the body names this user's
+ * banks and Item ids, so neither a shared cache nor the browser may keep it.
+ * The header is set here, on whatever readConnections returns, so a new return
+ * path inside it cannot leave the header off. A throw escapes before this line
+ * and gets Next's own error response, which carries no connection data.
  */
 export async function GET(request: NextRequest) {
+  const response = await readConnections(request);
+  response.headers.set("Cache-Control", "private, no-store");
+  return response;
+}
+
+async function readConnections(request: NextRequest): Promise<NextResponse> {
   const authUserId = await getAuthenticatedUserIdFromRequest(request);
   if (!authUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
