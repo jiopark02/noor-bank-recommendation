@@ -278,9 +278,11 @@ export default function MoneyPage() {
     [plaidConnections, fetchData]
   );
 
-  // Add another bank. Own handler (not ConnectBankCard, which has no user-facing
-  // error/duplicate channel): POST exchange-token, surface the 409
-  // ALREADY_CONNECTED duplicate case as an inline notice, refresh on success.
+  // Add another bank, from the compact button in the connection list (not
+  // ConnectBankCard, the full empty-state card). POST exchange-token, surface
+  // the 409 ALREADY_CONNECTED duplicate case and any other refusal as an inline
+  // notice, and also reload this screen's data on success. ConnectBankCard
+  // reads the response the same way and shows its own notice.
   const handleAddBankSuccess = useCallback(
     async (
       publicToken: string,
