@@ -47,6 +47,33 @@ import {
 /** The most plaid_connections rows one user may hold, whatever their status. */
 export const CONNECTION_LIMIT = 5;
 
+export const CONNECTION_LIMIT_CODE = "CONNECTION_LIMIT_REACHED";
+const CONNECTION_LIMIT_MESSAGE = `You can connect up to ${CONNECTION_LIMIT} banks. Remove one to add another.`;
+
+/**
+ * The same limit, checked by create-link-token before Link opens, so a user at
+ * the limit is not walked through their bank's login only to be refused.
+ *
+ * FAILS OPEN, unlike the check in exchangeForUser: a count that could not be
+ * read (null) lets Link open. This check only spares the user a wasted Link
+ * session; the fail-closed check before the exchange is the one that holds the
+ * limit.
+ *
+ * Re-link link tokens come from /api/plaid/relink, which does not call this, so
+ * a user at the limit can still repair an existing connection.
+ */
+export function linkLimitRefusal(
+  count: number | null
+): { status: 422; body: { error: string; code: string } } | null {
+  if (count === null || count < CONNECTION_LIMIT) {
+    return null;
+  }
+  return {
+    status: 422,
+    body: { error: CONNECTION_LIMIT_MESSAGE, code: CONNECTION_LIMIT_CODE },
+  };
+}
+
 export type ExchangeInput = {
   publicToken: string;
   /** From the client's Link metadata. Used only for the pre-exchange check. */
@@ -241,11 +268,7 @@ export async function exchangeForUser(
   }
   if (count >= CONNECTION_LIMIT) {
     emit(deps, `${userPrefix} refused=limit count=${count}`);
-    return failure(
-      422,
-      "CONNECTION_LIMIT_REACHED",
-      `You can connect up to ${CONNECTION_LIMIT} banks. Remove one to add another.`
-    );
+    return failure(422, CONNECTION_LIMIT_CODE, CONNECTION_LIMIT_MESSAGE);
   }
 
   // 2. Duplicate check on the client's institution id. Fails open: step 6
