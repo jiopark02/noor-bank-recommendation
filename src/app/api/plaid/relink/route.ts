@@ -9,7 +9,6 @@ import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
   getPlaidConnectionByItemId,
-  updatePlaidConnectionStatus,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 import {
@@ -97,9 +96,12 @@ export async function POST(request: NextRequest) {
         access_token: accessToken, // This makes it an "update" mode link
       });
 
-      // Mark connection as active again (user will complete re-auth in Plaid Link)
-      await updatePlaidConnectionStatus(userId, itemId, "active");
-
+      // No status write here. This runs BEFORE the user has re-authenticated —
+      // they may abandon Link or fail the bank's login — so marking the
+      // connection active at this point would record a repair that has not
+      // happened. Completing update mode does not reach the server either (the
+      // client no longer exchanges its public token), so nothing writes status
+      // on the re-link path.
       return NextResponse.json({
         success: true,
         linkToken: response.data.link_token,

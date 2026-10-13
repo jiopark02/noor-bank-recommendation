@@ -582,7 +582,13 @@ export async function revokeAndDeleteConnections(
  * plaidTokenReadSites.test.ts: the decrypt below is a real read of the stored
  * column, and the plaintext it produces is handed to the Plaid SDK on the next
  * line. Keeping that pair in one small named function means the probe has one
- * file to point at, and the routes above it never touch a token at all.
+ * file to point at, and the routes that revoke a STORED connection never touch
+ * a token at all.
+ *
+ * exchange-token also takes `itemRemove` from here, without the decrypt: it
+ * revokes an Item it has just minted and could not store, holding the plaintext
+ * token the exchange returned, so there is no ciphertext to read
+ * (plaidExchange.ts).
  *
  * decryptPlaidAccessToken is called rather than referenced (`decrypt:
  * decryptPlaidAccessToken` would type-check identically) so the probe's second

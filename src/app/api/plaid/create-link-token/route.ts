@@ -5,8 +5,13 @@ import {
   PLAID_COUNTRY_CODES,
   isPlaidConfigured,
 } from "@/lib/plaid";
-import { authenticate, handlePlaidError } from "@/lib/plaidApiUtils";
+import {
+  authenticate,
+  countPlaidConnections,
+  handlePlaidError,
+} from "@/lib/plaidApiUtils";
 import { resolvePlaidWebhookUrl } from "@/lib/plaidWebhookConfig";
+import { linkLimitRefusal } from "@/lib/plaidExchange";
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,6 +36,14 @@ export async function POST(request: NextRequest) {
     }
 
     const { userId } = auth;
+
+    // Refuse before Link opens when the user is already at the connection
+    // limit. Fails open on a failed count; exchange-token re-checks and fails
+    // closed.
+    const refusal = linkLimitRefusal(await countPlaidConnections(userId));
+    if (refusal) {
+      return NextResponse.json(refusal.body, { status: refusal.status });
+    }
 
     // Registers /api/plaid/webhook on the new Item. Unset -> field omitted.
     const webhook = resolvePlaidWebhookUrl(process.env.PLAID_WEBHOOK_URL);

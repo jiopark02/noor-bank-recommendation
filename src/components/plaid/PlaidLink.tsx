@@ -34,12 +34,18 @@ export function PlaidLinkButton({
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The server's `code` for a refused link token. Only the connection-limit
+  // refusal is told apart: it is not a configuration problem, so the setup
+  // hint below must not be shown with it. Compared as a literal because the
+  // module that exports it (plaidExchange.ts) is server-only.
+  const [errorCode, setErrorCode] = useState<string | null>(null);
 
   // Fetch link token on mount
   useEffect(() => {
     if (linkTokenOverride) {
       setLinkToken(linkTokenOverride);
       setError(null);
+      setErrorCode(null);
       return;
     }
 
@@ -67,6 +73,7 @@ export function PlaidLinkButton({
             );
           }
         } else {
+          setErrorCode(readString(data, "code") ?? null);
           setError(readErrorMessage(data) || "Failed to create link token");
         }
       } catch (err) {
@@ -108,10 +115,12 @@ export function PlaidLinkButton({
     return (
       <div className="text-center p-4">
         <p className="text-red-500 text-sm">{error}</p>
-        <p className="text-gray-400 text-xs mt-2">
-          Plaid needs to be configured. Add your API keys to environment
-          variables.
-        </p>
+        {errorCode !== "CONNECTION_LIMIT_REACHED" && (
+          <p className="text-gray-400 text-xs mt-2">
+            Plaid needs to be configured. Add your API keys to environment
+            variables.
+          </p>
+        )}
       </div>
     );
   }
@@ -159,12 +168,21 @@ interface ConnectBankCardProps {
   onConnected?: () => void;
 }
 
+const CONNECT_FALLBACK_MESSAGE =
+  "We couldn't connect your bank. Please try again.";
+
 export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
+  // What the user is told when a connection did not go through. Every refusal
+  // the exchange route sends — duplicate, connection limit, a failed save —
+  // used to reach only the console, so the card looked as if nothing happened.
+  const [notice, setNotice] = useState<string | null>(null);
+
   const handleSuccess = useCallback(
     async (
       publicToken: string,
       metadata: { institution: { name: string; institution_id: string } }
     ) => {
+      setNotice(null);
       try {
         // Exchange public token for access token
         const plaidHeaders = buildJsonAuthorizedHeaders(
@@ -182,10 +200,25 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
 
         const data = asPlainObject(await response.json());
 
+        // Same reading as the money screen's add-bank handler: the status or
+        // the code, and the server's institution name when it sent one.
+        if (
+          response.status === 409 ||
+          readString(data, "code") === "ALREADY_CONNECTED"
+        ) {
+          const name =
+            readString(data, "institutionName") ||
+            metadata.institution.name ||
+            "This bank";
+          setNotice(`${name} is already connected.`);
+          return;
+        }
+
         if (data.success === true) {
           const itemId = readString(data, "itemId");
           if (!itemId) {
             console.error("Failed to exchange token:", readErrorMessage(data));
+            setNotice(CONNECT_FALLBACK_MESSAGE);
             return;
           }
           const stored = localStorage.getItem("noor_plaid_connections") || "[]";
@@ -227,9 +260,13 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
             "Failed to exchange token:",
             readErrorMessage(data) ?? data
           );
+          // The server's wording when it sent one: it already distinguishes the
+          // connection limit from a retryable failure.
+          setNotice(readErrorMessage(data) || CONNECT_FALLBACK_MESSAGE);
         }
       } catch (err) {
         console.error("Error exchanging token:", err);
+        setNotice(CONNECT_FALLBACK_MESSAGE);
       }
     },
     [userId, onConnected]
@@ -332,6 +369,12 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
           Connect Bank Account
         </span>
       </PlaidLinkButton>
+
+      {notice && (
+        <p className="text-sm text-red-500 text-center mt-3" role="alert">
+          {notice}
+        </p>
+      )}
     </motion.div>
   );
 }

@@ -228,51 +228,6 @@ export function usePlaidConnections(userId: string | null) {
     [userId]
   );
 
-  // Handle successful bank connection from Plaid Link
-  const handleConnectionSuccess = useCallback(
-    async (data: {
-      itemId: string;
-      accessToken?: string;
-      institutionName: string;
-      institutionId?: string;
-    }) => {
-      try {
-        // Exchange public token for access token
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
-        );
-        const response = await fetch("/api/plaid/exchange-token", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({
-            publicToken: data.accessToken, // In real flow, this would be exchanged client-side or server-side
-            itemId: data.itemId,
-            institutionName: data.institutionName,
-            institutionId: data.institutionId,
-          }),
-        });
-
-        const payload = asPlainObject(await response.json());
-        if (!response.ok) {
-          throw new Error(
-            readErrorMessage(payload) || "Failed to save connection"
-          );
-        }
-
-        // Re-pull authoritative state from the DB (no localStorage mutation).
-        await fetchConnections();
-
-        return true;
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to save connection";
-        setError(message);
-        return false;
-      }
-    },
-    [userId, fetchConnections]
-  );
-
   return {
     connections,
     isLoading,
@@ -282,7 +237,6 @@ export function usePlaidConnections(userId: string | null) {
     connect,
     disconnect,
     relink,
-    handleConnectionSuccess,
     refetch: fetchConnections,
   };
 }

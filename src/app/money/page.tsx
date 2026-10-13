@@ -237,44 +237,17 @@ export default function MoneyPage() {
     }
   }, [relinkItemId, plaidConnections]);
 
-  const handleRelinkSuccess = useCallback(
-    async (
-      publicToken: string,
-      metadata: { institution: { name: string; institution_id: string } }
-    ) => {
-      if (!userId) return;
-
-      try {
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
-        );
-        const response = await fetch("/api/plaid/exchange-token", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({
-            publicToken,
-            institutionId: metadata.institution.institution_id,
-            institutionName: metadata.institution.name,
-          }),
-        });
-
-        const data = asPlainObject(await response.json());
-        if (data.success !== true) {
-          throw new Error(
-            readErrorMessage(data) || "Failed to complete re-link"
-          );
-        }
-
-        setRelinkToken(null);
-        handleBankConnected();
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to complete re-link";
-        setError(message);
-      }
-    },
-    [handleBankConnected, userId]
-  );
+  // Update mode repairs the existing Item's login in place: its access token
+  // does not change, so there is nothing to exchange and nothing to store. The
+  // public token Link hands back here is deliberately not sent anywhere.
+  //
+  // fetchData() is called explicitly because a re-link leaves hasActive
+  // unchanged, so the hasActive-dependent fetch effect would not re-run.
+  const handleRelinkSuccess = useCallback(async () => {
+    setRelinkToken(null);
+    handleBankConnected();
+    await fetchData();
+  }, [handleBankConnected, fetchData]);
 
   // Remove a single connection. The route now revokes the Plaid Item first and
   // deletes the row only if that succeeded, so a failure means the bank is still
@@ -305,9 +278,11 @@ export default function MoneyPage() {
     [plaidConnections, fetchData]
   );
 
-  // Add another bank. Own handler (not ConnectBankCard, which has no user-facing
-  // error/duplicate channel): POST exchange-token, surface the 409
-  // ALREADY_CONNECTED duplicate case as an inline notice, refresh on success.
+  // Add another bank, from the compact button in the connection list (not
+  // ConnectBankCard, the full empty-state card). POST exchange-token, surface
+  // the 409 ALREADY_CONNECTED duplicate case and any other refusal as an inline
+  // notice, and also reload this screen's data on success. ConnectBankCard
+  // reads the response the same way and shows its own notice.
   const handleAddBankSuccess = useCallback(
     async (
       publicToken: string,
@@ -690,7 +665,12 @@ export default function MoneyPage() {
 
                 {userId && (
                   <div className="mt-4">
+                    {/* Keyed on the count so the button remounts and asks for
+                        a fresh link token when a bank is added or removed:
+                        otherwise a limit refusal fetched at the limit stays on
+                        screen after a removal frees a slot. */}
                     <PlaidLinkButton
+                      key={plaidConnections.connections.length}
                       userId={userId}
                       onSuccess={handleAddBankSuccess}
                       className="w-full py-3 border border-gray-300 text-black font-medium rounded-xl disabled:opacity-50 transition-all"
