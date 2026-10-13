@@ -18,9 +18,10 @@ import { describe, it, expect } from "vitest";
  * (live schema as observed 2026-09-25), so in that deployment the row lookup
  * matched zero rows, this route read that as "already gone", and answered
  * 200 { success: true } while the row and its live Plaid Item both survived.
- * The user was told their bank was removed when it was not. Those policies
- * were later dropped and anon/authenticated hold no privileges on the table,
- * so an anon-key client is refused outright rather than shown zero rows.
+ * The user was told their bank was removed when it was not. A later migration
+ * drops those policies and revokes every anon/authenticated privilege on the
+ * table; where it is applied, an anon-key client is refused outright rather
+ * than shown zero rows.
  *
  * /api/account/delete has refused on exactly this condition since before the
  * revocation work (accountDeletion.ts, step 1a). This route did not, and the

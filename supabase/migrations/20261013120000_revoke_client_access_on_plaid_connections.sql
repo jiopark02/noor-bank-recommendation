@@ -18,8 +18,10 @@
 -- This file drops the four policies and revokes every privilege on the table
 -- and on its id sequence from both roles. Row level security stays enabled, so
 -- with no policy a role without BYPASSRLS sees no rows even if a privilege is
--- granted back later. End state: RLS on, no policies, no client-role
--- privileges. service_role is not named anywhere below except in the check.
+-- granted back later. RLS does not govern TRUNCATE, REFERENCES or TRIGGER, so
+-- a grant-back of those is not contained by it. End state: RLS on, no
+-- policies, no client-role privileges. service_role is not named anywhere
+-- below except in the check.
 --
 -- The end state is checked by property rather than assumed. A REVOKE removes
 -- only grants made by the role that runs it, and a role can also hold a
@@ -37,6 +39,9 @@
 --     and USAGE on the sequence.
 -- If the check fails, stop and look at where the remaining privilege or policy
 -- comes from; do not widen this file to make it pass. This file grants nothing.
+--
+-- The Supabase advisor reports a table with RLS on and no policy; for this
+-- table that is the intended state, not something to fix by adding a policy.
 --
 -- Running this file again reaches the same end state: DROP POLICY IF EXISTS and
 -- revoking a privilege that is not held change nothing, and the check tests the
