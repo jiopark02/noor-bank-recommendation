@@ -83,12 +83,15 @@ export async function POST(request: NextRequest) {
     //
     // It was written against the behaviour that preceded that throw. The client
     // fell back to the anon key, which attaches no user JWT, so `auth.uid()` was
-    // NULL. Every policy on plaid_connections is `(auth.uid())::text = user_id`
+    // NULL. Every policy on plaid_connections was `(auth.uid())::text = user_id`
     // (live schema as observed 2026-09-25), so the lookup below matched zero
     // rows, this route read that as "the connection is already gone", and it
     // answered 200 { success: true } while the row and its live Plaid Item both
     // survived. The user was told their bank was removed when it was not — the
-    // exact outcome the revoke-before-delete rule exists to prevent.
+    // exact outcome the revoke-before-delete rule exists to prevent. A later
+    // migration drops those policies and revokes every anon/authenticated
+    // privilege on the table; where it is applied, an anon-key client is
+    // refused outright rather than shown zero rows.
     //
     // The delete below cannot reach a zero-row result this way, because it runs
     // only after the lookup found the row through the same client, and that
