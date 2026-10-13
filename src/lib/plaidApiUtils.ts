@@ -3,7 +3,10 @@ import { createServerClient } from "./supabase";
 import { getAuthenticatedUserIdFromRequest } from "./apiAuth";
 import { getPlaidErrorCode, getPlaidErrorStatus } from "./plaidErrorRedaction";
 import { asPlainObject, readRequestJson } from "@/lib/requestJson";
-import { encryptPlaidAccessToken } from "./plaidTokenCrypto";
+import {
+  encryptPlaidAccessToken,
+  isPlaidTokenCryptoError,
+} from "./plaidTokenCrypto";
 
 /**
  * Authenticate Plaid API requests via Supabase Bearer JWT.
@@ -212,34 +215,76 @@ export async function getPlaidConnectionsByItemIdAcrossUsers(
  *
  * Used for app-level duplicate detection (same user re-linking a bank they
  * already have). Only rows with a matching non-null institution_id are found,
- * so it detects duplicates only among connections created after the
- * institution_id column shipped (pre-existing rows are NULL — see design §5).
+ * so rows stored with a NULL institution_id never take part.
  *
- * NOTE: this is UX-grade detection, NOT a security boundary. The institution_id
- * used to call it originates from the client; a forged value only affects the
- * caller's own rows. The persisted institution_id is the server-confirmed value.
+ * Duplicate detection in exchange-token runs it twice, with the same predicate:
+ *  - BEFORE the exchange, with the institution_id from the client's Link
+ *    metadata. That value is client-supplied, so this pass is a convenience that
+ *    avoids minting an Item, not a boundary; exchange-token fails open on it.
+ *  - AFTER the exchange, with the institution_id Plaid itself reports for the new
+ *    Item (itemGet), and `excludeItemId` set to that new Item. This is the pass a
+ *    client value cannot steer, and exchange-token fails closed on it.
  *
- * Throws on a query error so the caller can decide the fail direction
- * (exchange-token fails open — see its call site).
+ * Throws on a query error so the caller can decide the fail direction.
  */
 export async function getActivePlaidConnectionByInstitution(
   userId: string,
-  institutionId: string
+  institutionId: string,
+  excludeItemId?: string
 ) {
   const supabase = createServerClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("plaid_connections")
     .select("item_id,institution_name")
     .eq("user_id", userId)
     .eq("institution_id", institutionId)
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
+    .eq("status", "active");
+  if (excludeItemId !== undefined) {
+    query = query.neq("item_id", excludeItemId);
+  }
+  const { data, error } = await query.limit(1).maybeSingle();
 
   if (error) {
     throw error;
   }
   return data;
+}
+
+/**
+ * How many plaid_connections rows this user has, or null if the count could
+ * not be read.
+ *
+ * Every row counts, whatever its status: an errored connection still holds a
+ * live Plaid Item until it is removed, so it occupies a slot.
+ *
+ * null rather than 0 on failure, for the reason getAllPlaidConnections gives:
+ * a failed read reported as "none" would wave the connection limit through.
+ */
+export async function countPlaidConnections(
+  userId: string
+): Promise<number | null> {
+  try {
+    const supabase = createServerClient();
+    const { count, error } = await supabase
+      .from("plaid_connections")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error(
+        "Error counting Plaid connections: code",
+        postgrestErrorCode(error) ?? "none"
+      );
+      return null;
+    }
+    return typeof count === "number" ? count : null;
+  } catch (error) {
+    console.error(
+      "Error counting Plaid connections: code",
+      postgrestErrorCode(error) ?? "none"
+    );
+    return null;
+  }
 }
 
 /**
@@ -400,13 +445,20 @@ export async function getAllPlaidConnections(
  * verified token, unmodified — no trim, no casing change — because every read
  * site has to reproduce it byte-for-byte to decrypt.
  *
- * Encryption failures are NOT caught by the try below: encryptPlaidAccessToken
- * throws before the insert is built, so a missing or malformed
- * PLAID_TOKEN_ENCRYPTION_KEY propagates to the caller instead of being folded
- * into this function's `return null` ("Failed to save connection"). That is
- * deliberate — a configuration fault and a database fault are different events
- * and must not arrive as the same one. The route's outer catch turns it into
- * the generic 500. There is no branch here that stores a plaintext token.
+ * It never throws, and every failure is reported by KIND, because the caller
+ * has a freshly minted Plaid Item in hand and has to decide whether to revoke
+ * it: an encryption failure and an ordinary database failure leave nothing
+ * stored and the Item must be revoked, while `duplicate_item` means a row for
+ * this (user_id, item_id) already exists and the Item must NOT be revoked. A
+ * throw would bypass that decision entirely. There is no branch here that
+ * stores a plaintext token.
+ *
+ * The insert asks for no representation: nothing reads the stored row back,
+ * and a returned row would carry the ciphertext.
+ *
+ * Logs the error CODE only. A PostgREST error's `details` can echo the failing
+ * row ("Failing row contains (...)" on a CHECK violation), and that row holds
+ * the ciphertext.
  */
 export async function storePlaidConnection(
   userId: string,
@@ -414,34 +466,72 @@ export async function storePlaidConnection(
   itemId: string,
   institutionName: string,
   institutionId: string | null
-) {
-  const encryptedAccessToken = encryptPlaidAccessToken(accessToken, userId);
+): Promise<PlaidConnectionStore> {
+  let encryptedAccessToken: string;
+  try {
+    encryptedAccessToken = encryptPlaidAccessToken(accessToken, userId);
+  } catch (error) {
+    console.error(
+      "Error storing Plaid connection: encryption failed, reason",
+      isPlaidTokenCryptoError(error) ? error.reason : "unknown"
+    );
+    return { ok: false, kind: "crypto", dbErrorCode: null };
+  }
 
   try {
     const supabase = createServerClient();
-    const { data, error } = await supabase
-      .from("plaid_connections")
-      .insert({
-        user_id: userId,
-        access_token: encryptedAccessToken,
-        item_id: itemId,
-        institution_name: institutionName,
-        institution_id: institutionId,
-        status: "active",
-      })
-      .select()
-      .single();
+    const { error } = await supabase.from("plaid_connections").insert({
+      user_id: userId,
+      access_token: encryptedAccessToken,
+      item_id: itemId,
+      institution_name: institutionName,
+      institution_id: institutionId,
+      status: "active",
+    });
 
-    if (error) {
-      console.error("Error storing Plaid connection:", error);
-      return null;
+    const result = storeResultFromInsert(error);
+    if (!result.ok) {
+      console.error(
+        "Error storing Plaid connection: code",
+        result.dbErrorCode ?? "none"
+      );
     }
-
-    return data;
+    return result;
   } catch (error) {
-    console.error("Error storing Plaid connection:", error);
-    return null;
+    const dbErrorCode = postgrestErrorCode(error);
+    console.error("Error storing Plaid connection: threw, code", dbErrorCode ?? "none");
+    return { ok: false, kind: "db", dbErrorCode };
   }
+}
+
+/**
+ * What one plaid_connections insert did.
+ *
+ * `duplicate_item` is PostgreSQL's unique_violation (23505). The live table's
+ * only unique constraint besides its primary key is (user_id, item_id), so this
+ * almost always means the row for this Item already exists. The caller still
+ * re-reads to confirm before reporting success: a primary-key collision would
+ * arrive with the same code.
+ */
+export type PlaidConnectionStore =
+  | { ok: true }
+  | {
+      ok: false;
+      kind: "crypto" | "duplicate_item" | "db";
+      dbErrorCode: string | null;
+    };
+
+/** Pure, so the 23505 decision is executed by a test rather than read. */
+export function storeResultFromInsert(error: unknown): PlaidConnectionStore {
+  if (!error) {
+    return { ok: true };
+  }
+  const dbErrorCode = postgrestErrorCode(error);
+  return {
+    ok: false,
+    kind: dbErrorCode === "23505" ? "duplicate_item" : "db",
+    dbErrorCode,
+  };
 }
 
 /**
