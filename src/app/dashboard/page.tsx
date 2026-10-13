@@ -8,7 +8,7 @@ import { PageLayout } from "@/components/layout";
 import { useTheme } from "@/contexts/ThemeContext";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
-import { clearLocalAuthState } from "@/lib/validation";
+import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 interface StoredBudget {
@@ -34,8 +34,6 @@ interface StoredPlaidSubscription {
 }
 
 const STORAGE_KEY_BUDGET = "noor_budget";
-const STORAGE_KEY_ACCOUNTS = "noor_plaid_accounts";
-const STORAGE_KEY_TRANSACTIONS = "noor_plaid_transactions";
 
 const QUICK_PROMPTS = [
   "How much can I spend this week?",
@@ -110,6 +108,12 @@ export default function HomePage() {
   );
 
   useEffect(() => {
+    // Bank data is never kept in browser storage; every figure comes from the
+    // server on each visit. Earlier builds cached accounts, transactions and
+    // connection details here, so drop whatever they left on this device. Runs
+    // first, before any redirect or await, so every visit clears it.
+    clearPlaidLocalState();
+
     const storedUserId = localStorage.getItem("noor_user_id");
     if (!storedUserId) {
       router.replace("/waitlist");
@@ -183,33 +187,10 @@ export default function HomePage() {
         );
         setHasBankConnection(hasActiveConnection);
 
-        if (hasActiveConnection) {
-          try {
-            const storedAccountsRaw = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
-            const storedTxRaw = localStorage.getItem(STORAGE_KEY_TRANSACTIONS);
-
-            if (storedAccountsRaw) {
-              const parsedAccounts = JSON.parse(storedAccountsRaw) as unknown;
-              if (Array.isArray(parsedAccounts)) {
-                setAccounts(parsedAccounts as StoredPlaidAccount[]);
-              }
-            }
-
-            if (storedTxRaw) {
-              const parsedTx = JSON.parse(storedTxRaw) as unknown;
-              if (Array.isArray(parsedTx)) {
-                setTransactions(parsedTx as StoredPlaidTransaction[]);
-              }
-            }
-          } catch {
-            // Ignore cache parse errors.
-          }
-        } else {
+        if (!hasActiveConnection) {
           setAccounts([]);
           setTransactions([]);
           setSubscriptions([]);
-          localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
-          localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
         }
       } catch (err) {
         if (cancelled) return;
@@ -296,12 +277,6 @@ export default function HomePage() {
       setTransactions(nextTransactions);
       setSubscriptions(nextSubscriptions);
       setHasMoneyData(true);
-
-      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(nextAccounts));
-      localStorage.setItem(
-        STORAGE_KEY_TRANSACTIONS,
-        JSON.stringify(nextTransactions)
-      );
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to sync bank data";
@@ -309,17 +284,13 @@ export default function HomePage() {
       if (/no active bank connection/i.test(message)) {
         // Not a failed read: the routes answer this only after reading the
         // connections and finding none active (a failed read is a generic
-        // 500). Show the no-connection state, not an error.
-        // Do NOT delete noor_plaid_connections — connection truth lives in the
-        // DB now; destroying local state caused the "connected but shows
-        // disconnected" loop. Only clear the display cache.
+        // 500). Show the no-connection state, not an error, and clear only
+        // what this screen holds in memory.
         setMoneyError(null);
         setHasBankConnection(false);
         setAccounts([]);
         setTransactions([]);
         setSubscriptions([]);
-        localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
-        localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
       } else {
         setMoneyError(message);
       }

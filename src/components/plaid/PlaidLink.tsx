@@ -221,39 +221,8 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
             setNotice(CONNECT_FALLBACK_MESSAGE);
             return;
           }
-          const stored = localStorage.getItem("noor_plaid_connections") || "[]";
-          const existing = JSON.parse(stored) as Array<{
-            itemId: string;
-            institutionName: string;
-            institutionId?: string;
-            status: "active" | "error";
-            createdAt?: string;
-          }>;
-
-          const nextConnection = {
-            itemId,
-            institutionName:
-              readString(data, "institutionName") ||
-              metadata.institution.name ||
-              "Unknown Bank",
-            institutionId:
-              readString(data, "institutionId") ||
-              metadata.institution.institution_id ||
-              undefined,
-            status: "active" as const,
-            createdAt: new Date().toISOString(),
-          };
-
-          const deduped = existing.filter(
-            (c) => c.itemId !== nextConnection.itemId
-          );
-          deduped.push(nextConnection);
-          localStorage.setItem(
-            "noor_plaid_connections",
-            JSON.stringify(deduped)
-          );
-
-          // Refresh parent component
+          // Nothing about the connection is kept in the browser: the parent
+          // re-reads connection state from the server.
           onConnected?.();
         } else {
           console.error(
