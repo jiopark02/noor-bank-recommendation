@@ -50,12 +50,52 @@ function formatMoney(value: number): string {
   }).format(value);
 }
 
+// What the money figures can honestly show right now:
+//   ready       - the server answered for a connected bank; show its numbers.
+//   none        - no active connection; the zeros are true.
+//   unavailable - the last read failed; we do not know the numbers.
+//   loading     - connected, no answer yet.
+// Only "ready" and "none" may render a dollar amount. An unknown figure must
+// not look like a real $0.
+type MoneyDisplayState = "ready" | "none" | "unavailable" | "loading";
+
+function MoneyFigure({
+  state,
+  children,
+}: {
+  state: MoneyDisplayState;
+  children: React.ReactNode;
+}) {
+  if (state === "loading") {
+    return (
+      <>
+        <span
+          aria-hidden="true"
+          className="inline-block w-24 h-[0.75em] rounded bg-gray-200 animate-pulse align-middle"
+        />
+        <span className="sr-only">Loading</span>
+      </>
+    );
+  }
+  if (state === "unavailable") {
+    return (
+      <>
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">Unavailable</span>
+      </>
+    );
+  }
+  return <>{children}</>;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const { theme, useSchoolTheme } = useTheme();
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingData, setIsLoadingData] = useState(false);
+  // True only once the accounts and transactions routes have both answered
+  // successfully in this visit. Nothing else may make the figures "ready".
+  const [hasMoneyData, setHasMoneyData] = useState(false);
   const [moneyError, setMoneyError] = useState<string | null>(null);
   const [hasBankConnection, setHasBankConnection] = useState(false);
   const [userName, setUserName] = useState("there");
@@ -197,7 +237,7 @@ export default function HomePage() {
       return;
     }
 
-    setIsLoadingData(true);
+    setHasMoneyData(false);
     setMoneyError(null);
 
     try {
@@ -255,6 +295,7 @@ export default function HomePage() {
       setAccounts(nextAccounts);
       setTransactions(nextTransactions);
       setSubscriptions(nextSubscriptions);
+      setHasMoneyData(true);
 
       localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(nextAccounts));
       localStorage.setItem(
@@ -264,21 +305,24 @@ export default function HomePage() {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to sync bank data";
-      setMoneyError(message);
 
       if (/no active bank connection/i.test(message)) {
+        // Not a failed read: the routes answer this only after reading the
+        // connections and finding none active (a failed read is a generic
+        // 500). Show the no-connection state, not an error.
         // Do NOT delete noor_plaid_connections — connection truth lives in the
         // DB now; destroying local state caused the "connected but shows
         // disconnected" loop. Only clear the display cache.
+        setMoneyError(null);
         setHasBankConnection(false);
         setAccounts([]);
         setTransactions([]);
         setSubscriptions([]);
         localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
         localStorage.removeItem(STORAGE_KEY_TRANSACTIONS);
+      } else {
+        setMoneyError(message);
       }
-    } finally {
-      setIsLoadingData(false);
     }
   }, [userId, hasBankConnection]);
 
@@ -393,8 +437,20 @@ export default function HomePage() {
     return metrics;
   }, [hasBankConnection, metrics]);
 
+  const moneyDisplay: MoneyDisplayState =
+    hasBankConnection && hasMoneyData
+      ? "ready"
+      : !hasBankConnection && !moneyError
+        ? "none"
+        : moneyError
+          ? "unavailable"
+          : "loading";
+
   const aiSummary = useMemo(() => {
-    if (isLoadingData) {
+    // Keyed on the display state rather than an in-flight flag: between the
+    // connection check and the start of the sync there is a render with no
+    // request running, and it must not read as "connected, no history yet".
+    if (moneyDisplay === "loading") {
       return {
         opening:
           "Syncing your Plaid data now. I will calculate your safe cap in a moment.",
@@ -470,7 +526,7 @@ export default function HomePage() {
       )}.`,
     };
   }, [
-    isLoadingData,
+    moneyDisplay,
     moneyError,
     hasBankConnection,
     transactions,
@@ -643,19 +699,19 @@ export default function HomePage() {
               </p>
             </div>
 
-            {isLoadingData && (
+            {moneyDisplay === "loading" && (
               <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
                 Syncing your latest bank data...
               </div>
             )}
 
-            {!isLoadingData && moneyError && (
+            {moneyDisplay === "unavailable" && (
               <div className="mb-4 rounded-xl border border-red-200 bg-rose-50 px-4 py-3 text-sm text-red-800">
                 {moneyError}
               </div>
             )}
 
-            {!isLoadingData && !moneyError && !hasBankConnection && (
+            {moneyDisplay === "none" && (
               <div className="mb-4 rounded-xl border border-red-200 bg-rose-50 px-4 py-3 text-sm text-red-800">
                 No active bank connections found. Please connect a bank first.
               </div>
@@ -664,7 +720,9 @@ export default function HomePage() {
             <div className="noor-card p-6 mb-5">
               <p className="text-gray-500 text-sm mb-1">Net Worth</p>
               <p className="text-4xl font-semibold text-black mb-4">
-                {formatMoney(displayMetrics.netWorth)}
+                <MoneyFigure state={moneyDisplay}>
+                  {formatMoney(displayMetrics.netWorth)}
+                </MoneyFigure>
               </p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -673,13 +731,17 @@ export default function HomePage() {
                     className="text-lg font-medium"
                     style={{ color: accentColor }}
                   >
-                    {formatMoney(displayMetrics.cash)}
+                    <MoneyFigure state={moneyDisplay}>
+                      {formatMoney(displayMetrics.cash)}
+                    </MoneyFigure>
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-500 text-xs">Credit Used</p>
                   <p className="text-lg font-medium text-red-600">
-                    -{formatMoney(displayMetrics.creditUsed)}
+                    <MoneyFigure state={moneyDisplay}>
+                      -{formatMoney(displayMetrics.creditUsed)}
+                    </MoneyFigure>
                   </p>
                 </div>
               </div>
@@ -692,13 +754,17 @@ export default function HomePage() {
                   className="text-xl font-semibold"
                   style={{ color: accentColor }}
                 >
-                  +{formatMoney(displayMetrics.income)}
+                  <MoneyFigure state={moneyDisplay}>
+                    +{formatMoney(displayMetrics.income)}
+                  </MoneyFigure>
                 </p>
               </div>
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Spending</p>
                 <p className="text-xl font-semibold text-red-600">
-                  -{formatMoney(displayMetrics.spending)}
+                  <MoneyFigure state={moneyDisplay}>
+                    -{formatMoney(displayMetrics.spending)}
+                  </MoneyFigure>
                 </p>
               </div>
             </div>
@@ -709,11 +775,17 @@ export default function HomePage() {
                   Monthly Subscriptions
                 </h3>
                 <span className="text-lg font-semibold text-black">
-                  {formatMoney(displayMetrics.totalSubscriptions)}
+                  <MoneyFigure state={moneyDisplay}>
+                    {formatMoney(displayMetrics.totalSubscriptions)}
+                  </MoneyFigure>
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {displayMetrics.subscriptions.length > 0 ? (
+                {moneyDisplay === "loading" || moneyDisplay === "unavailable" ? (
+                  <span className="text-sm text-gray-500">
+                    <MoneyFigure state={moneyDisplay}>{null}</MoneyFigure>
+                  </span>
+                ) : displayMetrics.subscriptions.length > 0 ? (
                   displayMetrics.subscriptions.slice(0, 2).map((sub, idx) => (
                     <span
                       key={`${sub.name || "subscription"}-${idx}`}
