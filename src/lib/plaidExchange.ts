@@ -29,14 +29,41 @@ import {
  *   6. Duplicate (server id) — read fails closed
  *   7. Store                 — encrypt + insert
  *
- * ⚠️ AN ITEM THIS USER ALREADY HAS IS NEVER REVOKED HERE. An older client that
- * exchanges the public token from an update-mode Link session gets back an
- * item_id that is already in one of this user's rows, and revoking it would
- * destroy a working connection while its row stays behind. So the compensating
- * revocation is only constructed after step 4 has CONFIRMED that no row for this
- * Item exists; when that read fails, nothing is revoked and the request stops.
- * The cost of that direction is a possible orphaned Item, which the log line
- * names so it can be cleaned up by hand.
+ * ⚠️ AN ITEM THIS USER ALREADY HAS IS NEVER REVOKED HERE. Revoking an Item that
+ * a row points at would destroy a working connection while its row stays
+ * behind. So itemRemove is called only immediately after a read, in this same
+ * request, that found no row for this Item: step 4 before anything is refused,
+ * and again inside `refuse`, right before the revocation. The second read is
+ * there because step 4's answer can go stale — an insert that committed but was
+ * reported as a failure with no error code (a transport error, a throw), or
+ * another request that stored the same Item in between. When that read finds a
+ * row, nothing is revoked (`revoke=skipped reason=row_present`); after a failed
+ * store this means the row is there, so the answer is 200 with the stored row's
+ * values, and any other refusal keeps its own answer. When either read fails,
+ * nothing is revoked either (`failure=ownership_read revoke=skipped`, or
+ * `revoke=skipped reason=recheck_read_failed` with the original refusal). The
+ * cost of that direction is a possible orphaned Item, which the log line names
+ * so it can be cleaned up by hand.
+ *
+ * Older clients that still exchange the public token after a re-link: the
+ * update-mode token is normally never exchanged, because the pre-exchange
+ * duplicate check answers 409 (or the limit check, which runs first, 422), and
+ * nothing is revoked. That is still the false "failed" message the client fix
+ * removed, not a tolerated path. Only when the pre-exchange check cannot match
+ * (no institution id in the metadata, or a stored row with a NULL id) does the
+ * exchange run, and step 4 then finds the row.
+ *
+ * LOG PAIRING
+ * Every successful exchange logs `[plaid-exchange] user_id=… item_id=… minted`
+ * before anything else is decided. Each minted line is followed, for the same
+ * item_id, by at least one line carrying `resolved=`, `compensate=`,
+ * `revoke=skipped` or `refused=`. A minted line with none of these after it
+ * means the request died between the exchange and its outcome, and the Item may
+ * be live with no row.
+ *
+ * Institution names are stored capped at INSTITUTION_NAME_MAX characters, the
+ * same cap sanitizePlaidLabel (plaidChatContext.ts) applies when it shows them,
+ * and the response carries the stored value.
  *
  * Plaintext tokens pass through this module but are never logged and never put
  * in a response body. It does not read the stored token column, which is why it
@@ -135,6 +162,9 @@ const RETRY_MESSAGE =
 const SAVE_FAILED_MESSAGE = "Failed to save connection. Please try again.";
 const DUPLICATE_MESSAGE = "This bank is already connected to your account.";
 const UNKNOWN_INSTITUTION = "Unknown Institution";
+
+/** The stored institution name's cap; the chat label cap, sanitizePlaidLabel. */
+export const INSTITUTION_NAME_MAX = 80;
 
 function emit(deps: ExchangeDeps, line: string): void {
   if (deps.log) {
@@ -302,6 +332,7 @@ export async function exchangeForUser(
   }
   const { accessToken, itemId } = minted;
   const prefix = `${userPrefix} item_id=${itemId}`;
+  emit(deps, `${prefix} minted`);
 
   // 4. Ownership. One retry: the read is idempotent and a single transient
   // failure is the common case.
@@ -326,13 +357,26 @@ export async function exchangeForUser(
     );
   }
 
-  // From here on the Item is known to be new to this user, so revoking it on a
-  // refusal is safe. This closure is the only way this function revokes.
+  // This closure is the only way this function revokes. Step 4's "no row" may
+  // be stale by the time a refusal is reached, so it is read again here and
+  // the Item is revoked only on a fresh "no row".
+  // `rowPresent` is the answer to give when the re-read finds a row; without
+  // it the original refusal stands.
   const refuse = async (
     reason: string,
-    outcome: ExchangeOutcome
+    outcome: ExchangeOutcome,
+    rowPresent?: (row: StoredConnectionView) => ExchangeOutcome
   ): Promise<ExchangeOutcome> => {
     emit(deps, `${prefix} refused=${reason}`);
+    const recheck = await readOwnItem(deps, userId, itemId);
+    if (!recheck.ok) {
+      emit(deps, `${prefix} revoke=skipped reason=recheck_read_failed`);
+      return outcome;
+    }
+    if (recheck.connection) {
+      emit(deps, `${prefix} revoke=skipped reason=row_present`);
+      return rowPresent ? rowPresent(recheck.connection) : outcome;
+    }
     await compensateRevoke(deps, prefix, accessToken);
     return outcome;
   };
@@ -349,8 +393,9 @@ export async function exchangeForUser(
   }
   const serverInstitutionId = nonEmpty(item.institutionId);
   const serverInstitutionName = nonEmpty(item.institutionName);
-  const institutionName =
-    serverInstitutionName ?? clientInstitutionName ?? UNKNOWN_INSTITUTION;
+  const institutionName = (
+    serverInstitutionName ?? clientInstitutionName ?? UNKNOWN_INSTITUTION
+  ).slice(0, INSTITUTION_NAME_MAX);
 
   // 6. Duplicate check on Plaid's institution id. Fails closed. Skipped when
   // Plaid reports no institution: the row is then stored with a NULL id, and
@@ -421,10 +466,20 @@ export async function exchangeForUser(
     return failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
   }
 
+  // A store reported as failed can still have committed. If the re-read in
+  // `refuse` finds the row, the bank is connected and is answered as such.
   return refuse(
     stored.kind === "crypto"
       ? "store_crypto"
       : `store_db db_error=${logField(stored.dbErrorCode)}`,
-    failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE)
+    failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE),
+    (row) => {
+      emit(deps, `${prefix} resolved=already_stored stage=recheck`);
+      return connected(
+        itemId,
+        nonEmpty(row.institution_id),
+        nonEmpty(row.institution_name) ?? institutionName
+      );
+    }
   );
 }

@@ -14,9 +14,15 @@ import { describe, it, expect } from "vitest";
  * A source probe over money/page.tsx, like plaidDisconnectLocalCleanup.test.ts:
  * there is no DOM environment here to run the component. It proves only that the
  * text of handleRelinkSuccess, comments removed, does not name the exchange
- * route. The server separately tolerates an older client that still sends the
- * exchange (plaidExchange.test.ts, "an Item this user already has"), which is
- * also why nothing else would notice the call coming back.
+ * route. Nothing on the server makes the call harmless again: an older client
+ * that still sends the exchange after a re-link is answered by the pre-exchange
+ * duplicate check with 409 (or by the connection limit with 422, which runs
+ * first), before the update-mode public token is exchanged, and nothing is
+ * revoked. The re-link itself already succeeded at Plaid, so what comes back is
+ * the false "failed" message this file exists to keep away. (Only when that
+ * check cannot match — no institution id in the metadata, or a stored row whose
+ * id is NULL — does the exchange run; plaidExchange.ts then finds the row and
+ * revokes nothing.)
  *
  * IF THIS FILE FAILS
  *  (a) The exchange call is back in handleRelinkSuccess — the regression.

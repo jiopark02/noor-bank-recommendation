@@ -665,7 +665,12 @@ export default function MoneyPage() {
 
                 {userId && (
                   <div className="mt-4">
+                    {/* Keyed on the count so the button remounts and asks for
+                        a fresh link token when a bank is added or removed:
+                        otherwise a limit refusal fetched at the limit stays on
+                        screen after a removal frees a slot. */}
                     <PlaidLinkButton
+                      key={plaidConnections.connections.length}
                       userId={userId}
                       onSuccess={handleAddBankSuccess}
                       className="w-full py-3 border border-gray-300 text-black font-medium rounded-xl disabled:opacity-50 transition-all"

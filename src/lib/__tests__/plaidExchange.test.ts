@@ -411,6 +411,156 @@ describe("tokens never leave through logs or responses", () => {
   });
 });
 
+describe("the ownership read is repeated right before a compensating revocation", () => {
+  const ROW = {
+    ok: true as const,
+    connection: { institution_name: "Committed Bank", institution_id: "ins_committed" },
+  };
+  const NO_ROW = { ok: true as const, connection: null };
+
+  it("answers 200 without revoking when a store reported as failed actually committed", async () => {
+    // MUTATION: deleting the readOwnItem re-read in `refuse` (revoking on step
+    // 4's answer), or passing no `rowPresent` from the store-failure branch.
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null });
+    deps.findOwnItem.mockResolvedValueOnce(NO_ROW).mockResolvedValueOnce(ROW);
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(200);
+    expect(out.body.success).toBe(true);
+    expect(out.body.institutionName).toBe("Committed Bank");
+    expect(out.body.institutionId).toBe("ins_committed");
+    expect(deps.findOwnItem).toHaveBeenCalledTimes(2);
+    expect(deps.itemRemove).not.toHaveBeenCalled();
+    expect(
+      deps.lines.some((l) => l.includes("revoke=skipped reason=row_present"))
+    ).toBe(true);
+  });
+
+  it("keeps the 409 without revoking when the post-exchange duplicate's re-read finds a row", async () => {
+    // MUTATION: deleting the re-read in `refuse`, or answering every refusal
+    // with the row's 200 instead of only the store failures.
+    const deps = passingDeps();
+    deps.findActiveByInstitution.mockImplementation(
+      async (_u: string, institutionId: string) =>
+        institutionId === "ins_server" ? { institution_name: "Stored Bank" } : null
+    );
+    deps.findOwnItem.mockResolvedValueOnce(NO_ROW).mockResolvedValueOnce(ROW);
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(409);
+    expect(out.body.code).toBe("ALREADY_CONNECTED");
+    expect(deps.itemRemove).not.toHaveBeenCalled();
+    expect(
+      deps.lines.some((l) => l.includes("revoke=skipped reason=row_present"))
+    ).toBe(true);
+  });
+
+  it("keeps the original refusal without revoking when the re-read fails", async () => {
+    // MUTATION: treating a failed re-read as "no row" (revoking anyway), or
+    // dropping the recheck_read_failed line.
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null });
+    deps.findOwnItem.mockResolvedValueOnce(NO_ROW).mockResolvedValueOnce({ ok: false });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(500);
+    expect(out.body.code).toBe("CONNECTION_SAVE_FAILED");
+    expect(deps.itemRemove).not.toHaveBeenCalled();
+    expect(
+      deps.lines.some(
+        (l) =>
+          l.includes(`item_id=${NEW_ITEM}`) &&
+          l.includes("revoke=skipped reason=recheck_read_failed")
+      )
+    ).toBe(true);
+  });
+
+  it("treats a thrown re-read as a failed one", async () => {
+    // MUTATION: calling deps.findOwnItem directly in `refuse` instead of
+    // readOwnItem, so the throw escapes.
+    const deps = passingDeps();
+    deps.itemGet.mockRejectedValue(new Error("boom"));
+    deps.findOwnItem
+      .mockResolvedValueOnce(NO_ROW)
+      .mockRejectedValueOnce(new Error("db down"));
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(503);
+    expect(out.body.code).toBe("INSTITUTION_LOOKUP_FAILED");
+    expect(deps.itemRemove).not.toHaveBeenCalled();
+  });
+});
+
+describe("a minted Item is logged as soon as it exists", () => {
+  const itemLines = (d: Spied) =>
+    d.lines.filter((l) => l.includes(`item_id=${NEW_ITEM}`));
+
+  const scenarios: Array<[string, (d: Spied) => void]> = [
+    ["success", () => {}],
+    ["itemGet failure", (d) => d.itemGet.mockRejectedValue(new Error("boom"))],
+    ["store failure", (d) =>
+      d.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null })],
+    ["ownership read failure", (d) => d.findOwnItem.mockResolvedValue({ ok: false })],
+  ];
+
+  it.each(scenarios)("%s: minted comes first and is paired with an outcome", async (_n, arrange) => {
+    // MUTATION: removing the `minted` emit, or moving it below step 4.
+    const deps = passingDeps();
+    arrange(deps);
+    await exchangeForUser(USER, INPUT, deps);
+    const lines = itemLines(deps);
+    expect(lines[0]).toBe(`[plaid-exchange] user_id=${USER} item_id=${NEW_ITEM} minted`);
+    expect(
+      lines
+        .slice(1)
+        .some((l) => /resolved=|compensate=|revoke=skipped|refused=/.test(l))
+    ).toBe(true);
+  });
+
+  it("logs no minted line when the exchange is refused", async () => {
+    // MUTATION: emitting `minted` before the exchange resolves.
+    const deps = passingDeps();
+    deps.exchange.mockRejectedValue(plaidRejection("INVALID_PUBLIC_TOKEN", "INVALID_INPUT"));
+    await exchangeForUser(USER, INPUT, deps);
+    expect(deps.lines.some((l) => l.includes("minted"))).toBe(false);
+  });
+});
+
+describe("institution names are stored at most 80 characters long", () => {
+  const LONG = "B".repeat(81) + "ank of Somewhere Very Long";
+
+  it("caps Plaid's name and answers with the stored value", async () => {
+    // MUTATION: removing `.slice(0, INSTITUTION_NAME_MAX)`, or capping only
+    // the value sent to store.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: LONG });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    const stored = deps.store.mock.calls[0][3] as string;
+    expect(stored).toHaveLength(80);
+    expect(stored).toBe(LONG.slice(0, 80));
+    expect(out.body.institutionName).toBe(stored);
+  });
+
+  it("caps the client's name when it is the fallback", async () => {
+    // MUTATION: capping Plaid's name before the fallback chain instead of the
+    // chosen value.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: null });
+    const out = response(
+      await exchangeForUser(USER, { ...INPUT, institutionName: LONG }, deps)
+    );
+    const stored = deps.store.mock.calls[0][3] as string;
+    expect(stored).toHaveLength(80);
+    expect(out.body.institutionName).toBe(stored);
+  });
+
+  it("leaves an 80-character name whole", async () => {
+    // MUTATION: an off-by-one cap (`slice(0, 79)`).
+    const deps = passingDeps();
+    const exact = "C".repeat(80);
+    deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: exact });
+    await exchangeForUser(USER, INPUT, deps);
+    expect(deps.store.mock.calls[0][3]).toBe(exact);
+  });
+});
+
 describe("storeResultFromInsert", () => {
   it("reports success when there is no error", () => {
     expect(storeResultFromInsert(null)).toEqual({ ok: true });
