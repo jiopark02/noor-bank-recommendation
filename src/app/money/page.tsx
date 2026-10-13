@@ -128,10 +128,8 @@ export default function MoneyPage() {
         const data = asPlainObject(await accountsRes.json());
         const errText = readString(data, "error");
         if (errText && /no active bank connections/i.test(errText)) {
-          // Re-pull authoritative connection state from the DB. Do NOT delete
-          // noor_plaid_connections here — connection truth lives in the DB now,
-          // and destroying local state caused the "connected but shows
-          // disconnected" loop.
+          // Re-pull authoritative connection state from the DB, which is the
+          // only place connection state lives.
           plaidConnections.refetch();
         }
         if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {

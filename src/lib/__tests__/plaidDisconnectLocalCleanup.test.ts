@@ -7,16 +7,16 @@ import { describe, it, expect } from "vitest";
  *
  * WHY THE DIRECTION IS THE WHOLE POINT
  * `usePlaidConnections.disconnect` POSTs to /api/plaid/disconnect, which returns
- * 200 only after the connection row was actually deleted. Clearing the three
- * noor_plaid_* caches on that 200 answers a CONFIRMED fact.
+ * 200 only after the connection row was actually deleted. Clearing the
+ * noor_plaid_* keys on that 200 answers a CONFIRMED fact. The app no longer
+ * writes those keys, so what this clears is whatever an earlier build left; the
+ * success-only direction still matters as the standing shape of this handler.
  *
  * Clearing them in the `catch` — or in a `finally` — answers an INFERRED one,
  * and infers it wrongly: if the POST failed, the row still exists and the bank
- * is still connected, so wiping the caches shows the user a failed operation as
- * a partial success. That is the silent-failure mode CLAUDE.md names, and it is
- * also the exact reasoning behind the "do not delete noor_plaid_connections"
- * comments in dashboard/page.tsx and money/page.tsx: a failed read is not
- * evidence of absence.
+ * is still connected, so clearing local state shows the user a failed operation
+ * as a partial success. That is the silent-failure mode CLAUDE.md names: a
+ * failed read is not evidence of absence.
  *
  * The regression is invisible to everything else. Moving the call into the
  * catch, or into a finally, type-checks clean, renders identically on the happy
