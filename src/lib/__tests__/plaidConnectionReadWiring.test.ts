@@ -34,7 +34,7 @@ import { describe, it, expect } from "vitest";
  * Why the direction matters: the 404's wording is string-matched by two screens.
  * money/page.tsx shows the connect-a-bank card on it (pushing an already
  * connected user toward a duplicate connection row) and dashboard/page.tsx
- * clears its cached accounts and transactions. A database hiccup must not reach
+ * clears the accounts and transactions it shows. A database hiccup must not reach
  * either. A generic 500 — what handlePlaidError produces for an error carrying
  * no Plaid error_code — matches neither, which is the point of throwing here.
  *

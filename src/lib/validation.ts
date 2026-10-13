@@ -392,7 +392,7 @@ export function clearSession(): void {
 // shared-device hygiene: no account's history should linger after sign-out.
 // SCOPE SPLIT (deliberate, see purgeAllNoorLocalState below):
 //   - clearLocalAuthState = LOGOUT / SIGNED_OUT path. Purges only the sensitive
-//     subset (auth + profile + chat + Plaid bank cache). This is the
+//     subset (auth + profile + chat + the Plaid keys). This is the
 //     shared-device hygiene boundary; it is intentionally a curated subset, NOT
 //     a blanket noor_ sweep (a logout should not, for example, reset the
 //     device's language preference).
@@ -403,34 +403,32 @@ export function clearLocalAuthState(): void {
   localStorage.removeItem('noor_user_id');
   localStorage.removeItem('noor_user_profile');
   localStorage.removeItem('noor_chat_history');
-  // Plaid cache: on a shared device the dashboard renders the previous user's
-  // cached account balances and transactions during the window before the live
-  // fetch overwrites them — real exposure, so clear them on logout too.
+  // Plaid keys: the app no longer writes these, but earlier builds stored
+  // account balances, transactions and connection details under them. Clear
+  // them on logout so nothing an older build left survives on a shared device.
   localStorage.removeItem('noor_plaid_connections');
   localStorage.removeItem('noor_plaid_accounts');
   localStorage.removeItem('noor_plaid_transactions');
 }
 
-// Drops the browser's cached Plaid data. Called on a CONFIRMED disconnect — the
-// server returned 200, which /api/plaid/disconnect does only after the row
-// deletion succeeded — so the removal answers a confirmed fact, not an inferred
-// one. That distinction is the whole reason this exists as its own function:
-// dashboard/page.tsx and money/page.tsx both carry comments forbidding this
-// cleanup when the signal is a FAILED read, because destroying local state on a
-// transient error produced a "connected but shows disconnected" loop. A user's
-// explicit removal, acknowledged by the server, is the opposite situation.
+// Drops the Plaid keys from the browser. The app no longer writes them — bank
+// data is read from the server on every visit — but earlier builds stored
+// account balances, transactions and connection details under them, and those
+// values can still be on a device. Callers, all removing leftovers rather than
+// live state:
+//   - ClientLayout's mount effect, on every page;
+//   - the dashboard's mount effect, unconditionally on every visit;
+//   - a CONFIRMED disconnect in usePlaidConnections (the server returned 200,
+//     which /api/plaid/disconnect does only after the row deletion succeeded).
+// Neither reacts to a failed read. Clearing local state on a transient error is
+// what once produced a "connected but shows disconnected" loop, and that is
+// why the disconnect call sits on the success path only.
 //
-// All three keys go, none of them pruned per item:
-//   - accounts / transactions are the dashboard's caches and are not keyed per
-//     item, so the removed bank's balances sit inside them and would be
-//     rehydrated on the next dashboard visit.
-//   - connections is written by PlaidLink's own read-modify-write dedupe step
-//     and read by nothing else; the duplicate check that matters is the
-//     server's (DB lookup -> 409), so removing the array costs nothing and
-//     leaves no stale institution name for a connection just deleted.
+// All three keys go, none of them pruned per item. Nothing reads them, so
+// removing them costs nothing.
 //
-// No typeof window guard, matching clearLocalAuthState above: the callers are
-// click handlers.
+// No typeof window guard, matching clearLocalAuthState above: every caller runs
+// only in the browser (mount effects and a click handler).
 export function clearPlaidLocalState(): void {
   localStorage.removeItem('noor_plaid_connections');
   localStorage.removeItem('noor_plaid_accounts');
@@ -461,9 +459,9 @@ export const NOOR_LOCAL_KEYS = [
   'noor_user_profile',
   'noor_chat_history',
   'noor_locale',
-  'noor_plaid_connections',
-  'noor_plaid_accounts',      // dashboard cache of Plaid account balances (bank data)
-  'noor_plaid_transactions',  // dashboard cache of Plaid transactions (bank data)
+  'noor_plaid_connections',   // no longer written; earlier builds stored connection details
+  'noor_plaid_accounts',      // no longer written; earlier builds cached account balances
+  'noor_plaid_transactions',  // no longer written; earlier builds cached transactions
   'noor_selected_country',
   'noor_user_intent',
   'noor_user_priorities',

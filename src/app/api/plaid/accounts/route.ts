@@ -45,13 +45,12 @@ export async function POST(request: NextRequest) {
     // with it, so neither description covers the other:
     //   money/page.tsx      shows the connect-a-bank card — shouldShowConnectCard
     //                       keys on this message — pushing an already connected
-    //                       user toward a duplicate connection row. It
-    //                       deliberately does not clear its connection cache.
+    //                       user toward a duplicate connection row. It re-reads
+    //                       connection state from the server.
     //   dashboard/page.tsx  has no connect card on this path (its only connect
     //                       affordance is a link to /money). It flips
-    //                       hasBankConnection false and clears the cached
-    //                       accounts and transactions from both state and
-    //                       localStorage.
+    //                       hasBankConnection false and clears the accounts
+    //                       and transactions it holds in state.
     // Hand it to the outer catch instead: handlePlaidError maps an error carrying
     // no Plaid error_code to a generic 500, which is the direction this route
     // already takes for any other unexpected failure and, being generic, is a
