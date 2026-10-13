@@ -3,7 +3,18 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 
 /**
- * Bank data must not be kept in browser storage.
+ * The dashboard and the connect card must not keep bank data in browser
+ * storage, and the leftover Plaid keys are cleared on mount.
+ *
+ * SCOPE
+ * Two files are checked for storage use: dashboard/page.tsx and
+ * components/plaid/PlaidLink.tsx. Only direct `localStorage.<method>(` /
+ * `sessionStorage.<method>(` call forms are recognised, and only the KEY
+ * argument is checked — never the value written. Storage reached through an
+ * alias, a helper in another module, or a computed key is invisible here. A
+ * third file, components/layout/ClientLayout.tsx, is checked only for the
+ * clearing call in its mount effect, not for its other storage use. No other
+ * file in the app is covered by this probe.
  *
  * WHY
  * Balances, transactions and connection details came from the dashboard and
@@ -21,8 +32,9 @@ import { describe, it, expect } from "vitest";
  * WHAT THIS FILE PROVES AND DOES NOT PROVE
  * It reads source TEXT. It proves the dashboard touches browser storage only
  * under an explicit list of non-bank keys, that its mount effect calls the
- * clearing helper before any redirect or await, and that the connect card does
- * not touch browser storage at all. It does NOT execute anything — no DOM
+ * clearing helper imported from @/lib/validation before any redirect or await,
+ * that ClientLayout's mount effect calls the same helper, and that the connect
+ * card does not touch browser storage at all. It does NOT execute anything — no DOM
  * environment exists in this repo — so it cannot prove the keys are actually
  * gone from a browser. That is checked in DevTools on a deployment.
  *
@@ -52,6 +64,9 @@ const DASHBOARD = withoutComments(
 const PLAID_LINK = withoutComments(
   readSource("../../components/plaid/PlaidLink.tsx")
 );
+const CLIENT_LAYOUT = withoutComments(
+  readSource("../../components/layout/ClientLayout.tsx")
+);
 
 /** Every `<store>.<method>(<first argument>` call in the source. */
 function storageCalls(
@@ -74,7 +89,7 @@ const DASHBOARD_ALLOWED_READS = [
 ];
 const DASHBOARD_ALLOWED_WRITES = ['"noor_quick_prompt"'];
 
-describe("bank data is not kept in browser storage", () => {
+describe("dashboard and connect card keep no bank keys in browser storage; Plaid keys cleared on mount", () => {
   it("dashboard reads and writes browser storage only under non-bank keys", () => {
     const calls = storageCalls(DASHBOARD);
     if (calls.length === 0) {
@@ -126,6 +141,25 @@ describe("bank data is not kept in browser storage", () => {
     expect(clearAt).toBeGreaterThan(-1);
     expect(clearAt).toBeLessThan(redirectAt);
     expect(clearAt).toBeLessThan(sessionAt);
+
+    // The call must be the validation.ts helper, which owns the key names — not
+    // a local function of the same name.
+    expect(DASHBOARD).toMatch(
+      /import\s*\{[^}]*\bclearPlaidLocalState\b[^}]*\}\s*from\s*"@\/lib\/validation"/
+    );
+  });
+
+  it("ClientLayout mount effect clears the Plaid keys", () => {
+    const start = CLIENT_LAYOUT.indexOf("useEffect(() => {");
+    const end = CLIENT_LAYOUT.indexOf("const shouldShowChat", start);
+    if (start < 0 || end < 0) {
+      throw new Error(
+        "ClientLayout.tsx: could not bound the mount effect between the " +
+          "first `useEffect(() => {` and `const shouldShowChat`; re-point " +
+          "these anchors."
+      );
+    }
+    expect(CLIENT_LAYOUT.slice(start, end)).toContain("clearPlaidLocalState()");
   });
 
   it("connect card does not touch browser storage", () => {

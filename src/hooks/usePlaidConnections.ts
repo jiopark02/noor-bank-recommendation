@@ -164,11 +164,12 @@ export function usePlaidConnections(userId: string | null) {
 
         // Only past the !ok early return, so this runs on a CONFIRMED deletion
         // and never in the catch or a finally: if the POST failed the row still
-        // exists and the connection is still live, and clearing the caches
+        // exists and the connection is still live, and clearing local state
         // would present a failed operation as a partial success.
         //
-        // Before the refetch, so a slow or failing reload cannot leave the
-        // stale caches sitting there in the meantime.
+        // The app no longer writes the Plaid keys; this removes whatever an
+        // earlier build left. Before the refetch, so a slow or failing reload
+        // does not delay it.
         clearPlaidLocalState();
 
         // Re-pull authoritative state from the DB instead of mutating a local

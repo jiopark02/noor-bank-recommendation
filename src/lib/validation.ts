@@ -392,7 +392,7 @@ export function clearSession(): void {
 // shared-device hygiene: no account's history should linger after sign-out.
 // SCOPE SPLIT (deliberate, see purgeAllNoorLocalState below):
 //   - clearLocalAuthState = LOGOUT / SIGNED_OUT path. Purges only the sensitive
-//     subset (auth + profile + chat + Plaid bank cache). This is the
+//     subset (auth + profile + chat + the Plaid keys). This is the
 //     shared-device hygiene boundary; it is intentionally a curated subset, NOT
 //     a blanket noor_ sweep (a logout should not, for example, reset the
 //     device's language preference).
@@ -414,8 +414,9 @@ export function clearLocalAuthState(): void {
 // Drops the Plaid keys from the browser. The app no longer writes them — bank
 // data is read from the server on every visit — but earlier builds stored
 // account balances, transactions and connection details under them, and those
-// values can still be on a device. Two callers, both removing leftovers rather
-// than live state:
+// values can still be on a device. Callers, all removing leftovers rather than
+// live state:
+//   - ClientLayout's mount effect, on every page;
 //   - the dashboard's mount effect, unconditionally on every visit;
 //   - a CONFIRMED disconnect in usePlaidConnections (the server returned 200,
 //     which /api/plaid/disconnect does only after the row deletion succeeded).
@@ -426,8 +427,8 @@ export function clearLocalAuthState(): void {
 // All three keys go, none of them pruned per item. Nothing reads them, so
 // removing them costs nothing.
 //
-// No typeof window guard, matching clearLocalAuthState above: the callers are
-// click handlers.
+// No typeof window guard, matching clearLocalAuthState above: every caller runs
+// only in the browser (mount effects and a click handler).
 export function clearPlaidLocalState(): void {
   localStorage.removeItem('noor_plaid_connections');
   localStorage.removeItem('noor_plaid_accounts');

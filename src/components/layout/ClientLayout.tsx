@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { NoorAIChat } from "@/components/chat";
 import { supabase, getSessionSafe } from "@/lib/supabase-browser";
-import { clearLocalAuthState } from "@/lib/validation";
+import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -54,6 +54,9 @@ export function ClientLayout({ children }: ClientLayoutProps) {
     // longer writes noor_chat_history; this removes any residue left on disk for
     // users who were active before this change (and never logged out).
     localStorage.removeItem("noor_chat_history");
+    // Same for bank data: the app no longer writes the Plaid keys, so drop what
+    // earlier builds left, on every page and not only the dashboard.
+    clearPlaidLocalState();
     syncSession();
 
     const { data: authListener } = supabase?.auth.onAuthStateChange(

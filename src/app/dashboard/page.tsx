@@ -34,6 +34,7 @@ interface StoredPlaidSubscription {
 }
 
 const STORAGE_KEY_BUDGET = "noor_budget";
+const CONNECTIONS_LOAD_FAILED = "Failed to load bank connections";
 
 const QUICK_PROMPTS = [
   "How much can I spend this week?",
@@ -151,8 +152,11 @@ export default function HomePage() {
     // Determine bank-connection state from the DB (authoritative source), not
     // localStorage — so it survives a localStorage purge (logout / new device).
     // isLoading stays true until this resolves, so the UI never flashes a
-    // "not connected" state before the check completes.
+    // "not connected" state before the check completes — and it stays true on
+    // the redirect to /login, so a signed-out visit never shows $0 on its way
+    // out.
     let cancelled = false;
+    let redirecting = false;
     (async () => {
       try {
         // The authoritative auth signal is the live Supabase session, not the
@@ -162,6 +166,7 @@ export default function HomePage() {
         const session = await getSessionSafe();
         if (cancelled) return;
         if (!session) {
+          redirecting = true;
           clearLocalAuthState();
           router.replace("/login");
           return;
@@ -171,12 +176,21 @@ export default function HomePage() {
           method: "GET",
           headers: await getSupabaseBearerHeaders(),
         });
-        const payload = asPlainObject(await res.json());
         if (!res.ok) {
+          const data = asPlainObject(await res.json().catch(() => ({})));
           throw new Error(
-            readErrorMessage(payload) || "Failed to load bank connections"
+            readErrorMessage(data) || CONNECTIONS_LOAD_FAILED
           );
         }
+        // A 200 whose body does not parse is a failed read, not an empty list,
+        // and the parser's own wording is not for the screen.
+        let body: unknown;
+        try {
+          body = await res.json();
+        } catch {
+          throw new Error(CONNECTIONS_LOAD_FAILED);
+        }
+        const payload = asPlainObject(body);
         if (cancelled) return;
 
         const list = Array.isArray(payload.connections)
@@ -198,10 +212,10 @@ export default function HomePage() {
         // flipping to "not connected" (which would prompt a re-link and create
         // duplicate connection rows). moneyError also hides the connect prompt.
         setMoneyError(
-          err instanceof Error ? err.message : "Failed to load bank connections"
+          err instanceof Error ? err.message : CONNECTIONS_LOAD_FAILED
         );
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled && !redirecting) setIsLoading(false);
       }
     })();
 
@@ -435,8 +449,10 @@ export default function HomePage() {
       return {
         opening: "I could not read your latest Plaid data due to a sync error.",
         question: "Can you show me a safe spending cap for this week?",
+        // A failed read, not a broken connection: this screen does not read
+        // the routes' re-link signal, so it must not tell the user to reconnect.
         answer:
-          "Please reconnect or refresh your bank data in Money page and I will recalculate instantly.",
+          "I couldn't load your bank data right now. Try refreshing in a moment.",
       };
     }
 
