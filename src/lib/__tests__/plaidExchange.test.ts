@@ -412,7 +412,7 @@ describe("tokens never leave through logs or responses", () => {
   });
 });
 
-describe("the ownership read is repeated right before a compensating revocation", () => {
+describe("the row is read again only after a store failure that may have committed", () => {
   const ROW = {
     ok: true as const,
     connection: { institution_name: "Committed Bank", institution_id: "ins_committed" },
@@ -629,6 +629,15 @@ describe("(f) isDefiniteDbRejection", () => {
     }
   });
 
+  it("(C10 a) is false for 40003 and true for the rest of class 40", () => {
+    // MUTATION: removing the `code === "40003"` exclusion (40003 then counts
+    // as definite), or excluding the whole 40 class (40001 / 40P01 then go
+    // ambiguous).
+    expect(isDefiniteDbRejection("40003")).toBe(false);
+    expect(isDefiniteDbRejection("40001")).toBe(true);
+    expect(isDefiniteDbRejection("40P01")).toBe(true);
+  });
+
   it("is false for PostgREST codes, null and malformed codes", () => {
     // MUTATION: matching a prefix instead of the whole code (dropping `^`/`$`),
     // or treating null as definite.
@@ -653,8 +662,9 @@ describe("institution names are cut by code point, including the client's", () =
   });
 
   it("(h) caps a long client name in the pre-exchange 409", async () => {
-    // MUTATION: removing capName where the client name is read (only the
-    // final stored name is then capped).
+    // MUTATION: removing capName both where the client name is read and
+    // inside duplicate() (either one alone still caps it), or
+    // INSTITUTION_NAME_MAX = 79.
     const deps = passingDeps();
     deps.findActiveByInstitution.mockResolvedValue({ institution_name: null });
     const long = "Z".repeat(120);
@@ -667,7 +677,9 @@ describe("institution names are cut by code point, including the client's", () =
   });
 
   it("(h) caps a long client name in the step 4 answer", async () => {
-    // MUTATION: removing capName where the client name is read.
+    // MUTATION: removing capName both where the client name is read and
+    // inside connected() (either one alone still caps it), or
+    // INSTITUTION_NAME_MAX = 79.
     const deps = passingDeps();
     deps.findOwnItem.mockResolvedValue({
       ok: true,
@@ -678,6 +690,39 @@ describe("institution names are cut by code point, including the client's", () =
     );
     expect(out.status).toBe(200);
     expect(out.body.institutionName).toBe("Y".repeat(80));
+  });
+});
+
+describe("names in responses are capped even when they were never stored by this request", () => {
+  it("(C10 b) caps Plaid's name in the post-exchange 409 when the stored row has none", async () => {
+    // MUTATION: removing capName inside duplicate().
+    const deps = passingDeps();
+    const plaidName = "P".repeat(79) + "\u{1F3E6}" + "Q".repeat(20);
+    deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: plaidName });
+    deps.findActiveByInstitution.mockImplementation(
+      async (_u: string, _i: string, exclude?: string) =>
+        exclude ? { institution_name: "" } : null
+    );
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(409);
+    const name = out.body.institutionName as string;
+    expect(Array.from(name)).toHaveLength(80);
+    expect(name).toBe("P".repeat(79) + "\u{1F3E6}");
+  });
+
+  it("(C10 c) caps a long name from the row step 4 found", async () => {
+    // MUTATION: removing capName inside connected().
+    const deps = passingDeps();
+    deps.findOwnItem.mockResolvedValue({
+      ok: true,
+      connection: { institution_name: "R".repeat(120), institution_id: "ins_existing" },
+    });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(200);
+    const name = out.body.institutionName as string;
+    expect(Array.from(name)).toHaveLength(80);
+    expect(name).toBe("R".repeat(80));
+    expect(deps.store).not.toHaveBeenCalled();
   });
 });
 
@@ -720,8 +765,8 @@ describe("institution names are stored at most 80 characters long", () => {
   const LONG = "B".repeat(81) + "ank of Somewhere Very Long";
 
   it("caps Plaid's name and answers with the stored value", async () => {
-    // MUTATION: removing `.slice(0, INSTITUTION_NAME_MAX)`, or capping only
-    // the value sent to store.
+    // MUTATION: removing capName from the final institutionName (the stored
+    // value is then uncapped), or INSTITUTION_NAME_MAX = 79.
     const deps = passingDeps();
     deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: LONG });
     const out = response(await exchangeForUser(USER, INPUT, deps));
@@ -732,8 +777,9 @@ describe("institution names are stored at most 80 characters long", () => {
   });
 
   it("caps the client's name when it is the fallback", async () => {
-    // MUTATION: capping Plaid's name before the fallback chain instead of the
-    // chosen value.
+    // MUTATION: removing capName both where the client name is read and from
+    // the final institutionName (either one alone still caps it), or
+    // INSTITUTION_NAME_MAX = 79.
     const deps = passingDeps();
     deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: null });
     const out = response(
@@ -745,7 +791,8 @@ describe("institution names are stored at most 80 characters long", () => {
   });
 
   it("leaves an 80-character name whole", async () => {
-    // MUTATION: an off-by-one cap (`slice(0, 79)`).
+    // MUTATION: an off-by-one cap (INSTITUTION_NAME_MAX = 79, or
+    // `.slice(0, INSTITUTION_NAME_MAX - 1)` inside capName).
     const deps = passingDeps();
     const exact = "C".repeat(80);
     deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: exact });

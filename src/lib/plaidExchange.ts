@@ -42,13 +42,19 @@ import {
  * step 4's answer, as does a store that failed before inserting (`crypto`) or
  * one the server rejected with a SQLSTATE (isDefiniteDbRejection). The one case
  * that can have committed anyway is a store failure without such a code — a
- * transport error, a throw, a PostgREST code of its own, or a connection-class
- * (08) SQLSTATE. For that case only, the row is read again (one retry): a row
- * means the bank is connected and the answer is 200 with the row's values; no
- * row means revoke and 500; two failed reads mean no revocation, 500, and
+ * transport error, a throw, a PostgREST code of its own, or one of the
+ * SQLSTATEs isDefiniteDbRejection leaves ambiguous (08, 40003, 57P, 58, XX).
+ * For that case only, the row is read again (one retry): a row means the bank
+ * is connected and the answer is 200 with the row's values; no row means
+ * revoke and 500; two failed reads mean no revocation, 500, and
  * `revoke=skipped reason=recheck_read_failed`. The cost of that direction is a
  * possible orphaned Item, which the log line names so it can be cleaned up by
  * hand.
+ *
+ * Remaining risk: if the re-read finds no row and the Item is revoked, and the
+ * original insert commits only after that, a row is left pointing at a revoked
+ * Item. Without a lock spanning the insert and the re-read this cannot be
+ * prevented here.
  *
  * Older clients that still exchange the public token after a re-link: the
  * update-mode token is normally never exchanged, because the pre-exchange
@@ -74,9 +80,11 @@ import {
  * `refused=store_db … revoke=skipped reason=recheck_read_failed`.
  *
  * Institution names are capped at INSTITUTION_NAME_MAX code points: the
- * client's name when it is read (so every response that falls back to it
- * carries the capped value), and the chosen name again before it is stored.
- * The response carries the stored value. The number matches sanitizePlaidLabel
+ * client's name when it is read, the chosen name again before it is stored,
+ * and every name in a response, inside duplicate() and connected(). The last
+ * covers names that come from Plaid in the post-exchange 409 and from stored
+ * rows. A name already stored longer than the cap stays as it is in the
+ * database; only the response is cut. The number matches sanitizePlaidLabel
  * (plaidChatContext.ts), which counts UTF-16 code units instead, so a name with
  * characters outside the BMP can be cut shorter there.
  *
@@ -199,16 +207,23 @@ function capName(value: string | null): string | null {
  * its types says what a PGRST code implies about the commit, so it stays
  * ambiguous.
  *
- * Also ambiguous, though they are SQLSTATEs: classes where the error can arrive
- * after the commit already happened — 08 (connection exception), 57P
- * (the session was terminated), 58 (system error) and XX (internal error).
- * Calling one of those ambiguous costs a re-read; calling it definite could
- * revoke an Item whose row exists.
+ * Also ambiguous, though they are SQLSTATEs: codes where the error can arrive
+ * after the commit already happened, or where the server itself says it does
+ * not know — 08 (connection exception), 40003 (statement_completion_unknown),
+ * 57P (the session was terminated), 58 (system error) and XX (internal error).
+ * The rest of class 40 (40001 serialization failure, 40P01 deadlock) rolls the
+ * transaction back and stays definite. Calling one of those ambiguous costs a
+ * re-read; calling it definite could revoke an Item whose row exists.
  */
 export function isDefiniteDbRejection(code: string | null): boolean {
   if (code === null || !/^[0-9A-Z]{5}$/.test(code)) return false;
   const sqlClass = code.slice(0, 2);
-  if (sqlClass === "08" || sqlClass === "58" || code.slice(0, 3) === "57P") {
+  if (
+    sqlClass === "08" ||
+    sqlClass === "58" ||
+    code === "40003" ||
+    code.slice(0, 3) === "57P"
+  ) {
     return false;
   }
   return /^[0-9]/.test(sqlClass) || sqlClass === "F0" || sqlClass === "HV" || sqlClass === "P0";
@@ -248,7 +263,7 @@ function duplicate(institutionName: string): ExchangeOutcome {
   return respond(409, {
     duplicate: true,
     code: "ALREADY_CONNECTED",
-    institutionName,
+    institutionName: capName(institutionName),
     message: DUPLICATE_MESSAGE,
     error: DUPLICATE_MESSAGE,
   });
@@ -263,7 +278,7 @@ function connected(
     success: true,
     itemId,
     institutionId,
-    institutionName,
+    institutionName: capName(institutionName),
     message: "Bank account connected successfully",
   });
 }
