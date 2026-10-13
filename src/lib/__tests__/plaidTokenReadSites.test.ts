@@ -100,11 +100,6 @@ const NON_CONSUMING_SITES: Record<string, string> = {
   "lib/supabase-browser.ts": "Supabase session access_token, not Plaid",
   "app/auth/callback/page.tsx": "Supabase session access_token, not Plaid",
   "app/survey/page.tsx": "Supabase session access_token, not Plaid",
-  // NOT LISTED, and it is not an oversight: src/hooks/usePlaidConnections.ts
-  // has a field called `accessToken` that actually carries a Plaid Link PUBLIC
-  // token. It is camelCase, so this probe — which tracks the snake_case column
-  // identifier — does not see it, and it must not be added here: doing so would
-  // fail the "expected file no longer mentions" assertion on every run.
 };
 
 function walk(dir: string, out: string[] = []): string[] {
