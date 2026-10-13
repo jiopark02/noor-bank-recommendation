@@ -535,36 +535,6 @@ export function storeResultFromInsert(error: unknown): PlaidConnectionStore {
 }
 
 /**
- * Update Plaid connection status
- */
-export async function updatePlaidConnectionStatus(
-  userId: string,
-  itemId: string,
-  status: "active" | "error"
-) {
-  try {
-    const supabase = createServerClient();
-    const { data, error } = await supabase
-      .from("plaid_connections")
-      .update({ status })
-      .eq("user_id", userId)
-      .eq("item_id", itemId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error updating Plaid connection status:", error);
-      return null;
-    }
-
-    return data;
-  } catch (error) {
-    console.error("Error updating connection status:", error);
-    return null;
-  }
-}
-
-/**
  * What one plaid_connections delete did.
  *
  * `deleted` is the row count, taken from `.select("id")` — a PostgREST delete
