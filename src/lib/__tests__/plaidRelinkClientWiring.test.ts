@@ -20,8 +20,9 @@ import { describe, it, expect } from "vitest";
  * first), before the update-mode public token is exchanged, and nothing is
  * revoked. The re-link itself already succeeded at Plaid, so what comes back is
  * the false "failed" message this file exists to keep away. (Only when that
- * check cannot match — no institution id in the metadata, or a stored row whose
- * id is NULL — does the exchange run; plaidExchange.ts then finds the row and
+ * check cannot match — no institution id in the metadata, a stored row whose id
+ * is NULL, a stored row whose status is not `active`, or a pre-exchange read
+ * that failed — does the exchange run; plaidExchange.ts then finds the row and
  * revokes nothing.)
  *
  * IF THIS FILE FAILS

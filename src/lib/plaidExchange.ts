@@ -31,39 +31,54 @@ import {
  *
  * ⚠️ AN ITEM THIS USER ALREADY HAS IS NEVER REVOKED HERE. Revoking an Item that
  * a row points at would destroy a working connection while its row stays
- * behind. So itemRemove is called only immediately after a read, in this same
- * request, that found no row for this Item: step 4 before anything is refused,
- * and again inside `refuse`, right before the revocation. The second read is
- * there because step 4's answer can go stale — an insert that committed but was
- * reported as a failure with no error code (a transport error, a throw), or
- * another request that stored the same Item in between. When that read finds a
- * row, nothing is revoked (`revoke=skipped reason=row_present`); after a failed
- * store this means the row is there, so the answer is 200 with the stored row's
- * values, and any other refusal keeps its own answer. When either read fails,
- * nothing is revoked either (`failure=ownership_read revoke=skipped`, or
- * `revoke=skipped reason=recheck_read_failed` with the original refusal). The
- * cost of that direction is a possible orphaned Item, which the log line names
- * so it can be cleaned up by hand.
+ * behind. Step 4 reads the user's row for the Item, and the compensating
+ * revocation is reachable only after that read found none; when it fails,
+ * nothing is revoked and the request stops.
+ *
+ * WHEN STEP 4'S ANSWER CAN GO STALE
+ * A Plaid public token can be exchanged only once, so no other request can be
+ * holding this Item: between step 4 and the insert, nothing else can create its
+ * row. Every refusal before the insert (steps 5 and 6) therefore revokes on
+ * step 4's answer, as does a store that failed before inserting (`crypto`) or
+ * one the server rejected with a SQLSTATE (isDefiniteDbRejection). The one case
+ * that can have committed anyway is a store failure without such a code — a
+ * transport error, a throw, a PostgREST code of its own, or a connection-class
+ * (08) SQLSTATE. For that case only, the row is read again (one retry): a row
+ * means the bank is connected and the answer is 200 with the row's values; no
+ * row means revoke and 500; two failed reads mean no revocation, 500, and
+ * `revoke=skipped reason=recheck_read_failed`. The cost of that direction is a
+ * possible orphaned Item, which the log line names so it can be cleaned up by
+ * hand.
  *
  * Older clients that still exchange the public token after a re-link: the
  * update-mode token is normally never exchanged, because the pre-exchange
  * duplicate check answers 409 (or the limit check, which runs first, 422), and
  * nothing is revoked. That is still the false "failed" message the client fix
  * removed, not a tolerated path. Only when the pre-exchange check cannot match
- * (no institution id in the metadata, or a stored row with a NULL id) does the
- * exchange run, and step 4 then finds the row.
+ * does the exchange run, and step 4 then finds the row (that read does not
+ * filter on status). It cannot match when the metadata carries no institution
+ * id, when the stored row's id is NULL, when the stored row's status is not
+ * `active`, or when the pre-exchange read itself failed (it fails open).
  *
  * LOG PAIRING
  * Every successful exchange logs `[plaid-exchange] user_id=… item_id=… minted`
- * before anything else is decided. Each minted line is followed, for the same
- * item_id, by at least one line carrying `resolved=`, `compensate=`,
- * `revoke=skipped` or `refused=`. A minted line with none of these after it
- * means the request died between the exchange and its outcome, and the Item may
- * be live with no row.
+ * before anything else is decided. `minted` means the exchange succeeded, not
+ * that the Item is new: an Item this user already has is minted too. Each
+ * minted line is followed, for the same item_id, by at least one line carrying
+ * `resolved=`, `compensate=`, `revoke=skipped` or `refused=`. A minted line with
+ * none of these after it means the request died between the exchange and its
+ * outcome, and the Item may be live with no row. `refused=` appears only when
+ * the final answer is a refusal; an ambiguous store failure first logs
+ * `store_failed db_error=…` and ends with `resolved=already_stored
+ * stage=recheck`, with `refused=store_db …` and a `compensate=` line, or with
+ * `refused=store_db … revoke=skipped reason=recheck_read_failed`.
  *
- * Institution names are stored capped at INSTITUTION_NAME_MAX characters, the
- * same cap sanitizePlaidLabel (plaidChatContext.ts) applies when it shows them,
- * and the response carries the stored value.
+ * Institution names are capped at INSTITUTION_NAME_MAX code points: the
+ * client's name when it is read (so every response that falls back to it
+ * carries the capped value), and the chosen name again before it is stored.
+ * The response carries the stored value. The number matches sanitizePlaidLabel
+ * (plaidChatContext.ts), which counts UTF-16 code units instead, so a name with
+ * characters outside the BMP can be cut shorter there.
  *
  * Plaintext tokens pass through this module but are never logged and never put
  * in a response body. It does not read the stored token column, which is why it
@@ -163,8 +178,41 @@ const SAVE_FAILED_MESSAGE = "Failed to save connection. Please try again.";
 const DUPLICATE_MESSAGE = "This bank is already connected to your account.";
 const UNKNOWN_INSTITUTION = "Unknown Institution";
 
-/** The stored institution name's cap; the chat label cap, sanitizePlaidLabel. */
+/** The institution name's cap in code points; the number sanitizePlaidLabel uses. */
 export const INSTITUTION_NAME_MAX = 80;
+
+/** Cut by code point, so a character outside the BMP is never split in half. */
+function capName(value: string): string;
+function capName(value: string | null): string | null;
+function capName(value: string | null): string | null {
+  if (value === null) return null;
+  return Array.from(value).slice(0, INSTITUTION_NAME_MAX).join("");
+}
+
+/**
+ * Whether a failed insert's code proves the row was NOT committed.
+ *
+ * True only for a PostgreSQL SQLSTATE the server sent while rejecting the
+ * statement: five characters of 0-9/A-Z, in a class that starts with a digit or
+ * is F0, HV or P0. That shape excludes node errno codes ("EPIPE" is five
+ * letters too) and PostgREST's own codes ("PGRST…"); nothing in this repo or in
+ * its types says what a PGRST code implies about the commit, so it stays
+ * ambiguous.
+ *
+ * Also ambiguous, though they are SQLSTATEs: classes where the error can arrive
+ * after the commit already happened — 08 (connection exception), 57P
+ * (the session was terminated), 58 (system error) and XX (internal error).
+ * Calling one of those ambiguous costs a re-read; calling it definite could
+ * revoke an Item whose row exists.
+ */
+export function isDefiniteDbRejection(code: string | null): boolean {
+  if (code === null || !/^[0-9A-Z]{5}$/.test(code)) return false;
+  const sqlClass = code.slice(0, 2);
+  if (sqlClass === "08" || sqlClass === "58" || code.slice(0, 3) === "57P") {
+    return false;
+  }
+  return /^[0-9]/.test(sqlClass) || sqlClass === "F0" || sqlClass === "HV" || sqlClass === "P0";
+}
 
 function emit(deps: ExchangeDeps, line: string): void {
   if (deps.log) {
@@ -304,7 +352,8 @@ export async function exchangeForUser(
   // 2. Duplicate check on the client's institution id. Fails open: step 6
   // repeats it with Plaid's own value and fails closed.
   const clientInstitutionId = nonEmpty(input.institutionId);
-  const clientInstitutionName = nonEmpty(input.institutionName);
+  // Capped here, once, so every answer that falls back to it is capped too.
+  const clientInstitutionName = capName(nonEmpty(input.institutionName));
   if (clientInstitutionId) {
     try {
       const existing = await deps.findActiveByInstitution(
@@ -357,26 +406,16 @@ export async function exchangeForUser(
     );
   }
 
-  // This closure is the only way this function revokes. Step 4's "no row" may
-  // be stale by the time a refusal is reached, so it is read again here and
-  // the Item is revoked only on a fresh "no row".
-  // `rowPresent` is the answer to give when the re-read finds a row; without
-  // it the original refusal stands.
+  // From here on the Item is known to be new to this user, and no other
+  // request can store it (its public token is spent), so revoking it on a
+  // refusal is safe. The one exception — a store that may have committed — is
+  // re-read before it reaches this. This closure is the only way this function
+  // revokes.
   const refuse = async (
     reason: string,
-    outcome: ExchangeOutcome,
-    rowPresent?: (row: StoredConnectionView) => ExchangeOutcome
+    outcome: ExchangeOutcome
   ): Promise<ExchangeOutcome> => {
     emit(deps, `${prefix} refused=${reason}`);
-    const recheck = await readOwnItem(deps, userId, itemId);
-    if (!recheck.ok) {
-      emit(deps, `${prefix} revoke=skipped reason=recheck_read_failed`);
-      return outcome;
-    }
-    if (recheck.connection) {
-      emit(deps, `${prefix} revoke=skipped reason=row_present`);
-      return rowPresent ? rowPresent(recheck.connection) : outcome;
-    }
     await compensateRevoke(deps, prefix, accessToken);
     return outcome;
   };
@@ -393,9 +432,9 @@ export async function exchangeForUser(
   }
   const serverInstitutionId = nonEmpty(item.institutionId);
   const serverInstitutionName = nonEmpty(item.institutionName);
-  const institutionName = (
+  const institutionName = capName(
     serverInstitutionName ?? clientInstitutionName ?? UNKNOWN_INSTITUTION
-  ).slice(0, INSTITUTION_NAME_MAX);
+  );
 
   // 6. Duplicate check on Plaid's institution id. Fails closed. Skipped when
   // Plaid reports no institution: the row is then stored with a NULL id, and
@@ -446,9 +485,12 @@ export async function exchangeForUser(
   }
 
   if (stored.kind === "duplicate_item") {
-    // A row for this Item appeared between step 4 and the insert. It is this
-    // user's Item now, so it is not revoked — but success is reported only once
-    // the row is actually seen.
+    // 23505 arrives when this user already has a row with this item_id — not
+    // from a race after step 4 (no other request holds this Item), but, for
+    // example, when an earlier ambiguous store failure had in fact committed —
+    // or on a primary-key collision. The code alone does not say which, so the
+    // Item is not revoked, and success is reported only once the row is
+    // actually read back.
     const confirm = await readOwnItem(deps, userId, itemId);
     if (confirm.ok && confirm.connection) {
       emit(deps, `${prefix} resolved=already_stored stage=insert`);
@@ -466,20 +508,39 @@ export async function exchangeForUser(
     return failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
   }
 
-  // A store reported as failed can still have committed. If the re-read in
-  // `refuse` finds the row, the bank is connected and is answered as such.
-  return refuse(
-    stored.kind === "crypto"
-      ? "store_crypto"
-      : `store_db db_error=${logField(stored.dbErrorCode)}`,
-    failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE),
-    (row) => {
-      emit(deps, `${prefix} resolved=already_stored stage=recheck`);
-      return connected(
-        itemId,
-        nonEmpty(row.institution_id),
-        nonEmpty(row.institution_name) ?? institutionName
-      );
-    }
-  );
+  const saveFailed = failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
+  const dbError = `db_error=${logField(stored.dbErrorCode)}`;
+
+  // Nothing was inserted (crypto) or the server refused the insert: no row.
+  if (stored.kind === "crypto") {
+    return refuse("store_crypto", saveFailed);
+  }
+  if (isDefiniteDbRejection(stored.dbErrorCode)) {
+    return refuse(`store_db ${dbError}`, saveFailed);
+  }
+
+  // The insert may have committed. Read the row before deciding; one retry,
+  // as in step 4.
+  emit(deps, `${prefix} store_failed ${dbError}`);
+  let recheck = await readOwnItem(deps, userId, itemId);
+  if (!recheck.ok) {
+    recheck = await readOwnItem(deps, userId, itemId);
+  }
+  if (!recheck.ok) {
+    emit(
+      deps,
+      `${prefix} refused=store_db ${dbError} revoke=skipped reason=recheck_read_failed`
+    );
+    return saveFailed;
+  }
+  if (recheck.connection) {
+    emit(deps, `${prefix} revoke=skipped reason=row_present`);
+    emit(deps, `${prefix} resolved=already_stored stage=recheck`);
+    return connected(
+      itemId,
+      nonEmpty(recheck.connection.institution_id),
+      nonEmpty(recheck.connection.institution_name) ?? institutionName
+    );
+  }
+  return refuse(`store_db ${dbError}`, saveFailed);
 }
