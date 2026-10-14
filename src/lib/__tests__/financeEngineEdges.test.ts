@@ -21,6 +21,9 @@ import type {
  *   - streamsById built last-wins                         -> "a duplicate streamId: first copy wins …"
  *   - null guard removed from uniqueStreams               -> "a null stream entry is skipped …"
  *   - uniqueStreams' seen made a plain object again       -> "a stream whose id is an Object.prototype name is kept"
+ *   - collectDataIssues' seenStreams a plain object again -> "a stream whose id is an Object.prototype name is kept"
+ *   - uniqueAccounts' seen a plain object again           -> "an account whose id is an Object.prototype name …"
+ *   - indexAccounts a plain object again                  -> "a transaction on an absent account named like …"
  */
 
 function empty(): EngineInput {
@@ -249,10 +252,40 @@ describe("computeFinancialSummary — edges", () => {
   });
 
   it("a stream whose id is an Object.prototype name is kept", () => {
+    // Metrics and dataIssues must agree: kept, and not reported as a duplicate.
+    for (const id of ["constructor", "hasOwnProperty", "__proto__"]) {
+      const input = empty();
+      input.accounts = [acct({})];
+      input.recurring = { source: "plaid_streams", streams: [strm({ streamId: id })] };
+      const s = computeFinancialSummary(input);
+      expect(s.recurring.items.map((i) => i.streamId), id).toEqual([id]);
+      expect(s.safeToSpend.inputs.upcomingRecurring.map((u) => u.streamId), id).toEqual([id]);
+      expect(s.dataIssues, id).toEqual([]);
+    }
+  });
+
+  it("an account whose id is an Object.prototype name is kept in every metric", () => {
     const input = empty();
-    input.recurring = { source: "plaid_streams", streams: [strm({ streamId: "constructor" })] };
+    input.accounts = [
+      acct({ accountId: "toString" }),
+      acct({ accountId: "valueOf", type: "credit", subtype: "credit card", currentCents: 1000, availableCents: null, limitCents: 10000 }),
+    ];
+    input.transactions = [txn("t1", { accountId: "toString" })];
     const s = computeFinancialSummary(input);
-    expect(s.recurring.items.map((i) => i.streamId)).toEqual(["constructor"]);
+    expect(s.cashFlow.spendingGrossCents).toBe(1000);
+    expect(s.safeToSpend.inputs.balances.map((b) => b.accountId)).toEqual(["toString"]);
+    expect(s.safeToSpend.totals.reservedCreditCents).toBe(1000);
+    expect(s.creditUtilization.accounts.map((a) => a.accountId)).toEqual(["valueOf"]);
+    expect(s.dataIssues).toEqual([]);
+  });
+
+  it("a transaction on an absent account named like an Object.prototype member is an unknown account", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.transactions = [txn("t1", { accountId: "constructor" })];
+    const s = computeFinancialSummary(input);
+    expect(s.cashFlow.excluded.unknownAccount.count).toBe(1);
+    expect(s.cashFlow.spendingGrossCents).toBe(0);
   });
 
   it("a null stream entry is skipped, not thrown on", () => {

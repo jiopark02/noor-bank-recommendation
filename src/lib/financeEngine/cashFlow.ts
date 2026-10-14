@@ -33,28 +33,31 @@ export function uniqueAccounts(accounts: EngineAccount[]): {
   accounts: EngineAccount[];
   duplicateIds: string[];
 } {
-  const seen: Record<string, true> = {};
+  // A Set, not a plain object: an id such as "toString" would otherwise read
+  // as already seen through Object.prototype.
+  const seen = new Set<string>();
   const unique: EngineAccount[] = [];
   const duplicateIds: string[] = [];
   for (let i = 0; i < accounts.length; i++) {
     const a = accounts[i];
     if (!a || typeof a.accountId !== "string" || a.accountId === "") continue;
-    if (seen[a.accountId]) {
+    if (seen.has(a.accountId)) {
       duplicateIds.push(a.accountId);
       continue;
     }
-    seen[a.accountId] = true;
+    seen.add(a.accountId);
     unique.push(a);
   }
   return { accounts: unique, duplicateIds };
 }
 
+/** A Map, so looking up an absent id like "constructor" yields undefined. */
 export function indexAccounts(
   accounts: EngineAccount[]
-): Record<string, EngineAccount> {
-  const byId: Record<string, EngineAccount> = {};
+): Map<string, EngineAccount> {
+  const byId = new Map<string, EngineAccount>();
   const unique = uniqueAccounts(accounts).accounts;
-  for (let i = 0; i < unique.length; i++) byId[unique[i].accountId] = unique[i];
+  for (let i = 0; i < unique.length; i++) byId.set(unique[i].accountId, unique[i]);
   return byId;
 }
 
@@ -122,7 +125,7 @@ export function computeCashFlow(input: EngineInput): CashFlowResult {
       continue;
     }
 
-    const { cls, source } = classifyTransaction(t, accounts[t.accountId]);
+    const { cls, source } = classifyTransaction(t, accounts.get(t.accountId));
     result.classificationSource[source] += 1;
     const magnitude = Math.abs(t.amountCents);
 
