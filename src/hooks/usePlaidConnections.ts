@@ -88,44 +88,6 @@ export function usePlaidConnections(userId: string | null) {
     fetchConnections();
   }, [fetchConnections]);
 
-  // Connect a new bank (open Plaid Link)
-  const connect = useCallback(async () => {
-    if (!userId) {
-      setError("Please log in first");
-      return;
-    }
-
-    try {
-      // Request link token from backend
-      const plaidHeaders = buildJsonAuthorizedHeaders(
-        await getSupabaseBearerHeaders()
-      );
-      const response = await fetch("/api/plaid/create-link-token", {
-        method: "POST",
-        headers: plaidHeaders,
-        body: JSON.stringify({}),
-      });
-
-      const payload = asPlainObject(await response.json());
-      if (!response.ok) {
-        throw new Error(
-          readErrorMessage(payload) || "Failed to create link token"
-        );
-      }
-
-      const linkToken = readString(payload, "linkToken");
-      if (!linkToken) {
-        throw new Error("Failed to create link token");
-      }
-      return linkToken;
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to connect bank";
-      setError(message);
-      throw err;
-    }
-  }, [userId]);
-
   // Disconnect a bank.
   //
   // A failure here is REPORTED TO THE CALLER, never written into this hook's
@@ -235,7 +197,6 @@ export function usePlaidConnections(userId: string | null) {
     error,
     hasActive:
       connections.length > 0 && connections.some((c) => c.status === "active"),
-    connect,
     disconnect,
     relink,
     refetch: fetchConnections,
