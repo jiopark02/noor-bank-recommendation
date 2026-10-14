@@ -19,12 +19,12 @@
 
 /** Integer number of cents. */
 export type Cents = number;
-/** Calendar date, `YYYY-MM-DD`. */
+/** Calendar date, `YYYY-MM-DD`, year 2000 or later. */
 export type IsoDate = string;
 /**
- * ISO 8601 date-time string with an explicit zone ("Z" or ±hh:mm). A zone-less
- * date-time is invalid: `now` throws, any other field is reported in
- * `dataIssues` and treated as null.
+ * ISO 8601 date-time string with an explicit zone ("Z" or ±hh:mm), at or after
+ * 2000-01-01T00:00:00Z. A zone-less or earlier date-time is invalid: `now`
+ * throws, any other field is reported in `dataIssues` and treated as null.
  */
 export type IsoDateTime = string;
 

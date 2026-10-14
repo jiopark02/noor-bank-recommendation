@@ -11,6 +11,10 @@ import type {
 
 const MS_PER_DAY = 86400000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+// Dates before this year are rejected. Date.UTC reads years 0-99 as
+// 1900-1999, and nothing the engine is given legitimately predates it.
+const MIN_YEAR = 2000;
+const MIN_TIMESTAMP_MS = Date.UTC(MIN_YEAR, 0, 1);
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function isLeapYear(year: number): boolean {
@@ -40,6 +44,7 @@ function parseYmd(
   const year = Number(m[1]);
   const month = Number(m[2]);
   const day = Number(m[3]);
+  if (year < MIN_YEAR) return null;
   if (month < 1 || month > 12) return null;
   if (day < 1 || day > daysInMonth(year, month)) return null;
   return { year, month, day };
@@ -94,11 +99,12 @@ export function parseTimestampMs(t: unknown): number | null {
     offsetMinutes = sign * (offsetHours * 60 + offsetMins);
   }
 
-  return (
+  const ms =
     Date.UTC(date.year, date.month - 1, date.day, hours, minutes, seconds) +
     millis -
-    offsetMinutes * 60000
-  );
+    offsetMinutes * 60000;
+  // An offset can move a valid local date to a UTC instant before the bound.
+  return ms < MIN_TIMESTAMP_MS ? null : ms;
 }
 
 /** The UTC calendar date of a zoned date-time, or null when it is not one. */

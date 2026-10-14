@@ -16,6 +16,7 @@ import type {
  *   - creditUtilization iterates input.accounts directly  -> "a duplicate accountId: first wins …"
  *   - duplicate-account dataIssue removed                 -> "a duplicate accountId: first wins …"
  *   - each new dataIssue check removed                    -> the test named for that issue
+ *   - year bound removed from parseYmd                    -> "a pre-2000 date reaches the existing failure paths"
  */
 
 function empty(): EngineInput {
@@ -227,6 +228,25 @@ describe("computeFinancialSummary — edges", () => {
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "stream", id: "s", reason: "invalid_predicted_next_date" },
     ]);
+  });
+
+  it("a pre-2000 date reaches the existing failure paths", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.transactions = [txn("old", { date: "0026-10-01" })];
+    const s = computeFinancialSummary(input);
+    expect(s.dataIssues).toEqual([{ kind: "transaction", id: "old", reason: "invalid_date" }]);
+    expect(s.cashFlow.excluded.invalid.count).toBe(1);
+
+    const period = empty();
+    period.period = { start: "0026-09-11", end: "2026-10-10", completeness: "unknown" };
+    expect(computeFinancialSummary(period).dataIssues).toEqual([
+      { kind: "period", id: "period", reason: "invalid_period" },
+    ]);
+
+    const now = empty();
+    now.now = "0026-10-10T12:00:00Z";
+    expect(() => computeFinancialSummary(now)).toThrow(/^computeFinancialSummary: invalid now$/);
   });
 
   it("throws on an unparseable now", () => {

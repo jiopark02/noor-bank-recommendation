@@ -23,6 +23,8 @@ import {
  *   - leap-year branch removed from daysInMonth  -> "February in a leap year"
  *   - month-end clamp removed from addMonths     -> "Jan 31 + 1 month"
  *   - zone made optional in TIMESTAMP_PATTERN    -> "zone-less timestamps are invalid"
+ *   - year bound removed from parseYmd           -> "years before 2000 are not dates"
+ *   - instant bound removed from parseTimestampMs -> "years before 2000 are not dates"
  */
 
 describe("toCents / isCents / sumCents", () => {
@@ -118,12 +120,25 @@ describe("dates", () => {
   });
 
   it("parses zoned timestamps without the platform parser", () => {
-    expect(parseTimestampMs("1970-01-01T00:00:00Z")).toBe(0);
-    expect(parseTimestampMs("1970-01-01T09:00:00+09:00")).toBe(0);
-    expect(parseTimestampMs("1970-01-01T00:00:00.250Z")).toBe(250);
-    expect(parseTimestampMs("1970-01-01T00:00Z")).toBe(0);
+    expect(parseTimestampMs("2000-01-01T00:00:00Z")).toBe(946684800000);
+    expect(parseTimestampMs("2000-01-01T09:00:00+09:00")).toBe(946684800000);
+    expect(parseTimestampMs("2000-01-01T00:00:00.250Z")).toBe(946684800250);
+    expect(parseTimestampMs("2000-01-01T00:00Z")).toBe(946684800000);
     expect(parseTimestampMs("2026-10-10T24:00:00Z")).toBeNull();
     expect(parseTimestampMs("2026-02-30T00:00:00Z")).toBeNull();
     expect(parseTimestampMs(null)).toBeNull();
+  });
+
+  // Date.UTC reads years 0-99 as 1900-1999, so without a lower bound a year
+  // like 0050 would silently become 1950.
+  it("years before 2000 are not dates", () => {
+    expect(isIsoDate("0050-01-01")).toBe(false);
+    expect(isIsoDate("1999-12-31")).toBe(false);
+    expect(isIsoDate("2000-01-01")).toBe(true);
+    expect(dayNumber("0099-12-31")).toBeNull();
+    expect(parseTimestampMs("0050-01-01T00:00:00Z")).toBeNull();
+    // Valid calendar date, but the instant falls on 1999-12-31 in UTC.
+    expect(parseTimestampMs("2000-01-01T00:30:00+01:00")).toBeNull();
+    expect(parseTimestampMs("2000-01-01T00:00:00Z")).toBe(946684800000);
   });
 });
