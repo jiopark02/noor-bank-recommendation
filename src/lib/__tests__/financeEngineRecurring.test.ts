@@ -3,7 +3,7 @@ import {
   computeRecurring,
   upcomingOccurrences,
 } from "../financeEngine/recurring";
-import { dayNumber } from "../financeEngine/dates";
+import { addCadence, dayNumber, fromDayNumber } from "../financeEngine/dates";
 import type {
   EngineInput,
   EngineRecurringStream,
@@ -17,6 +17,9 @@ import type {
  *   - upcomingOccurrences stops after one date  -> "a weekly stream recurs inside the horizon"
  *   - SEMI_MONTHLY spacing 15 -> 17 days         -> "SEMI_MONTHLY 1st/15th … 2 dates"
  *   - SEMI_MONTHLY spacing 15 -> 13 days         -> "SEMI_MONTHLY 15th/month-end … 1 date"
+ *   - first step computed one too high or low     -> "matches unbounded stepping for every cadence"
+ *   - month-based forward step removed            -> "matches unbounded stepping for every cadence"
+ *   - a fixed step limit restored                 -> "a stale anchor beyond the old step limit …"
  */
 
 function stream(over: Partial<EngineRecurringStream>): EngineRecurringStream {
@@ -159,5 +162,58 @@ describe("upcomingOccurrences", () => {
   it("a stale anchor is bounded and still finds dates in range", () => {
     const out = upcomingOccurrences(stream({ frequency: "WEEKLY", predictedNextDate: "2026-01-05" }), from, to);
     expect(out).toEqual(["2026-10-12", "2026-10-19", "2026-10-26"]);
+  });
+
+  // Reference: step from the anchor one interval at a time with no limit.
+  function stepAll(anchor: string, frequency: EngineRecurringStream["frequency"], fromDay: number, toDay: number): string[] {
+    const out: string[] = [];
+    for (let k = 0; ; k++) {
+      const d = addCadence(anchor, frequency, k) as string;
+      const day = dayNumber(d) as number;
+      if (day > toDay) return out;
+      if (day >= fromDay) out.push(d);
+    }
+  }
+
+  it("matches unbounded stepping for every cadence", () => {
+    const horizons: Array<[number, number]> = [
+      [from, to],
+      [dayNumber("2027-02-10") as number, dayNumber("2027-02-28") as number],
+    ];
+    const frequencies = ["WEEKLY", "BIWEEKLY", "SEMI_MONTHLY", "MONTHLY", "ANNUALLY"] as const;
+    const first = dayNumber("2023-01-01") as number;
+    const last = dayNumber("2026-10-31") as number;
+    let compared = 0;
+    for (const frequency of frequencies) {
+      for (let a = first; a <= last; a++) {
+        const anchor = fromDayNumber(a);
+        for (const [f, t] of horizons) {
+          const got = upcomingOccurrences(stream({ frequency, predictedNextDate: anchor }), f, t);
+          const want = stepAll(anchor, frequency, f, t);
+          if (got.join() !== want.join()) {
+            expect(got, `${frequency} anchor ${anchor}`).toEqual(want);
+          }
+          compared++;
+        }
+      }
+    }
+    expect(compared).toBeGreaterThan(10000);
+  });
+
+  it("a stale anchor beyond the old step limit still yields its dates", () => {
+    expect(
+      upcomingOccurrences(stream({ frequency: "WEEKLY", predictedNextDate: "2024-01-01" }), from, to)
+    ).toEqual(["2026-10-12", "2026-10-19", "2026-10-26"]);
+    expect(
+      upcomingOccurrences(stream({ frequency: "MONTHLY", predictedNextDate: "2020-01-31" }), from, to)
+    ).toEqual(["2026-10-31"]);
+  });
+
+  it("an annual Feb 29 anchor clamps", () => {
+    const febFrom = dayNumber("2027-02-10") as number;
+    const febTo = dayNumber("2027-02-28") as number;
+    expect(
+      upcomingOccurrences(stream({ frequency: "ANNUALLY", predictedNextDate: "2024-02-29" }), febFrom, febTo)
+    ).toEqual(["2027-02-28"]);
   });
 });

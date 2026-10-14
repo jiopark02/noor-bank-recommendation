@@ -5,10 +5,12 @@ import type {
   RecurringResult,
 } from "./types";
 import { isCents, monthlyCentsFromCadence } from "./money";
-import { addCadence, dayNumber, fromDayNumber, isIsoDate } from "./dates";
-
-/** Guard against an unbounded loop on a stale anchor or a short cadence. */
-const MAX_OCCURRENCES = 62;
+import {
+  addCadence,
+  dayNumber,
+  firstCadenceStepOnOrAfter,
+  isIsoDate,
+} from "./dates";
 
 /**
  * The one stream dedupe every metric uses: the first stream with a given id
@@ -59,8 +61,11 @@ export function nextDateOf(s: EngineRecurringStream): IsoDate | null {
 
 /**
  * Dates on which the stream is expected to charge, from `fromDay` through
- * `toDay` inclusive (UTC day numbers). Steps forward from the next expected
- * date; an UNKNOWN cadence or a stream with no date yields nothing.
+ * `toDay` inclusive (UTC day numbers). Starts at the first occurrence on or
+ * after `fromDay`, computed from the next expected date however far back it
+ * lies, and steps forward; every step advances at least seven days, so the
+ * loop ends at `toDay`. An UNKNOWN cadence or a stream with no date yields
+ * nothing.
  */
 export function upcomingOccurrences(
   s: EngineRecurringStream,
@@ -71,13 +76,15 @@ export function upcomingOccurrences(
   if (s.frequency === "UNKNOWN") return out;
   const anchor = nextDateOf(s);
   if (anchor === null) return out;
+  const first = firstCadenceStepOnOrAfter(anchor, s.frequency, fromDay);
+  if (first === null) return out;
 
-  for (let k = 0; k < MAX_OCCURRENCES; k++) {
+  for (let k = first; ; k++) {
     const occurrence = addCadence(anchor, s.frequency, k);
     if (occurrence === null) break;
-    const day = dayNumber(occurrence) as number;
-    if (day > toDay) break;
-    if (day >= fromDay) out.push(fromDayNumber(day));
+    const day = dayNumber(occurrence);
+    if (day === null || day > toDay) break;
+    out.push(occurrence);
   }
   return out;
 }

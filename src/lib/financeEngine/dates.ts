@@ -176,3 +176,45 @@ export function addCadence(
       return null;
   }
 }
+
+/**
+ * The smallest `k >= 0` for which `addCadence(d, frequency, k)` falls on or
+ * after `targetDay` (a UTC day number), computed directly instead of by
+ * stepping from `d`, so a stale anchor costs nothing. null for an invalid date
+ * or an UNKNOWN cadence.
+ */
+export function firstCadenceStepOnOrAfter(
+  d: IsoDate,
+  frequency: RecurringFrequency,
+  targetDay: number
+): number | null {
+  const start = dayNumber(d);
+  if (start === null) return null;
+  switch (frequency) {
+    case "WEEKLY":
+      return Math.max(0, Math.ceil((targetDay - start) / 7));
+    case "BIWEEKLY":
+      return Math.max(0, Math.ceil((targetDay - start) / 14));
+    case "SEMI_MONTHLY":
+      return Math.max(0, Math.ceil((targetDay - start) / 15));
+    case "MONTHLY":
+    case "ANNUALLY": {
+      if (start >= targetDay) return 0;
+      const from = parseYmd(d) as { year: number; month: number };
+      const target = parseYmd(fromDayNumber(targetDay)) as { year: number; month: number };
+      const months = (target.year - from.year) * 12 + (target.month - from.month);
+      const perStep = frequency === "MONTHLY" ? 1 : 12;
+      // One step short of the target's month lands before targetDay, so at
+      // most two forward steps remain.
+      let k = Math.max(0, Math.floor(months / perStep) - 1);
+      for (;;) {
+        const day = dayNumber(addCadence(d, frequency, k) as IsoDate);
+        if (day === null) return null;
+        if (day >= targetDay) return k;
+        k++;
+      }
+    }
+    default:
+      return null;
+  }
+}
