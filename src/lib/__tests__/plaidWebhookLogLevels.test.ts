@@ -157,7 +157,10 @@ describe("[plaid-webhook] outcome levels without an injected log", () => {
   );
 
   it("every outcome is covered by a case", () => {
-    // Red if: an outcome is added to WebhookOutcome without a case here.
+    // Not what keeps every outcome levelled: tsc does that, through the module's
+    // Record<WebhookOutcome, LogLevel>. This checks that the cases above cover the
+    // list below, and that list is kept by hand — add an outcome there too.
+    // Red if: a case is removed while its outcome stays in the list.
     const covered = new Set(CASES.map((c) => c.outcome));
     const all: WebhookOutcome[] = [
       "malformed",

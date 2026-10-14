@@ -42,6 +42,31 @@ import {
 
 export const REVOCATION_CODES: readonly string[] = ["USER_PERMISSION_REVOKED"];
 
+/**
+ * ITEM webhooks that say the user's bank connection needs attention. They are
+ * logged, not acted on, and that line is the only record of them, so it is a
+ * warning rather than routine info.
+ *
+ *   ERROR                 - the Item has an error; the user fixes it through
+ *                           update mode.
+ *   PENDING_DISCONNECT    - a US/CA Item will be disconnected in 7 days unless
+ *                           the user goes through update mode.
+ *   PENDING_EXPIRATION    - the EU/UK equivalent; not expected here, still a
+ *                           warning if it arrives.
+ *   USER_ACCOUNT_REVOKED  - the user revoked access to one account at the
+ *                           institution. Not treated as a revocation here:
+ *                           only REVOCATION_CODES revoke an Item.
+ *
+ * Kept by hand: the Plaid SDK types webhook codes as plain strings, so nothing
+ * flags a code that is added or renamed.
+ */
+const ITEM_ATTENTION_CODES: readonly string[] = [
+  "ERROR",
+  "PENDING_EXPIRATION",
+  "PENDING_DISCONNECT",
+  "USER_ACCOUNT_REVOKED",
+];
+
 export type WebhookOutcome =
   | "malformed"
   | "env_mismatch"
@@ -81,6 +106,10 @@ export type WebhookDeps = {
  * or an Item with more than one owner that nothing will retry. `warn` is a
  * verified delivery we did not expect: a body of the wrong shape, or a
  * webhook for the other environment. `info` is an outcome that is done.
+ *
+ * One exception, made in `decide`: a `logged` webhook that says the user's
+ * connection needs attention — a code in ITEM_ATTENTION_CODES, or any webhook
+ * carrying an `error` — is a warning, with the same line.
  */
 const OUTCOME_LEVEL: Record<WebhookOutcome, LogLevel> = {
   malformed: "warn",
@@ -127,6 +156,13 @@ export async function handlePlaidWebhook(
   const itemId = body?.item_id;
   const environment = body?.environment;
   const errorCode = asRecord(body?.error)?.error_code;
+  // Any webhook can carry `error`; a present one is a signal whatever its
+  // shape, though the line names its code only when that is a string.
+  const needsAttention =
+    (type === "ITEM" &&
+      typeof code === "string" &&
+      ITEM_ATTENTION_CODES.indexOf(code) !== -1) ||
+    (body?.error !== undefined && body?.error !== null);
 
   // Never the payload's URLs (new_webhook_url), never an amount: only these
   // fields, each bounded.
@@ -145,7 +181,10 @@ export async function handlePlaidWebhook(
     if (deps.log) {
       deps.log(line);
     } else {
-      writeLogLine(line, OUTCOME_LEVEL[outcome]);
+      writeLogLine(
+        line,
+        outcome === "logged" && needsAttention ? "warn" : OUTCOME_LEVEL[outcome]
+      );
     }
     return { status, outcome };
   };
