@@ -17,6 +17,10 @@ import type {
  *   - duplicate-account dataIssue removed                 -> "a duplicate accountId: first wins …"
  *   - each new dataIssue check removed                    -> the test named for that issue
  *   - year bound removed from parseYmd                    -> "a pre-2000 date reaches the existing failure paths"
+ *   - computeRecurring iterates streams without uniqueStreams -> "a duplicate streamId: first copy wins …"
+ *   - streamsById built last-wins                         -> "a duplicate streamId: first copy wins …"
+ *   - null guard removed from uniqueStreams               -> "a null stream entry is skipped …"
+ *   - uniqueStreams' seen made a plain object again       -> "a stream whose id is an Object.prototype name is kept"
  */
 
 function empty(): EngineInput {
@@ -212,6 +216,54 @@ describe("computeFinancialSummary — edges", () => {
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "stream", id: "s", reason: "duplicate" },
     ]);
+  });
+
+  it("a duplicate streamId: first copy wins in every metric", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.recurring = {
+      source: "plaid_streams",
+      streams: [
+        strm({ averageAmountCents: 1000, predictedNextDate: "2026-10-20" }),
+        strm({ averageAmountCents: 5000, predictedNextDate: "2026-10-15" }),
+      ],
+    };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items.map((i) => [i.streamId, i.basisCents])).toEqual([["s", 1000]]);
+    expect(s.recurring.totalMonthlyCents).toBe(1000);
+    expect(s.safeToSpend.inputs.upcomingRecurring).toEqual([
+      { streamId: "s", label: "S", dueDate: "2026-10-20", cents: 1000 },
+    ]);
+    expect(s.dataIssues).toEqual([{ kind: "stream", id: "s", reason: "duplicate" }]);
+  });
+
+  it("a duplicate whose first copy is inactive excludes the stream", () => {
+    const input = empty();
+    input.recurring = {
+      source: "plaid_streams",
+      streams: [strm({ isActive: false }), strm({})],
+    };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items).toEqual([]);
+    expect(s.recurring.excluded).toEqual([{ streamId: "s", reason: "inactive" }]);
+  });
+
+  it("a stream whose id is an Object.prototype name is kept", () => {
+    const input = empty();
+    input.recurring = { source: "plaid_streams", streams: [strm({ streamId: "constructor" })] };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items.map((i) => i.streamId)).toEqual(["constructor"]);
+  });
+
+  it("a null stream entry is skipped, not thrown on", () => {
+    const input = empty();
+    input.recurring = {
+      source: "plaid_streams",
+      streams: [null as unknown as EngineRecurringStream, strm({})],
+    };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items.map((i) => i.streamId)).toEqual(["s"]);
+    expect(s.dataIssues).toEqual([{ kind: "stream", id: "", reason: "missing_id" }]);
   });
 
   it("a missing streamId is reported", () => {

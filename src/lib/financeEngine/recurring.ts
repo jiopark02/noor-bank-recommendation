@@ -10,6 +10,29 @@ import { addCadence, dayNumber, fromDayNumber, isIsoDate } from "./dates";
 /** Guard against an unbounded loop on a stale anchor or a short cadence. */
 const MAX_OCCURRENCES = 62;
 
+/**
+ * The one stream dedupe every metric uses: the first stream with a given id
+ * wins, later copies are dropped. Streams without a usable id are dropped too.
+ * The entry point reports both through its own pass, which applies the same
+ * rule.
+ */
+export function uniqueStreams(
+  streams: EngineRecurringStream[]
+): EngineRecurringStream[] {
+  // A Set, not a plain object: an id such as "constructor" would otherwise
+  // read as already seen through Object.prototype.
+  const seen = new Set<string>();
+  const unique: EngineRecurringStream[] = [];
+  for (let i = 0; i < streams.length; i++) {
+    const s = streams[i];
+    if (!s || typeof s.streamId !== "string" || s.streamId === "") continue;
+    if (seen.has(s.streamId)) continue;
+    seen.add(s.streamId);
+    unique.push(s);
+  }
+  return unique;
+}
+
 /** The per-occurrence amount and which field it came from, or null if none is usable. */
 export function streamBasis(
   s: EngineRecurringStream
@@ -81,7 +104,7 @@ export function computeRecurring(input: EngineInput): RecurringResult {
     excluded: [],
   };
 
-  const streams = input.recurring.streams;
+  const streams = uniqueStreams(input.recurring.streams);
   for (let i = 0; i < streams.length; i++) {
     const s = streams[i];
     if (!s.isActive) {

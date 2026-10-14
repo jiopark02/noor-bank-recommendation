@@ -14,7 +14,7 @@ import {
   parseTimestampMs,
   utcDateOf,
 } from "./dates";
-import { nextDateOf, upcomingOccurrences } from "./recurring";
+import { nextDateOf, uniqueStreams, upcomingOccurrences } from "./recurring";
 import { uniqueAccounts } from "./cashFlow";
 
 /** The earlier of two zoned timestamps; both have already been validated. */
@@ -183,14 +183,16 @@ export function computeSafeToSpend(
         reason: recurring.excluded[i].reason,
       });
     }
-    const streamsById: Record<string, EngineRecurringStream> = {};
-    const streams = input.recurring.streams;
+    // Same dedupe as computeRecurring, so each item finds the copy it came
+    // from. A Map, so an id like "__proto__" is an ordinary key.
+    const streamsById = new Map<string, EngineRecurringStream>();
+    const streams = uniqueStreams(input.recurring.streams);
     for (let i = 0; i < streams.length; i++) {
-      streamsById[streams[i].streamId] = streams[i];
+      streamsById.set(streams[i].streamId, streams[i]);
     }
     for (let i = 0; i < recurring.items.length; i++) {
       const item = recurring.items[i];
-      const stream = streamsById[item.streamId];
+      const stream = streamsById.get(item.streamId);
       if (!stream || nextDateOf(stream) === null) {
         result.inputs.excludedRecurring.push({
           streamId: item.streamId,
