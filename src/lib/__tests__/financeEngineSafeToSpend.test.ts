@@ -20,6 +20,7 @@ import type {
  *   - other-currency push removed                   -> "other-currency and null-currency accounts are listed"
  *   - accounts iterated without uniqueAccounts      -> "a duplicate accountId is counted once"
  *   - bufferCents check removed                     -> "a non-integer buffer is a caller bug"
+ *   - negative-buffer check removed                 -> "a negative buffer is a caller bug"
  *   - SEMI_MONTHLY assumption push removed          -> "states the SEMI_MONTHLY spacing approximation"
  *   - due-today assumption push removed             -> "a charge due today is flagged"
  */
@@ -241,6 +242,11 @@ describe("computeSafeToSpend", () => {
   it("a non-integer buffer is a caller bug", () => {
     expect(() => run(scenario(), { ...DEFAULT_POLICY, bufferCents: 1.5 })).toThrow(/invalid bufferCents/);
     expect(() => run(scenario(), { ...DEFAULT_POLICY, bufferCents: NaN })).toThrow(/invalid bufferCents/);
+  });
+
+  it("a negative buffer is a caller bug", () => {
+    // Subtracting a negative buffer would raise the result.
+    expect(() => run(scenario(), { ...DEFAULT_POLICY, bufferCents: -1 })).toThrow(/invalid bufferCents/);
   });
 
   it("states the SEMI_MONTHLY spacing approximation when such a stream is used", () => {

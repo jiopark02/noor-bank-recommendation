@@ -48,8 +48,9 @@ export function computeSafeToSpend(
   if (today === null) throw new Error("computeSafeToSpend: invalid now");
   // A policy is a caller-supplied constant; a broken one is a caller bug, not
   // data. NaN would otherwise make every comparison below false and report a
-  // computed figure with no shortfall.
-  if (!isCents(policy.bufferCents)) {
+  // computed figure with no shortfall, and a negative buffer would raise the
+  // result instead of lowering it.
+  if (!isCents(policy.bufferCents) || policy.bufferCents < 0) {
     throw new Error("computeSafeToSpend: invalid bufferCents");
   }
   const horizonEnd = endOfMonthUtc(today);

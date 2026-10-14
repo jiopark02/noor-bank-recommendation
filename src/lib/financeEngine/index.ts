@@ -129,8 +129,8 @@ function collectDataIssues(input: EngineInput): DataIssue[] {
 
 /**
  * Computes every v1 metric from one input. Throws only when `input.now` does
- * not parse, which is a caller bug; bad data is skipped and reported in
- * `dataIssues` and in each metric's exclusion counts.
+ * not parse or the policy is invalid, both caller bugs; bad data is skipped
+ * and reported in `dataIssues` and in each metric's exclusion counts.
  */
 export function computeFinancialSummary(
   input: EngineInput,
