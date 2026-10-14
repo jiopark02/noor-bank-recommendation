@@ -26,6 +26,7 @@ export const DEFAULT_POLICY: EnginePolicy = {
   spendableSubtypes: ["checking", "cash management", "prepaid", "paypal"],
   reserveCreditCardBalances: true,
   bufferCents: 0,
+  pastDueGraceDays: 7,
 };
 
 function collectDataIssues(input: EngineInput): DataIssue[] {

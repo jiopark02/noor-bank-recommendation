@@ -176,6 +176,7 @@ const EXPECTED_NUMERIC_PATHS = [
   "safeToSpend.inputs.creditCardBalances[].cents",
   "safeToSpend.inputs.upcomingRecurring[].cents",
   "safeToSpend.policy.bufferCents",
+  "safeToSpend.policy.pastDueGraceDays",
   "safeToSpend.totals.bufferCents",
   "safeToSpend.totals.reservedCreditCents",
   "safeToSpend.totals.spendableCashCents",
@@ -193,7 +194,7 @@ const EXPECTED_KEYS = [
   "horizon", "id", "incomeCents", "inputs", "invalid", "items", "kind", "label", "legacy",
   "limitCents", "monthlyCents", "netCents", "nextDate", "nonCashAccounts", "none",
   "obligationsExceedCash", "oldestAsOf", "oldestFetchedAt", "otherCurrency", "outsidePeriod",
-  "pending", "period", "pfc", "policy", "ratioBasisPoints", "reason", "recurring", "refundsCents",
+  "pastDueGraceDays", "pending", "period", "pfc", "policy", "ratioBasisPoints", "reason", "recurring", "refundsCents",
   "reserveCreditCardBalances", "reservedCreditCents", "rule", "safeToSpend", "source",
   "spendableCashCents", "spendableSubtypes", "spendingGrossCents", "spendingNetCents", "start",
   "state", "status", "streamId", "subtype", "to", "totalMonthlyCents", "totals",
@@ -264,6 +265,7 @@ const ASSUMPTION_CODES = [
   "other_currency_accounts_excluded",
   "semi_monthly_spacing_approximated",
   "recurring_due_today_may_already_be_pending",
+  "recurring_past_due_assumed_unposted",
 ];
 const REASON_VALUES = [
   // DataIssue.reason

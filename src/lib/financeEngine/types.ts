@@ -115,6 +115,13 @@ export interface EnginePolicy {
   /** Whether positive credit-card balances are subtracted in full. */
   reserveCreditCardBalances: boolean;
   bufferCents: Cents;
+  /**
+   * How many days back a recurring charge whose expected date has passed, and
+   * which the stream has not recorded, still counts as an obligation. Integer,
+   * 0 or more; 0 counts none. Above 7 a weekly stream can contribute more than
+   * one past-due charge.
+   */
+  pastDueGraceDays: number;
 }
 
 // ---- output -----------------------------------------------------------------
@@ -133,7 +140,8 @@ export type AssumptionCode =
   | "balance_as_of_unknown"
   | "other_currency_accounts_excluded"
   | "semi_monthly_spacing_approximated"
-  | "recurring_due_today_may_already_be_pending";
+  | "recurring_due_today_may_already_be_pending"
+  | "recurring_past_due_assumed_unposted";
 
 /** An account a metric left out, and why. */
 export interface ExcludedAccount {

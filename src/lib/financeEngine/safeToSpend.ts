@@ -30,7 +30,8 @@ function olderOf(a: string | null, b: string): string {
  *
  *   spendable cash
  *   − recurring charges expected between today and the end of this calendar
- *     month (UTC)
+ *     month (UTC), plus those expected in the last `pastDueGraceDays` days
+ *     that the stream has not recorded yet (policy)
  *   − positive credit-card balances, in full (policy)
  *   − buffer (policy)
  *
@@ -53,9 +54,13 @@ export function computeSafeToSpend(
   if (!isCents(policy.bufferCents) || policy.bufferCents < 0) {
     throw new Error("computeSafeToSpend: invalid bufferCents");
   }
+  if (!isCents(policy.pastDueGraceDays) || policy.pastDueGraceDays < 0) {
+    throw new Error("computeSafeToSpend: invalid pastDueGraceDays");
+  }
   const horizonEnd = endOfMonthUtc(today);
   const fromDay = dayNumber(today) as number;
   const toDay = dayNumber(horizonEnd) as number;
+  const graceFromDay = fromDay - policy.pastDueGraceDays;
 
   const assumptions: AssumptionCode[] = ["dates_utc"];
   const addAssumption = (code: AssumptionCode) => {
@@ -86,6 +91,7 @@ export function computeSafeToSpend(
       spendableSubtypes: policy.spendableSubtypes.slice(),
       reserveCreditCardBalances: policy.reserveCreditCardBalances,
       bufferCents: policy.bufferCents,
+      pastDueGraceDays: policy.pastDueGraceDays,
     },
     assumptions,
     freshness: { oldestAsOf: null, oldestFetchedAt: null, anyAsOfUnknown: false },
@@ -206,8 +212,18 @@ export function computeSafeToSpend(
       if (stream.frequency === "SEMI_MONTHLY") {
         addAssumption("semi_monthly_spacing_approximated");
       }
-      const dates = upcomingOccurrences(stream, fromDay, toDay);
+      // A date already past counts only while it is inside the grace window
+      // and the stream has recorded no charge on or after it. Whether such a
+      // charge already sits in the balance as pending cannot be told from
+      // these inputs; the possibility is stated.
+      const lastDay = typeof stream.lastDate === "string" ? dayNumber(stream.lastDate) : null;
+      const dates = upcomingOccurrences(stream, graceFromDay, toDay);
       for (let j = 0; j < dates.length; j++) {
+        const day = dayNumber(dates[j]) as number;
+        if (day < fromDay) {
+          if (lastDay !== null && lastDay >= day) continue;
+          addAssumption("recurring_past_due_assumed_unposted");
+        }
         result.inputs.upcomingRecurring.push({
           streamId: item.streamId,
           label: item.label,

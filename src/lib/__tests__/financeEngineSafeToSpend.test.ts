@@ -21,6 +21,10 @@ import type {
  *   - accounts iterated without uniqueAccounts      -> "a duplicate accountId is counted once"
  *   - bufferCents check removed                     -> "a non-integer buffer is a caller bug"
  *   - negative-buffer check removed                 -> "a negative buffer is a caller bug"
+ *   - occurrences read from today, not today - grace -> "a charge predicted inside the grace window …"
+ *   - grace window bound off by one                 -> "the grace window edges"
+ *   - lastDate check on past-due dates removed      -> "a past-due date already recorded …"
+ *   - pastDueGraceDays check removed                -> "an invalid grace is a caller bug"
  *   - SEMI_MONTHLY assumption push removed          -> "states the SEMI_MONTHLY spacing approximation"
  *   - due-today assumption push removed             -> "a charge due today is flagged"
  */
@@ -271,6 +275,60 @@ describe("computeSafeToSpend", () => {
 
     input.accounts[0] = account({ availableCents: null });
     expect(run(input).assumptions).not.toContain("recurring_due_today_may_already_be_pending");
+  });
+
+  // now is 2026-10-10, so the default 7-day grace window is [10-03, 10-10).
+  function withStream(over: Partial<EngineRecurringStream>): EngineInput {
+    const input = scenario();
+    input.recurring = { source: "plaid_streams", streams: [{ ...netflix, streamId: "late", ...over }] };
+    return input;
+  }
+
+  it("a charge predicted inside the grace window and not yet recorded is an obligation", () => {
+    const r = run(withStream({ predictedNextDate: "2026-10-05", lastDate: "2026-09-05" }));
+    expect(r.inputs.upcomingRecurring).toEqual([
+      { streamId: "late", label: "Netflix", dueDate: "2026-10-05", cents: 1549 },
+    ]);
+    expect(r.totals.upcomingRecurringCents).toBe(1549);
+    expect(r.amountCents).toBe(180000 - 1549 - 60000);
+    expect(r.assumptions).toContain("recurring_past_due_assumed_unposted");
+  });
+
+  it("the grace window edges", () => {
+    const inside = run(withStream({ predictedNextDate: "2026-10-03", lastDate: "2026-09-03" }));
+    expect(inside.inputs.upcomingRecurring.map((u) => u.dueDate)).toEqual(["2026-10-03"]);
+    const outside = run(withStream({ predictedNextDate: "2026-10-02", lastDate: "2026-09-02" }));
+    expect(outside.inputs.upcomingRecurring).toEqual([]);
+    expect(outside.assumptions).not.toContain("recurring_past_due_assumed_unposted");
+  });
+
+  it("a past-due date already recorded by the stream is not counted", () => {
+    const r = run(withStream({ predictedNextDate: "2026-10-05", lastDate: "2026-10-06" }));
+    expect(r.inputs.upcomingRecurring).toEqual([]);
+    expect(r.assumptions).not.toContain("recurring_past_due_assumed_unposted");
+  });
+
+  it("grace 0 keeps past-due dates out", () => {
+    const r = run(
+      withStream({ predictedNextDate: "2026-10-05", lastDate: "2026-09-05" }),
+      { ...DEFAULT_POLICY, pastDueGraceDays: 0 }
+    );
+    expect(r.inputs.upcomingRecurring).toEqual([]);
+    expect(r.assumptions).not.toContain("recurring_past_due_assumed_unposted");
+    expect(r.policy.pastDueGraceDays).toBe(0);
+  });
+
+  it("a stale weekly stream contributes at most one past-due charge", () => {
+    const r = run(withStream({ frequency: "WEEKLY", predictedNextDate: "2026-01-05", lastDate: "2025-12-29" }));
+    expect(r.inputs.upcomingRecurring.map((u) => u.dueDate)).toEqual([
+      "2026-10-05", "2026-10-12", "2026-10-19", "2026-10-26",
+    ]);
+  });
+
+  it("an invalid grace is a caller bug", () => {
+    for (const pastDueGraceDays of [-1, 1.5, NaN]) {
+      expect(() => run(scenario(), { ...DEFAULT_POLICY, pastDueGraceDays })).toThrow(/invalid pastDueGraceDays/);
+    }
   });
 
   it("throws only on an unparseable now", () => {
