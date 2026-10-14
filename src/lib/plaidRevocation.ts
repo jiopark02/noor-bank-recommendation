@@ -187,7 +187,11 @@ export type RevocationDeps = {
    * against it can be executed in a test without touching the environment.
    */
   plaidEnvironment: PlaidEnvironmentName;
-  /** Defaults to console.error. Injected so tests stay quiet. */
+  /**
+   * Defaults to console.error, console.warn or console.info by the line's
+   * level (writeLogLine). Injected so tests stay quiet; an injected log gets
+   * the line only.
+   */
   log?: (line: string) => void;
 };
 
@@ -286,12 +290,40 @@ export function logField(value: unknown): string {
   return flattened === "" ? "none" : flattened;
 }
 
-function emit(deps: RevocationDeps, line: string): void {
+/**
+ * How serious a log line is, which decides the console method it is written
+ * with and so the level the log viewer shows. `error` is a failure someone may
+ * have to act on; `warn` is a failure this request may still recover from;
+ * `info` is an outcome, including a deliberate refusal.
+ */
+export type LogLevel = "error" | "warn" | "info";
+
+/**
+ * Writes one line with the console method for its level.
+ *
+ * Each method is looked up when the line is written, not captured once, so a
+ * test that replaces it sees the call.
+ */
+export function writeLogLine(line: string, level: LogLevel): void {
+  switch (level) {
+    case "error":
+      console.error(line);
+      return;
+    case "warn":
+      console.warn(line);
+      return;
+    case "info":
+      console.info(line);
+      return;
+  }
+}
+
+function emit(deps: RevocationDeps, line: string, level: LogLevel): void {
   if (deps.log) {
     deps.log(line);
     return;
   }
-  console.error(line);
+  writeLogLine(line, level);
 }
 
 /**
@@ -417,7 +449,8 @@ export async function revokeAndDeleteConnection(
     emit(
       deps,
       `[plaid-revoke] user_id=${userId} item_id=${itemId} failure=${failure} ` +
-        `reason=${cryptoReasonOf(error)}`
+        `reason=${cryptoReasonOf(error)}`,
+      "error"
     );
     return { itemId, ok: false, failure };
   }
@@ -450,7 +483,8 @@ export async function revokeAndDeleteConnection(
         `[plaid-revoke] user_id=${userId} item_id=${itemId} failure=plaid ` +
           `error_code=${logField(getPlaidErrorCode(error))} ` +
           `error_type=${logField(getPlaidErrorType(error))}` +
-          mismatch
+          mismatch,
+        "error"
       );
       return { itemId, ok: false, failure: "plaid" };
     }
@@ -477,7 +511,8 @@ export async function revokeAndDeleteConnection(
       ? `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
           `resolved=item_not_found`
       : `[plaid-revoke] user_id=${userId} item_id=${itemId} resolved=revoked ` +
-          `request_id=${logField(requestId)}`
+          `request_id=${logField(requestId)}`,
+    "info"
   );
 
   // One retry, because the delete is idempotent and filtered by user_id +
@@ -496,7 +531,8 @@ export async function revokeAndDeleteConnection(
     emit(
       deps,
       `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
-        `retrying=row_delete db_error=${deletion.dbErrorCode ?? "none"}`
+        `retrying=row_delete db_error=${deletion.dbErrorCode ?? "none"}`,
+      "warn"
     );
     deletion = await deps.deleteRow(userId, itemId);
   }
@@ -504,7 +540,8 @@ export async function revokeAndDeleteConnection(
     emit(
       deps,
       `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
-        `failure=row_delete db_error=${deletion.dbErrorCode ?? "none"}`
+        `failure=row_delete db_error=${deletion.dbErrorCode ?? "none"}`,
+      "error"
     );
     return { itemId, ok: false, failure: "row_delete" };
   }
@@ -521,7 +558,8 @@ export async function revokeAndDeleteConnection(
   emit(
     deps,
     `[plaid-revoke] user_id=${userId} item_id=${itemId} ` +
-      `deleted=${deletion.deleted}`
+      `deleted=${deletion.deleted}`,
+    "info"
   );
   return { itemId, ok: true };
 }

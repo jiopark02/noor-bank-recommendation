@@ -4,6 +4,8 @@ import {
   classifyItemRemoveRejection,
   logField,
   plaidTokenEnvironment,
+  writeLogLine,
+  type LogLevel,
 } from "./plaidRevocation";
 
 /**
@@ -171,7 +173,11 @@ export type ExchangeDeps = {
   itemRemove: (accessToken: string) => Promise<string | null>;
   /** The environment this deployment talks to (PLAID_ENVIRONMENT). */
   plaidEnvironment: string;
-  /** Defaults to console.error. Injected so tests can read the lines. */
+  /**
+   * Defaults to console.error, console.warn or console.info by the line's
+   * level (writeLogLine). Injected so tests can read the lines; an injected
+   * log gets the line only.
+   */
   log?: (line: string) => void;
 };
 
@@ -229,12 +235,12 @@ export function isDefiniteDbRejection(code: string | null): boolean {
   return /^[0-9]/.test(sqlClass) || sqlClass === "F0" || sqlClass === "HV" || sqlClass === "P0";
 }
 
-function emit(deps: ExchangeDeps, line: string): void {
+function emit(deps: ExchangeDeps, line: string, level: LogLevel): void {
   if (deps.log) {
     deps.log(line);
     return;
   }
-  console.error(line);
+  writeLogLine(line, level);
 }
 
 function nonEmpty(value: unknown): string | null {
@@ -315,7 +321,11 @@ async function compensateRevoke(
 ): Promise<void> {
   try {
     const requestId = await deps.itemRemove(accessToken);
-    emit(deps, `${prefix} compensate=revoked request_id=${logField(requestId)}`);
+    emit(
+      deps,
+      `${prefix} compensate=revoked request_id=${logField(requestId)}`,
+      "info"
+    );
   } catch (error) {
     const verdict = classifyItemRemoveRejection(
       error,
@@ -323,7 +333,7 @@ async function compensateRevoke(
       deps.plaidEnvironment
     );
     if (verdict.itemAlreadyGone) {
-      emit(deps, `${prefix} compensate=item_not_found`);
+      emit(deps, `${prefix} compensate=item_not_found`, "info");
       return;
     }
     const mismatch = verdict.envMismatch
@@ -335,7 +345,8 @@ async function compensateRevoke(
       `${prefix} compensate=failed ` +
         `error_code=${logField(getPlaidErrorCode(error))} ` +
         `error_type=${logField(getPlaidErrorType(error))}` +
-        mismatch
+        mismatch,
+      "error"
     );
   }
 }
@@ -356,11 +367,11 @@ export async function exchangeForUser(
     count = null;
   }
   if (count === null) {
-    emit(deps, `${userPrefix} refused=limit_read`);
+    emit(deps, `${userPrefix} refused=limit_read`, "error");
     return failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE);
   }
   if (count >= CONNECTION_LIMIT) {
-    emit(deps, `${userPrefix} refused=limit count=${count}`);
+    emit(deps, `${userPrefix} refused=limit count=${count}`, "info");
     return failure(422, CONNECTION_LIMIT_CODE, CONNECTION_LIMIT_MESSAGE);
   }
 
@@ -383,7 +394,11 @@ export async function exchangeForUser(
         );
       }
     } catch {
-      emit(deps, `${userPrefix} dedupe_read=failed stage=pre proceeding=true`);
+      emit(
+        deps,
+        `${userPrefix} dedupe_read=failed stage=pre proceeding=true`,
+        "warn"
+      );
     }
   }
 
@@ -396,7 +411,7 @@ export async function exchangeForUser(
   }
   const { accessToken, itemId } = minted;
   const prefix = `${userPrefix} item_id=${itemId}`;
-  emit(deps, `${prefix} minted`);
+  emit(deps, `${prefix} minted`, "info");
 
   // 4. Ownership. One retry: the read is idempotent and a single transient
   // failure is the common case.
@@ -405,13 +420,13 @@ export async function exchangeForUser(
     own = await readOwnItem(deps, userId, itemId);
   }
   if (!own.ok) {
-    emit(deps, `${prefix} failure=ownership_read revoke=skipped`);
+    emit(deps, `${prefix} failure=ownership_read revoke=skipped`, "error");
     return failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE);
   }
   if (own.connection) {
     // Already stored for this user — an update-mode token from an older
     // client. Nothing to save and nothing to revoke.
-    emit(deps, `${prefix} resolved=already_stored`);
+    emit(deps, `${prefix} resolved=already_stored`, "info");
     return connected(
       itemId,
       nonEmpty(own.connection.institution_id),
@@ -426,11 +441,14 @@ export async function exchangeForUser(
   // refusal is safe. The one exception — a store that may have committed — is
   // re-read before it reaches this. This closure is the only way this function
   // revokes.
+  // `level` is the refusal's own: a duplicate is an outcome, a failed read or
+  // save is a failure. The compensating revocation logs its own level.
   const refuse = async (
     reason: string,
-    outcome: ExchangeOutcome
+    outcome: ExchangeOutcome,
+    level: LogLevel
   ): Promise<ExchangeOutcome> => {
-    emit(deps, `${prefix} refused=${reason}`);
+    emit(deps, `${prefix} refused=${reason}`, level);
     await compensateRevoke(deps, prefix, accessToken);
     return outcome;
   };
@@ -442,7 +460,8 @@ export async function exchangeForUser(
   } catch {
     return refuse(
       "item_get",
-      failure(503, "INSTITUTION_LOOKUP_FAILED", RETRY_MESSAGE)
+      failure(503, "INSTITUTION_LOOKUP_FAILED", RETRY_MESSAGE),
+      "error"
     );
   }
   const serverInstitutionId = nonEmpty(item.institutionId);
@@ -465,7 +484,8 @@ export async function exchangeForUser(
     } catch {
       return refuse(
         "dedupe_read",
-        failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE)
+        failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE),
+        "error"
       );
     }
     if (existing) {
@@ -475,7 +495,8 @@ export async function exchangeForUser(
           nonEmpty(existing.institution_name) ??
             serverInstitutionName ??
             "This bank"
-        )
+        ),
+        "info"
       );
     }
   }
@@ -495,7 +516,7 @@ export async function exchangeForUser(
   }
 
   if (stored.ok) {
-    emit(deps, `${prefix} resolved=stored`);
+    emit(deps, `${prefix} resolved=stored`, "info");
     return connected(itemId, serverInstitutionId, institutionName);
   }
 
@@ -508,7 +529,7 @@ export async function exchangeForUser(
     // actually read back.
     const confirm = await readOwnItem(deps, userId, itemId);
     if (confirm.ok && confirm.connection) {
-      emit(deps, `${prefix} resolved=already_stored stage=insert`);
+      emit(deps, `${prefix} resolved=already_stored stage=insert`, "info");
       return connected(
         itemId,
         nonEmpty(confirm.connection.institution_id),
@@ -518,7 +539,8 @@ export async function exchangeForUser(
     emit(
       deps,
       `${prefix} refused=store_conflict db_error=${logField(stored.dbErrorCode)} ` +
-        `revoke=skipped`
+        `revoke=skipped`,
+      "error"
     );
     return failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
   }
@@ -528,15 +550,16 @@ export async function exchangeForUser(
 
   // Nothing was inserted (crypto) or the server refused the insert: no row.
   if (stored.kind === "crypto") {
-    return refuse("store_crypto", saveFailed);
+    return refuse("store_crypto", saveFailed, "error");
   }
   if (isDefiniteDbRejection(stored.dbErrorCode)) {
-    return refuse(`store_db ${dbError}`, saveFailed);
+    return refuse(`store_db ${dbError}`, saveFailed, "error");
   }
 
   // The insert may have committed. Read the row before deciding; one retry,
-  // as in step 4.
-  emit(deps, `${prefix} store_failed ${dbError}`);
+  // as in step 4. A warning, not an error: this request may still end in
+  // `resolved=already_stored`, and the line that ends it carries the verdict.
+  emit(deps, `${prefix} store_failed ${dbError}`, "warn");
   let recheck = await readOwnItem(deps, userId, itemId);
   if (!recheck.ok) {
     recheck = await readOwnItem(deps, userId, itemId);
@@ -544,18 +567,19 @@ export async function exchangeForUser(
   if (!recheck.ok) {
     emit(
       deps,
-      `${prefix} refused=store_db ${dbError} revoke=skipped reason=recheck_read_failed`
+      `${prefix} refused=store_db ${dbError} revoke=skipped reason=recheck_read_failed`,
+      "error"
     );
     return saveFailed;
   }
   if (recheck.connection) {
-    emit(deps, `${prefix} revoke=skipped reason=row_present`);
-    emit(deps, `${prefix} resolved=already_stored stage=recheck`);
+    emit(deps, `${prefix} revoke=skipped reason=row_present`, "info");
+    emit(deps, `${prefix} resolved=already_stored stage=recheck`, "info");
     return connected(
       itemId,
       nonEmpty(recheck.connection.institution_id),
       nonEmpty(recheck.connection.institution_name) ?? institutionName
     );
   }
-  return refuse(`store_db ${dbError}`, saveFailed);
+  return refuse(`store_db ${dbError}`, saveFailed, "error");
 }
