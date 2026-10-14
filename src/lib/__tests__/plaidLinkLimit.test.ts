@@ -16,12 +16,12 @@ import {
  */
 
 describe("linkLimitRefusal", () => {
-  it("refuses at the limit with the code PlaidLinkButton keys on", () => {
+  it("refuses at the limit with the CONNECTION_LIMIT_REACHED code", () => {
     // MUTATION: `count < CONNECTION_LIMIT` -> `count <= CONNECTION_LIMIT`.
     const refusal = linkLimitRefusal(CONNECTION_LIMIT);
     expect(refusal?.status).toBe(422);
     expect(refusal?.body.code).toBe(CONNECTION_LIMIT_CODE);
-    // PlaidLinkButton compares against this literal; keep the two in step.
+    // The code the 422 body carries; pinned so a rename is a deliberate change.
     expect(CONNECTION_LIMIT_CODE).toBe("CONNECTION_LIMIT_REACHED");
     expect(typeof refusal?.body.error).toBe("string");
   });

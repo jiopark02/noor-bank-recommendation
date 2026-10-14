@@ -34,18 +34,12 @@ export function PlaidLinkButton({
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The server's `code` for a refused link token. Only the connection-limit
-  // refusal is told apart: it is not a configuration problem, so the setup
-  // hint below must not be shown with it. Compared as a literal because the
-  // module that exports it (plaidExchange.ts) is server-only.
-  const [errorCode, setErrorCode] = useState<string | null>(null);
 
   // Fetch link token on mount
   useEffect(() => {
     if (linkTokenOverride) {
       setLinkToken(linkTokenOverride);
       setError(null);
-      setErrorCode(null);
       return;
     }
 
@@ -73,7 +67,6 @@ export function PlaidLinkButton({
             );
           }
         } else {
-          setErrorCode(readString(data, "code") ?? null);
           setError(readErrorMessage(data) || "Failed to create link token");
         }
       } catch (err) {
@@ -115,12 +108,6 @@ export function PlaidLinkButton({
     return (
       <div className="text-center p-4">
         <p className="text-red-500 text-sm">{error}</p>
-        {errorCode !== "CONNECTION_LIMIT_REACHED" && (
-          <p className="text-gray-400 text-xs mt-2">
-            Plaid needs to be configured. Add your API keys to environment
-            variables.
-          </p>
-        )}
       </div>
     );
   }
