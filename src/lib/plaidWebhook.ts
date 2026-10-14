@@ -5,7 +5,9 @@ import type {
 } from "./plaidApiUtils";
 import {
   logField,
+  writeLogLine,
   type ConnectionRevocationOutcome,
+  type LogLevel,
 } from "./plaidRevocation";
 
 /**
@@ -64,7 +66,32 @@ export type WebhookDeps = {
     userId: string,
     connection: ItemOwnedConnection
   ) => Promise<ConnectionRevocationOutcome>;
-  log: (line: string) => void;
+  /**
+   * Defaults to console.error, console.warn or console.info by the outcome's
+   * level (OUTCOME_LEVEL). Injected so tests can read the lines; an injected
+   * log gets the line only.
+   */
+  log?: (line: string) => void;
+};
+
+/**
+ * The level each outcome's line is written at when no log is injected.
+ *
+ * `error` needs someone: a configuration fault, a failed read or revocation,
+ * or an Item with more than one owner that nothing will retry. `warn` is a
+ * verified delivery we did not expect: a body of the wrong shape, or a
+ * webhook for the other environment. `info` is an outcome that is done.
+ */
+const OUTCOME_LEVEL: Record<WebhookOutcome, LogLevel> = {
+  malformed: "warn",
+  env_mismatch: "warn",
+  logged: "info",
+  admin_unconfigured: "error",
+  lookup_failed: "error",
+  unknown_item: "info",
+  ambiguous_item: "error",
+  revoked: "info",
+  revoke_failed: "error",
 };
 
 /**
@@ -114,7 +141,12 @@ export async function handlePlaidWebhook(
     outcome: WebhookOutcome,
     extra = ""
   ): WebhookDecision => {
-    deps.log(`${base} outcome=${outcome}${extra}${errorSuffix}`);
+    const line = `${base} outcome=${outcome}${extra}${errorSuffix}`;
+    if (deps.log) {
+      deps.log(line);
+    } else {
+      writeLogLine(line, OUTCOME_LEVEL[outcome]);
+    }
     return { status, outcome };
   };
 
