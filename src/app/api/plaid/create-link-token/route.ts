@@ -15,12 +15,17 @@ import { linkLimitRefusal } from "@/lib/plaidExchange";
 
 export async function POST(request: NextRequest) {
   try {
-    // Check if Plaid is configured
+    // Check if Plaid is configured. The caller is shown a plain sentence (the
+    // bank-link button displays it to the user); what to fix goes to the
+    // server log only. No user is authenticated yet, so the line names none.
     if (!isPlaidConfigured()) {
+      console.error(
+        "[plaid-link-token] refused=plaid_unconfigured: set PLAID_CLIENT_ID and PLAID_SECRET, and a recognized PLAID_ENV"
+      );
       return NextResponse.json(
         {
           error:
-            "Plaid is not configured. Please add PLAID_CLIENT_ID and PLAID_SECRET to your environment variables.",
+            "Bank connections aren't available right now. Please try again later.",
         },
         { status: 503 }
       );

@@ -42,7 +42,6 @@ export async function POST(request: NextRequest) {
           lookupByItemId: getPlaidConnectionsByItemIdAcrossUsers,
           revoke: (userId, connection) =>
             revokeAndDeleteConnection(userId, connection, liveRevocationDeps()),
-          log: (line) => console.error(line),
         }),
       log: (line) => console.error(line),
     }

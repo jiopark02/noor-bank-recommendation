@@ -35,6 +35,36 @@ interface StoredPlaidSubscription {
 
 const STORAGE_KEY_BUDGET = "noor_budget";
 const CONNECTIONS_LOAD_FAILED = "Failed to load bank connections";
+const BANK_DATA_LOAD_FAILED =
+  "We couldn't load your bank data right now. Please try again in a moment.";
+
+// A fetch that rejects and a 2xx body that does not parse are not something
+// the server said, and the browser's or the parser's own wording is not for
+// the screen. Both end as `message`; an error the server sent in a body is
+// thrown by the callers, with its text, as before.
+async function fetchOrFail(
+  input: string,
+  init: RequestInit,
+  message: string
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error(message);
+  }
+}
+
+async function readJsonOrFail(res: Response, message: string): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(message);
+  }
+}
+
+function isPlainRecord(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
 const QUICK_PROMPTS = [
   "How much can I spend this week?",
@@ -172,10 +202,14 @@ export default function HomePage() {
           return;
         }
 
-        const res = await fetch("/api/plaid/connections", {
-          method: "GET",
-          headers: await getSupabaseBearerHeaders(),
-        });
+        const res = await fetchOrFail(
+          "/api/plaid/connections",
+          {
+            method: "GET",
+            headers: await getSupabaseBearerHeaders(),
+          },
+          CONNECTIONS_LOAD_FAILED
+        );
         if (!res.ok) {
           const data = asPlainObject(await res.json().catch(() => ({})));
           throw new Error(
@@ -184,18 +218,21 @@ export default function HomePage() {
         }
         // A 200 whose body does not parse is a failed read, not an empty list,
         // and the parser's own wording is not for the screen.
-        let body: unknown;
-        try {
-          body = await res.json();
-        } catch {
-          throw new Error(CONNECTIONS_LOAD_FAILED);
-        }
-        const payload = asPlainObject(body);
+        const payload = asPlainObject(
+          await readJsonOrFail(res, CONNECTIONS_LOAD_FAILED)
+        );
         if (cancelled) return;
 
-        const list = Array.isArray(payload.connections)
-          ? (payload.connections as Array<{ status?: string }>)
-          : [];
+        // The route always sends an array of objects, empty when the user has
+        // no connections. Anything else is a failed read: read as "none" it
+        // would show a connected user $0.00.
+        if (!Array.isArray(payload.connections)) {
+          throw new Error(CONNECTIONS_LOAD_FAILED);
+        }
+        if (!payload.connections.every(isPlainRecord)) {
+          throw new Error(CONNECTIONS_LOAD_FAILED);
+        }
+        const list = payload.connections as Array<{ status?: string }>;
         const hasActiveConnection = list.some(
           (connection) => connection.status === "active"
         );
@@ -246,16 +283,24 @@ export default function HomePage() {
       );
 
       const [accountsRes, transactionsRes] = await Promise.all([
-        fetch("/api/plaid/accounts", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({}),
-        }),
-        fetch("/api/plaid/transactions", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({ startDate, endDate }),
-        }),
+        fetchOrFail(
+          "/api/plaid/accounts",
+          {
+            method: "POST",
+            headers: plaidHeaders,
+            body: JSON.stringify({}),
+          },
+          BANK_DATA_LOAD_FAILED
+        ),
+        fetchOrFail(
+          "/api/plaid/transactions",
+          {
+            method: "POST",
+            headers: plaidHeaders,
+            body: JSON.stringify({ startDate, endDate }),
+          },
+          BANK_DATA_LOAD_FAILED
+        ),
       ]);
 
       if (!accountsRes.ok) {
@@ -274,22 +319,30 @@ export default function HomePage() {
         );
       }
 
-      const accountsData = asPlainObject(await accountsRes.json());
-      const transactionsData = asPlainObject(await transactionsRes.json());
+      const accountsData = asPlainObject(
+        await readJsonOrFail(accountsRes, BANK_DATA_LOAD_FAILED)
+      );
+      const transactionsData = asPlainObject(
+        await readJsonOrFail(transactionsRes, BANK_DATA_LOAD_FAILED)
+      );
 
-      const nextAccounts = Array.isArray(accountsData.accounts)
-        ? accountsData.accounts
-        : [];
-      const nextTransactions = Array.isArray(transactionsData.transactions)
-        ? transactionsData.transactions
-        : [];
-      const nextSubscriptions = Array.isArray(transactionsData.subscriptions)
-        ? transactionsData.subscriptions
-        : [];
+      // Both routes always send these as arrays, empty when there is nothing
+      // to show. Anything else is a failed read: read as empty it would show
+      // $0.00 as if it were the user's real figure. All three are checked
+      // before any state is set, so a partial body never becomes "ready".
+      if (!Array.isArray(accountsData.accounts)) {
+        throw new Error(BANK_DATA_LOAD_FAILED);
+      }
+      if (!Array.isArray(transactionsData.transactions)) {
+        throw new Error(BANK_DATA_LOAD_FAILED);
+      }
+      if (!Array.isArray(transactionsData.subscriptions)) {
+        throw new Error(BANK_DATA_LOAD_FAILED);
+      }
 
-      setAccounts(nextAccounts);
-      setTransactions(nextTransactions);
-      setSubscriptions(nextSubscriptions);
+      setAccounts(accountsData.accounts);
+      setTransactions(transactionsData.transactions);
+      setSubscriptions(transactionsData.subscriptions);
       setHasMoneyData(true);
     } catch (err) {
       const message =
