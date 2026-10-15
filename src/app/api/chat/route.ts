@@ -6,10 +6,12 @@ import {
   isSupabaseConfigured,
 } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
+import { asPlainObject } from "@/lib/requestJson";
+import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
 import {
-  asPlainObject,
-  readRequestJson,
-} from "@/lib/requestJson";
+  CHAT_MAX_BODY_BYTES,
+  windowChatMessages,
+} from "@/lib/chatInputLimits";
 import {
   buildJsonAuthorizedHeaders,
   extrasFromAuthorizationValue,
@@ -981,11 +983,60 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Input bounds (chatInputLimits.ts): refuse or trim the request BEFORE the
+    // hourly count, any DB read, Plaid fetch, or LLM call, so a refused request
+    // costs nothing beyond authentication. The body is read with a byte
+    // ceiling; the conversation is fitted to the message and character limits.
+    // A request inside the limits passes through unchanged.
+    const bodyRead = await readRequestJsonWithByteLimit(
+      request,
+      CHAT_MAX_BODY_BYTES
+    );
+    if (bodyRead.kind === "too_large") {
+      console.warn("[chat-input] refused reason=%s", "payload_too_large");
+      return NextResponse.json(
+        {
+          error:
+            "This conversation is too large to send. Please clear the chat and try again.",
+          code: "PAYLOAD_TOO_LARGE",
+        },
+        { status: 413 }
+      );
+    }
+    const bodyObj = asPlainObject(bodyRead.value);
+    const parsedMessages = parseChatMessages(bodyObj.messages);
+    if (!parsedMessages) {
+      return NextResponse.json(
+        { error: "Messages are required" },
+        { status: 400 }
+      );
+    }
+    const chatWindow = windowChatMessages(parsedMessages);
+    if (!chatWindow.ok) {
+      console.warn("[chat-input] refused reason=%s", chatWindow.reason);
+      return NextResponse.json(
+        {
+          error:
+            "Your message is too long. Please shorten it and try again.",
+          code: "MESSAGE_TOO_LONG",
+        },
+        { status: 400 }
+      );
+    }
+    if (chatWindow.dropped > 0) {
+      console.info(
+        "[chat-input] trimmed kept=%d dropped=%d",
+        chatWindow.messages.length,
+        chatWindow.dropped
+      );
+    }
+
     // Rate-limit hard cap (B1): reject clearly abnormal usage (e.g. a client
-    // infinite loop) BEFORE any LLM call, DB write, or Plaid fetch — so a
-    // blocked request costs nothing. This is a loose safety ceiling, not a
-    // per-user quota; normal use must never hit it. Gated entirely by
-    // CHAT_RATE_LIMIT_ENABLED, so an unset/false env leaves the flow untouched.
+    // infinite loop) after input validation and BEFORE any LLM call, DB write,
+    // or Plaid fetch — so a blocked request costs nothing. This is a loose
+    // safety ceiling, not a per-user quota; normal use must never hit it.
+    // Gated entirely by CHAT_RATE_LIMIT_ENABLED, so an unset/false env leaves
+    // the flow untouched.
     const rateLimit = resolveChatRateLimit();
     if (rateLimit) {
       try {
@@ -1010,8 +1061,9 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         // Fail-open: a transient count-query failure must not block legitimate
-        // users. Log loudly; the next request re-checks. The account-level
-        // OpenRouter spend limit is the backstop for the DB-down + abuse case.
+        // users. Log loudly; the next request re-checks. The in-app limits
+        // are the cost defense; this code must not rely on any provider-side
+        // spend limit.
         console.error(
           "[rate-limit] turn-count check failed; allowing request (fail-open):",
           error
@@ -1021,16 +1073,6 @@ export async function POST(request: NextRequest) {
 
     let activeSession: ChatSession | null = null;
     let memoryBlock = "";
-
-    const rawBody = await readRequestJson(request);
-    const bodyObj = asPlainObject(rawBody);
-    const parsedMessages = parseChatMessages(bodyObj.messages);
-    if (!parsedMessages) {
-      return NextResponse.json(
-        { error: "Messages are required" },
-        { status: 400 }
-      );
-    }
 
     const dbContext = await loadReadOnlyUserContextFromSupabase(authUserId);
 
@@ -1072,7 +1114,7 @@ export async function POST(request: NextRequest) {
     // patch here without per-field whitelisting + sanitization and a real need.
     const mergedUserContext: UserContext = dbContext;
 
-    const formattedMessages = parsedMessages.map((msg) => ({
+    const formattedMessages = chatWindow.messages.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
