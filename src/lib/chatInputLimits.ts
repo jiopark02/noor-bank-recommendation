@@ -2,7 +2,8 @@
  * chatInputLimits — per-request bounds on what POST /api/chat accepts and on
  * how much conversation reaches the model.
  *
- * The client sends the whole conversation on every request, and that array is
+ * The client sends its conversation as history on every request (our client
+ * windows it first; older cached bundles send all of it), and that array is
  * what the model receives after the system prompt. Without these bounds one
  * request could grow model input cost without limit; max_tokens caps output
  * only.
