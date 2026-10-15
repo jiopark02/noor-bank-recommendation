@@ -16,6 +16,15 @@ import type {
  *   - creditUtilization iterates input.accounts directly  -> "a duplicate accountId: first wins …"
  *   - duplicate-account dataIssue removed                 -> "a duplicate accountId: first wins …"
  *   - each new dataIssue check removed                    -> the test named for that issue
+ *   - year bound removed from parseYmd                    -> "a pre-2000 date reaches the existing failure paths"
+ *   - computeRecurring iterates streams without uniqueStreams -> "a duplicate streamId: first copy wins …"
+ *   - streamsById built last-wins                         -> "a duplicate streamId: first copy wins …"
+ *   - null guard removed from uniqueStreams               -> "a null stream entry is skipped …"
+ *   - empty-id filter removed from uniqueStreams          -> "an active stream with no id is left out …"
+ *   - uniqueStreams' seen made a plain object again       -> "a stream whose id is an Object.prototype name is kept"
+ *   - collectDataIssues' seenStreams a plain object again -> "a stream whose id is an Object.prototype name is kept"
+ *   - uniqueAccounts' seen a plain object again           -> "an account whose id is an Object.prototype name …"
+ *   - indexAccounts a plain object again                  -> "a transaction on an absent account named like …"
  */
 
 function empty(): EngineInput {
@@ -213,6 +222,84 @@ describe("computeFinancialSummary — edges", () => {
     ]);
   });
 
+  it("a duplicate streamId: first copy wins in every metric", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.recurring = {
+      source: "plaid_streams",
+      streams: [
+        strm({ averageAmountCents: 1000, predictedNextDate: "2026-10-20" }),
+        strm({ averageAmountCents: 5000, predictedNextDate: "2026-10-15" }),
+      ],
+    };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items.map((i) => [i.streamId, i.basisCents])).toEqual([["s", 1000]]);
+    expect(s.recurring.totalMonthlyCents).toBe(1000);
+    expect(s.safeToSpend.inputs.upcomingRecurring).toEqual([
+      { streamId: "s", label: "S", dueDate: "2026-10-20", cents: 1000 },
+    ]);
+    expect(s.dataIssues).toEqual([{ kind: "stream", id: "s", reason: "duplicate" }]);
+  });
+
+  it("a duplicate whose first copy is inactive excludes the stream", () => {
+    const input = empty();
+    input.recurring = {
+      source: "plaid_streams",
+      streams: [strm({ isActive: false }), strm({})],
+    };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items).toEqual([]);
+    expect(s.recurring.excluded).toEqual([{ streamId: "s", reason: "inactive" }]);
+  });
+
+  it("a stream whose id is an Object.prototype name is kept", () => {
+    // Metrics and dataIssues must agree: kept, and not reported as a duplicate.
+    for (const id of ["constructor", "hasOwnProperty", "__proto__"]) {
+      const input = empty();
+      input.accounts = [acct({})];
+      input.recurring = { source: "plaid_streams", streams: [strm({ streamId: id })] };
+      const s = computeFinancialSummary(input);
+      expect(s.recurring.items.map((i) => i.streamId), id).toEqual([id]);
+      expect(s.safeToSpend.inputs.upcomingRecurring.map((u) => u.streamId), id).toEqual([id]);
+      expect(s.dataIssues, id).toEqual([]);
+    }
+  });
+
+  it("an account whose id is an Object.prototype name is kept in every metric", () => {
+    const input = empty();
+    input.accounts = [
+      acct({ accountId: "toString" }),
+      acct({ accountId: "valueOf", type: "credit", subtype: "credit card", currentCents: 1000, availableCents: null, limitCents: 10000 }),
+    ];
+    input.transactions = [txn("t1", { accountId: "toString" })];
+    const s = computeFinancialSummary(input);
+    expect(s.cashFlow.spendingGrossCents).toBe(1000);
+    expect(s.safeToSpend.inputs.balances.map((b) => b.accountId)).toEqual(["toString"]);
+    expect(s.safeToSpend.totals.reservedCreditCents).toBe(1000);
+    expect(s.creditUtilization.accounts.map((a) => a.accountId)).toEqual(["valueOf"]);
+    expect(s.dataIssues).toEqual([]);
+  });
+
+  it("a transaction on an absent account named like an Object.prototype member is an unknown account", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.transactions = [txn("t1", { accountId: "constructor" })];
+    const s = computeFinancialSummary(input);
+    expect(s.cashFlow.excluded.unknownAccount.count).toBe(1);
+    expect(s.cashFlow.spendingGrossCents).toBe(0);
+  });
+
+  it("a null stream entry is skipped, not thrown on", () => {
+    const input = empty();
+    input.recurring = {
+      source: "plaid_streams",
+      streams: [null as unknown as EngineRecurringStream, strm({})],
+    };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items.map((i) => i.streamId)).toEqual(["s"]);
+    expect(s.dataIssues).toEqual([{ kind: "stream", id: "", reason: "missing_id" }]);
+  });
+
   it("a missing streamId is reported", () => {
     const input = empty();
     input.recurring = { source: "plaid_streams", streams: [strm({ streamId: "" })] };
@@ -221,12 +308,43 @@ describe("computeFinancialSummary — edges", () => {
     ]);
   });
 
+  // Pins current behavior: an id-less stream's charge is not reserved, so safe-to-spend can read high.
+  it("an active stream with no id is left out of every metric and reported", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.recurring = { source: "plaid_streams", streams: [strm({ streamId: "" })] };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items).toEqual([]);
+    expect(s.safeToSpend.inputs.upcomingRecurring).toEqual([]);
+    expect(s.safeToSpend.totals.upcomingRecurringCents).toBe(0);
+    expect(s.dataIssues).toEqual([{ kind: "stream", id: "", reason: "missing_id" }]);
+  });
+
   it("an invalid predictedNextDate is reported", () => {
     const input = empty();
     input.recurring = { source: "plaid_streams", streams: [strm({ predictedNextDate: "2026-13-01" })] };
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "stream", id: "s", reason: "invalid_predicted_next_date" },
     ]);
+  });
+
+  it("a pre-2000 date reaches the existing failure paths", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.transactions = [txn("old", { date: "0026-10-01" })];
+    const s = computeFinancialSummary(input);
+    expect(s.dataIssues).toEqual([{ kind: "transaction", id: "old", reason: "invalid_date" }]);
+    expect(s.cashFlow.excluded.invalid.count).toBe(1);
+
+    const period = empty();
+    period.period = { start: "0026-09-11", end: "2026-10-10", completeness: "unknown" };
+    expect(computeFinancialSummary(period).dataIssues).toEqual([
+      { kind: "period", id: "period", reason: "invalid_period" },
+    ]);
+
+    const now = empty();
+    now.now = "0026-10-10T12:00:00Z";
+    expect(() => computeFinancialSummary(now)).toThrow(/^computeFinancialSummary: invalid now$/);
   });
 
   it("throws on an unparseable now", () => {

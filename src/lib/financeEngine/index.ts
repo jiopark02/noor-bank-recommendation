@@ -26,6 +26,7 @@ export const DEFAULT_POLICY: EnginePolicy = {
   spendableSubtypes: ["checking", "cash management", "prepaid", "paypal"],
   reserveCreditCardBalances: true,
   bufferCents: 0,
+  pastDueGraceDays: 7,
 };
 
 function collectDataIssues(input: EngineInput): DataIssue[] {
@@ -99,18 +100,20 @@ function collectDataIssues(input: EngineInput): DataIssue[] {
   // ---- recurring streams
   if (input.recurring.source === "plaid_streams") {
     const streams = input.recurring.streams;
-    const seenStreams: Record<string, true> = {};
+    // Same rule as uniqueStreams: first copy wins, and a Set so that an id
+    // like "constructor" is not read as already seen.
+    const seenStreams = new Set<string>();
     for (let i = 0; i < streams.length; i++) {
       const s = streams[i];
       if (!s || typeof s.streamId !== "string" || s.streamId === "") {
         issues.push({ kind: "stream", id: "", reason: "missing_id" });
         continue;
       }
-      if (seenStreams[s.streamId]) {
+      if (seenStreams.has(s.streamId)) {
         issues.push({ kind: "stream", id: s.streamId, reason: "duplicate" });
         continue;
       }
-      seenStreams[s.streamId] = true;
+      seenStreams.add(s.streamId);
       if (s.predictedNextDate !== null && !isIsoDate(s.predictedNextDate)) {
         issues.push({ kind: "stream", id: s.streamId, reason: "invalid_predicted_next_date" });
       }
@@ -129,8 +132,8 @@ function collectDataIssues(input: EngineInput): DataIssue[] {
 
 /**
  * Computes every v1 metric from one input. Throws only when `input.now` does
- * not parse, which is a caller bug; bad data is skipped and reported in
- * `dataIssues` and in each metric's exclusion counts.
+ * not parse or the policy is invalid, both caller bugs; bad data is skipped
+ * and reported in `dataIssues` and in each metric's exclusion counts.
  */
 export function computeFinancialSummary(
   input: EngineInput,

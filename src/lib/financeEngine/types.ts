@@ -19,12 +19,12 @@
 
 /** Integer number of cents. */
 export type Cents = number;
-/** Calendar date, `YYYY-MM-DD`. */
+/** Calendar date, `YYYY-MM-DD`, year 2000 or later. */
 export type IsoDate = string;
 /**
- * ISO 8601 date-time string with an explicit zone ("Z" or ±hh:mm). A zone-less
- * date-time is invalid: `now` throws, any other field is reported in
- * `dataIssues` and treated as null.
+ * ISO 8601 date-time string with an explicit zone ("Z" or ±hh:mm), at or after
+ * 2000-01-01T00:00:00Z. A zone-less or earlier date-time is invalid: `now`
+ * throws, any other field is reported in `dataIssues` and treated as null.
  */
 export type IsoDateTime = string;
 
@@ -115,6 +115,13 @@ export interface EnginePolicy {
   /** Whether positive credit-card balances are subtracted in full. */
   reserveCreditCardBalances: boolean;
   bufferCents: Cents;
+  /**
+   * How many days back a recurring charge whose expected date has passed, and
+   * which the stream has not recorded, still counts as an obligation. Integer,
+   * 0 or more; 0 counts none. Above 7 a weekly stream can contribute more than
+   * one past-due charge.
+   */
+  pastDueGraceDays: number;
 }
 
 // ---- output -----------------------------------------------------------------
@@ -133,7 +140,8 @@ export type AssumptionCode =
   | "balance_as_of_unknown"
   | "other_currency_accounts_excluded"
   | "semi_monthly_spacing_approximated"
-  | "recurring_due_today_may_already_be_pending";
+  | "recurring_due_today_may_already_be_pending"
+  | "recurring_past_due_assumed_unposted";
 
 /** An account a metric left out, and why. */
 export interface ExcludedAccount {
