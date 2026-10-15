@@ -20,6 +20,7 @@ import type {
  *   - computeRecurring iterates streams without uniqueStreams -> "a duplicate streamId: first copy wins …"
  *   - streamsById built last-wins                         -> "a duplicate streamId: first copy wins …"
  *   - null guard removed from uniqueStreams               -> "a null stream entry is skipped …"
+ *   - empty-id filter removed from uniqueStreams          -> "an active stream with no id is left out …"
  *   - uniqueStreams' seen made a plain object again       -> "a stream whose id is an Object.prototype name is kept"
  *   - collectDataIssues' seenStreams a plain object again -> "a stream whose id is an Object.prototype name is kept"
  *   - uniqueAccounts' seen a plain object again           -> "an account whose id is an Object.prototype name …"
@@ -305,6 +306,18 @@ describe("computeFinancialSummary — edges", () => {
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "stream", id: "", reason: "missing_id" },
     ]);
+  });
+
+  // Pins current behavior: an id-less stream's charge is not reserved, so safe-to-spend can read high.
+  it("an active stream with no id is left out of every metric and reported", () => {
+    const input = empty();
+    input.accounts = [acct({})];
+    input.recurring = { source: "plaid_streams", streams: [strm({ streamId: "" })] };
+    const s = computeFinancialSummary(input);
+    expect(s.recurring.items).toEqual([]);
+    expect(s.safeToSpend.inputs.upcomingRecurring).toEqual([]);
+    expect(s.safeToSpend.totals.upcomingRecurringCents).toBe(0);
+    expect(s.dataIssues).toEqual([{ kind: "stream", id: "", reason: "missing_id" }]);
   });
 
   it("an invalid predictedNextDate is reported", () => {
