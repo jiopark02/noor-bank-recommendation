@@ -53,6 +53,7 @@ This file is loaded as baseline context in every session, so anything stale here
   8. **Shared or global modules**: clients and widely imported helpers.
   9. **Irreversible or public effects**: data deletion, data migrations, anything `git revert` does not undo, and anything that becomes public on push (this repository is public).
   10. **User-facing**: screens and browser storage keys.
+  11. **Money movement**: any code that creates, cancels, or automatically executes a charge or payout through a payment processor. Name the processor call and what triggers it. Report it even when the path moves real money only under live credentials.
 
 **Role division.** Claude Code owns implementation: exploring the real repo, writing code, SQL, and migration files, debugging, committing, and pushing. Chat Claude owns direction, strategy, the "why," and the contextual cross-check. Which reviews a change gets is set by the operator's prompt.
 
