@@ -28,9 +28,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * being sent. The server records what it actually received, and the
  * precondition test asserts the sentinels arrived.
  *
- * WHY THE PROXY VARIABLES ARE CLEARED. axios's http adapter honours
- * HTTP(S)_PROXY / NO_PROXY from the environment. A proxy set on a CI runner or
- * a developer machine could send the request somewhere other than loopback.
+ * WHY THE PROXY VARIABLES ARE CLEARED. axios's http adapter asks
+ * proxy-from-env for a proxy, and proxy-from-env 2.1.0 reads, each in lower
+ * then upper case, `<protocol>_proxy` (here http_proxy, since the loopback URL
+ * is http), `all_proxy` and `no_proxy`; axios's own shouldBypassProxy reads
+ * no_proxy / NO_PROXY again. A proxy set on a CI runner or a developer machine
+ * could send the request somewhere other than loopback, so every one of those
+ * names is saved, removed for the test, and restored. https_proxy is cleared
+ * too, although an http URL does not consult it. The npm_config_*proxy names
+ * are not read by proxy-from-env 2.1.0; they are cleared anyway so a
+ * different resolver version cannot route around the loopback.
  *
  * WHAT IT DOES NOT PROVE. Anything about TLS, redirects, or a live Plaid
  * response; the loopback server is plain HTTP and answers once.
@@ -49,8 +56,13 @@ const KEYS = [
   "HTTPS_PROXY",
   "http_proxy",
   "https_proxy",
+  "ALL_PROXY",
+  "all_proxy",
   "NO_PROXY",
   "no_proxy",
+  "npm_config_proxy",
+  "npm_config_http_proxy",
+  "npm_config_https_proxy",
 ] as const;
 const PROXY_KEYS = KEYS.slice(3);
 
@@ -121,10 +133,16 @@ beforeEach(async () => {
       );
     });
   });
-  await new Promise<void>((resolve) =>
-    server?.listen(0, "127.0.0.1", () => resolve())
-  );
-  const { port } = server.address() as AddressInfo;
+  const listening = server;
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    listening.once("error", onError);
+    listening.listen(0, "127.0.0.1", () => {
+      listening.off("error", onError);
+      resolve();
+    });
+  });
+  const { port } = listening.address() as AddressInfo;
 
   vi.resetModules();
   plaid = await import("../plaid");
