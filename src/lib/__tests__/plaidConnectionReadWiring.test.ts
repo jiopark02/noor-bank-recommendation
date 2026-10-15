@@ -206,6 +206,22 @@ describe.each(ROUTES)(
       expect(guardAt).toBeLessThan(source.indexOf(EMPTY_CASE_MESSAGE));
     });
 
+    it("assigns the helper's result unchanged, with no fallback in front of the guard", () => {
+      // The guard above only matters if the null can reach it. A fallback at
+      // the assignment — `(await getAllPlaidConnections(userId)) ?? []`, or
+      // `|| []` — turns a failed read into "no connections" before the guard
+      // runs, leaves the guard in place as dead code, type-checks clean, and
+      // passes every guard assertion in this file. So the right-hand side of
+      // the assignment is pinned exactly, modulo whitespace.
+      const source = readRoute(probe);
+      const match = /const\s+allConnections\s*=\s*([\s\S]*?);/.exec(source);
+
+      expect(match, probe.label + ": no `const allConnections =` found").not.toBeNull();
+      expect((match as RegExpExecArray)[1].replace(/\s+/g, " ").trim()).toBe(
+        "await getAllPlaidConnections(userId)"
+      );
+    });
+
     it("keeps the genuine empty case intact, on the active-connection count", () => {
       const source = readRoute(probe);
 
