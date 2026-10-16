@@ -140,6 +140,8 @@ export function useChat({
         return;
       }
 
+      // Set when the route refused the request under the chat usage limit.
+      let usageLimitMessage: string | null = null;
       try {
         // The body carries messages only. The route builds the user context
         // from the database and never read a client-sent one.
@@ -156,7 +158,14 @@ export function useChat({
         const data = asPlainObject(await response.json());
 
         if (!response.ok) {
-          throw new Error(readErrorMessage(data) || "Failed to get response");
+          const serverMessage = readErrorMessage(data);
+          // The server's text names the window that was hit; the generic
+          // "try again in a moment" would be wrong for the day and 30-day
+          // limits.
+          if (data.code === "USAGE_LIMIT_REACHED" && serverMessage) {
+            usageLimitMessage = serverMessage;
+          }
+          throw new Error(serverMessage || "Failed to get response");
         }
 
         const assistantText =
@@ -183,6 +192,7 @@ export function useChat({
           id: generateId(),
           role: "assistant",
           content:
+            usageLimitMessage ??
             "Sorry, there was an error generating a response. Please try again in a moment.",
           timestamp: new Date(),
         };

@@ -64,4 +64,27 @@ describe("useChat request wiring", () => {
     expect(unlockAt).toBeLessThan(returnAt);
     expect(loadingAt).toBeLessThan(returnAt);
   });
+
+  it("a usage-limit refusal shows the server's text in the bubble, not the generic retry text", () => {
+    // The generic "try again in a moment" is wrong for the 24-hour and 30-day
+    // limits, so on USAGE_LIMIT_REACHED the bubble carries the route's text,
+    // which names the window. Every other error keeps the generic text.
+    const notOk = source.indexOf("if (!response.ok) {");
+    expect(notOk).toBeGreaterThan(-1);
+    const notOkBody = source.slice(notOk, source.indexOf("\n        }\n", notOk));
+    expect(notOkBody).toContain(
+      'if (data.code === "USAGE_LIMIT_REACHED" && serverMessage) {'
+    );
+    expect(notOkBody).toContain("usageLimitMessage = serverMessage;");
+    expect(occurrences("usageLimitMessage = ")).toBe(1);
+    expect(occurrences("let usageLimitMessage: string | null = null;")).toBe(1);
+
+    // The send's own catch: the first one after the response check.
+    const catchAt = source.indexOf("} catch (err) {", notOk);
+    expect(catchAt).toBeGreaterThan(notOk);
+    const catchBody = source.slice(catchAt, source.indexOf("} finally {", catchAt));
+    expect(catchBody.replace(/\s+/g, " ")).toContain(
+      'content: usageLimitMessage ?? "Sorry, there was an error generating a response. Please try again in a moment.",'
+    );
+  });
 });
