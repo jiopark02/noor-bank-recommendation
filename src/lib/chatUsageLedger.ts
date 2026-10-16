@@ -7,7 +7,9 @@
  * thrown client, an answer of the wrong shape — so the caller cannot mistake
  * "could not check" for "allowed". Under enforcement the route answers that
  * throw with 503. A reserve that times out is aborted, but the database may
- * still have committed the row, so the caller settles that reservation at zero.
+ * still have committed the row, so the caller settles that reservation anyway:
+ * at zero under enforcement, where the request stops with 503, and from its
+ * attempts under observe, where it goes on.
  *
  * settleChatUsage NEVER REJECTS AND NEVER WAITS LONGER THAN
  * CHAT_USAGE_SETTLE_TIMEOUT_MS. It runs on the way out of every admitted
