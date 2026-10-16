@@ -185,6 +185,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -193,13 +194,18 @@ afterEach(() => {
 
 describe("enforce (the default)", () => {
   it("reserves with the verified user id, in enforce mode, when the mode is unset", async () => {
-    await post();
+    const res = await post();
     expect(usage.reserveInputs).toHaveLength(1);
     expect(usage.reserveInputs[0].userId).toBe(USER_ID);
     expect(usage.reserveInputs[0].mode).toBe("enforce");
     expect(usage.reserveInputs[0].reservationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     );
+    expect(res.settledAtResponse).toBe(1);
+    expect(usage.settled).toHaveLength(1);
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+    });
   });
 
   it("a hit limit: 429 USAGE_LIMIT_REACHED with Retry-After, no model call, no save, no settle", async () => {
@@ -264,6 +270,11 @@ describe("enforce (the default)", () => {
     const res = await post();
     expect(res.status).toBe(503);
     expect(fetchCalls).toBe(0);
+    expect(res.settledAtResponse).toBe(1);
+    expect(usage.settled).toHaveLength(1);
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+    });
   });
 });
 
@@ -285,7 +296,11 @@ describe("observe", () => {
     expect(fetchCalls).toBe(1);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.0123,
+      attempts: 1,
+    });
   });
 
   it("a check that cannot be made does not refuse: 200, and the request is settled", async () => {
@@ -297,7 +312,11 @@ describe("observe", () => {
     expect(fetchCalls).toBe(1);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.0123,
+      attempts: 1,
+    });
   });
 });
 
@@ -329,9 +348,14 @@ describe("one settle per admitted request, from the attempt tally", () => {
 
   it("success without a reported cost: one attempt at the hold", async () => {
     answers = [{ kind: "ok" }];
-    await post();
+    const res = await post();
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.05,
+      attempts: 1,
+    });
   });
 
   it("fallback: the failed attempt at the hold plus the successful one's cost", async () => {
@@ -341,7 +365,11 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(fetchCalls).toBe(2);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.06, attempts: 2 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.06,
+      attempts: 2,
+    });
   });
 
   it("SAVE_FAILED: settled at the attempt's cost", async () => {
@@ -352,7 +380,11 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(res.json.code).toBe("SAVE_FAILED");
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.0123,
+      attempts: 1,
+    });
   });
 
   it("every model failed: both attempts at the hold", async () => {
@@ -364,7 +396,11 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(res.status).toBe(502);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.1,
+      attempts: 2,
+    });
   });
 
   it("upstream 401: one attempt at the hold", async () => {
@@ -374,7 +410,11 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(fetchCalls).toBe(1);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.05,
+      attempts: 1,
+    });
   });
 
   it("upstream 429 on both models: the response is unchanged and both attempts are settled", async () => {
@@ -387,7 +427,11 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(res.json).toEqual({ error: "Rate limit exceeded. Please try again later." });
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.1,
+      attempts: 2,
+    });
   });
 
   it("fetch throws (outer catch): one attempt at the hold", async () => {
@@ -398,7 +442,11 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(fetchCalls).toBe(1);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.05,
+      attempts: 1,
+    });
   });
 
   it("memory 503: settled at zero, no model call", async () => {
@@ -410,7 +458,11 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(fetchCalls).toBe(0);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0, attempts: 0 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0,
+      attempts: 0,
+    });
   });
 
   it("no OpenRouter key 503: settled at zero, no model call", async () => {
@@ -420,6 +472,10 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(fetchCalls).toBe(0);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
-    expect(usage.settled[0]).toMatchObject({ cost: 0, attempts: 0 });
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0,
+      attempts: 0,
+    });
   });
 });
