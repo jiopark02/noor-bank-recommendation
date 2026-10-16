@@ -18,8 +18,9 @@ import { describe, it, expect } from "vitest";
  * before telemetry, and must appear in the route exactly once.
  *
  * The telemetry inputs are pinned too, because a wrong value there passes
- * every CHECK and lands as quietly wrong data: the prompt-block flags and the
- * attempt counter (LOOP_HEAD), the arguments of the row written once a
+ * every CHECK and lands as quietly wrong data: the prompt-block flags, the
+ * attempt counter and the usage tally the attempt appends to (LOOP_HEAD), the
+ * arguments of the row written once a
  * response arrives (SUCCESS_ROW), and, in both crons, where the observed status
  * and the parsed flag are assigned (STATUS_AFTER_FETCH,
  * JSON_PARSED_AFTER_PARSE).
@@ -157,6 +158,7 @@ const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for
             userId: authUserId,
             sessionId: activeSession?.id ?? null,
             blocks: promptBlocks,
+            tally: usageTally,
           }
         );
 

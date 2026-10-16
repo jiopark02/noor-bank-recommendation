@@ -9,12 +9,13 @@ import {
 
 /**
  * POST /api/chat applies the input limits before anything that costs: the
- * hourly count read, DB reads, Plaid, and the model call. A request inside the
+ * usage reservation, DB reads, Plaid, and the model call. A request inside the
  * limits must reach the model, pick its model, answer, and persist exactly as
  * before.
  *
  * HOW
- * Authentication, the admin client, AI memory and LLM call logging are mocked.
+ * Authentication, the admin client, AI memory, the chat usage ledger and LLM
+ * call logging are mocked.
  * The route itself, the prompt builder, the Plaid egress policy (AI_PLAID_STATE
  * unset, so "off") and the OpenRouter request builder run for real. fetch is
  * stubbed and records the OpenRouter request body.
@@ -22,9 +23,24 @@ import {
 
 const memory = {
   enabled: false,
-  countCalls: 0,
   saved: [] as Array<{ sessionId: string; userId: string; pair: unknown }>,
 };
+
+const usage = {
+  reserveCalls: 0,
+  settled: [] as unknown[],
+};
+
+vi.mock("@/lib/chatUsageLedger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../chatUsageLedger")>()),
+  reserveChatUsage: async () => {
+    usage.reserveCalls += 1;
+    return { allowed: true, limit: null, retryAt: null };
+  },
+  settleChatUsage: async (input: unknown) => {
+    usage.settled.push(input);
+  },
+}));
 
 vi.mock("@/lib/apiAuth", () => ({
   getAuthenticatedUserIdFromRequest: async () => "00000000-0000-4000-8000-000000000001",
@@ -53,10 +69,6 @@ vi.mock("@/lib/aiMemory", () => ({
     return {};
   },
   getSessionMessages: async () => [],
-  getRecentChatTurnCount: async () => {
-    memory.countCalls += 1;
-    return 0;
-  },
 }));
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -90,8 +102,9 @@ const COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
 
 beforeEach(() => {
   memory.enabled = false;
-  memory.countCalls = 0;
   memory.saved = [];
+  usage.reserveCalls = 0;
+  usage.settled = [];
   openRouterBodies = [];
   vi.resetModules();
   vi.stubEnv("OPENROUTER_API_KEY", "sk-test-fake");
@@ -101,8 +114,7 @@ beforeEach(() => {
   vi.stubEnv("OPENROUTER_COMPLEX_MODEL", "");
   vi.stubEnv("AI_PLAID_STATE", "");
   vi.stubEnv("AI_SUPABASE_READ_ENABLED", "");
-  vi.stubEnv("CHAT_RATE_LIMIT_ENABLED", "true");
-  vi.stubEnv("CHAT_MAX_REQUESTS_PER_HOUR", "100");
+  vi.stubEnv("CHAT_USAGE_LIMIT_MODE", "");
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -143,26 +155,26 @@ function refusalLogs(): unknown[][] {
     );
 }
 
-describe("refusals happen before the hourly count and the model", () => {
-  it("a body over the byte ceiling: 413 PAYLOAD_TOO_LARGE, no count read, no model call", async () => {
+describe("refusals happen before the usage reservation and the model", () => {
+  it("a body over the byte ceiling: 413 PAYLOAD_TOO_LARGE, no reservation, no model call", async () => {
     const huge = JSON.stringify({
       messages: [{ role: "user", content: "x".repeat(CHAT_MAX_BODY_BYTES) }],
     });
     const res = await post(huge);
     expect(res.status).toBe(413);
     expect(res.json.code).toBe("PAYLOAD_TOO_LARGE");
-    expect(memory.countCalls).toBe(0);
+    expect(usage.reserveCalls).toBe(0);
     expect(openRouterBodies).toHaveLength(0);
     expect(refusalLogs()).toEqual([["[chat-input] refused reason=%s", "payload_too_large"]]);
   });
 
-  it("a last user message over U: 400 MESSAGE_TOO_LONG, no count read, no model call", async () => {
+  it("a last user message over U: 400 MESSAGE_TOO_LONG, no reservation, no model call", async () => {
     const res = await post({
       messages: [{ role: "user", content: "x".repeat(CHAT_MAX_LAST_USER_MESSAGE_CHARS + 1) }],
     });
     expect(res.status).toBe(400);
     expect(res.json.code).toBe("MESSAGE_TOO_LONG");
-    expect(memory.countCalls).toBe(0);
+    expect(usage.reserveCalls).toBe(0);
     expect(openRouterBodies).toHaveLength(0);
     expect(refusalLogs()).toEqual([
       ["[chat-input] refused reason=%s", "last_user_message_too_long"],
@@ -178,7 +190,7 @@ describe("refusals happen before the hourly count and the model", () => {
     });
     expect(res.status).toBe(400);
     expect(res.json.code).toBe("MESSAGE_TOO_LONG");
-    expect(memory.countCalls).toBe(0);
+    expect(usage.reserveCalls).toBe(0);
     expect(openRouterBodies).toHaveLength(0);
     expect(refusalLogs()).toEqual([["[chat-input] refused reason=%s", "tail_too_long"]]);
   });
@@ -189,7 +201,7 @@ describe("refusals happen before the hourly count and the model", () => {
     });
     expect(res.status).toBe(400);
     expect(res.json.code).toBe("MESSAGE_TOO_LONG");
-    expect(memory.countCalls).toBe(0);
+    expect(usage.reserveCalls).toBe(0);
     expect(openRouterBodies).toHaveLength(0);
     expect(refusalLogs()).toEqual([["[chat-input] refused reason=%s", "empty_window"]]);
   });
@@ -197,7 +209,7 @@ describe("refusals happen before the hourly count and the model", () => {
   it("a malformed body still gets the existing 400", async () => {
     const res = await post("{not json");
     expect(res).toEqual({ status: 400, json: { error: "Messages are required" } });
-    expect(memory.countCalls).toBe(0);
+    expect(usage.reserveCalls).toBe(0);
   });
 });
 
@@ -206,7 +218,7 @@ describe("a request inside the limits is unchanged", () => {
     const messages = conversation(7);
     const res = await post({ messages });
     expect(res.status).toBe(200);
-    expect(memory.countCalls).toBe(1);
+    expect(usage.reserveCalls).toBe(1);
     expect(openRouterBodies).toHaveLength(1);
     const sent = openRouterBodies[0].messages;
     expect(sent[0].role).toBe("system");

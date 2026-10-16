@@ -24,7 +24,6 @@ import {
   formatMemoryForPrompt,
   saveMessages,
   getSessionMessages,
-  getRecentChatTurnCount,
   type DbChatMessage,
   type ChatSession,
 } from "@/lib/aiMemory";
@@ -53,6 +52,20 @@ import {
   type ChatPromptBlocks,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import { randomUUID } from "crypto";
+import {
+  buildUsageCheckUnavailableBody,
+  buildUsageLimitBody,
+  resolveChatUsageMode,
+  retryAfterSeconds,
+  settledCost,
+} from "@/lib/chatUsageLimits";
+import {
+  ChatUsageCheckError,
+  reserveChatUsage,
+  settleChatUsage,
+  type ChatUsageDecision,
+} from "@/lib/chatUsageLedger";
 import {
   OPENROUTER_URL,
   buildOpenRouterRequestBody,
@@ -68,47 +81,6 @@ const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
 
 function isAiSupabaseReadEnabled(): boolean {
   return process.env.AI_SUPABASE_READ_ENABLED === "true";
-}
-
-// Rolling window for the chat rate-limit hard cap (B1): 1 hour.
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-
-interface ChatRateLimitConfig {
-  maxRequestsPerHour: number;
-}
-
-/**
- * Resolves the chat rate-limit config from env, or null when disabled.
- *
- * Disabled (returns null) when CHAT_RATE_LIMIT_ENABLED is not exactly "true",
- * or when CHAT_MAX_REQUESTS_PER_HOUR is missing / non-numeric / non-positive.
- * A null result leaves the request flow byte-for-byte unchanged, so an unset or
- * misconfigured env can never accidentally block real users.
- */
-function resolveChatRateLimit(): ChatRateLimitConfig | null {
-  if (process.env.CHAT_RATE_LIMIT_ENABLED?.trim() !== "true") {
-    return null;
-  }
-
-  const raw = process.env.CHAT_MAX_REQUESTS_PER_HOUR?.trim();
-  if (!raw) {
-    console.error(
-      "[rate-limit] CHAT_RATE_LIMIT_ENABLED=true but " +
-        "CHAT_MAX_REQUESTS_PER_HOUR is unset; rate limit disabled."
-    );
-    return null;
-  }
-
-  const maxRequestsPerHour = Number(raw);
-  if (!Number.isFinite(maxRequestsPerHour) || maxRequestsPerHour <= 0) {
-    console.error(
-      "[rate-limit] CHAT_RATE_LIMIT_ENABLED=true but " +
-        `CHAT_MAX_REQUESTS_PER_HOUR is invalid (${raw}); rate limit disabled.`
-    );
-    return null;
-  }
-
-  return { maxRequestsPerHour };
 }
 
 function mapSupabaseContextToUserContext(data: {
@@ -707,6 +679,11 @@ interface ChatLlmCallContext {
   userId: string;
   sessionId: string | null;
   blocks: ChatPromptBlocks;
+  /**
+   * The chat usage tally: each attempt appends its reported cost, or null when
+   * it has none, and the request is settled from it (chatUsageLimits.ts).
+   */
+  tally: Array<number | null>;
 }
 
 /**
@@ -767,6 +744,7 @@ async function callOpenRouter(
         blocks: telemetry.blocks,
       })
     );
+    telemetry.tally.push(null);
     if (signal.aborted) logLlmTimeout("chat", model, CHAT_LLM_TIMEOUT_MS);
     throw error;
   }
@@ -794,6 +772,7 @@ async function callOpenRouter(
         blocks: telemetry.blocks,
       })
     );
+    telemetry.tally.push(null);
     logLlmTimeout("chat", model, CHAT_LLM_TIMEOUT_MS);
     throw new Error("OpenRouter response timed out while being read");
   }
@@ -805,6 +784,9 @@ async function callOpenRouter(
     model,
   });
 
+  telemetry.tally.push(
+    jsonParsed ? parseOpenRouterResponseMeta(data).providerCost : null
+  );
   await recordLlmCall(
     buildLlmCallRow({
       route: "chat",
@@ -977,6 +959,11 @@ async function persistTurnIfEnabled(params: {
 }
 
 export async function POST(request: NextRequest) {
+  // The chat usage reservation this request holds, if any, and the per-attempt
+  // costs it is settled from in the finally below, on every exit.
+  let usageReservation: { reservationId: string; userId: string } | null =
+    null;
+  const usageTally: Array<number | null> = [];
   try {
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
     if (!authUserId) {
@@ -984,10 +971,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Input bounds (chatInputLimits.ts): refuse or trim the request BEFORE the
-    // hourly count, any DB read, Plaid fetch, or LLM call, so a refused request
-    // costs nothing beyond authentication. The body is read with a byte
-    // ceiling; the conversation is fitted to the message and character limits.
-    // A request inside the limits passes through unchanged.
+    // usage reservation, any DB read, Plaid fetch, or LLM call, so a refused
+    // request costs nothing beyond authentication. The body is read with a
+    // byte ceiling; the conversation is fitted to the message and character
+    // limits. A request inside the limits passes through unchanged.
     const bodyRead = await readRequestJsonWithByteLimit(
       request,
       CHAT_MAX_BODY_BYTES
@@ -1031,43 +1018,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Rate-limit hard cap (B1): reject clearly abnormal usage (e.g. a client
-    // infinite loop) after input validation and BEFORE any LLM call, DB write,
-    // or Plaid fetch — so a blocked request costs nothing. This is a loose
-    // safety ceiling, not a per-user quota; normal use must never hit it.
-    // Gated entirely by CHAT_RATE_LIMIT_ENABLED, so an unset/false env leaves
-    // the flow untouched.
-    const rateLimit = resolveChatRateLimit();
-    if (rateLimit) {
+    // Chat usage limit (chatUsageLimits.ts, chatUsageLedger.ts): after the
+    // input limits and BEFORE any profile read, memory, Plaid fetch or model
+    // call, so a refused request costs nothing. chat_usage_reserve decides
+    // and records the request in one transaction. Under enforce a hit limit is
+    // 429 and a check that cannot be made is 503 (fail-closed); under observe
+    // the request proceeds whatever the decision; off makes no call.
+    const usageMode = resolveChatUsageMode(process.env.CHAT_USAGE_LIMIT_MODE);
+    if (usageMode !== "off") {
+      const reservationId = randomUUID();
+      let usageDecision: ChatUsageDecision | null = null;
       try {
-        const recentTurns = await getRecentChatTurnCount(authUserId, {
-          sinceMs: RATE_LIMIT_WINDOW_MS,
+        usageDecision = await reserveChatUsage({
+          reservationId,
+          userId: authUserId,
+          mode: usageMode,
         });
-        if (recentTurns >= rateLimit.maxRequestsPerHour) {
-          console.warn(
-            "[rate-limit] user %s blocked: %d turns in last hour >= cap %d",
-            authUserId,
-            recentTurns,
-            rateLimit.maxRequestsPerHour
-          );
+      } catch (error) {
+        // A reserve that timed out may still have committed its row, so it
+        // is settled in the finally like any other.
+        usageReservation = { reservationId, userId: authUserId };
+        console.error(
+          "[chat-usage] check failed mode=%s reason=%s code=%s",
+          usageMode,
+          error instanceof ChatUsageCheckError ? error.reason : "unknown",
+          error instanceof ChatUsageCheckError ? error.code : null
+        );
+        if (usageMode === "enforce") {
+          return NextResponse.json(buildUsageCheckUnavailableBody(), {
+            status: 503,
+          });
+        }
+      }
+      if (usageDecision) {
+        console.info(
+          "[chat-usage] mode=%s allowed=%s limit=%s reservation=%s",
+          usageMode,
+          usageDecision.allowed,
+          usageDecision.limit,
+          reservationId
+        );
+        if (!usageDecision.allowed && usageMode === "enforce") {
+          // Refused under enforce: chat_usage_reserve recorded no row.
           return NextResponse.json(
+            buildUsageLimitBody(usageDecision.limit, usageDecision.retryAt),
             {
-              error:
-                "You've reached the usage limit for now. Please try again later.",
-              code: "RATE_LIMITED",
-            },
-            { status: 429 }
+              status: 429,
+              headers: {
+                "Retry-After": String(
+                  retryAfterSeconds(usageDecision.retryAt, Date.now())
+                ),
+              },
+            }
           );
         }
-      } catch (error) {
-        // Fail-open: a transient count-query failure must not block legitimate
-        // users. Log loudly; the next request re-checks. The in-app limits
-        // are the cost defense; this code must not rely on any provider-side
-        // spend limit.
-        console.error(
-          "[rate-limit] turn-count check failed; allowing request (fail-open):",
-          error
-        );
+        usageReservation = { reservationId, userId: authUserId };
       }
     }
 
@@ -1338,6 +1343,7 @@ export async function POST(request: NextRequest) {
             userId: authUserId,
             sessionId: activeSession?.id ?? null,
             blocks: promptBlocks,
+            tally: usageTally,
           }
         );
 
@@ -1410,6 +1416,17 @@ export async function POST(request: NextRequest) {
       { error: "Failed to get response from AI" },
       { status: 500 }
     );
+  } finally {
+    // Awaited: Vercel freezes the function once the response is returned.
+    // settleChatUsage never rejects and is bounded by its own timeout.
+    if (usageReservation) {
+      await settleChatUsage({
+        reservationId: usageReservation.reservationId,
+        userId: usageReservation.userId,
+        cost: settledCost(usageTally),
+        attempts: usageTally.length,
+      });
+    }
   }
 }
 

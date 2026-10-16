@@ -52,13 +52,13 @@ export interface ChatUsageReserveInput {
   mode: "enforce" | "observe";
 }
 
-export interface ChatUsageDecision {
-  /** False when a limit is hit. Under observe the row is recorded anyway. */
-  allowed: boolean;
-  limit: ChatUsageLimitScope | null;
-  /** ISO timestamp from the database clock; set whenever a limit is hit. */
-  retryAt: string | null;
-}
+/**
+ * allowed is false when a limit is hit; under observe the row is recorded
+ * anyway. retryAt is an ISO timestamp from the database clock.
+ */
+export type ChatUsageDecision =
+  | { allowed: true; limit: null; retryAt: null }
+  | { allowed: false; limit: ChatUsageLimitScope; retryAt: string };
 
 export type ChatUsageCheckFailure = "rpc_error" | "timeout" | "threw" | "malformed";
 
