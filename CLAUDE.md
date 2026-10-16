@@ -111,7 +111,7 @@ API routes verify identity via `getAuthenticatedUserIdFromRequest()` in `src/lib
 ### Chat / Noor AI (`src/app/api/chat/route.ts`)
 `POST /api/chat`:
 1. Authenticates via JWT.
-2. Checks the chat rate-limit cap (see below) — before body parsing, LLM call, or any DB write.
+2. Reads the body under a byte ceiling, parses it and applies the input limits (`chatInputLimits.ts`), then checks the chat rate-limit cap (see below) — all before the LLM call or any DB write.
 3. Loads the user profile from `users` + `survey_responses` when profile reads are enabled. **Client-supplied `userContext` in the request body is intentionally discarded** (prompt-injection defense).
 4. Fetches or creates an active `chat_session` and builds a memory context that is **appended** to the system prompt.
 5. Detects intent (greeting / balance / financial-planning / subscription) and may inject a Plaid snapshot (see the Plaid egress trap below).

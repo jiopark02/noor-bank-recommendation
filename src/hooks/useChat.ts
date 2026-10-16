@@ -10,6 +10,10 @@ import {
 } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
+import {
+  CHAT_MAX_LAST_USER_MESSAGE_CHARS,
+  buildChatRequestMessages,
+} from "@/lib/chatInputLimits";
 
 export interface ChatMessage {
   id: string;
@@ -121,13 +125,24 @@ export function useChat({
 
       setMessages((prev) => [...prev, userMessage]);
 
-      try {
-        // Prepare messages for API (only content and role)
-        const apiMessages = [...messages, userMessage].map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }));
+      // Role and content only, fitted to the same window the route applies
+      // (chatInputLimits.ts), so the server never has to refuse our history.
+      // Null means the new message itself is over the length limit: it is not
+      // sent, and its bubble stays visible because the caller has already
+      // cleared the input. The window skips it on later turns.
+      const apiMessages = buildChatRequestMessages(messages, userMessage);
+      if (!apiMessages) {
+        setError(
+          `Your message is too long. Please keep it to at most ${CHAT_MAX_LAST_USER_MESSAGE_CHARS} characters.`
+        );
+        setIsLoading(false);
+        isSendingRef.current = false;
+        return;
+      }
 
+      try {
+        // The body carries messages only. The route builds the user context
+        // from the database and never read a client-sent one.
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: buildJsonAuthorizedHeaders(
@@ -135,7 +150,6 @@ export function useChat({
           ),
           body: JSON.stringify({
             messages: apiMessages,
-            userContext,
           }),
         });
 
@@ -179,7 +193,7 @@ export function useChat({
         isSendingRef.current = false;
       }
     },
-    [messages, userContext]
+    [messages]
   );
 
   const clearMessages = useCallback(() => {
