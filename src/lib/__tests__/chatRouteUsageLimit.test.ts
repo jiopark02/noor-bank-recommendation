@@ -184,8 +184,11 @@ beforeEach(() => {
   }
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  // Let a settle the route did not await land in this test's array, not the
+  // next test's.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
