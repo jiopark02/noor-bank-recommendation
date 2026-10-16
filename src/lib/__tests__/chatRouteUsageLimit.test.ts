@@ -44,7 +44,10 @@ vi.mock("@/lib/chatUsageLedger", async (importOriginal) => ({
     usage.reserveInputs.push(input);
     return usage.reserve(input);
   },
+  // A macrotask before recording, so a settle the route does not await lands
+  // after the response and settledAtResponse sees it missing.
   settleChatUsage: async (input: ChatUsageSettleInput) => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
     usage.settled.push(input);
   },
 }));
@@ -116,13 +119,16 @@ async function post(): Promise<{
   status: number;
   headers: Headers;
   json: Record<string, unknown>;
+  settledAtResponse: number;
 }> {
   const { POST } = await import("../../app/api/chat/route");
   const res = await POST(chatRequest());
+  const settledAtResponse = usage.settled.length;
   return {
     status: res.status,
     headers: res.headers,
     json: (await res.json()) as Record<string, unknown>,
+    settledAtResponse,
   };
 }
 
@@ -204,15 +210,16 @@ describe("enforce (the default)", () => {
     const res = await post();
     vi.useRealTimers();
     expect(res.status).toBe(429);
-    expect(res.json).toMatchObject({
+    expect(res.json).toEqual({
+      error: "You've reached the chat limit for the last 24 hours. Please try again later.",
       code: "USAGE_LIMIT_REACHED",
       limit: "day",
       retryAt: "2026-10-17T12:00:00.000Z",
     });
-    expect(typeof res.json.error).toBe("string");
     expect(res.headers.get("Retry-After")).toBe("3600");
     expect(fetchCalls).toBe(0);
     expect(memory.saved).toBe(0);
+    expect(res.settledAtResponse).toBe(0);
     expect(usage.settled).toHaveLength(0);
   });
 
@@ -240,6 +247,7 @@ describe("enforce (the default)", () => {
       code: "USAGE_CHECK_UNAVAILABLE",
     });
     expect(fetchCalls).toBe(0);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({
       reservationId: usage.reserveInputs[0].reservationId,
@@ -275,6 +283,7 @@ describe("observe", () => {
     expect(res.status).toBe(200);
     expect(res.json.success).toBe(true);
     expect(fetchCalls).toBe(1);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
   });
@@ -286,6 +295,7 @@ describe("observe", () => {
     const res = await post();
     expect(res.status).toBe(200);
     expect(fetchCalls).toBe(1);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
   });
@@ -297,6 +307,7 @@ describe("off", () => {
     const res = await post();
     expect(res.status).toBe(200);
     expect(usage.reserveInputs).toHaveLength(0);
+    expect(res.settledAtResponse).toBe(0);
     expect(usage.settled).toHaveLength(0);
   });
 });
@@ -305,6 +316,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
   it("success: one attempt at its reported cost", async () => {
     const res = await post();
     expect(res.status).toBe(200);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toEqual([
       {
         reservationId: usage.reserveInputs[0].reservationId,
@@ -327,6 +339,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     const res = await post();
     expect(res.status).toBe(200);
     expect(fetchCalls).toBe(2);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.06, attempts: 2 });
   });
@@ -337,6 +350,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     const res = await post();
     expect(res.status).toBe(500);
     expect(res.json.code).toBe("SAVE_FAILED");
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
   });
@@ -348,6 +362,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     ];
     const res = await post();
     expect(res.status).toBe(502);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
   });
@@ -357,6 +372,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     const res = await post();
     expect(res.status).toBe(401);
     expect(fetchCalls).toBe(1);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
   });
@@ -369,6 +385,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     const res = await post();
     expect(res.status).toBe(429);
     expect(res.json).toEqual({ error: "Rate limit exceeded. Please try again later." });
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
   });
@@ -379,6 +396,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(res.status).toBe(500);
     expect(res.json).toEqual({ error: "Failed to get response from AI" });
     expect(fetchCalls).toBe(1);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
   });
@@ -390,6 +408,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(res.status).toBe(503);
     expect(res.json.code).toBe("MEMORY_LOAD_FAILED");
     expect(fetchCalls).toBe(0);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0, attempts: 0 });
   });
@@ -399,6 +418,7 @@ describe("one settle per admitted request, from the attempt tally", () => {
     const res = await post();
     expect(res.status).toBe(503);
     expect(fetchCalls).toBe(0);
+    expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0, attempts: 0 });
   });

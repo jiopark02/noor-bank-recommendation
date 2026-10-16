@@ -85,6 +85,7 @@ describe("cost arithmetic", () => {
     expect(settledCost([0.001, null])).toBe(0.051);
     expect(settledCost([null])).toBe(0.05);
     expect(settledCost([])).toBe(0);
+    expect(settledCost([0])).toBe(0);
   });
 
   it("keeps a reported cost above the hold as is", () => {
