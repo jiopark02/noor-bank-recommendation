@@ -62,6 +62,13 @@ describe("chat usage ledger migration", () => {
     expect(sql).toContain("references auth.users(id) on delete cascade");
   });
 
+  it("reads the cost sum and its retry time in the same statement", () => {
+    expect(
+      occurrences("into v_hour_count, v_day_count, v_cost_30d, v_retry_cost")
+    ).toBe(1);
+    expect(occurrences("into v_retry_cost")).toBe(0);
+  });
+
   it("runs in one transaction with a closing DO block", () => {
     expect(sql.trimStart().startsWith("begin;")).toBe(true);
     expect(sql.trimEnd().endsWith("commit;")).toBe(true);

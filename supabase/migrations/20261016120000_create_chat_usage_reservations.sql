@@ -137,13 +137,29 @@ begin
     return;
   end if;
 
-  select count(*) filter (where r.created_at > v_now - interval '1 hour'),
-         count(*) filter (where r.created_at > v_now - interval '1 day'),
-         coalesce(sum(coalesce(r.settled_cost, r.hold_cost)), 0)
-    into v_hour_count, v_day_count, v_cost_30d
-    from public.chat_usage_reservations r
-   where r.user_id = p_user_id
-     and r.created_at > v_now - interval '30 days';
+  -- The counts, the cost sum and the cost retry time come from one statement,
+  -- so one snapshot. chat_usage_settle takes no lock and can commit between two
+  -- statements of this function, lowering a row from its hold; a sum read in
+  -- one statement and a running sum read in another could then disagree. Here
+  -- the running sum at the oldest row equals the sum, so a sum at or over the
+  -- max always yields a retry time.
+  select count(*) filter (where s.created_at > v_now - interval '1 hour'),
+         count(*) filter (where s.created_at > v_now - interval '1 day'),
+         coalesce(sum(s.cost), 0),
+         max(s.created_at) filter (where s.running_cost >= p_max_cost_30d)
+           + interval '30 days'
+    into v_hour_count, v_day_count, v_cost_30d, v_retry_cost
+    from (
+      select r.created_at,
+             coalesce(r.settled_cost, r.hold_cost) as cost,
+             sum(coalesce(r.settled_cost, r.hold_cost)) over (
+               order by r.created_at desc, r.id desc
+               rows between unbounded preceding and current row
+             ) as running_cost
+        from public.chat_usage_reservations r
+       where r.user_id = p_user_id
+         and r.created_at > v_now - interval '30 days'
+    ) s;
 
   -- A count limit of C is hit at C rows in the window; the request is admitted
   -- again once the C-th newest row leaves it.
@@ -173,25 +189,11 @@ begin
 
   -- The cost limit is hit when the window's sum reaches the max; the request
   -- is admitted again once the newest row at which the running sum, newest
-  -- first, reaches the max leaves the window.
+  -- first, reaches the max leaves the window. Costs are never negative, so the
+  -- rows at which the running sum reaches the max are the oldest ones, and the
+  -- newest of them is the first the running sum reaches.
   if p_max_cost_30d is not null and v_cost_30d >= p_max_cost_30d then
     v_hit_cost := true;
-    select s.created_at + interval '30 days'
-      into v_retry_cost
-      from (
-        select r.created_at,
-               r.id,
-               sum(coalesce(r.settled_cost, r.hold_cost)) over (
-                 order by r.created_at desc, r.id desc
-                 rows between unbounded preceding and current row
-               ) as running_cost
-          from public.chat_usage_reservations r
-         where r.user_id = p_user_id
-           and r.created_at > v_now - interval '30 days'
-      ) s
-     where s.running_cost >= p_max_cost_30d
-     order by s.created_at desc, s.id desc
-     limit 1;
   end if;
 
   -- retry_at is the latest across hit limits (greatest ignores nulls).
