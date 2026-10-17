@@ -10,8 +10,9 @@ import {
 /**
  * POST /api/chat applies the input limits before anything that costs: the
  * usage reservation, DB reads, Plaid, and the model call. A request inside the
- * limits must reach the model, pick its model, answer, and persist exactly as
- * before.
+ * limits must pick its model, answer, and persist as before. Of the body, only
+ * the last user message reaches the model; the history comes from the stored
+ * session (chatRouteServerHistory.test.ts).
  *
  * HOW
  * Authentication, the admin client, AI memory, the chat usage ledger and LLM
@@ -213,8 +214,8 @@ describe("refusals happen before the usage reservation and the model", () => {
   });
 });
 
-describe("a request inside the limits is unchanged", () => {
-  it("the model receives [system, ...messages] exactly as sent", async () => {
+describe("a request inside the limits is accepted", () => {
+  it("the model receives [system, last user message], whatever else the body carries", async () => {
     const messages = conversation(7);
     const res = await post({ messages });
     expect(res.status).toBe(200);
@@ -222,16 +223,7 @@ describe("a request inside the limits is unchanged", () => {
     expect(openRouterBodies).toHaveLength(1);
     const sent = openRouterBodies[0].messages;
     expect(sent[0].role).toBe("system");
-    expect(sent.slice(1)).toEqual(messages);
-  });
-
-  it("an assistant-first conversation inside the limits is sent as is", async () => {
-    const messages: Msg[] = [
-      { role: "assistant", content: "earlier answer" },
-      { role: "user", content: "and then?" },
-    ];
-    await post({ messages });
-    expect(openRouterBodies[0].messages.slice(1)).toEqual(messages);
+    expect(sent.slice(1)).toEqual([messages[6]]);
   });
 
   it("the response body keeps its keys", async () => {
@@ -266,14 +258,11 @@ describe("a request inside the limits is unchanged", () => {
 });
 
 describe("a request over the limits is windowed", () => {
-  it("over N: the model receives system plus the trimmed window ending at the last user message", async () => {
+  it("over N: the body is trimmed, and still only its last user message reaches the model", async () => {
     const messages = conversation(CHAT_MAX_HISTORY_MESSAGES + 1);
     const res = await post({ messages });
     expect(res.status).toBe(200);
-    const sent = openRouterBodies[0].messages.slice(1);
-    // Newest N are indices 1..N; the leading assistant at index 1 is dropped.
-    expect(sent).toEqual(messages.slice(2));
-    expect(sent[sent.length - 1]).toEqual(messages[messages.length - 1]);
+    expect(openRouterBodies[0].messages.slice(1)).toEqual([messages[messages.length - 1]]);
   });
 
   it("trimming does not change the model choice", async () => {

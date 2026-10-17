@@ -2,17 +2,19 @@
  * chatInputLimits — per-request bounds on what POST /api/chat accepts and on
  * how much conversation reaches the model.
  *
- * The client sends its conversation as history on every request (our client
- * windows it first; older cached bundles send all of it), and that array is
- * what the model receives after the system prompt. Without these bounds one
- * request could grow model input cost without limit; max_tokens caps output
- * only.
+ * The client sends its conversation on every request (our client windows it
+ * first; older cached bundles send all of it). The route checks that array
+ * against these limits before anything that costs, but only its last user
+ * message reaches the model: the history after the system prompt is read from
+ * the active session's stored turns and fitted to N and T by
+ * chatServerHistory.ts. Without these bounds one request could grow model
+ * input cost without limit; max_tokens caps output only.
  *
- * Both sides apply the same rule. The chat route enforces it on every request,
- * including requests from cached older client bundles that send everything.
- * useChat applies it before sending, so our own client never meets a rejection
- * for history size. The module has no imports so the browser bundle can carry
- * it.
+ * Both sides apply the same rule to the request. The chat route enforces it on
+ * every request, including requests from cached older client bundles that
+ * send everything. useChat applies it before sending, so our own client never
+ * meets a rejection for history size. The module has no imports so the
+ * browser bundle can carry it.
  *
  * The values are provisional bounds, chosen to be well clear of normal use.
  * They are constants rather than env vars: the client must use the same
@@ -25,27 +27,33 @@
 
 /**
  * U. Far above a typed chat question, still room for a pasted paragraph or
- * short statement; leaves at least three quarters of T for history.
+ * short statement; leaves at least three quarters of T for history. A request
+ * whose last user message is longer is refused; an earlier user message longer
+ * than this, in the request or in stored history, is skipped.
  */
 export const CHAT_MAX_LAST_USER_MESSAGE_CHARS = 4000;
 
 /**
  * N. At most twenty user/assistant exchanges, below the 50 rows a history
  * reload can return. When replies are long the character bound T usually
- * binds before N, so the window then holds fewer exchanges than this.
+ * binds before N, so the window then holds fewer exchanges than this. Bounds
+ * the stored history plus the current user message that reach the model, and
+ * the number of stored rows the route reads for it.
  */
 export const CHAT_MAX_HISTORY_MESSAGES = 40;
 
 /**
  * T. Bounds the conversation part of model input per request (roughly 4k
  * tokens of English, more for scripts that tokenize densely), independent of
- * any model's context window.
+ * any model's context window: the stored history plus the current user
+ * message.
  */
 export const CHAT_MAX_HISTORY_CHARS = 16000;
 
 /**
  * B. Fixed ceiling on upload and parse work only, deliberately generous; model
- * cost is bounded by N and T, not by this.
+ * cost is bounded by N and T, not by this. Beyond its last user message the
+ * request body only costs parsing.
  */
 export const CHAT_MAX_BODY_BYTES = 1048576;
 
