@@ -49,9 +49,9 @@ describe("chat memory tables: client write migration", () => {
   });
 
   it("keeps every select policy and creates none", () => {
-    for (const table of TABLES) {
-      expect(sql).not.toContain(`${table}_select_own on`);
-    }
+    // Any drop of a select policy, whatever the case, quoting, schema or
+    // IF EXISTS, within one statement.
+    expect(matches(/\bdrop\s+policy\b[^;]*select_own/gi)).toBe(0);
     expect(sql.toLowerCase()).not.toContain("create policy");
   });
 

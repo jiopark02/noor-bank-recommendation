@@ -92,7 +92,7 @@ describe("buildModelConversation", () => {
   it("for every role sequence up to eight rows: starts with user, alternates, ends with the current message", () => {
     for (let length = 0; length <= 8; length += 1) {
       for (const seq of allSequences(length)) {
-        const { messages, kept, dropped } = buildModelConversation(seq, "now");
+        const { messages, stored, kept, dropped } = buildModelConversation(seq, "now");
         expect(messages[0].role).toBe("user");
         for (let i = 1; i < messages.length; i += 1) {
           expect(messages[i].role).not.toBe(messages[i - 1].role);
@@ -104,7 +104,11 @@ describe("buildModelConversation", () => {
           .map((m) => seq.findIndex((s) => s.content === m.content && s.role === m.role));
         expect(positions.every((p) => p >= 0)).toBe(true);
         expect(positions).toEqual([...positions].sort((x, y) => x - y));
-        expect(kept + dropped).toBe(seq.length);
+        // The counts match what reached the model: every message but the
+        // current one is a kept row, and the rest of the input was dropped.
+        expect(stored).toBe(seq.length);
+        expect(kept).toBe(messages.length - 1);
+        expect(dropped).toBe(seq.length - (messages.length - 1));
       }
     }
   });
