@@ -10,8 +10,10 @@ import { asPlainObject } from "@/lib/requestJson";
 import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
 import {
   CHAT_MAX_BODY_BYTES,
+  CHAT_MAX_HISTORY_MESSAGES,
   windowChatMessages,
 } from "@/lib/chatInputLimits";
+import { buildModelConversation } from "@/lib/chatServerHistory";
 import {
   buildJsonAuthorizedHeaders,
   extrasFromAuthorizationValue,
@@ -973,8 +975,9 @@ export async function POST(request: NextRequest) {
     // Input bounds (chatInputLimits.ts): refuse or trim the request BEFORE the
     // usage reservation, any DB read, Plaid fetch, or LLM call, so a refused
     // request costs nothing beyond authentication. The body is read with a
-    // byte ceiling; the conversation is fitted to the message and character
-    // limits. A request inside the limits passes through unchanged.
+    // byte ceiling and its conversation is checked against the message and
+    // character limits. Only its last user message is used below: the model's
+    // history is read from the stored session, never taken from the body.
     const bodyRead = await readRequestJsonWithByteLimit(
       request,
       CHAT_MAX_BODY_BYTES
@@ -1017,6 +1020,14 @@ export async function POST(request: NextRequest) {
         chatWindow.dropped
       );
     }
+    // A body without a user message has nothing to send to the model.
+    if (!chatWindow.messages.some((msg) => msg.role === "user")) {
+      return NextResponse.json(
+        { error: "Messages are required" },
+        { status: 400 }
+      );
+    }
+    const lastUserMessageText = getLastUserMessage(chatWindow.messages);
 
     // Chat usage limit (chatUsageLimits.ts, chatUsageLedger.ts): after the
     // input limits and BEFORE any profile read, memory, Plaid fetch or model
@@ -1078,22 +1089,40 @@ export async function POST(request: NextRequest) {
 
     let activeSession: ChatSession | null = null;
     let memoryBlock = "";
+    let storedHistory: DbChatMessage[] = [];
+    let historySource: "server" | "none" = "none";
 
     const dbContext = await loadReadOnlyUserContextFromSupabase(authUserId);
 
     if (isAiMemoryEnabled()) {
       try {
-        activeSession = await withRetry(
+        const session = await withRetry(
           () => getOrCreateActiveSession(authUserId),
           "getOrCreateActiveSession"
         );
+        activeSession = session;
 
-        const memoryContext = await withRetry(
-          () => buildMemoryContext(authUserId, { activeSession }),
-          "buildMemoryContext"
-        );
+        // The model's history is this session's stored turns: the session
+        // this turn is saved into, not a second lookup of the active session.
+        // Read newest first so the limit keeps the latest rows.
+        const [memoryContext, recentRows] = await Promise.all([
+          withRetry(
+            () => buildMemoryContext(authUserId, { activeSession: session }),
+            "buildMemoryContext"
+          ),
+          withRetry(
+            () =>
+              getSessionMessages(session.id, authUserId, {
+                limit: CHAT_MAX_HISTORY_MESSAGES,
+                order: "desc",
+              }),
+            "getSessionMessages (history)"
+          ),
+        ]);
 
         memoryBlock = formatMemoryForPrompt(memoryContext);
+        storedHistory = recentRows.reverse();
+        historySource = "server";
       } catch (error) {
         console.error("AI memory load failed:", error);
         return NextResponse.json(
@@ -1119,11 +1148,23 @@ export async function POST(request: NextRequest) {
     // patch here without per-field whitelisting + sanitization and a real need.
     const mergedUserContext: UserContext = dbContext;
 
-    const formattedMessages = chatWindow.messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
-    const lastUserMessageText = getLastUserMessage(formattedMessages);
+    // The conversation after the system prompt: stored turns, then the
+    // current user message. With memory off there are no stored turns, so the
+    // model receives the system prompt and this one message.
+    const modelConversation = buildModelConversation(
+      storedHistory,
+      lastUserMessageText
+    );
+    console.info(
+      "[chat-history] source=%s stored=%d kept=%d dropped=%d",
+      historySource,
+      modelConversation.stored,
+      modelConversation.kept,
+      modelConversation.dropped
+    );
+    if (modelConversation.windowRefused) {
+      console.warn("[chat-history] window refused; sending the current message only");
+    }
     const isGreeting = isSimpleGreetingOrSmallTalk(lastUserMessageText);
     const wantsBalance =
       !isGreeting && isBalanceQuestion(lastUserMessageText);
@@ -1138,7 +1179,7 @@ export async function POST(request: NextRequest) {
     // no longer runs under any mode because its egress channel denies on every
     // input). The base prompt's guideline 2 also tells the model it has no bank
     // data. Bank figures the model was given on earlier turns can still reach it
-    // through the conversation history and the memory block; "off" does not
+    // through the stored conversation history and the memory block; "off" does not
     // remove those.
     const plaidStateMode = resolvePlaidStateMode();
     const plaidStateEnabled = plaidStateMode !== "off";
@@ -1318,10 +1359,10 @@ export async function POST(request: NextRequest) {
     if (openRouterApiKey) {
       const openRouterMessages = [
         { role: "system" as const, content: systemPrompt },
-        ...formattedMessages,
+        ...modelConversation.messages,
       ];
 
-      const modelsToTry = selectOpenRouterModels(formattedMessages);
+      const modelsToTry = selectOpenRouterModels(modelConversation.messages);
       let lastFailure: OpenRouterResult | null = null;
       // Which optional blocks the system prompt carries, for llm_calls only.
       const promptBlocks: ChatPromptBlocks = {
