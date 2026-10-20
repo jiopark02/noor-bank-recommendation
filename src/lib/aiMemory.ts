@@ -597,30 +597,6 @@ export async function getSessionMessages(
   return (data ?? []) as DbChatMessage[];
 }
 
-/**
- * Returns the most recent N messages for a user's active session, in
- * chronological order (oldest first). Convenience wrapper used by route.ts
- * when building the LLM context window without sending the entire history.
- *
- * Returns an empty array if the user has no active session.
- *
- * @throws Error when the database query fails.
- */
-export async function getRecentMessagesForActiveSession(
-  userId: string,
-  limit: number = DEFAULT_MESSAGES_LIMIT
-): Promise<DbChatMessage[]> {
-  const session = await getActiveSession(userId);
-  if (!session) return [];
-
-  // Fetch the most-recent N messages (desc), then reverse to chronological.
-  const recent = await getSessionMessages(session.id, userId, {
-    limit,
-    order: "desc",
-  });
-  return recent.reverse();
-}
-
 // -----------------------------------------------------------------------------
 // SECTION 4: User Facts (Layer 2)
 // -----------------------------------------------------------------------------
