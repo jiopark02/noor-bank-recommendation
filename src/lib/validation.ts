@@ -134,32 +134,6 @@ export function validateEmail(email: string): EmailValidation {
 }
 
 // ============================================
-// PHONE VALIDATION & FORMATTING
-// ============================================
-
-export function formatPhoneNumber(value: string): string {
-  // Remove all non-digits
-  const digits = value.replace(/\D/g, '');
-
-  // Format as (xxx) xxx-xxxx
-  if (digits.length === 0) return '';
-  if (digits.length <= 3) return `(${digits}`;
-  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
-}
-
-export function validatePhone(phone: string): { isValid: boolean; error: string | null } {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length === 0) {
-    return { isValid: true, error: null }; // Optional field
-  }
-  if (digits.length !== 10) {
-    return { isValid: false, error: 'Phone number must be 10 digits' };
-  }
-  return { isValid: true, error: null };
-}
-
-// ============================================
 // CURRENCY FORMATTING
 // ============================================
 
@@ -172,103 +146,9 @@ export function formatCurrency(value: number | string): string {
   }).format(num);
 }
 
-export function parseCurrency(value: string): number {
-  const num = parseFloat(value.replace(/[,$]/g, ''));
-  return isNaN(num) ? 0 : num;
-}
-
-// ============================================
-// FORM VALIDATION
-// ============================================
-
-export interface FormField {
-  value: string | number | boolean | null;
-  required?: boolean;
-  minLength?: number;
-  maxLength?: number;
-  pattern?: RegExp;
-  customValidator?: (value: unknown) => string | null;
-}
-
-export interface FormValidationResult {
-  isValid: boolean;
-  errors: Record<string, string>;
-}
-
-export function validateForm(fields: Record<string, FormField>): FormValidationResult {
-  const errors: Record<string, string> = {};
-
-  for (const [fieldName, field] of Object.entries(fields)) {
-    const { value, required, minLength, maxLength, pattern, customValidator } = field;
-
-    // Required check
-    if (required && (value === null || value === undefined || value === '')) {
-      errors[fieldName] = 'This field is required';
-      continue;
-    }
-
-    // Skip other validations if value is empty and not required
-    if (value === null || value === undefined || value === '') continue;
-
-    const strValue = String(value);
-
-    // Min length check
-    if (minLength !== undefined && strValue.length < minLength) {
-      errors[fieldName] = `Must be at least ${minLength} characters`;
-      continue;
-    }
-
-    // Max length check
-    if (maxLength !== undefined && strValue.length > maxLength) {
-      errors[fieldName] = `Must be at most ${maxLength} characters`;
-      continue;
-    }
-
-    // Pattern check
-    if (pattern && !pattern.test(strValue)) {
-      errors[fieldName] = 'Invalid format';
-      continue;
-    }
-
-    // Custom validator
-    if (customValidator) {
-      const customError = customValidator(value);
-      if (customError) {
-        errors[fieldName] = customError;
-      }
-    }
-  }
-
-  return {
-    isValid: Object.keys(errors).length === 0,
-    errors,
-  };
-}
-
-// ============================================
-// NAME VALIDATION
-// ============================================
-
-export function validateName(name: string): { isValid: boolean; error: string | null } {
-  const trimmed = name.trim();
-  if (trimmed.length === 0) {
-    return { isValid: false, error: 'Name is required' };
-  }
-  if (trimmed.length < 2) {
-    return { isValid: false, error: 'Name must be at least 2 characters' };
-  }
-  if (!/^[a-zA-Z\s'-]+$/.test(trimmed)) {
-    return { isValid: false, error: 'Name can only contain letters, spaces, hyphens, and apostrophes' };
-  }
-  return { isValid: true, error: null };
-}
-
 // ============================================
 // NAME SANITIZATION
 // ============================================
-// Role split: validateName = UX/form-level correctness feedback;
-// sanitizeNameField = security/storage-level hardening (always applied
-// server-side regardless of form validation).
 export function sanitizeNameField(value: unknown): string {
   // SECURITY (prompt injection): firstName/lastName are interpolated raw into
   // the system prompt's "## Current User Context" section as a markdown list
@@ -297,7 +177,6 @@ export interface SessionConfig {
 }
 
 const SESSION_KEY = 'noor_session';
-const ACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 const SESSION_DURATION_REMEMBER = 365 * 24 * 60 * 60 * 1000; // 1 year
 
 export function createSession(staySignedIn: boolean): SessionConfig {
@@ -340,38 +219,6 @@ export function updateSessionActivity(): void {
   } else {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
   }
-}
-
-export function isSessionValid(): boolean {
-  const session = getSession();
-  if (!session) return false;
-
-  const now = Date.now();
-
-  // For "stay signed in" sessions, check expiration
-  if (session.staySignedIn && session.expiresAt > 0 && now > session.expiresAt) {
-    clearSession();
-    return false;
-  }
-
-  // For non-persistent sessions (expiresAt = 0), they auto-clear on browser close
-  // Just check inactivity timeout
-  if (!session.staySignedIn) {
-    const inactiveTime = now - session.lastActivity;
-    if (inactiveTime > ACTIVITY_TIMEOUT) {
-      return false; // Session timed out but don't clear yet (for "still there?" prompt)
-    }
-  }
-
-  return true;
-}
-
-export function isInactivityWarning(): boolean {
-  const session = getSession();
-  if (!session || session.staySignedIn) return false;
-
-  const inactiveTime = Date.now() - session.lastActivity;
-  return inactiveTime > ACTIVITY_TIMEOUT && inactiveTime < ACTIVITY_TIMEOUT * 2;
 }
 
 export function clearSession(): void {
@@ -435,52 +282,11 @@ export function clearPlaidLocalState(): void {
   localStorage.removeItem('noor_plaid_transactions');
 }
 
-// ============================================
-// NOOR LOCAL STORAGE KEY REGISTRY (documentation + logout-subset reference)
-// ============================================
-// This is a documented inventory of known noor_* localStorage keys. It is NO
-// LONGER the account-deletion execution list — purgeAllNoorLocalState() uses a
-// prefix sweep instead, because this hand-maintained list provably drifts (see
-// that function's comment). Keep it current as a reference, but nothing depends
-// on it being exhaustive for correctness anymore.
-//
-// Its remaining active role is to document the sensitive subset that the LOGOUT
-// path (clearLocalAuthState) clears vs. leaves — a logout must not wipe device
-// preferences (e.g. language), so logout cannot use the blanket sweep.
-//
-// Some keys are written via named constants elsewhere in this file:
-//   'noor_session'           -> SESSION_KEY
-//   'noor_notification_prefs' -> NOTIFICATION_KEY
-//   'noor_terms_accepted'    -> TERMS_KEY (written ONLY via that constant, so it
-//                               never appears as a bare literal in feature code).
-export const NOOR_LOCAL_KEYS = [
-  'noor_session',
-  'noor_user_id',
-  'noor_user_profile',
-  'noor_chat_history',
-  'noor_locale',
-  'noor_plaid_connections',   // no longer written; earlier builds stored connection details
-  'noor_plaid_accounts',      // no longer written; earlier builds cached account balances
-  'noor_plaid_transactions',  // no longer written; earlier builds cached transactions
-  'noor_selected_country',
-  'noor_user_intent',
-  'noor_user_priorities',
-  'noor_quick_prompt',
-  'noor_onboarding_completed',
-  'noor_notification_prefs',
-  'noor_notifications',
-  'noor_savings_goals',
-  'noor_finance_progress',
-  'noor_checklist_completed',
-  'noor_checklist_items',
-  'noor_terms_accepted',
-] as const;
-
 /**
  * Full local-state purge for ACCOUNT DELETION (not logout).
  *
  * Sweeps EVERY key with the "noor_" prefix from both localStorage and
- * sessionStorage. This deliberately does NOT iterate NOOR_LOCAL_KEYS: the
+ * sessionStorage. This deliberately does NOT iterate a static key list: a
  * hand-maintained whitelist was abandoned here after 2026-07-03 live testing
  * found noor_plaid_accounts / noor_plaid_transactions surviving deletion, and a
  * full setItem sweep then surfaced ~17 further noor_* keys missing from the
@@ -525,64 +331,7 @@ export const ERROR_MESSAGES = {
 
   // Session
   SESSION_EXPIRED: 'Your session has expired. Please sign in again.',
-  SESSION_TIMEOUT: 'You have been inactive. Please sign in again.',
 };
-
-// ============================================
-// API HELPERS
-// ============================================
-
-export interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
-}
-
-export async function fetchWithTimeout<T>(
-  url: string,
-  options: RequestInit = {},
-  timeout: number = 10000
-): Promise<ApiResponse<T>> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-
-    clearTimeout(id);
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      return {
-        success: false,
-        error: data.error || data.message || ERROR_MESSAGES.SERVER_ERROR,
-      };
-    }
-
-    return {
-      success: true,
-      data,
-    };
-  } catch (error) {
-    clearTimeout(id);
-
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        return { success: false, error: ERROR_MESSAGES.TIMEOUT_ERROR };
-      }
-      if (error.message.includes('fetch')) {
-        return { success: false, error: ERROR_MESSAGES.NETWORK_ERROR };
-      }
-    }
-
-    return { success: false, error: ERROR_MESSAGES.SERVER_ERROR };
-  }
-}
 
 // ============================================
 // NOTIFICATION PREFERENCES
@@ -666,50 +415,6 @@ export function calculateProfileCompletion(profile: Record<string, unknown> | nu
     requiredFields: missingRequired,
     optionalFields: missingOptional,
   };
-}
-
-// ============================================
-// DATA EXPORT (GDPR)
-// ============================================
-
-export function exportUserData(): string {
-  const data: Record<string, unknown> = {};
-
-  // Collect all user data from localStorage
-  const keys = [
-    'noor_user_id',
-    'noor_user_profile',
-    'noor_savings_goals',
-    'noor_finance_progress',
-    'noor_notification_prefs',
-    'noor_session',
-  ];
-
-  for (const key of keys) {
-    const value = localStorage.getItem(key);
-    if (value) {
-      try {
-        data[key] = JSON.parse(value);
-      } catch {
-        data[key] = value;
-      }
-    }
-  }
-
-  return JSON.stringify(data, null, 2);
-}
-
-export function downloadUserData(): void {
-  const data = exportUserData();
-  const blob = new Blob([data], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `noor-data-export-${new Date().toISOString().split('T')[0]}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 // ============================================
