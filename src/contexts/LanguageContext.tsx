@@ -135,9 +135,3 @@ export function useLanguage() {
   }
   return context;
 }
-
-// Hook for simple translation
-export function useTranslation() {
-  const { t, locale, isRTL } = useLanguage();
-  return { t, locale, isRTL };
-}

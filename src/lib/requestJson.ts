@@ -42,10 +42,6 @@ export function readRecord(
   return asPlainObject(v);
 }
 
-export function readStringProp(obj: unknown, key: string): string | undefined {
-  return readString(asPlainObject(obj), key);
-}
-
 export function readFiniteNumber(
   obj: Record<string, unknown>,
   key: string

@@ -39,7 +39,6 @@ export const DEAL_CATEGORIES: DealCategory[] = [
 
 // Storage key
 const STORAGE_KEY_DEALS = 'noor_user_deals';
-const STORAGE_KEY_UPVOTES = 'noor_deal_upvotes';
 
 // ============================================================================
 // US DEALS
@@ -1772,52 +1771,4 @@ export function submitDeal(deal: Omit<Deal, 'id' | 'upvotes' | 'created_at' | 'i
   }
 
   return newDeal;
-}
-
-// Upvote a deal
-export function upvoteDeal(dealId: string): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    // Check if already upvoted
-    const stored = localStorage.getItem(STORAGE_KEY_UPVOTES);
-    const upvotes: string[] = stored ? JSON.parse(stored) : [];
-
-    if (upvotes.includes(dealId)) {
-      // Remove upvote
-      const updated = upvotes.filter(id => id !== dealId);
-      localStorage.setItem(STORAGE_KEY_UPVOTES, JSON.stringify(updated));
-    } else {
-      // Add upvote
-      upvotes.push(dealId);
-      localStorage.setItem(STORAGE_KEY_UPVOTES, JSON.stringify(upvotes));
-    }
-  } catch {
-    // Ignore
-  }
-}
-
-// Check if user upvoted a deal
-export function hasUpvoted(dealId: string): boolean {
-  if (typeof window === 'undefined') return false;
-
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_UPVOTES);
-    const upvotes: string[] = stored ? JSON.parse(stored) : [];
-    return upvotes.includes(dealId);
-  } catch {
-    return false;
-  }
-}
-
-// Get upvoted deals
-export function getUpvotedDeals(): string[] {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_UPVOTES);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
 }
