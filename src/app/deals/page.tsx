@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
 import { useDeals, Deal } from '@/hooks/useDeals';
@@ -16,21 +16,8 @@ const DEAL_CATEGORIES = [
   { id: 'education', label: 'Education', icon: '📚' },
 ];
 
-// Per-deal upvote flags, one key per upvoted deal id, value the string 'true'.
-// The `noor_` prefix is not cosmetic: account deletion clears browser storage
-// with a prefix sweep (purgeAllNoorLocalState), so a key spelled without it
-// survives deletion permanently. Dynamic suffixes like this one are exactly why
-// that sweep is prefix-based rather than a static key list.
-const UPVOTE_KEY_PREFIX = 'noor_deal_upvoted_';
-
-// The spelling these keys had before the rename. Browsers that visited an
-// earlier build still hold them; the migration below ports them once and then
-// removes them, so nothing is left behind for the sweep to miss.
-const LEGACY_UPVOTE_KEY_PREFIX = 'deal_upvoted_';
-
 export default function DealsPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [upvotedDeals, setUpvotedDeals] = useState<Set<string>>(new Set());
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [newDeal, setNewDeal] = useState({
@@ -47,60 +34,6 @@ export default function DealsPage() {
   const { deals, isLoading, refetch } = useDeals({
     category: selectedCategory,
   });
-
-  // Load upvotes from localStorage
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    // Port anything still stored under the legacy prefix, then drop it. Driven
-    // by the prefix rather than by `deals`, because a legacy key belonging to a
-    // deal outside the active category filter would never be visited otherwise
-    // and would stay orphaned past account deletion — the gap this rename
-    // exists to close.
-    //
-    // Two passes, collect then mutate: removing a key during the index walk
-    // shifts every later key down one slot and skips half of them.
-    const legacyKeys: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      // A ported key begins with `noor_`, so it can never match the legacy
-      // prefix and cannot be picked up again on a later pass.
-      if (key && key.startsWith(LEGACY_UPVOTE_KEY_PREFIX)) {
-        legacyKeys.push(key);
-      }
-    }
-    legacyKeys.forEach((legacyKey) => {
-      const value = localStorage.getItem(legacyKey);
-      if (value !== null) {
-        const dealId = legacyKey.slice(LEGACY_UPVOTE_KEY_PREFIX.length);
-        localStorage.setItem(`${UPVOTE_KEY_PREFIX}${dealId}`, value);
-      }
-      localStorage.removeItem(legacyKey);
-    });
-
-    const upvoted = new Set<string>();
-    deals.forEach((deal) => {
-      if (localStorage.getItem(`${UPVOTE_KEY_PREFIX}${deal.id}`)) {
-        upvoted.add(deal.id);
-      }
-    });
-    setUpvotedDeals(upvoted);
-  }, [deals]);
-
-  const handleUpvote = (dealId: string) => {
-    const key = `${UPVOTE_KEY_PREFIX}${dealId}`;
-    setUpvotedDeals((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(dealId)) {
-        newSet.delete(dealId);
-        if (typeof window !== 'undefined') localStorage.removeItem(key);
-      } else {
-        newSet.add(dealId);
-        if (typeof window !== 'undefined') localStorage.setItem(key, 'true');
-      }
-      return newSet;
-    });
-  };
 
   const handleSubmitDeal = () => {
     if (!newDeal.title || !newDeal.description || !newDeal.brand) return;
@@ -215,31 +148,6 @@ export default function DealsPage() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {/* Upvote */}
-                        <button
-                          onClick={() => handleUpvote(deal.id)}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-all ${
-                            upvotedDeals.has(deal.id)
-                              ? 'bg-orange-100 text-orange-600'
-                              : 'bg-[#F5F4F2] text-[#6B6B6B]'
-                          }`}
-                        >
-                          <svg
-                            className={`w-3 h-3 ${upvotedDeals.has(deal.id) ? 'fill-orange-600' : ''}`}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M5 15l7-7 7 7"
-                            />
-                          </svg>
-                          {(deal.upvotes || 0) + (upvotedDeals.has(deal.id) ? 1 : 0)}
-                        </button>
-
                         {/* Get Deal */}
                         {deal.link && (
                           <a
