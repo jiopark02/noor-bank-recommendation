@@ -130,8 +130,6 @@ export default function AuthCallbackPage() {
           createSession(true);
 
           if (hasCompletedSurvey) {
-            // Fill the onboarding cache from the DB (source of truth).
-            localStorage.setItem("noor_onboarding_completed", "true");
             router.push("/dashboard");
           } else {
             // No survey yet — send them to complete their profile.

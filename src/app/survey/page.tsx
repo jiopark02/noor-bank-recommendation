@@ -709,9 +709,6 @@ export default function SurveyPage() {
       // Third layer of the consent gate, and the only one that is not UI: a user
       // who did not tick the box gets no acceptance record written at all.
       if (data.agreeToTerms) acceptTerms();
-      // Writer for the onboarding cache (previously a ghost key nothing set):
-      // the survey is now complete. callback also fills this from the DB.
-      localStorage.setItem("noor_onboarding_completed", "true");
 
       // Merge over the cached profile rather than replacing it. Settings is the
       // only writer for the school fields now, and re-submitting this form must
