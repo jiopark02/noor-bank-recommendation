@@ -59,8 +59,11 @@ export default function AuthCallbackPage() {
 
           // New vs returning is decided by the DB, not a local cache: does a
           // survey_responses row exist for this user? (The old
-          // noor_onboarding_completed check was a ghost key nothing ever wrote,
-          // so every OAuth login was treated as new.)
+          // noor_onboarding_completed check read a key nothing wrote while the
+          // check existed, so every OAuth login was treated as new. Writers for
+          // the key were added on 2026-07-06, in the change that replaced the
+          // check, and have since been removed; no code ever read what they
+          // wrote.)
           const { data: surveyRow } = await supabase
             .from("survey_responses")
             .select("id")

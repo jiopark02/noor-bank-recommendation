@@ -231,7 +231,9 @@ export function clearSession(): void {
 // ============================================
 // SECURITY: Chat history was mirrored to localStorage under "noor_chat_history"
 // and was NOT cleared on logout, leaving prior users' plaintext financial
-// conversations readable on a shared device (via DevTools or "Export My Data").
+// conversations readable on a shared device (via DevTools, or via the old
+// "Export My Data" path, which dumped localStorage to a file; that path has
+// been removed, and data export is now served by a server API).
 // This central helper purges all local auth/profile/chat state and must be
 // called from every logout-equivalent path (explicit logout, account delete,
 // and the SIGNED_OUT auth event covering other-tab logout / token expiry).
@@ -314,23 +316,9 @@ export function purgeAllNoorLocalState(): void {
 export const ERROR_MESSAGES = {
   // Auth
   INVALID_CREDENTIALS: 'Invalid email or password',
-  EMAIL_EXISTS: 'An account with this email already exists',
-  EMAIL_NOT_FOUND: 'No account found with this email',
-  PASSWORD_MISMATCH: "Passwords don't match",
-  WEAK_PASSWORD: 'Password does not meet requirements',
 
   // Network
-  NETWORK_ERROR: 'Unable to connect. Please check your internet connection.',
   SERVER_ERROR: 'Something went wrong. Please try again later.',
-  TIMEOUT_ERROR: 'Request timed out. Please try again.',
-
-  // Form
-  REQUIRED_FIELD: 'This field is required',
-  INVALID_EMAIL: 'Please enter a valid email address',
-  INVALID_PHONE: 'Please enter a valid phone number',
-
-  // Session
-  SESSION_EXPIRED: 'Your session has expired. Please sign in again.',
 };
 
 // ============================================
