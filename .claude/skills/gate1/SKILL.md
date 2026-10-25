@@ -25,9 +25,9 @@ Result files are named `<out>/gate1-<test basename>-<timestamp>-green-1.txt`, `-
 2. Run the full suite green: `npx vitest run > <prefix>-green-1.txt 2>&1; echo "exit=$?"`.
 3. Back up `<src>` to `<out>`.
 4. Count CR-bearing lines in `<src>`:
-   `CR=$(printf '\r'); grep -c "$CR" <src>; echo "exit=$?"`.
-   Do not write `$'\r'` inside a double-quoted `"$( )"`; there it matches every line, not CRs.
-5. Revert only the fix hunk(s) from `git show <commit> -- <src>` with the Edit tool. Never use `sed -i`. Count CR-bearing lines again; the count must match step 4 (allowing only for lines the revert removed or added).
+   `grep -U -c "$(printf '\r')" <src>; echo "exit=$?"`.
+   Do not write `$'\r'` inside a double-quoted `"$( )"`; there it matches every line, not CRs, and always pass -U: Git Bash grep strips CR without it.
+5. Revert only the fix hunk(s) from `git show <commit> -- <src>` with the Edit tool. Never use `sed -i`. Count CR-bearing lines again with `grep -U -c "$(printf '\r')" <src>`; the count must match step 4 (allowing only for lines the revert removed or added).
 6. Run the full suite: `npx vitest run > <prefix>-red.txt 2>&1; echo "exit=$?"`. It counts as red only if the target test in `<test>` is in the failure list. Record the failing assertion and message verbatim.
 7. Restore with `git checkout -- <src>`.
 8. `git status --porcelain` must be empty. Then run the suite green again: `npx vitest run > <prefix>-green-2.txt 2>&1; echo "exit=$?"`.
