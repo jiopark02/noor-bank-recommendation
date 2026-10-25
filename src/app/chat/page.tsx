@@ -245,7 +245,7 @@ export default function ChatPage() {
               </span>
             </div>
             <p className="text-[11px] text-gray-400 mt-0.5" style={{ fontFamily: FONT }}>
-              AI assistant · Not financial advice
+              AI assistant
             </p>
           </div>
         </div>

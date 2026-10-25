@@ -109,7 +109,7 @@ export function ChatModal({
                   className="text-xs"
                   style={{ color: headerTextColor, opacity: 0.7 }}
                 >
-                  AI assistant · Not financial advice
+                  AI assistant
                 </p>
               </div>
             </div>
