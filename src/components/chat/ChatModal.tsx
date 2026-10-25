@@ -109,7 +109,7 @@ export function ChatModal({
                   className="text-xs"
                   style={{ color: headerTextColor, opacity: 0.7 }}
                 >
-                  Financial assistant for international students
+                  AI assistant
                 </p>
               </div>
             </div>
@@ -157,8 +157,8 @@ export function ChatModal({
                 </div>
                 <h4 className="font-medium text-gray-900 mb-1">Hi! I'm Noor</h4>
                 <p className="text-sm text-gray-500 mb-2">
-                  I'm here to help with banking, housing, visa questions, and
-                  more.
+                  I'm here to help with budgeting, saving, and everyday money
+                  questions.
                 </p>
                 <p className="text-xs text-gray-400 mb-6">
                   No question is too small. Take your time.

@@ -245,7 +245,7 @@ export default function ChatPage() {
               </span>
             </div>
             <p className="text-[11px] text-gray-400 mt-0.5" style={{ fontFamily: FONT }}>
-              {userName ? `Personalized for ${userName}` : "Personalized to your profile"}
+              AI assistant
             </p>
           </div>
         </div>
@@ -291,7 +291,7 @@ export default function ChatPage() {
                 {userName ? `Hi ${userName}.` : "Ask me anything."}
               </h2>
               <p className="text-[14px] text-gray-400 mt-1.5 leading-relaxed" style={{ fontFamily: FONT }}>
-                Banking, credit, visa, taxes — I know your profile.
+                Budgeting, saving, credit — I know your profile.
               </p>
             </div>
 
@@ -470,7 +470,7 @@ export default function ChatPage() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); }
             }}
-            placeholder="Ask about banking, visa, taxes…"
+            placeholder="Ask about your money…"
             className="flex-1 bg-transparent outline-none text-[14px] placeholder:text-gray-300"
             style={{ fontFamily: FONT, color: "#0A0A0A" }}
           />

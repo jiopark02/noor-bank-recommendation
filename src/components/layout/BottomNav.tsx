@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,47 +13,13 @@ interface NavItem {
   icon: React.ComponentType<IconProps>;
 }
 
-const INTL_VISA_PATTERNS = ["F-1", "F1", "J-1", "J1", "M-1", "M1", "F-2", "J-2"];
-
-function resolveVisaTypeFromStorage(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem("noor_user_profile");
-    if (!raw) return null;
-    const profile = JSON.parse(raw) as Record<string, unknown>;
-    const candidate =
-      profile.visaType ??
-      profile.visa_type ??
-      profile.visa_status ??
-      profile.visaStatus;
-    return typeof candidate === "string" && candidate.trim()
-      ? candidate.trim()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function isInternationalVisa(visaType: string | null): boolean {
-  if (!visaType) return false;
-  const upper = visaType.toUpperCase();
-  return INTL_VISA_PATTERNS.some(
-    (pattern) =>
-      upper.includes(pattern.toUpperCase()) ||
-      upper.replace(/\s/g, "").includes(pattern.replace(/-/g, "").toUpperCase())
-  );
-}
-
-function buildMoreMenuGroups(showIntlOnly: boolean): {
+function buildMoreMenuGroups(): {
   title: string;
   items: NavItem[];
 }[] {
   const finance: NavItem[] = [
     { href: "/banking", labelKey: "nav.banking", icon: BankingIcon },
     { href: "/grow", labelKey: "nav.grow", icon: GrowIcon },
-    ...(showIntlOnly
-      ? [{ href: "/visa", labelKey: "nav.visa", icon: VisaIcon }]
-      : []),
     { href: "/money", labelKey: "nav.money", icon: MoneyIcon },
   ];
 
@@ -62,9 +28,6 @@ function buildMoreMenuGroups(showIntlOnly: boolean): {
     { href: "/jobs", labelKey: "nav.jobs", icon: JobsIcon },
     { href: "/funding", labelKey: "nav.funding", icon: FundingIcon },
     { href: "/deals", labelKey: "nav.deals", icon: DealsIcon },
-    ...(showIntlOnly
-      ? [{ href: "/guides", labelKey: "nav.guides", icon: GuidesIcon }]
-      : []),
   ];
 
   const settings: NavItem[] = [
@@ -96,17 +59,7 @@ export function BottomNav() {
   const { theme, useSchoolTheme } = useTheme();
   const { t } = useLanguage();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  const [visaType, setVisaType] = useState<string | null>(null);
-
-  useEffect(() => {
-    setVisaType(resolveVisaTypeFromStorage());
-  }, [safePathname, isMoreOpen]);
-
-  const showIntlMenu = isInternationalVisa(visaType);
-  const moreMenuGroups = useMemo(
-    () => buildMoreMenuGroups(showIntlMenu),
-    [showIntlMenu]
-  );
+  const moreMenuGroups = useMemo(() => buildMoreMenuGroups(), []);
 
   const allMoreItems = useMemo(
     () => moreMenuGroups.flatMap((g) => g.items),
@@ -383,31 +336,6 @@ function HousingIcon({ active }: IconProps) {
   );
 }
 
-function VisaIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <rect
-        x="2"
-        y="4"
-        width="20"
-        height="16"
-        rx="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M2 10h20" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6 16h4M14 16h4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function GrowIcon({ active }: IconProps) {
   return (
     <svg
@@ -595,31 +523,6 @@ function LandingPageIcon({ active }: IconProps) {
     >
       <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M9 21V12h6v9" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function GuidesIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M4 19.5A2.5 2.5 0 016.5 17H20"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M8 7h8M8 11h6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

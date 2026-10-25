@@ -322,48 +322,6 @@ export const ERROR_MESSAGES = {
 };
 
 // ============================================
-// NOTIFICATION PREFERENCES
-// ============================================
-
-export interface NotificationPreferences {
-  emailNotifications: boolean;
-  pushNotifications: boolean;
-  visaReminders: boolean;
-  budgetAlerts: boolean;
-  newDeals: boolean;
-  forumReplies: boolean;
-  weeklySummary: boolean;
-}
-
-const NOTIFICATION_KEY = 'noor_notification_prefs';
-
-export const DEFAULT_NOTIFICATION_PREFS: NotificationPreferences = {
-  emailNotifications: true,
-  pushNotifications: true,
-  visaReminders: true,
-  budgetAlerts: true,
-  newDeals: true,
-  forumReplies: true,
-  weeklySummary: true,
-};
-
-export function getNotificationPreferences(): NotificationPreferences {
-  const stored = localStorage.getItem(NOTIFICATION_KEY);
-  if (!stored) return DEFAULT_NOTIFICATION_PREFS;
-  try {
-    return { ...DEFAULT_NOTIFICATION_PREFS, ...JSON.parse(stored) };
-  } catch {
-    return DEFAULT_NOTIFICATION_PREFS;
-  }
-}
-
-export function saveNotificationPreferences(prefs: Partial<NotificationPreferences>): void {
-  const current = getNotificationPreferences();
-  const updated = { ...current, ...prefs };
-  localStorage.setItem(NOTIFICATION_KEY, JSON.stringify(updated));
-}
-
-// ============================================
 // USER PROFILE COMPLETION
 // ============================================
 

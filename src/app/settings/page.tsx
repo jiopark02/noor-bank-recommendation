@@ -12,10 +12,6 @@ import {
   validatePassword,
   getPasswordStrengthColor,
   getPasswordStrengthLabel,
-  getNotificationPreferences,
-  saveNotificationPreferences,
-  NotificationPreferences,
-  DEFAULT_NOTIFICATION_PREFS,
   calculateProfileCompletion,
   clearLocalAuthState,
   purgeAllNoorLocalState,
@@ -223,11 +219,6 @@ const Ico = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
     </svg>
   ),
-  bell: (
-    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-    </svg>
-  ),
   download: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -340,7 +331,6 @@ export default function SettingsPage() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
-  const [notifications, setNotifications] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFS);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -376,7 +366,6 @@ export default function SettingsPage() {
     }
     const checklistDone = localStorage.getItem('noor_checklist_completed');
     setChecklistCompleted(checklistDone === 'true');
-    setNotifications(getNotificationPreferences());
   }, []);
 
   const passwordValidation = useMemo(() => validatePassword(newPassword), [newPassword]);
@@ -414,12 +403,6 @@ export default function SettingsPage() {
   const showError = (message: string) => {
     setToastError(message);
     setTimeout(() => setToastError(null), 4000);
-  };
-
-  const handleNotificationChange = (key: keyof NotificationPreferences, value: boolean) => {
-    const updated = { ...notifications, [key]: value };
-    setNotifications(updated);
-    saveNotificationPreferences(updated);
   };
 
   const handleResetChecklist = () => {
@@ -625,16 +608,6 @@ export default function SettingsPage() {
 
   const initials = getInitials(userProfile?.firstName, userProfile?.lastName);
   const fullName = [userProfile?.firstName, userProfile?.lastName].filter(Boolean).join(' ');
-
-  const NOTIFICATION_ROWS: Array<{ key: keyof NotificationPreferences; label: string; desc: string }> = [
-    { key: 'emailNotifications', label: 'Email Notifications', desc: 'Important updates and alerts' },
-    { key: 'pushNotifications', label: 'Push Notifications', desc: 'Real-time alerts on your device' },
-    { key: 'visaReminders', label: 'Goal Reminders', desc: 'Progress check-ins and milestones' },
-    { key: 'budgetAlerts', label: 'Budget Alerts', desc: 'Spending limit and savings updates' },
-    { key: 'newDeals', label: 'New Deals', desc: 'Exclusive offers and discounts' },
-    { key: 'forumReplies', label: 'Forum Replies', desc: 'Responses to your posts' },
-    { key: 'weeklySummary', label: 'Weekly Summary', desc: 'Digest of your financial activity' },
-  ];
 
   return (
     <div className="min-h-screen pb-28" style={{ background: '#F5F5F5', fontFamily: FONT }}>
@@ -843,39 +816,6 @@ export default function SettingsPage() {
           last
           onClick={() => setShowLanguageModal(true)}
         />
-      </SettingsCard>
-
-      {/* ── NOTIFICATIONS ── */}
-      <SectionLabel>Notifications</SectionLabel>
-      <SettingsCard>
-        {NOTIFICATION_ROWS.map((item, idx) => (
-          <div
-            key={item.key}
-            className="flex items-center gap-3.5 px-4 py-3.5"
-            style={{
-              borderBottom: idx < NOTIFICATION_ROWS.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
-            }}
-          >
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(0,0,0,0.05)' }}
-            >
-              <div style={{ color: 'rgba(0,0,0,0.55)' }}>{Ico.bell}</div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[14px] font-medium text-black leading-tight" style={{ fontFamily: FONT }}>
-                {item.label}
-              </div>
-              <div className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.35)', fontFamily: FONT }}>
-                {item.desc}
-              </div>
-            </div>
-            <Toggle
-              checked={notifications[item.key]}
-              onChange={(v) => handleNotificationChange(item.key, v)}
-            />
-          </div>
-        ))}
       </SettingsCard>
 
       {/* ── DATA & PRIVACY ── */}

@@ -38,7 +38,6 @@ const SEARCHABLE_ITEMS: SearchResult[] = [
   // Pages
   { id: 'page-banking', type: 'page', title: 'Banking', subtitle: 'Bank accounts & credit cards', href: '/banking', icon: '📄' },
   { id: 'page-housing', type: 'page', title: 'Housing', subtitle: 'Find apartments near campus', href: '/housing', icon: '📄' },
-  { id: 'page-visa', type: 'page', title: 'Visa Tracker', subtitle: 'F-1 status & OPT timeline', href: '/visa', icon: '📄' },
   { id: 'page-funding', type: 'page', title: 'Funding', subtitle: 'Scholarships & grants', href: '/funding', icon: '📄' },
   { id: 'page-jobs', type: 'page', title: 'Jobs', subtitle: 'Campus & CPT jobs', href: '/jobs', icon: '📄' },
   { id: 'page-forum', type: 'page', title: 'Forum', subtitle: 'Community discussions', href: '/forum', icon: '📄' },
@@ -47,7 +46,6 @@ const SEARCHABLE_ITEMS: SearchResult[] = [
 
   // Common searches
   { id: 'ssn', type: 'page', title: 'Open account without SSN', subtitle: 'Guide', href: '/banking', icon: '❓' },
-  { id: 'opt', type: 'page', title: 'OPT Application', subtitle: 'Timeline & requirements', href: '/visa', icon: '❓' },
   { id: 'credit', type: 'page', title: 'Build Credit History', subtitle: 'First credit card guide', href: '/banking', icon: '❓' },
 ];
 
