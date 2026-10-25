@@ -8,8 +8,10 @@
 //   - edits in place with sed (-i / --in-place), which rewrites CRLF files
 // Anything else exits 0 with no output, so the normal permission flow applies.
 //
-// This is a guardrail, not a security boundary: eval, variables, xargs and
-// shell-expanded globs are not followed.
+// This is a guardrail, not a security boundary: eval, variables, xargs,
+// shell-expanded globs and env with options (env -i ...) are not followed, and
+// a relative -F path under git -C <dir> is resolved against the hook cwd, not
+// <dir>.
 
 "use strict";
 
