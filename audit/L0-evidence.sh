@@ -115,11 +115,18 @@ run "branch ui-redesign-glass-wip: file list vs main (name only)" \
 # ---------------------------------------------------------------------------
 section "02. SYMBOL CENSUS  (definition + every reference, per symbol)"
 # ---------------------------------------------------------------------------
+# Expected: no hit under src/ or supabase/ for signInAnonymously, signUp,
+# validateName (CLAUDE.md says no call site), signInWithOtp (an account entry
+# point CLAUDE.md does not list) and url.parse (deprecated Node API).
+# bcrypt (the legacy password_hash path was removed) has exactly one hit under
+# src/: the regex literal text "\bcrypto" in
+# src/lib/__tests__/financeEngineBoundary.test.ts, not a bcrypt reference.
+# The tree-wide count is not 0: CLAUDE.md, docs/ and messages/*.json mention
+# some of these.
 for sym in \
-  downloadUserData isSessionValid isInactivityWarning \
   signInAnonymously signInWithOtp signUp createUser \
   validateName sanitizeNameField acceptTerms \
-  resolvePlaidStateMode getRecentChatTurnCount resolveChatRateLimit \
+  resolvePlaidStateMode reserveChatUsage resolveChatUsageMode \
   isAiMemoryEnabled isSignupDisabled \
   getSessionSafe getSession onAuthStateChange getUser \
   itemRemove mapAccountType mapAccountKind buildBalanceSummary \
@@ -162,6 +169,7 @@ ls -1 supabase/migrations 2>/dev/null \
 printf '[end of duplicate scan]\n' >> "$OUT"
 
 sub "column-name patterns across all migrations"
+# Expected 0: consent, terms_accepted, agreed_at, policy_version, consented_at, confirmation_sent_at (CLAUDE.md: no column stores terms acceptance).
 for col in consent terms_accepted agreed_at policy_version consented_at \
            confirmation_sent_at access_token encrypted institution_id \
            ip_address user_agent input_tokens output_tokens
@@ -229,15 +237,18 @@ grep -nIE 'messages|system|push\(|contextBlock|prompt' \
 printf '[end]\n' >> "$OUT"
 
 sub "OpenRouter / Anthropic endpoint literals"
+# Expected 0: api.anthropic.com and ANTHROPIC_API_KEY (CLAUDE.md: OpenRouter is the only provider path).
 for p in 'openrouter.ai' 'api.anthropic.com' 'OPENROUTER_' 'ANTHROPIC_API_KEY'
 do
   g "$p"
 done
 
-sub "chat_messages / user_facts / chat_summaries write sites"
-for p in "from('chat_messages')" "from('user_facts')" "from('chat_summaries')" \
-         "from('plaid_connections')" "from('users')" "from('survey_responses')" \
-         "from('waitlist_signups')"
+sub "from() call sites (reads and writes) for chat_messages / user_facts / chat_summaries / plaid_connections / users / survey_responses / waitlist_signups"
+# Basic regex; [\"'] matches either quote style used for the table name.
+for p in "from([\"']chat_messages[\"'])" "from([\"']user_facts[\"'])" \
+         "from([\"']chat_summaries[\"'])" "from([\"']plaid_connections[\"'])" \
+         "from([\"']users[\"'])" "from([\"']survey_responses[\"'])" \
+         "from([\"']waitlist_signups[\"'])"
 do
   g "$p"
 done
@@ -258,6 +269,7 @@ printf '[end]\n' >> "$OUT"
 # ---------------------------------------------------------------------------
 section "09. CONSENT / POLICY TEXT SURFACE"
 # ---------------------------------------------------------------------------
+# Expected 0: noorapp.com (stale contact domain; copy was moved to noor.financial in 2760c82 and cd915e1).
 for p in 'international student' 'International Student' 'noorapp.com' \
          'privacy@' 'Last updated' 'industry-standard' 'never sell' \
          'terms_accepted' 'noor_terms_accepted'
@@ -273,6 +285,8 @@ sub "next.config.js header block with line numbers (already dumped in 05; isolat
 grep -nI -A40 -e 'securityHeaders' next.config.js 2>/dev/null >> "$OUT"
 printf '[end]\n' >> "$OUT"
 
+# Not expected 0. The six header names are set in next.config.js, so src/ and supabase/ hold no hit for them.
+# 'nonce' is a common word and does hit src/ (e.g. the GCM nonce in src/lib/plaidTokenCrypto.ts).
 for p in 'Strict-Transport-Security' 'Content-Security-Policy' 'X-Frame-Options' \
          'Permissions-Policy' 'Referrer-Policy' 'X-Content-Type-Options' 'nonce'
 do
@@ -293,7 +307,8 @@ done
 # ---------------------------------------------------------------------------
 section "12. CRON / RATE LIMIT / AUTH GATES"
 # ---------------------------------------------------------------------------
-for p in 'CRON_SECRET' 'CHAT_RATE_LIMIT_ENABLED' 'CHAT_MAX_REQUESTS_PER_HOUR' \
+# Expected: no hit under src/ for AI_MEMORY_ENABLED (CLAUDE.md: referenced nowhere in code); CLAUDE.md and docs/ mention it.
+for p in 'CRON_SECRET' 'CHAT_USAGE_LIMIT_MODE' 'CHAT_USAGE_LIMITS' \
          'SIGNUP_DISABLED' 'AI_SUPABASE_READ_ENABLED' 'AI_MEMORY_ENABLED' \
          'requireAdmin' 'createAdminClient' 'service_role' 'SUPABASE_SERVICE_ROLE'
 do
