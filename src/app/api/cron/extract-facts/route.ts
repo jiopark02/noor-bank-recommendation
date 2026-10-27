@@ -617,8 +617,8 @@ async function extractOneSession(
       await supersedeUserFact(session.user_id, oldFact.id, payload);
       stats.superseded++;
     } catch (supersedeError) {
-      // A replacement holding an SSN- or card-shaped string is rejected before
-      // the old fact is touched, so there is nothing to recover: the old fact
+      // The output filter rejects a replacement (an identifier-shaped string or
+      // crisis content) before the old fact is touched, so there is nothing to recover: the old fact
       // stays active and the replacement is not stored.
       if (isSensitiveFactRejected(supersedeError)) {
         stats.filtered++;
@@ -672,7 +672,8 @@ async function extractOneSession(
       stats.saved++;
     } catch (saveError) {
       if (isSensitiveFactRejected(saveError)) {
-        // Not stored: the fact holds an SSN- or card-shaped string.
+        // Not stored: the output filter rejected the fact (an identifier-shaped
+        // string or crisis content).
         stats.filtered++;
       } else if (isUniqueViolation(saveError)) {
         // 동일 텍스트 active fact 이미 존재 — upsert와 동일하게 흡수.
