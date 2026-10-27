@@ -16,6 +16,8 @@ import {
   getDemoMessagesUsed,
   incrementDemoMessagesUsed,
 } from '../_lib';
+import { detectCrisisSignal } from '@/lib/crisisSignals';
+import { CRISIS_NOTICES } from '@/lib/crisisNotice';
 
 interface ChatMsg {
   role: 'user' | 'assistant';
@@ -63,7 +65,12 @@ export default function DemoChatPage() {
 
     window.setTimeout(() => {
       setTyping(false);
-      setMessages((prev) => [...prev, { role: 'assistant', text: getCannedAnswer(text) }]);
+      // A crisis signal gets the fixed notice instead of a canned answer: the
+      // canned answers are about the sample finances. Local only, like the
+      // rest of the demo: always the standard notice, nothing counted or sent.
+      const crisis = detectCrisisSignal(text);
+      const reply = crisis ? CRISIS_NOTICES[crisis].standard : getCannedAnswer(text);
+      setMessages((prev) => [...prev, { role: 'assistant', text: reply }]);
     }, 900);
   };
 
