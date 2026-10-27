@@ -33,8 +33,9 @@ const SUMMARY_PROMPT = promptConstant(
   read("../../app/api/cron/summarize/route.ts"),
   "SUMMARY_SYSTEM_PROMPT"
 );
+const EXTRACTION_SOURCE = read("../../app/api/cron/extract-facts/route.ts");
 const EXTRACTION_PROMPT = promptConstant(
-  read("../../app/api/cron/extract-facts/route.ts"),
+  EXTRACTION_SOURCE,
   "EXTRACTION_SYSTEM_PROMPT"
 );
 
@@ -61,6 +62,13 @@ describe("summary prompt", () => {
     );
   });
 
+  it("does not ask for visa status", () => {
+    expect(SUMMARY_PROMPT).not.toMatch(/visa/i);
+    expect(SUMMARY_PROMPT).toContain(
+      "relevant circumstances like school if mentioned"
+    );
+  });
+
   it("leaves out emotions, crisis content and safety notices", () => {
     expect(SUMMARY_PROMPT).toContain(
       "Do NOT include the user's emotions, mental health, or any mention of self-harm, suicide, harming others, or eating problems, and do not mention safety notices Noor showed."
@@ -82,10 +90,20 @@ describe("fact-extraction prompt", () => {
     );
   });
 
-  it("keeps the seven categories", () => {
+  it("keeps the six categories, without visa", () => {
     expect(EXTRACTION_PROMPT).toContain(
-      "category must be one of: financial, personal, goal, preference, visa, banking, other."
+      "category must be one of: financial, personal, goal, preference, banking, other."
     );
+    expect(EXTRACTION_PROMPT).not.toMatch(/visa/i);
+  });
+
+  it("validates categories through the shared guard, with no list of its own", () => {
+    expect(EXTRACTION_SOURCE).toContain(
+      'import { isUserFactCategory } from "@/lib/userFactCategories";'
+    );
+    expect(EXTRACTION_SOURCE).toContain("return isUserFactCategory(value);");
+    expect(EXTRACTION_SOURCE).not.toMatch(/"visa"/);
+    expect(EXTRACTION_SOURCE).not.toContain("VALID_CATEGORIES");
   });
 
   it("still forbids full sensitive identifiers", () => {

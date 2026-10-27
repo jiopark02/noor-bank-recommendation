@@ -26,6 +26,7 @@ import {
   maskSensitive,
 } from "@/lib/memoryOutputFilter";
 import { detectCrisisSignal } from "@/lib/crisisSignals";
+import type { UserFactCategory } from "@/lib/userFactCategories";
 
 // -----------------------------------------------------------------------------
 // SECTION 1: Type Definitions
@@ -87,14 +88,7 @@ export interface UserFact {
   updated_at: string;
 }
 
-export type UserFactCategory =
-  | "financial"
-  | "personal"
-  | "goal"
-  | "preference"
-  | "visa"
-  | "banking"
-  | "other";
+export type { UserFactCategory };
 
 export type UserFactStatus = "active" | "expired" | "superseded";
 
@@ -604,7 +598,7 @@ export async function getSessionMessages(
 //
 // Facts are short, factual statements about the user that persist across
 // chat sessions. They are injected into future system prompts so the AI has
-// continuity (e.g., "user has F-1 visa", "monthly rent is $1200").
+// continuity (e.g., "user has no credit history", "monthly rent is $1200").
 //
 // Schema enforces uniqueness: a user cannot have two active facts with the
 // same lowercased text (ux_user_facts_user_active_fact). To "update" a fact,
