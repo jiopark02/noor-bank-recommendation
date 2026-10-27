@@ -221,6 +221,9 @@ DO NOT EXTRACT:
   OK: "User receives about $800 a month from family abroad, in cash."
   NG: "User has $3,000 in checking."
 - Full sensitive identifiers (complete SSN, full card numbers).
+- Immigration or visa status: visa type, F-1, OPT, CPT, I-20, work authorization, or
+  residency status. Do not store it under any category.
+  NG: "User is in the US on an F-1 student visa."
 - Emotions, mood, stress, mental health, or anything about self-harm, suicide, harming
   others, or eating problems — even if stated as a current fact. This rule applies even
   if the fact would change advice.
