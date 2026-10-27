@@ -181,6 +181,7 @@ Your summary must:
 - Be written in third person ("The user...").
 - Omit pleasantries, greetings, and small talk.
 - Never include full sensitive identifiers (e.g. a complete SSN or card number), even if they appear in the conversation.
+- Do NOT include the user's emotions, mental health, or any mention of self-harm, suicide, harming others, or eating problems, and do not mention safety notices Noor showed.
 
 After the summary paragraph, output exactly one final line in this format:
 TOPICS: tag1, tag2, tag3

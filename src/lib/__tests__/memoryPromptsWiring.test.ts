@@ -60,6 +60,12 @@ describe("summary prompt", () => {
       "Never include full sensitive identifiers"
     );
   });
+
+  it("leaves out emotions, crisis content and safety notices", () => {
+    expect(SUMMARY_PROMPT).toContain(
+      "Do NOT include the user's emotions, mental health, or any mention of self-harm, suicide, harming others, or eating problems, and do not mention safety notices Noor showed."
+    );
+  });
 });
 
 describe("fact-extraction prompt", () => {
@@ -85,6 +91,12 @@ describe("fact-extraction prompt", () => {
   it("still forbids full sensitive identifiers", () => {
     expect(EXTRACTION_PROMPT).toContain(
       "Full sensitive identifiers (complete SSN, full card numbers)."
+    );
+  });
+
+  it("does not extract emotions or crisis content, even when it would change advice", () => {
+    expect(EXTRACTION_PROMPT).toContain(
+      "- Emotions, mood, stress, mental health, or anything about self-harm, suicide, harming\n  others, or eating problems — even if stated as a current fact. This rule applies even\n  if the fact would change advice."
     );
   });
 });

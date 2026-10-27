@@ -231,6 +231,11 @@ DO NOT EXTRACT:
   OK: "User receives about $800 a month from family abroad, in cash."
   NG: "User has $3,000 in checking."
 - Full sensitive identifiers (complete SSN, full card numbers).
+- Emotions, mood, stress, mental health, or anything about self-harm, suicide, harming
+  others, or eating problems — even if stated as a current fact. This rule applies even
+  if the fact would change advice.
+  NG: "User feels anxious and overwhelmed about money."
+  NG: "User has had thoughts of hurting themselves."
 
 EXISTING FACTS — reconcile:
 - The existing facts are given as a numbered list. [1] is the most recently created.
