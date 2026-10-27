@@ -20,12 +20,26 @@ export interface UserContext {
   optStartDate?: string;
 }
 
+export interface SystemPromptOptions {
+  plaidStateEnabled?: boolean;
+}
+
+/**
+ * The system prompt with the per-user context last, after the fixed part, so
+ * every user's prompt starts with the same text.
+ */
 export function generateSystemPrompt(
   userContext: UserContext,
-  options?: { plaidStateEnabled?: boolean }
+  options?: SystemPromptOptions
 ): string {
-  const contextSection = buildContextSection(userContext);
+  return `${buildStaticSystemPrompt(options)}
 
+## Current User Context
+${buildContextSection(userContext)}`;
+}
+
+/** The fixed part of the system prompt: it carries no user value. */
+export function buildStaticSystemPrompt(options?: SystemPromptOptions): string {
   // Response guideline #2. When the Plaid capability scaffold is enabled
   // (AI_PLAID_STATE != "off"), we drop the unconditional "you have access to
   // financial data" claim — which is false on turns where no data was injected
@@ -45,9 +59,6 @@ export function generateSystemPrompt(
 - Strength: make confusing financial topics feel simple, manageable, and less scary
 - Voice: occasionally use casual, relatable language when it feels natural — but keep it subtle, not forced
 - Language: always respond in English
-
-## Current User Context
-${contextSection}
 
 ## Core Expertise
 

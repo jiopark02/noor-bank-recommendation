@@ -11,6 +11,7 @@ import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
 import {
   CHAT_MAX_BODY_BYTES,
   CHAT_MAX_HISTORY_MESSAGES,
+  CHAT_MAX_LAST_USER_MESSAGE_CHARS,
   windowChatMessages,
 } from "@/lib/chatInputLimits";
 import { buildModelConversation } from "@/lib/chatServerHistory";
@@ -33,8 +34,6 @@ import {
   resolvePlaidStateMode,
   buildPlaidCapabilityBlock,
   maskPlaidBlockForLog,
-  sanitizePlaidLabel,
-  sealBankData,
 } from "@/lib/plaidChatContext";
 import { getPlaidChatState } from "@/lib/plaidChatState";
 import {
@@ -73,10 +72,15 @@ import {
   buildOpenRouterRequestBody,
   resolveOpenRouterApiKey,
 } from "@/lib/openRouterRequest";
-import { CHAT_LLM_TIMEOUT_MS, logLlmTimeout } from "@/lib/llmTimeouts";
+import {
+  CHAT_LLM_TIMEOUT_MS,
+  chatHasBudgetForAnotherAttempt,
+  logLlmTimeout,
+} from "@/lib/llmTimeouts";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const DEFAULT_SIMPLE_MODEL = "google/gemini-2.5-flash-lite";
 const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
@@ -193,48 +197,6 @@ interface PlaidAccountSummary {
   iso_currency_code?: string;
 }
 
-interface PlaidTransactionSummary {
-  amount: number;
-  date: string;
-  category?: string[];
-  merchant_name?: string | null;
-  name?: string;
-}
-
-interface PlaidSubscriptionSummary {
-  id?: string;
-  name?: string;
-  amount?: number;
-  monthly_amount?: number;
-  iso_currency_code?: string;
-  frequency?: "weekly" | "monthly" | "yearly" | "unknown" | string;
-  last_charged?: string | null;
-  next_charge?: string | null;
-}
-
-interface FinancialSnapshot {
-  balanceSummary: string;
-  monthlySpendingEstimate: number;
-  monthlyIncomeEstimate: number;
-  netMonthlyEstimate: number;
-  monthlySubscriptionEstimate: number;
-  subscriptions: Array<{
-    name: string;
-    monthlyAmount: number;
-    amount: number;
-    currency: string;
-    frequency: string;
-    lastCharged: string | null;
-    nextCharge: string | null;
-  }>;
-  diningMonthlyEstimate: number;
-  topSpendingCategory: string;
-  incomeRegularityScore: number;
-  riskLevel: "Low" | "Medium" | "High";
-  safeBuffer: number;
-  currency: string;
-}
-
 function getLastUserMessage(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i].role === "user") {
@@ -324,21 +286,6 @@ function isFinancialPlanningQuestion(message: string): boolean {
   return signals.some((signal) => normalized.includes(signal));
 }
 
-function isSubscriptionQuestion(message: string): boolean {
-  const normalized = message.toLowerCase();
-
-  const signals = [
-    "subscription",
-    "subscriptions",
-    "recurring",
-    "what am i paying",
-    "what are my bills",
-    "monthly charges",
-  ];
-
-  return signals.some((signal) => normalized.includes(signal));
-}
-
 function formatAmount(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat("en-US", {
@@ -379,161 +326,6 @@ function buildBalanceSummary(accounts: PlaidAccountSummary[]): string | null {
   )}.`;
 }
 
-function calculateIncomeRegularityScore(
-  transactions: PlaidTransactionSummary[]
-): number {
-  const incomeTxns = transactions.filter((txn) => txn.amount < 0);
-  if (incomeTxns.length < 2) return 50;
-
-  const amounts = incomeTxns.map((txn) => Math.abs(txn.amount));
-  const mean = amounts.reduce((sum, n) => sum + n, 0) / amounts.length;
-  if (mean <= 0) return 50;
-
-  const variance =
-    amounts.reduce((sum, n) => sum + Math.pow(n - mean, 2), 0) / amounts.length;
-  const stdDev = Math.sqrt(variance);
-  const coeffVar = stdDev / mean;
-
-  const score = Math.max(0, Math.min(100, Math.round((1 - coeffVar) * 100)));
-  return score;
-}
-
-function detectTopSpendingCategory(
-  categoryTotals: Record<string, number>
-): string {
-  const entries = Object.entries(categoryTotals || {});
-  if (entries.length === 0) return "Unknown";
-
-  entries.sort((a, b) => b[1] - a[1]);
-  return entries[0][0];
-}
-
-function calculateRiskLevel(
-  availableBalance: number,
-  monthlySpendingEstimate: number
-): { riskLevel: "Low" | "Medium" | "High"; safeBuffer: number } {
-  const safeBuffer = Math.max(300, monthlySpendingEstimate * 0.25);
-
-  if (availableBalance < safeBuffer) {
-    return { riskLevel: "High", safeBuffer };
-  }
-
-  if (availableBalance < safeBuffer * 2) {
-    return { riskLevel: "Medium", safeBuffer };
-  }
-
-  return { riskLevel: "Low", safeBuffer };
-}
-
-function buildFinancialSnapshot(
-  accounts: PlaidAccountSummary[],
-  transactions: PlaidTransactionSummary[],
-  subscriptions: PlaidSubscriptionSummary[],
-  categoryTotals: Record<string, number>,
-  summary: {
-    totalSpending?: number;
-    totalIncome?: number;
-    startDate?: string;
-    endDate?: string;
-  }
-): FinancialSnapshot | null {
-  const checkingAccount =
-    accounts.find((account) => account.type === "checking") || accounts[0];
-
-  if (!checkingAccount || typeof checkingAccount.current_balance !== "number") {
-    return null;
-  }
-
-  const currency = checkingAccount.iso_currency_code || "USD";
-  const availableBalance =
-    typeof checkingAccount.available_balance === "number"
-      ? checkingAccount.available_balance
-      : checkingAccount.current_balance;
-
-  const startDate = summary.startDate
-    ? new Date(summary.startDate)
-    : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const endDate = summary.endDate ? new Date(summary.endDate) : new Date();
-  const rangeDays = Math.max(
-    1,
-    Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-  );
-
-  const totalSpending = Math.max(0, summary.totalSpending || 0);
-  const totalIncome = Math.max(0, summary.totalIncome || 0);
-  const monthlySpendingEstimate = (totalSpending / rangeDays) * 30;
-  const monthlyIncomeEstimate = (totalIncome / rangeDays) * 30;
-  const netMonthlyEstimate = monthlyIncomeEstimate - monthlySpendingEstimate;
-
-  const normalizedSubscriptions = subscriptions
-    .map((sub, index) => {
-      const recurringMonthly =
-        typeof sub.monthly_amount === "number" &&
-        Number.isFinite(sub.monthly_amount)
-          ? sub.monthly_amount
-          : undefined;
-      const fallbackAmount =
-        typeof sub.amount === "number" && Number.isFinite(sub.amount)
-          ? sub.amount
-          : 0;
-      const monthlyAmount = Math.max(0, recurringMonthly ?? fallbackAmount);
-
-      return {
-        name: sub.name?.trim() || `Subscription ${index + 1}`,
-        monthlyAmount,
-        amount: Math.max(0, fallbackAmount),
-        currency: sub.iso_currency_code || currency,
-        frequency: sub.frequency || "unknown",
-        lastCharged: sub.last_charged || null,
-        nextCharge: sub.next_charge || null,
-      };
-    })
-    .filter((sub) => sub.monthlyAmount > 0)
-    .sort((a, b) => b.monthlyAmount - a.monthlyAmount);
-
-  const monthlySubscriptionEstimate = normalizedSubscriptions.reduce(
-    (sum, sub) => sum + sub.monthlyAmount,
-    0
-  );
-
-  const diningSpend = transactions
-    .filter((txn) => txn.amount > 0)
-    .filter((txn) => {
-      const categories = txn.category || [];
-      return categories.some((cat) => /food|dining|restaurant/i.test(cat));
-    })
-    .reduce((sum, txn) => sum + txn.amount, 0);
-  const diningMonthlyEstimate = (diningSpend / rangeDays) * 30;
-
-  const topSpendingCategory = detectTopSpendingCategory(categoryTotals);
-  const incomeRegularityScore = calculateIncomeRegularityScore(transactions);
-  const { riskLevel, safeBuffer } = calculateRiskLevel(
-    availableBalance,
-    monthlySpendingEstimate
-  );
-
-  return {
-    balanceSummary: `Your checking available balance is ${formatAmount(
-      availableBalance,
-      currency
-    )} and current balance is ${formatAmount(
-      checkingAccount.current_balance,
-      currency
-    )}.`,
-    monthlySpendingEstimate,
-    monthlyIncomeEstimate,
-    netMonthlyEstimate,
-    monthlySubscriptionEstimate,
-    subscriptions: normalizedSubscriptions,
-    diningMonthlyEstimate,
-    topSpendingCategory,
-    incomeRegularityScore,
-    riskLevel,
-    safeBuffer,
-    currency,
-  };
-}
-
 async function fetchBalanceSummaryFromPlaidRoute(
   request: NextRequest
 ): Promise<string | null> {
@@ -555,56 +347,6 @@ async function fetchBalanceSummaryFromPlaidRoute(
 
     const data = await response.json();
     return buildBalanceSummary(data?.accounts || []);
-  } catch {
-    return null;
-  }
-}
-
-async function fetchFinancialSnapshotFromPlaidRoutes(
-  request: NextRequest
-): Promise<FinancialSnapshot | null> {
-  try {
-    const accountsUrl = new URL("/api/plaid/accounts", request.url);
-    const transactionsUrl = new URL("/api/plaid/transactions", request.url);
-
-    const endDate = new Date().toISOString().split("T")[0];
-    const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
-
-    const plaidHeaders = buildJsonAuthorizedHeaders(
-      extrasFromAuthorizationValue(request.headers.get("authorization"))
-    );
-
-    const [accountsRes, transactionsRes] = await Promise.all([
-      fetch(accountsUrl.toString(), {
-        method: "POST",
-        headers: plaidHeaders,
-        body: JSON.stringify({}),
-        cache: "no-store",
-      }),
-      fetch(transactionsUrl.toString(), {
-        method: "POST",
-        headers: plaidHeaders,
-        body: JSON.stringify({ startDate, endDate }),
-        cache: "no-store",
-      }),
-    ]);
-
-    if (!accountsRes.ok || !transactionsRes.ok) {
-      return null;
-    }
-
-    const accountsData = await accountsRes.json();
-    const transactionsData = await transactionsRes.json();
-
-    return buildFinancialSnapshot(
-      accountsData?.accounts || [],
-      transactionsData?.transactions || [],
-      transactionsData?.subscriptions || [],
-      transactionsData?.categoryTotals || {},
-      transactionsData?.summary || {}
-    );
   } catch {
     return null;
   }
@@ -693,8 +435,8 @@ interface ChatLlmCallContext {
  *
  * recordLlmCall never rejects (llmCallLog.ts), so the row write cannot replace
  * a thrown fetch error or alter the returned result. A fetch that throws is
- * rethrown unchanged: it is still not retried on the next model, and it still
- * reaches POST's outer catch as before.
+ * rethrown unchanged; POST's model loop catches it and moves on to the next
+ * model, which starts only within the request budget (llmTimeouts.ts).
  *
  * The attempt is cut off after CHAT_LLM_TIMEOUT_MS. A timeout before the
  * response arrives makes fetch throw, which takes the path above. A timeout
@@ -961,6 +703,7 @@ async function persistTurnIfEnabled(params: {
 }
 
 export async function POST(request: NextRequest) {
+  const requestStartedAtMs = Date.now();
   // The chat usage reservation this request holds, if any, and the per-attempt
   // costs it is settled from in the finally below, on every exit.
   let usageReservation: { reservationId: string; userId: string } | null =
@@ -996,6 +739,7 @@ export async function POST(request: NextRequest) {
     const bodyObj = asPlainObject(bodyRead.value);
     const parsedMessages = parseChatMessages(bodyObj.messages);
     if (!parsedMessages) {
+      console.warn("[chat-input] refused reason=%s", "malformed_body");
       return NextResponse.json(
         { error: "Messages are required" },
         { status: 400 }
@@ -1004,10 +748,17 @@ export async function POST(request: NextRequest) {
     const chatWindow = windowChatMessages(parsedMessages);
     if (!chatWindow.ok) {
       console.warn("[chat-input] refused reason=%s", chatWindow.reason);
+      // One code for all three reasons; the message says which one it was.
+      const windowRefusalMessages: Record<typeof chatWindow.reason, string> = {
+        last_user_message_too_long: `Your message is too long. Please keep it to at most ${CHAT_MAX_LAST_USER_MESSAGE_CHARS} characters.`,
+        tail_too_long:
+          "This conversation has too much text after your latest message. Please clear the chat and try again.",
+        empty_window:
+          "There is no message to send. Please type a question and try again.",
+      };
       return NextResponse.json(
         {
-          error:
-            "Your message is too long. Please shorten it and try again.",
+          error: windowRefusalMessages[chatWindow.reason],
           code: "MESSAGE_TOO_LONG",
         },
         { status: 400 }
@@ -1022,12 +773,24 @@ export async function POST(request: NextRequest) {
     }
     // A body without a user message has nothing to send to the model.
     if (!chatWindow.messages.some((msg) => msg.role === "user")) {
+      console.warn("[chat-input] refused reason=%s", "no_user_message");
       return NextResponse.json(
         { error: "Messages are required" },
         { status: 400 }
       );
     }
     const lastUserMessageText = getLastUserMessage(chatWindow.messages);
+    // A blank message would reserve usage and call the model for nothing.
+    if (lastUserMessageText.trim() === "") {
+      console.warn("[chat-input] refused reason=%s", "empty_message");
+      return NextResponse.json(
+        {
+          error: "Please type a message before sending.",
+          code: "EMPTY_MESSAGE",
+        },
+        { status: 400 }
+      );
+    }
 
     // Chat usage limit (chatUsageLimits.ts, chatUsageLedger.ts): after the
     // input limits and BEFORE any profile read, memory, Plaid fetch or model
@@ -1170,17 +933,15 @@ export async function POST(request: NextRequest) {
       !isGreeting && isBalanceQuestion(lastUserMessageText);
     const wantsFinancialAnalysis =
       !isGreeting && isFinancialPlanningQuestion(lastUserMessageText);
-    const wantsSubscriptionDetails =
-      !isGreeting && isSubscriptionQuestion(lastUserMessageText);
 
     // Plaid capability scaffold (B-1). AI_PLAID_STATE = off | connection | balances.
-    // "off" closes every path below that reads fresh bank data: the scaffold
-    // block, the balance-keyword block, and the financial-analysis block (which
-    // no longer runs under any mode because its egress channel denies on every
-    // input). The base prompt's guideline 2 also tells the model it has no bank
-    // data. Bank figures the model was given on earlier turns can still reach it
-    // through the stored conversation history and the memory block; "off" does not
-    // remove those.
+    // "off" closes both paths below that read fresh bank data: the scaffold
+    // block and the balance-keyword block. The third, financial-analysis
+    // channel only has its egress decision evaluated and logged; there is no
+    // read behind it. The base prompt's guideline 2 also tells the model it
+    // has no bank data. Bank figures the model was given on earlier turns can
+    // still reach it through the stored conversation history and the memory
+    // block; "off" does not remove those.
     const plaidStateMode = resolvePlaidStateMode();
     const plaidStateEnabled = plaidStateMode !== "off";
 
@@ -1260,97 +1021,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Evaluated and logged only: no bank read follows this decision.
     const financialAnalysisDecision = evaluatePlaidEgressDecision({
       channel: "financial_analysis_keyword",
       plaidStateMode,
       wantsFinancialAnalysis,
     });
     logPlaidEgressDecision(financialAnalysisDecision, { mode: plaidStateMode });
-    let financialSnapshotInjected = false;
-    if (financialAnalysisDecision.allowed) {
-      const snapshot = await fetchFinancialSnapshotFromPlaidRoutes(request);
-
-      if (snapshot) {
-        financialSnapshotInjected = true;
-        // SECURITY (prompt injection): subscription/merchant names and the top
-        // spending category are external free text. When the Plaid-state feature
-        // is on, sanitize them and wrap the subscription list in the <bank_data>
-        // seal — this closes the pre-existing raw-`sub.name` interpolation gap.
-        // This branch is currently unreachable under every mode: the
-        // financial-analysis egress channel denies on every input, so neither
-        // helper runs and this block emits nothing.
-        const sealName = (name: string) =>
-          plaidStateEnabled ? sanitizePlaidLabel(name) : name;
-
-        const subscriptionBreakdown =
-          snapshot.subscriptions.length > 0
-            ? snapshot.subscriptions
-                .slice(0, 8)
-                .map(
-                  (sub) =>
-                    `  - ${sealName(sub.name)}: ${formatAmount(
-                      sub.monthlyAmount,
-                      sub.currency
-                    )}/mo (${sub.frequency})`
-                )
-                .join("\n")
-            : "  - No active recurring subscriptions detected in the selected date range.";
-
-        const subscriptionSection = plaidStateEnabled
-          ? sealBankData(subscriptionBreakdown)
-          : subscriptionBreakdown;
-
-        const topSpendingCategory = plaidStateEnabled
-          ? sanitizePlaidLabel(snapshot.topSpendingCategory)
-          : snapshot.topSpendingCategory;
-
-        // C1: in "balances" mode the always-on L2 block already injected the
-        // authoritative balance (null-preserving, subtype-aware). Drop the L3
-        // snapshot's balance line to avoid a duplicate/contradictory figure —
-        // L3's balanceSummary comes from the older /api/plaid/accounts path
-        // (null->$0, depository->"checking", .single() multi-bank 404), so
-        // leaving it in could contradict L2 within the same prompt. Same logic
-        // as retiring the wantsBalance block. This selection is now dead in
-        // every mode: the enclosing branch never runs, so no mode emits a
-        // balance line from here.
-        const balanceSummaryLine =
-          plaidStateMode === "balances" ? "" : `- ${snapshot.balanceSummary}\n`;
-
-        systemPrompt += `\n\n## Verified Financial Snapshot\n${balanceSummaryLine}- Estimated monthly income: ${formatAmount(
-          snapshot.monthlyIncomeEstimate,
-          snapshot.currency
-        )}\n- Estimated monthly spending: ${formatAmount(
-          snapshot.monthlySpendingEstimate,
-          snapshot.currency
-        )}\n- Estimated net monthly cash flow: ${formatAmount(
-          snapshot.netMonthlyEstimate,
-          snapshot.currency
-        )}\n- Estimated monthly subscription cost: ${formatAmount(
-          snapshot.monthlySubscriptionEstimate,
-          snapshot.currency
-        )}\n- Active subscriptions (monthly):\n${subscriptionSection}\n- Estimated monthly dining spend: ${formatAmount(
-          snapshot.diningMonthlyEstimate,
-          snapshot.currency
-        )}\n- Top spending category: ${
-          topSpendingCategory
-        }\n- Income regularity score (0-100): ${
-          snapshot.incomeRegularityScore
-        }\n- Baseline risk level: ${
-          snapshot.riskLevel
-        }\n- Safe buffer target: ${formatAmount(
-          snapshot.safeBuffer,
-          snapshot.currency
-        )}\n\n## Required Output Format For Money Decisions\nWhen the user asks affordability, budgeting, subscriptions, savings progress, or purchase timing:\n1) Start with one empathy sentence if the user sounds stressed.\n2) Show a compact math line using real numbers from snapshot + user-stated obligations (rent, bills, planned purchase).\n3) Provide Risk Level: Low, Medium, or High.\n4) Provide one clear recommendation: go, wait, or capped spend.\n5) Provide one practical alternative if risk is Medium/High.\n6) If data is incomplete, ask exactly one follow-up question needed for better precision.\n\nDo not give generic advice without numbers.`;
-
-        if (wantsSubscriptionDetails) {
-          systemPrompt +=
-            "\n\nIf the user asks for subscriptions, list each verified subscription with monthly amount first, then give one concise total monthly subscription cost line. Keep the answer plain and avoid generic budget advice unless requested.";
-        }
-      } else {
-        systemPrompt +=
-          "\n\nIf the user asks affordability or planning questions and verified banking data is unavailable, state that you need a connected bank account and then provide a conservative estimate framework.";
-      }
-    }
 
     // OpenRouter is the only provider path: every request carries the routing
     // preferences in openRouterRequest.ts. Without a key there is no other
@@ -1369,24 +1046,45 @@ export async function POST(request: NextRequest) {
         memory: memoryBlock !== "",
         plaidScaffold: capabilityScaffoldDecision.allowed,
         balance: balanceSnapshotInjected,
-        financialSnapshot: financialSnapshotInjected,
+        financialSnapshot: false,
       };
       let attemptIndex = 0;
+      let lastThrew = false;
 
       for (const model of modelsToTry) {
+        // Every attempt, the first included, starts only if it could run to
+        // its full timeout inside the request budget.
+        const elapsedMs = Date.now() - requestStartedAtMs;
+        if (!chatHasBudgetForAnotherAttempt(elapsedMs)) {
+          console.warn(
+            "[chat-deadline] attempt skipped attempt=%d elapsed_ms=%d",
+            attemptIndex + 1,
+            elapsedMs
+          );
+          break;
+        }
         attemptIndex++;
-        const result = await callOpenRouter(
-          openRouterApiKey,
-          model,
-          openRouterMessages,
-          {
-            attemptIndex,
-            userId: authUserId,
-            sessionId: activeSession?.id ?? null,
-            blocks: promptBlocks,
-            tally: usageTally,
-          }
-        );
+        let result: OpenRouterResult;
+        try {
+          result = await callOpenRouter(
+            openRouterApiKey,
+            model,
+            openRouterMessages,
+            {
+              attemptIndex,
+              userId: authUserId,
+              sessionId: activeSession?.id ?? null,
+              blocks: promptBlocks,
+              tally: usageTally,
+            }
+          );
+        } catch (error) {
+          // callOpenRouter has already recorded the attempt.
+          lastThrew = true;
+          console.error("Chat API error:", error);
+          continue;
+        }
+        lastThrew = false;
 
         if (result.ok) {
           try {
@@ -1429,6 +1127,25 @@ export async function POST(request: NextRequest) {
         }
 
         lastFailure = result;
+      }
+
+      // No attempt fitted in the request budget.
+      if (attemptIndex === 0) {
+        return NextResponse.json(
+          {
+            error: "Chat is taking longer than usual. Please try again.",
+            code: "CHAT_TIME_BUDGET_EXHAUSTED",
+          },
+          { status: 503 }
+        );
+      }
+
+      // The same response a throw reaching the outer catch gets.
+      if (lastThrew) {
+        return NextResponse.json(
+          { error: "Failed to get response from AI" },
+          { status: 500 }
+        );
       }
 
       if (lastFailure?.status === 429) {

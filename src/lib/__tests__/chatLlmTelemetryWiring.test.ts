@@ -25,9 +25,11 @@ import { describe, it, expect } from "vitest";
  * and the parsed flag are assigned (STATUS_AFTER_FETCH,
  * JSON_PARSED_AFTER_PARSE).
  *
- * Two behaviors are kept on purpose and are guarded here: a fetch that throws
- * is not retried on the next model (callOpenRouter rethrows it), and the last
- * failed model's error text still reaches the client (fixture v).
+ * Two behaviors are guarded here: a fetch that throws is recorded and rethrown
+ * by callOpenRouter, and the loop starts every attempt, the first included,
+ * only when the request budget still has room for a full one (LOOP_HEAD,
+ * LOOP_NO_ATTEMPT, LOOP_AFTER_THROW); and the last failed model's error text
+ * still reaches the client (fixture v).
  *
  * LINE ENDINGS
  * Both the route source and each fixture are normalized to \n before
@@ -136,33 +138,78 @@ const FIXTURE_V = `      return NextResponse.json(
 `;
 
 // The loop head as wired: the prompt-block flags written into every chat row,
-// the counter starting at 0 and incremented once per model, the call, and
-// nothing between them and the success branch (no try, no continue).
+// the budget check that leaves the loop before an attempt that cannot fit, the
+// counter starting at 0 and incremented once per attempt started, the call,
+// and the catch for a thrown attempt, which marks the throw and moves on;
+// nothing else stands between the call and the success branch.
 const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for llm_calls only.
       const promptBlocks: ChatPromptBlocks = {
         memory: memoryBlock !== "",
         plaidScaffold: capabilityScaffoldDecision.allowed,
         balance: balanceSnapshotInjected,
-        financialSnapshot: financialSnapshotInjected,
+        financialSnapshot: false,
       };
       let attemptIndex = 0;
+      let lastThrew = false;
 
       for (const model of modelsToTry) {
+        // Every attempt, the first included, starts only if it could run to
+        // its full timeout inside the request budget.
+        const elapsedMs = Date.now() - requestStartedAtMs;
+        if (!chatHasBudgetForAnotherAttempt(elapsedMs)) {
+          console.warn(
+            "[chat-deadline] attempt skipped attempt=%d elapsed_ms=%d",
+            attemptIndex + 1,
+            elapsedMs
+          );
+          break;
+        }
         attemptIndex++;
-        const result = await callOpenRouter(
-          openRouterApiKey,
-          model,
-          openRouterMessages,
-          {
-            attemptIndex,
-            userId: authUserId,
-            sessionId: activeSession?.id ?? null,
-            blocks: promptBlocks,
-            tally: usageTally,
-          }
-        );
+        let result: OpenRouterResult;
+        try {
+          result = await callOpenRouter(
+            openRouterApiKey,
+            model,
+            openRouterMessages,
+            {
+              attemptIndex,
+              userId: authUserId,
+              sessionId: activeSession?.id ?? null,
+              blocks: promptBlocks,
+              tally: usageTally,
+            }
+          );
+        } catch (error) {
+          // callOpenRouter has already recorded the attempt.
+          lastThrew = true;
+          console.error("Chat API error:", error);
+          continue;
+        }
+        lastThrew = false;
 
         if (result.ok) {
+`;
+
+// After the loop: no attempt fitted in the budget.
+const LOOP_NO_ATTEMPT = `      if (attemptIndex === 0) {
+        return NextResponse.json(
+          {
+            error: "Chat is taking longer than usual. Please try again.",
+            code: "CHAT_TIME_BUDGET_EXHAUSTED",
+          },
+          { status: 503 }
+        );
+      }
+`;
+
+// After the loop: when the last attempt threw, the response is the 500 a
+// throw reaching the outer catch gets.
+const LOOP_AFTER_THROW = `      if (lastThrew) {
+        return NextResponse.json(
+          { error: "Failed to get response from AI" },
+          { status: 500 }
+        );
+      }
 `;
 
 // The row callOpenRouter writes once a response arrives: the real HTTP status,
@@ -224,8 +271,20 @@ describe("chat route: the branches that decide the response are unchanged", () =
     expect(occurrences(CHAT, norm(fixture))).toBe(1);
   });
 
-  it("the loop head adds only the counter and the telemetry argument", () => {
+  it("the loop head adds only the budget check, the counter, the telemetry argument and the throw catch", () => {
     expect(occurrences(CHAT, norm(LOOP_HEAD))).toBe(1);
+  });
+
+  it("the loop is left only at the budget check, and the no-attempt and last-throw responses follow it", () => {
+    const post = functionBody(CHAT, "POST");
+    expect(occurrences(post, "continue;")).toBe(1);
+    expect(occurrences(post, "break;")).toBe(1);
+    expect(occurrences(post, "lastThrew = true;")).toBe(1);
+    expect(occurrences(post, norm(LOOP_NO_ATTEMPT))).toBe(1);
+    expect(occurrences(post, norm(LOOP_AFTER_THROW))).toBe(1);
+    expect(post.indexOf(norm(LOOP_NO_ATTEMPT))).toBeLessThan(
+      post.indexOf(norm(LOOP_AFTER_THROW))
+    );
   });
 });
 
