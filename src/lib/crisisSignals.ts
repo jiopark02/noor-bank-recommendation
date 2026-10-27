@@ -12,10 +12,10 @@
  * suicide", "purge my old subscriptions") are then removed, and the patterns
  * below are tested on what is left. Patterns are phrases, never a single word
  * such as "die", "kill" or "dead", and "kill" / "hurt" take only a reflexive
- * pronoun or a person as their object. A person followed by a possessive
- * ("my boss's idea") is not an object, and "shoot <person> a text" is removed
- * as an idiom. "purge" followed by a possessive or "the" is not counted as
- * eating unless a food word comes next ("purge my meals").
+ * pronoun or a person as their object. "kill my boss's idea", "shoot <person>
+ * a text" and "purge my credit card statements" are removed as idioms. The
+ * exceptions name the non-human object they remove, so "kill my boss's wife"
+ * and "purge my stomach" still match.
  *
  * WHAT IS DELIBERATELY NOT DONE
  * Negation is not suppressed ("I'm not suicidal" matches): a notice shown in
@@ -37,9 +37,13 @@ const EXCEPTIONS: RegExp[] = [
   /\b(?:financial|credit|career|social) suicide\b/g,
   /\bdying to\b/g,
   /\bkill two birds\b/g,
-  /\bpurg\w* (?:my |the |all |those |these )?(?:old |unused )?(?:files|accounts|subscriptions|cards|data)\b/g,
+  /\bpurg\w* (?:my |your |the |all |those |these )?(?:old |unused )?(?:credit card |bank |budget )?(?:files|accounts|subscriptions|cards|data|statements|receipts|records|spreadsheet|spreadsheets|budget|transactions|emails|inbox|history)\b/g,
   new RegExp(
     `\\bshoot(?:ing)? ${PERSON} an? (?:text|email|message|note|line|dm|question)\\b`,
+    "g"
+  ),
+  new RegExp(
+    `\\b(?:kill(?:ing)?|hurt(?:ing)?|shoot(?:ing)?|stab(?:bing)?|strangl(?:e|ing)|beat(?:ing)? up) ${PERSON}'s (?:idea|ideas|plan|plans|proposal|proposals|budget|project|projects|deal|deals|chances)\\b`,
     "g"
   ),
 ];
@@ -48,7 +52,7 @@ const SELF_HARM: RegExp[] = [
   new RegExp(`\\bkill(?:ing)? ${SELF}\\b`),
   /\bsuicid(?:e|al)\b/,
   new RegExp(`\\bend(?:ing)? ${POSSESSIVE} life\\b`),
-  /\bend it all\b/,
+  /\bend(?:ing)? it all\b/,
   new RegExp(`\\btake ${POSSESSIVE} (?:own )?life\\b`),
   /\b(?:wants?(?:ed)? to|wanna) die\b/,
   /\bwish(?:es)? (?:i|he|she|they) (?:was|were) dead\b/,
@@ -57,7 +61,7 @@ const SELF_HARM: RegExp[] = [
   // "live" only at the end of the message or before "anymore", "like this"
   // or "this way", so "I don't want to live paycheck to paycheck" does not
   // match.
-  /\bdo(?:es)? ?(?:n'?t|not) want to (?:live anymore\b|live like this\b|live this way\b|live$|be alive\b|be here anymore\b)/,
+  /\b(?:do(?:es)?|did) ?(?:n'?t|not) want to (?:live anymore\b|live like this\b|live this way\b|live$|be alive\b|be here anymore\b)/,
   new RegExp(`\\b(?:hurt(?:ing)?|harm(?:ing)?|cut(?:ting)?) ${SELF}\\b`),
   /\bself ?harm(?:ing)?\b/,
   /\boverdos(?:e|ing)\b/,
@@ -66,7 +70,7 @@ const SELF_HARM: RegExp[] = [
 
 const HARM_TO_OTHERS: RegExp[] = [
   new RegExp(
-    `\\b(?:want to|wants to|going to|gonna|i'?ll|i will|thinking (?:of|about)) (?:kill(?:ing)?|hurt(?:ing)?|shoot(?:ing)?|stab(?:bing)?|strangl(?:e|ing)|beat(?:ing)? up) ${PERSON}\\b(?!'s\\b)`
+    `\\b(?:want to|wants to|going to|gonna|i'?ll|i will|thinking (?:of|about)) (?:kill(?:ing)?|hurt(?:ing)?|shoot(?:ing)?|stab(?:bing)?|strangl(?:e|ing)|beat(?:ing)? up) ${PERSON}\\b`
   ),
 ];
 
@@ -75,10 +79,7 @@ const EATING: RegExp[] = [
   /\beating disorder\b/,
   new RegExp(`\\bstarv(?:e|es|ing) ${SELF}\\b`),
   new RegExp(`\\bma(?:ke|kes|king|de) ${SELF} (?:throw up|vomit|sick)\\b`),
-  // Not before a possessive or "the" ("purge my statements"), unless a food
-  // word follows it ("purge my meals"). "a", "this" and "all" are left out:
-  // "purge a lot", "purging this week" and "purge all the time" are eating.
-  /\bpurg(?:e|es|ed|ing)\b(?! (?:my|your|his|her|their|our|the) (?!(?:food|meal|meals|dinner|lunch|breakfast|snack|snacks)\b))/,
+  /\bpurg(?:e|es|ed|ing)\b/,
   /\bbinge (?:eat|eating)\b/,
 ];
 
