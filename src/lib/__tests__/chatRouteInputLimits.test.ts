@@ -207,11 +207,33 @@ describe("refusals happen before the usage reservation and the model", () => {
     expect(refusalLogs()).toEqual([["[chat-input] refused reason=%s", "empty_window"]]);
   });
 
-  it("a malformed body still gets the existing 400", async () => {
+  it("a malformed body still gets the existing 400, logged as malformed_body", async () => {
     const res = await post("{not json");
     expect(res).toEqual({ status: 400, json: { error: "Messages are required" } });
     expect(usage.reserveCalls).toBe(0);
+    expect(refusalLogs()).toEqual([["[chat-input] refused reason=%s", "malformed_body"]]);
   });
+
+  it("a body without a user message: 400, logged as no_user_message", async () => {
+    const res = await post({ messages: [{ role: "assistant", content: "only a reply" }] });
+    expect(res).toEqual({ status: 400, json: { error: "Messages are required" } });
+    expect(usage.reserveCalls).toBe(0);
+    expect(openRouterBodies).toHaveLength(0);
+    expect(refusalLogs()).toEqual([["[chat-input] refused reason=%s", "no_user_message"]]);
+  });
+
+  for (const blank of ["   ", "\n\t", ""]) {
+    it(`a blank last user message (${JSON.stringify(blank)}): 400 EMPTY_MESSAGE, no reservation, no model call`, async () => {
+      const res = await post({ messages: [{ role: "user", content: blank }] });
+      expect(res).toEqual({
+        status: 400,
+        json: { error: "Please type a message before sending.", code: "EMPTY_MESSAGE" },
+      });
+      expect(usage.reserveCalls).toBe(0);
+      expect(openRouterBodies).toHaveLength(0);
+      expect(refusalLogs()).toEqual([["[chat-input] refused reason=%s", "empty_message"]]);
+    });
+  }
 });
 
 describe("a request inside the limits is accepted", () => {

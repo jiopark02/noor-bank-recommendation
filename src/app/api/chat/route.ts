@@ -996,6 +996,7 @@ export async function POST(request: NextRequest) {
     const bodyObj = asPlainObject(bodyRead.value);
     const parsedMessages = parseChatMessages(bodyObj.messages);
     if (!parsedMessages) {
+      console.warn("[chat-input] refused reason=%s", "malformed_body");
       return NextResponse.json(
         { error: "Messages are required" },
         { status: 400 }
@@ -1022,12 +1023,24 @@ export async function POST(request: NextRequest) {
     }
     // A body without a user message has nothing to send to the model.
     if (!chatWindow.messages.some((msg) => msg.role === "user")) {
+      console.warn("[chat-input] refused reason=%s", "no_user_message");
       return NextResponse.json(
         { error: "Messages are required" },
         { status: 400 }
       );
     }
     const lastUserMessageText = getLastUserMessage(chatWindow.messages);
+    // A blank message would reserve usage and call the model for nothing.
+    if (lastUserMessageText.trim() === "") {
+      console.warn("[chat-input] refused reason=%s", "empty_message");
+      return NextResponse.json(
+        {
+          error: "Please type a message before sending.",
+          code: "EMPTY_MESSAGE",
+        },
+        { status: 400 }
+      );
+    }
 
     // Chat usage limit (chatUsageLimits.ts, chatUsageLedger.ts): after the
     // input limits and BEFORE any profile read, memory, Plaid fetch or model
