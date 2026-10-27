@@ -11,6 +11,7 @@ import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
 import {
   CHAT_MAX_BODY_BYTES,
   CHAT_MAX_HISTORY_MESSAGES,
+  CHAT_MAX_LAST_USER_MESSAGE_CHARS,
   windowChatMessages,
 } from "@/lib/chatInputLimits";
 import { buildModelConversation } from "@/lib/chatServerHistory";
@@ -1005,10 +1006,17 @@ export async function POST(request: NextRequest) {
     const chatWindow = windowChatMessages(parsedMessages);
     if (!chatWindow.ok) {
       console.warn("[chat-input] refused reason=%s", chatWindow.reason);
+      // One code for all three reasons; the message says which one it was.
+      const windowRefusalMessages: Record<typeof chatWindow.reason, string> = {
+        last_user_message_too_long: `Your message is too long. Please keep it to at most ${CHAT_MAX_LAST_USER_MESSAGE_CHARS} characters.`,
+        tail_too_long:
+          "This conversation has too much text after your latest message. Please clear the chat and try again.",
+        empty_window:
+          "There is no message to send. Please type a question and try again.",
+      };
       return NextResponse.json(
         {
-          error:
-            "Your message is too long. Please shorten it and try again.",
+          error: windowRefusalMessages[chatWindow.reason],
           code: "MESSAGE_TOO_LONG",
         },
         { status: 400 }
