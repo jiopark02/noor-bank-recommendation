@@ -1,0 +1,11 @@
+#!/bin/sh
+# Refuses a commit while HEAD is on main; commit on a branch instead.
+# Enabled per clone with: git config core.hooksPath .githooks
+# A detached HEAD and every other branch pass.
+
+ref=$(git symbolic-ref -q HEAD)
+if [ "$ref" = "refs/heads/main" ]; then
+  echo "pre-commit: committing on main is blocked; create a branch and commit there." >&2
+  exit 1
+fi
+exit 0
