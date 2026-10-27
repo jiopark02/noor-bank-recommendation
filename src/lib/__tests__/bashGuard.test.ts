@@ -41,7 +41,9 @@ function makeRepo(hooksPath?: string, hookFile = true) {
   }
   if (hookFile) {
     fs.mkdirSync(path.join(dir, ".githooks"));
-    fs.writeFileSync(path.join(dir, ".githooks", "pre-commit"), "#!/bin/sh\nexit 0\n");
+    const hook = path.join(dir, ".githooks", "pre-commit");
+    fs.writeFileSync(hook, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(hook, 0o755);
   }
   return dir;
 }
@@ -197,13 +199,16 @@ describe("bash-guard: commits must reach .githooks/pre-commit", () => {
   let hooked: string;
   let unhooked: string;
   let noHookFile: string;
+  let notExecutable: string;
   beforeAll(() => {
     hooked = makeRepo(".githooks");
     unhooked = makeRepo();
     noHookFile = makeRepo(".githooks", false);
+    notExecutable = makeRepo(".githooks");
+    fs.chmodSync(path.join(notExecutable, ".githooks", "pre-commit"), 0o644);
   });
   afterAll(() => {
-    for (const d of [hooked, unhooked, noHookFile]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [hooked, unhooked, noHookFile, notExecutable]) fs.rmSync(d, { recursive: true, force: true });
   });
 
   const blocked: Array<[string, string]> = [
@@ -256,6 +261,13 @@ describe("bash-guard: commits must reach .githooks/pre-commit", () => {
     const r = run('git commit -m "x"', noHookFile);
     expect(r.status).toBe(2);
     expect(r.stderr).toContain(".githooks/pre-commit is missing");
+  });
+
+  // Windows has no execute bit, so the guard skips this check there.
+  it.skipIf(process.platform === "win32")("blocks a commit where .githooks/pre-commit is not executable", () => {
+    const r = run('git commit -m "x"', notExecutable);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("not executable");
   });
 
   const passed = [
