@@ -29,6 +29,28 @@ function runRaw(input: string) {
   return { status: r.status, stderr: r.stderr };
 }
 
+// A fresh repository in a temp directory, with core.hooksPath set to
+// hooksPath when given and, unless hookFile is false, a .githooks/pre-commit
+// file. The guard lets a commit through only where core.hooksPath is
+// ".githooks" and that file exists.
+function makeRepo(hooksPath?: string, hookFile = true) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bash-guard-repo-"));
+  for (const args of [["init", "-q"], ...(hooksPath ? [["config", "core.hooksPath", hooksPath]] : [])]) {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  }
+  if (hookFile) {
+    fs.mkdirSync(path.join(dir, ".githooks"));
+    const hook = path.join(dir, ".githooks", "pre-commit");
+    fs.writeFileSync(hook, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(hook, 0o755);
+  }
+  return dir;
+}
+
+// Forward slashes: an unquoted backslash is an escape to bash, and to the guard.
+const slash = (p: string) => p.replace(/\\/g, "/");
+
 const HEREDOC_COMMIT_WITH_TRAILER = [
   "git commit -m \"$(cat <<'EOF'",
   "Fix the thing",
@@ -98,7 +120,8 @@ describe("bash-guard: blocks", () => {
 describe("bash-guard: commit -F file", () => {
   let dir: string;
   beforeAll(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "bash-guard-"));
+    // A repository with the hooks path set, so only the -F rule decides.
+    dir = makeRepo(".githooks");
     fs.writeFileSync(path.join(dir, "with.txt"), "Fix\r\n\r\nCo-Authored-By: A <a@example.com>\r\n");
     fs.writeFileSync(path.join(dir, "without.txt"), "Fix the thing\n");
   });
@@ -115,8 +138,9 @@ describe("bash-guard: commit -F file", () => {
   it("blocks --file=<absolute path> that carries the trailer", () => {
     // Forward slashes: an unquoted backslash is an escape to bash, and to the guard.
     const abs = path.join(dir, "with.txt").replace(/\\/g, "/");
-    const r = run(`git commit --file=${abs}`);
+    const r = run(`git commit --file=${abs}`, dir);
     expect(r.status).toBe(2);
+    expect(r.stderr).toContain("Co-Authored-By");
   });
 
   it("passes a -F file without the trailer", () => {
@@ -129,6 +153,15 @@ describe("bash-guard: commit -F file", () => {
 });
 
 describe("bash-guard: passes", () => {
+  // Commit cases need a repository with the hooks path set; the others ignore cwd.
+  let repo: string;
+  beforeAll(() => {
+    repo = makeRepo(".githooks");
+  });
+  afterAll(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
   const cases: string[] = [
     'echo "git add -A"',
     'grep -n "sed -i" f',
@@ -155,11 +188,109 @@ describe("bash-guard: passes", () => {
 
   for (const command of cases) {
     it(`passes: ${JSON.stringify(command)}`, () => {
-      const r = run(command);
+      const r = run(command, repo);
       expect(r.stderr).toBe("");
       expect(r.status).toBe(0);
     });
   }
+});
+
+describe("bash-guard: commits must reach .githooks/pre-commit", () => {
+  let hooked: string;
+  let unhooked: string;
+  let noHookFile: string;
+  let notExecutable: string;
+  beforeAll(() => {
+    hooked = makeRepo(".githooks");
+    unhooked = makeRepo();
+    noHookFile = makeRepo(".githooks", false);
+    notExecutable = makeRepo(".githooks");
+    fs.chmodSync(path.join(notExecutable, ".githooks", "pre-commit"), 0o644);
+  });
+  afterAll(() => {
+    for (const d of [hooked, unhooked, noHookFile, notExecutable]) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  const blocked: Array<[string, string]> = [
+    ['git commit --no-verify -m "x"', "--no-verify"],
+    ['git commit --no-veri -m "x"', "--no-verify"],
+    ['git commit -n -m "x"', "--no-verify"],
+    ['git commit -nm "x"', "--no-verify"],
+    ['git --attr-source HEAD commit -n -m "x"', "--no-verify"],
+    ['git -c core.hooksPath=/tmp commit -m "x"', "core.hooksPath"],
+    ['git -c core.hookspath=/tmp commit -m "x"', "core.hooksPath"],
+    ['git -c core.hooksPath commit -m "x"', "core.hooksPath"],
+    ["git --config-env=core.hooksPath=HP commit -m x", "core.hooksPath"],
+    ["git --config-env core.hooksPath=HP commit -m x", "core.hooksPath"],
+    ['git --git-dir .git commit -m "x"', "--git-dir"],
+    ['git --git-dir=.git commit -m "x"', "--git-dir"],
+    ['git --work-tree . commit -m "x"', "--git-dir"],
+    ['GIT_DIR=.git git commit -m "x"', "GIT_DIR"],
+    ['GIT_WORK_TREE=. git commit -m "x"', "GIT_DIR"],
+    ['env GIT_DIR=.git git commit -m "x"', "GIT_DIR"],
+    ['GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x git commit -m "x"', "GIT_CONFIG_"],
+    ['GIT_CONFIG_PARAMETERS="core.hooksPath=/x" git status', "GIT_CONFIG_"],
+  ];
+  for (const [command, reason] of blocked) {
+    it(`blocks in a repository with the hooks path set: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain(reason);
+    });
+  }
+
+  it("blocks a commit where core.hooksPath is unset", () => {
+    const r = run('git commit -m "x"', unhooked);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("git config core.hooksPath .githooks");
+  });
+
+  it("reads core.hooksPath at git -C <dir>, not the hook cwd", () => {
+    const r = run(`git -C ${slash(unhooked)} commit -m "x"`, hooked);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("git config core.hooksPath .githooks");
+  });
+
+  it("passes a commit where core.hooksPath is .githooks", () => {
+    const r = run('git commit -m "x"', hooked);
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+
+  it("blocks a commit where core.hooksPath is .githooks but .githooks/pre-commit is missing", () => {
+    const r = run('git commit -m "x"', noHookFile);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(".githooks/pre-commit is missing");
+  });
+
+  // Windows has no execute bit, so the guard skips this check there.
+  it.skipIf(process.platform === "win32")("blocks a commit where .githooks/pre-commit is not executable", () => {
+    const r = run('git commit -m "x"', notExecutable);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("not executable");
+  });
+
+  const passed = [
+    'git commit -mnote',
+    "git commit -uno -m x",
+    "git commit -S -m x",
+    "git commit -Sabc123 -m x",
+  ];
+  for (const command of passed) {
+    it(`passes (no -n inside an attached value): ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+    });
+  }
+
+  it("still sees -n after a bare -u or -S", () => {
+    for (const command of ["git commit -u -n -m x", "git commit -S -n -m x"]) {
+      const r = run(command, hooked);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("--no-verify");
+    }
+  });
 });
 
 describe("bash-guard: unreadable input fails closed", () => {

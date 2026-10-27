@@ -4,19 +4,43 @@
 //   - stages the whole tree (git add -A / --all / -u / --update / . / :/)
 //   - commits every tracked change (git commit -a / --all)
 //   - carries a Co-Authored-By trailer into a commit (message, heredoc or -F file)
+//   - skips the git hooks on a commit (--no-verify, an abbreviation of it down
+//     to --no-veri, or -n), overrides core.hooksPath with git -c /
+//     --config-env, sets any GIT_CONFIG_* variable in front of git, points a
+//     commit elsewhere with --git-dir / --work-tree / GIT_DIR= / GIT_WORK_TREE=,
+//     or commits in a repository whose core.hooksPath is not .githooks or
+//     that has no .githooks/pre-commit, or (off Windows) one that is not
+//     executable (anything unreadable also blocks); .githooks/pre-commit is
+//     what refuses a commit on main
 //   - force-pushes (--force, -f, --force-with-lease, +refspec)
 //   - edits in place with sed (-i / --in-place), which rewrites CRLF files
 // Anything else exits 0 with no output, so the normal permission flow applies.
 //
-// This is a guardrail, not a security boundary: eval, variables, xargs,
-// shell-expanded globs and env with options (env -i ...) are not followed, and
-// a relative -F path under git -C <dir> is resolved against the hook cwd, not
-// <dir>.
+// This is a guardrail, not a security boundary. Not followed or not checked:
+//   - shell-expanded globs (git add *), eval, variables, xargs, and env with
+//     options (env -i git add -A)
+//   - git aliases, including ones defined on the spot with -c alias.*=...
+//   - config pulled in by -c include.path=... or includeIf
+//   - a GIT_COMMON_DIR assignment
+//   - a cd earlier on the line: the core.hooksPath and hook-file reads use
+//     git -C <dir> or the hook cwd
+//   - a GIT_DIR exported earlier (export GIT_DIR=...; git commit); assignments
+//     are seen only in front of the git word itself
+//   - prefixes of --no-verify shorter than --no-veri
+//   - edits to .githooks/pre-commit itself, or to git config other than by -c
+//   - a relative -F path under git -C <dir>, which is resolved against the
+//     hook cwd, not <dir>
+//   - commits on main that never run pre-commit (git merge, cherry-pick,
+//     rebase, plumbing such as commit-tree / update-ref); those stay behind
+//     the permission prompt
+//   - commands run through the PowerShell tool, which this Bash matcher never
+//     sees (the git hook still applies to them)
 
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const MAX_DEPTH = 3;
 
@@ -26,6 +50,18 @@ const MESSAGES = {
     "bash-guard: commit -a stages every tracked change; stage files by path, then commit.",
   coAuthor:
     "bash-guard: commit message contains Co-Authored-By; remove the trailer.",
+  noVerify: "bash-guard: commit --no-verify / -n skips the pre-commit hook; commit without it.",
+  hooksPathOverride: "bash-guard: git -c core.hooksPath overrides the repository's hooks; drop the -c option.",
+  hooksPathUnset:
+    "bash-guard: commit is blocked because core.hooksPath is not .githooks in this repository (or could not be read); run: git config core.hooksPath .githooks",
+  hookFileMissing:
+    "bash-guard: commit is blocked because .githooks/pre-commit is missing at the top of this repository (or the top could not be read); commit from a checkout that has it.",
+  hookNotExecutable:
+    "bash-guard: commit is blocked because .githooks/pre-commit is not executable, so git would skip it; restore its execute bit (chmod +x .githooks/pre-commit).",
+  gitDirOverride:
+    "bash-guard: commit with --git-dir / --work-tree / GIT_DIR / GIT_WORK_TREE is blocked; run it from inside the repository instead.",
+  gitConfigEnv:
+    "bash-guard: GIT_CONFIG_* in front of git can override core.hooksPath; drop the assignment.",
   push: "bash-guard: force push is blocked; push without force or ask the operator.",
   sed: "bash-guard: sed -i rewrites line endings on this CRLF tree; use the Edit tool or perl -i and check the CR count.",
 };
@@ -318,7 +354,9 @@ function scanCluster(token, valueLetters) {
 
 // Walks an argument list, separating options from operands. longWithValue
 // lists long options that take a separate value when written without "=".
-function parseArgs(args, valueLetters, longWithValue) {
+// attachedOnly lists value letters whose value is optional and only ever
+// attached (-uno, -S<key>), so they never consume the next argument.
+function parseArgs(args, valueLetters, longWithValue, attachedOnly = []) {
   const longs = [];
   const shortLetters = [];
   const operands = [];
@@ -347,7 +385,7 @@ function parseArgs(args, valueLetters, longWithValue) {
       if (valueLetter) {
         if (attached !== "") {
           values.push({ opt: "-" + valueLetter, value: attached });
-        } else if (k + 1 < args.length) {
+        } else if (k + 1 < args.length && !attachedOnly.includes(valueLetter)) {
           values.push({ opt: "-" + valueLetter, value: args[k + 1] });
           k++;
         }
@@ -360,7 +398,7 @@ function parseArgs(args, valueLetters, longWithValue) {
   return { longs, shortLetters, operands, values };
 }
 
-const GIT_GLOBAL_WITH_VALUE = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"];
+const GIT_GLOBAL_WITH_VALUE = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env", "--attr-source"];
 
 function checkGitAdd(args) {
   const p = parseArgs(args, [], ["--chmod", "--pathspec-from-file"]);
@@ -370,17 +408,80 @@ function checkGitAdd(args) {
   return null;
 }
 
-function checkGitCommit(args, raw, cwd) {
+// The pre-commit hook in .githooks refuses commits on main, so a commit must
+// run where git will find it. Reads core.hooksPath in repoDir (the git -C
+// directory, or the hook cwd); anything other than ".githooks", including
+// unset or unreadable, blocks.
+function checkHooksPath(repoDir) {
+  let r;
+  try {
+    r = spawnSync("git", ["config", "--get", "core.hooksPath"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true,
+    });
+  } catch (e) {
+    return MESSAGES.hooksPathUnset;
+  }
+  if (r.error || r.status !== 0 || r.stdout.trim() !== ".githooks") return MESSAGES.hooksPathUnset;
+  return null;
+}
+
+// core.hooksPath being .githooks is not enough if the checkout has no
+// .githooks/pre-commit: git then runs no hook at all. Reads the top of the
+// repository at repoDir; unreadable blocks.
+function checkHookFile(repoDir) {
+  let r;
+  try {
+    r = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true,
+    });
+  } catch (e) {
+    return MESSAGES.hookFileMissing;
+  }
+  const top = r.error || r.status !== 0 ? "" : r.stdout.trim();
+  if (!top) return MESSAGES.hookFileMissing;
+  const hook = path.join(top, ".githooks", "pre-commit");
+  try {
+    if (!fs.statSync(hook).isFile()) return MESSAGES.hookFileMissing;
+  } catch (e) {
+    return MESSAGES.hookFileMissing;
+  }
+  // Git skips a hook without the execute bit. Windows has no such bit, and
+  // Git for Windows runs the hook regardless.
+  if (process.platform !== "win32") {
+    try {
+      fs.accessSync(hook, fs.constants.X_OK);
+    } catch (e) {
+      return MESSAGES.hookNotExecutable;
+    }
+  }
+  return null;
+}
+
+// Git accepts any unambiguous prefix of a long option; --no-veri is the
+// shortest that this check treats as --no-verify.
+function isNoVerify(longName) {
+  return longName.length >= "--no-veri".length && "--no-verify".startsWith(longName);
+}
+
+function checkGitCommit(args, raw, cwd, repoDir) {
   const p = parseArgs(
     args,
-    ["m", "F", "c", "C", "t"],
+    ["m", "F", "c", "C", "t", "u", "S"],
     [
       "--message", "--file", "--author", "--date", "--template", "--reuse-message",
       "--reedit-message", "--fixup", "--squash", "--cleanup", "--trailer",
-      "--pathspec-from-file", "--untracked-files",
-    ]
+      "--pathspec-from-file",
+    ],
+    ["u", "S"]
   );
   if (p.longs.includes("--all") || p.shortLetters.includes("a")) return MESSAGES.commitAll;
+  if (p.longs.some(isNoVerify) || p.shortLetters.includes("n")) return MESSAGES.noVerify;
   if (CO_AUTHOR.test(raw)) return MESSAGES.coAuthor;
   for (const v of p.values) {
     if ((v.opt === "-F" || v.opt === "--file") && v.value !== "-") {
@@ -394,8 +495,10 @@ function checkGitCommit(args, raw, cwd) {
       if (CO_AUTHOR.test(text)) return MESSAGES.coAuthor;
     }
   }
-  return null;
+  return checkHooksPath(repoDir) || checkHookFile(repoDir);
 }
+
+const HOOKS_PATH_SETTING = /^core\.hookspath(=|$)/i;
 
 function checkGitPush(args) {
   const p = parseArgs(args, ["o"], ["--repo", "--receive-pack", "--exec", "--push-option"]);
@@ -414,8 +517,16 @@ function checkSed(args) {
 
 function checkCommand(cmd, cwd, depth) {
   const words = cmd.words.slice();
-  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
-  while (words.length && ["env", "command", "exec", "time", "nohup"].includes(words[0])) words.shift();
+  // Leading assignments and wrappers, in any order (env GIT_DIR=x git ...).
+  // Each assignment's name is checked before it is dropped.
+  let gitDirEnv = false;
+  let gitConfigEnv = false;
+  while (words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]) || ["env", "command", "exec", "time", "nohup"].includes(words[0]))) {
+    const assigned = words[0].split("=")[0];
+    if (assigned === "GIT_DIR" || assigned === "GIT_WORK_TREE") gitDirEnv = true;
+    if (assigned.startsWith("GIT_CONFIG_")) gitConfigEnv = true;
+    words.shift();
+  }
   if (words.length === 0) return null;
 
   const name = baseName(words[0]);
@@ -434,10 +545,24 @@ function checkCommand(cmd, cwd, depth) {
   if (name === "sed") return checkSed(args);
 
   if (name === "git") {
+    if (gitConfigEnv) return MESSAGES.gitConfigEnv;
     let k = 0;
+    let repoDir = cwd;
+    let gitDirOption = false;
     while (k < args.length && args[k].startsWith("-")) {
       const a = args[k];
+      if (a.startsWith("--config-env=") && HOOKS_PATH_SETTING.test(a.slice("--config-env=".length))) {
+        return MESSAGES.hooksPathOverride;
+      }
+      const optName = a.split("=")[0];
+      if (optName === "--git-dir" || optName === "--work-tree") gitDirOption = true;
       if (GIT_GLOBAL_WITH_VALUE.includes(a)) {
+        const v = args[k + 1];
+        if ((a === "-c" || a === "--config-env") && v !== undefined && HOOKS_PATH_SETTING.test(v)) {
+          return MESSAGES.hooksPathOverride;
+        }
+        // Successive -C options resolve against each other, as git does.
+        if (a === "-C" && v !== undefined) repoDir = path.resolve(repoDir, v);
         k += 2;
       } else {
         k += 1;
@@ -446,7 +571,10 @@ function checkCommand(cmd, cwd, depth) {
     const sub = args[k];
     const rest = args.slice(k + 1);
     if (sub === "add") return checkGitAdd(rest);
-    if (sub === "commit") return checkGitCommit(rest, cmd.raw, cwd);
+    if (sub === "commit") {
+      if (gitDirEnv || gitDirOption) return MESSAGES.gitDirOverride;
+      return checkGitCommit(rest, cmd.raw, cwd, repoDir);
+    }
     if (sub === "push") return checkGitPush(rest);
   }
   return null;
