@@ -60,6 +60,7 @@ vi.mock("@/lib/aiMemory", () => ({
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
 let systemMessages: string[] = [];
+let models: string[] = [];
 
 let POST: typeof import("../../app/api/chat/route").POST;
 
@@ -82,6 +83,7 @@ beforeEach(() => {
   memory.enabled = false;
   memory.block = "";
   systemMessages = [];
+  models = [];
   vi.stubEnv("OPENROUTER_API_KEY", "sk-test-fake");
   vi.stubEnv("OPENROUTER_MODEL", "");
   vi.stubEnv("OPENROUTER_FALLBACK_MODEL", "");
@@ -96,6 +98,7 @@ beforeEach(() => {
       }
       const body = JSON.parse(String(init?.body)) as { model: string; messages: Msg[] };
       systemMessages.push(body.messages[0].content);
+      models.push(body.model);
       return new Response(
         JSON.stringify({
           id: "gen-1",
@@ -157,5 +160,36 @@ describe("every assembled system message keeps identity, safety first and bounda
     expect(systemMessages).toHaveLength(1);
     expect(systemMessages[0]).toContain("<user_memory>");
     expectFixedRules(systemMessages[0]);
+  });
+});
+
+describe("visa is not part of the chat route's prompt or model choice", () => {
+  it("the greeting block no longer names visa", async () => {
+    expect(await post("hi")).toBe(200);
+    expect(systemMessages).toHaveLength(1);
+    expect(systemMessages[0]).toContain(
+      "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, polite sentences. Do NOT mention their income, spending, budget, bank balance, or profile details unless they explicitly asked."
+    );
+    expect(systemMessages[0]).not.toMatch(/visa/i);
+  });
+
+  // With OPENROUTER_MODEL unset the route picks the simple or the complex
+  // model by isComplexPrompt. None of these messages carries another signal.
+  it.each([
+    ["visa", "visa planning"],
+    ["opt", "what are my options"],
+    ["cpt", "my CPT question"],
+  ])("a message containing %s goes to the simple model", async (_signal, text) => {
+    vi.stubEnv("OPENROUTER_SIMPLE_MODEL", "test/simple-model");
+    vi.stubEnv("OPENROUTER_COMPLEX_MODEL", "test/complex-model");
+    expect(await post(text)).toBe(200);
+    expect(models[0]).toBe("test/simple-model");
+  });
+
+  it("a complexity signal still goes to the complex model", async () => {
+    vi.stubEnv("OPENROUTER_SIMPLE_MODEL", "test/simple-model");
+    vi.stubEnv("OPENROUTER_COMPLEX_MODEL", "test/complex-model");
+    expect(await post("compare two checking accounts")).toBe(200);
+    expect(models[0]).toBe("test/complex-model");
   });
 });

@@ -376,9 +376,6 @@ function isComplexPrompt(message: string): boolean {
     "tradeoff",
     "step by step",
     "tax",
-    "visa",
-    "opt",
-    "cpt",
     "budget plan",
     "scenario",
     "strategy",
@@ -1051,7 +1048,7 @@ export async function POST(request: NextRequest) {
 
     if (isGreeting) {
       systemPrompt +=
-        "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, polite sentences. Do NOT mention their income, spending, budget, bank balance, visa, or profile details unless they explicitly asked.";
+        "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, polite sentences. Do NOT mention their income, spending, budget, bank balance, or profile details unless they explicitly asked.";
     }
 
     // Under "balances" mode the always-on L2 block already injected shallow

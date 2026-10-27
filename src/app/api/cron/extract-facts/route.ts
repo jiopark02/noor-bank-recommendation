@@ -20,6 +20,7 @@ import {
   type NewUserFact,
 } from "@/lib/aiMemory";
 import { asPlainObject } from "@/lib/requestJson";
+import { isUserFactCategory } from "@/lib/userFactCategories";
 import {
   buildCronLlmCallRow,
   type ObservedLlmCall,
@@ -72,17 +73,6 @@ const MAX_FACT_LENGTH = 500;
 const MAX_SUPERSEDE_EXPIRE = 30;
 // cron_runs 보존 기간(일). 이 cron 끝에서 best-effort 정리.
 const CRON_RUNS_RETENTION_DAYS = 180;
-
-// user_facts.category 허용값 (검증용).
-const VALID_CATEGORIES: ReadonlyArray<UserFactCategory> = [
-  "financial",
-  "personal",
-  "goal",
-  "preference",
-  "visa",
-  "banking",
-  "other",
-];
 
 /**
  * OpenRouter chat completions를 호출해 raw 문자열 응답을 반환한다.
@@ -206,7 +196,7 @@ All three arrays may be empty. Output {"new_facts":[],"supersede":[],"expire":[]
 
 EXTRACT — durable, currently-true facts about the user:
 - Each fact must be in ENGLISH, one concise sentence.
-- category must be one of: financial, personal, goal, preference, visa, banking, other.
+- category must be one of: financial, personal, goal, preference, banking, other.
 - confidence is a number between 0 and 1.
 - Store a fact only if it would change the next piece of advice Noor gives. If knowing it would not change any advice, do not extract it.
 
@@ -231,6 +221,14 @@ DO NOT EXTRACT:
   OK: "User receives about $800 a month from family abroad, in cash."
   NG: "User has $3,000 in checking."
 - Full sensitive identifiers (complete SSN, full card numbers).
+- Immigration or visa status: visa type, F-1, OPT, CPT, I-20, work authorization, or
+  residency status. Do not store it under any category.
+  NG: "User is in the US on an F-1 student visa."
+- Emotions, mood, stress, mental health, or anything about self-harm, suicide, harming
+  others, or eating problems — even if stated as a current fact. This rule applies even
+  if the fact would change advice.
+  NG: "User feels anxious and overwhelmed about money."
+  NG: "User has had thoughts of hurting themselves."
 
 EXISTING FACTS — reconcile:
 - The existing facts are given as a numbered list. [1] is the most recently created.
@@ -361,13 +359,10 @@ function normalizeConfidence(value: unknown): number {
 }
 
 /**
- * category가 7종 enum 중 하나인지.
+ * Whether the category is one of USER_FACT_CATEGORIES (userFactCategories.ts).
  */
 function isValidCategory(value: unknown): value is UserFactCategory {
-  return (
-    typeof value === "string" &&
-    (VALID_CATEGORIES as ReadonlyArray<string>).includes(value)
-  );
+  return isUserFactCategory(value);
 }
 
 /**
@@ -532,7 +527,8 @@ interface SessionFactStats {
   superseded: number;
   expired: number;
   failed: number;
-  // Not stored because the text held an SSN- or card-number-shaped string.
+  // Not stored because an output filter refused it (an identifier-shaped
+  // string or crisis content).
   filtered: number;
 }
 
@@ -624,8 +620,8 @@ async function extractOneSession(
       await supersedeUserFact(session.user_id, oldFact.id, payload);
       stats.superseded++;
     } catch (supersedeError) {
-      // A replacement holding an SSN- or card-shaped string is rejected before
-      // the old fact is touched, so there is nothing to recover: the old fact
+      // The output filter rejects a replacement (an identifier-shaped string or
+      // crisis content) before the old fact is touched, so there is nothing to recover: the old fact
       // stays active and the replacement is not stored.
       if (isSensitiveFactRejected(supersedeError)) {
         stats.filtered++;
@@ -679,7 +675,8 @@ async function extractOneSession(
       stats.saved++;
     } catch (saveError) {
       if (isSensitiveFactRejected(saveError)) {
-        // Not stored: the fact holds an SSN- or card-shaped string.
+        // Not stored: the output filter rejected the fact (an identifier-shaped
+        // string or crisis content).
         stats.filtered++;
       } else if (isUniqueViolation(saveError)) {
         // 동일 텍스트 active fact 이미 존재 — upsert와 동일하게 흡수.

@@ -37,7 +37,7 @@ const EXCEPTIONS: RegExp[] = [
   /\b(?:financial|credit|career|social) suicide\b/g,
   /\bdying to\b/g,
   /\bkill two birds\b/g,
-  /\bpurg\w* (?:my |your |the |all |those |these )?(?:old |unused )?(?:credit card |bank |budget )?(?:files|accounts|subscriptions|cards|data|statements|receipts|records|spreadsheet|spreadsheets|budget|transactions|emails|inbox|history)\b/g,
+  /\bpurg\w* (?:my |your |their |his |her |our |the |all |those |these )?(?:old |unused )?(?:credit card |bank |budget )?(?:files|accounts|subscriptions|cards|data|statements|receipts|records|spreadsheet|spreadsheets|budget|transactions|emails|inbox|history)\b/g,
   new RegExp(
     `\\bshoot(?:ing)? ${PERSON} an? (?:text|email|message|note|line|dm|question)\\b`,
     "g"

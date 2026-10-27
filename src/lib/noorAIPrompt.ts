@@ -12,12 +12,9 @@ export interface UserContext {
   // Kept for backward compatibility with existing profile data
   university?: string;
   institutionType?: string;
-  visaType?: string;
   campusSide?: string;
   isTransferStudent?: boolean;
   targetSchools?: string[];
-  visaExpiry?: string;
-  optStartDate?: string;
 }
 
 export interface SystemPromptOptions {
