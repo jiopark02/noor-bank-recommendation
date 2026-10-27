@@ -87,4 +87,30 @@ describe("useChat request wiring", () => {
       'content: usageLimitMessage ?? "Sorry, there was an error generating a response. Please try again in a moment.",'
     );
   });
+
+  it("an error response's crisisNotice is shown as a bubble before the error bubble", () => {
+    const notOk = source.indexOf("if (!response.ok) {");
+    const notOkBody = source.slice(notOk, source.indexOf("\n        }\n", notOk));
+    expect(notOkBody).toContain(
+      'if (typeof data.crisisNotice === "string" && data.crisisNotice) {'
+    );
+    expect(notOkBody).toContain("crisisNoticeText = data.crisisNotice;");
+    expect(occurrences("crisisNoticeText = ")).toBe(1);
+
+    const catchAt = source.indexOf("} catch (err) {", notOk);
+    const catchBody = source.slice(catchAt, source.indexOf("} finally {", catchAt));
+    expect(catchBody).toContain("content: crisisNoticeText,");
+    expect(catchBody).toContain(
+      "setMessages((prev) => [...prev, ...noticeMessages, errorMessage]);"
+    );
+  });
+
+  it("an over-long message with a crisis signal shows the standard notice locally", () => {
+    const guard = source.indexOf("if (!apiMessages) {");
+    const guardBody = source.slice(guard, source.indexOf("\n      }\n", guard));
+    expect(guardBody).toContain("detectCrisisSignal(userMessage.content)");
+    expect(guardBody).toContain("content: CRISIS_NOTICES[localCrisis].standard,");
+    expect(guardBody).toContain("setMessages((prev) => [...prev, noticeMessage]);");
+    expect(guardBody.indexOf("detectCrisisSignal(")).toBeLessThan(guardBody.indexOf("return;"));
+  });
 });

@@ -14,6 +14,8 @@ import {
   CHAT_MAX_LAST_USER_MESSAGE_CHARS,
   buildChatRequestMessages,
 } from "@/lib/chatInputLimits";
+import { detectCrisisSignal } from "@/lib/crisisSignals";
+import { CRISIS_NOTICES } from "@/lib/crisisNotice";
 
 export interface ChatMessage {
   id: string;
@@ -132,6 +134,19 @@ export function useChat({
       // cleared the input. The window skips it on later turns.
       const apiMessages = buildChatRequestMessages(messages, userMessage);
       if (!apiMessages) {
+        // Nothing reaches the server, so the crisis notice the route would
+        // have attached is shown from here: always the standard one, and not
+        // counted.
+        const localCrisis = detectCrisisSignal(userMessage.content);
+        if (localCrisis) {
+          const noticeMessage: ChatMessage = {
+            id: generateId(),
+            role: "assistant",
+            content: CRISIS_NOTICES[localCrisis].standard,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, noticeMessage]);
+        }
         setError(
           `Your message is too long. Please keep it to at most ${CHAT_MAX_LAST_USER_MESSAGE_CHARS} characters.`
         );
@@ -142,6 +157,8 @@ export function useChat({
 
       // Set when the route refused the request under the chat usage limit.
       let usageLimitMessage: string | null = null;
+      // Set when the route attached a crisis notice to an error response.
+      let crisisNoticeText: string | null = null;
       try {
         // The body carries messages only. The route builds the user context
         // from the database and never read a client-sent one.
@@ -158,6 +175,9 @@ export function useChat({
         const data = asPlainObject(await response.json());
 
         if (!response.ok) {
+          if (typeof data.crisisNotice === "string" && data.crisisNotice) {
+            crisisNoticeText = data.crisisNotice;
+          }
           const serverMessage = readErrorMessage(data);
           // The server's text names the window that was hit; the generic
           // "try again in a moment" would be wrong for the day and 30-day
@@ -197,7 +217,19 @@ export function useChat({
           timestamp: new Date(),
         };
 
-        setMessages((prev) => [...prev, errorMessage]);
+        // The crisis notice comes first, as it does on a successful reply.
+        const noticeMessages: ChatMessage[] = crisisNoticeText
+          ? [
+              {
+                id: generateId(),
+                role: "assistant",
+                content: crisisNoticeText,
+                timestamp: new Date(),
+              },
+            ]
+          : [];
+
+        setMessages((prev) => [...prev, ...noticeMessages, errorMessage]);
       } finally {
         setIsLoading(false);
         isSendingRef.current = false;
