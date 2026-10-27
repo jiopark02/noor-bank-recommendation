@@ -41,6 +41,9 @@ export async function readJsonBodyLeniently(res: {
   return { data: asPlainObject(raw), jsonParsed };
 }
 
+/** The reply text that stands in for an empty completion. */
+export const EMPTY_ASSISTANT_REPLY = "Sorry, I could not generate a response.";
+
 export function toOpenRouterResult(input: {
   ok: boolean;
   status: number;
@@ -85,7 +88,7 @@ export function toOpenRouterResult(input: {
     ok: true,
     status: 200,
     model,
-    message: assistantContent || "Sorry, I could not generate a response.",
+    message: assistantContent || EMPTY_ASSISTANT_REPLY,
     usage: usageObj
       ? {
           input_tokens:

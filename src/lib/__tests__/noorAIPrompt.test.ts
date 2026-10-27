@@ -77,6 +77,63 @@ describe("generateSystemPrompt — the per-user context comes last", () => {
   });
 });
 
+describe("buildStaticSystemPrompt — identity, boundaries and safety priority", () => {
+  it.each([false, true])(
+    "states the AI identity, safety first right after it, then boundaries (plaidStateEnabled=%s)",
+    (plaidStateEnabled) => {
+      const fixed = buildStaticSystemPrompt({ plaidStateEnabled });
+      expect(
+        fixed.startsWith(
+          "You are Noor, an AI personal finance guide for people who are just getting started with managing their money.\n\n## Safety comes first\n"
+        )
+      ).toBe(true);
+      const safetyAt = fixed.indexOf("## Safety comes first");
+      const identityAt = fixed.indexOf("## Identity and Tone");
+      const boundariesAt = fixed.indexOf("## Boundaries");
+      expect(identityAt).toBeGreaterThan(safetyAt);
+      expect(boundariesAt).toBeGreaterThan(identityAt);
+      expect(occurrencesOf(fixed, "## Safety comes first")).toBe(1);
+      expect(occurrencesOf(fixed, "## Boundaries")).toBe(1);
+    }
+  );
+
+  it("the safety section overrides the brevity, volunteering and greeting rules by name", () => {
+    const fixed = buildStaticSystemPrompt();
+    expect(fixed).toContain(
+      `this section overrides every other rule in this prompt, including "Don't volunteer information", "Be concise by default", and any instruction to answer a greeting in 1-2 sentences.`
+    );
+    for (const line of [
+      "1. **Match the user's intent (unless 'Safety comes first' applies).**",
+      "3. **Simple questions get simple answers (unless 'Safety comes first' applies).**",
+      "4. **Don't volunteer information (unless 'Safety comes first' applies).**",
+      "5. **Be concise by default (unless 'Safety comes first' applies).**",
+      "- Greeting or small talk: 1–2 short sentences (unless 'Safety comes first' applies)",
+      "### Safety and Escalation\n'Safety comes first' above takes priority over this section.",
+    ]) {
+      expect(fixed).toContain(line);
+    }
+  });
+
+  it("boundaries: says it is an AI, claims no feelings, discourages reliance, limits memory use", () => {
+    const fixed = buildStaticSystemPrompt();
+    for (const line of [
+      "- If asked whether you are a person, say plainly that you are an AI.",
+      "- Do not claim to have feelings, memories of your own, or a personal life.",
+      "- Do not encourage the user to rely on you for emotional support or companionship; you are not a therapist or counselor.",
+      "- Use remembered information only when it is needed to answer the current financial question. Do not bring up earlier personal topics to build closeness.",
+    ]) {
+      expect(fixed).toContain(line);
+    }
+  });
+
+  it("guideline 7 gives a next step instead of empathy first, and no friend persona remains", () => {
+    const fixed = buildStaticSystemPrompt();
+    expect(fixed).toContain("acknowledge it briefly, then give a concrete next step");
+    expect(fixed).not.toContain("with empathy");
+    expect(fixed.toLowerCase()).not.toContain("friend");
+  });
+});
+
 function occurrencesOf(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }

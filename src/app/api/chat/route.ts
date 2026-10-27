@@ -41,10 +41,22 @@ import {
   logPlaidEgressDecision,
 } from "@/lib/plaidEgressPolicy";
 import {
+  EMPTY_ASSISTANT_REPLY,
   readJsonBodyLeniently,
   toOpenRouterResult,
   type OpenRouterResult,
 } from "@/lib/openRouterChatResult";
+import {
+  detectCrisisSignal,
+  hasPriorCrisisSignal,
+  type CrisisCategory,
+} from "@/lib/crisisSignals";
+import {
+  CRISIS_NOTICES,
+  composeCrisisReply,
+  type CrisisVariant,
+} from "@/lib/crisisNotice";
+import { recordCrisisNotice } from "@/lib/crisisNoticeTally";
 import {
   buildLlmCallRow,
   classifyLlmOutcome,
@@ -702,6 +714,21 @@ async function persistTurnIfEnabled(params: {
   });
 }
 
+/**
+ * The response body as given, plus a crisisNotice field when there is a
+ * notice. Without one the body is unchanged: no crisisNotice key at all.
+ */
+function jsonWithCrisisNotice(
+  body: object,
+  notice: string | null,
+  init?: ResponseInit
+): NextResponse {
+  return NextResponse.json(
+    notice === null ? body : { ...body, crisisNotice: notice },
+    init
+  );
+}
+
 export async function POST(request: NextRequest) {
   const requestStartedAtMs = Date.now();
   // The chat usage reservation this request holds, if any, and the per-attempt
@@ -709,6 +736,24 @@ export async function POST(request: NextRequest) {
   let usageReservation: { reservationId: string; userId: string } | null =
     null;
   const usageTally: Array<number | null> = [];
+  // Crisis notice (crisisSignals.ts, crisisNotice.ts): detected once the body
+  // has parsed. Every response after that goes through respond(), which
+  // attaches the fixed notice only when a signal was detected, so the notice
+  // reaches the user on refusals and errors as well as on a model reply.
+  // Declared outside the try so the outer catch answers through respond().
+  let crisis: CrisisCategory | null = null;
+  let crisisVariant: CrisisVariant = "standard";
+  let crisisDelivered = false;
+  const crisisNotice = (): string | null =>
+    crisis ? CRISIS_NOTICES[crisis][crisisVariant] : null;
+  const respond = (
+    body: object,
+    init?: ResponseInit
+  ): NextResponse => {
+    const notice = crisisNotice();
+    if (notice !== null) crisisDelivered = true;
+    return jsonWithCrisisNotice(body, notice, init);
+  };
   try {
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
     if (!authUserId) {
@@ -745,6 +790,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // Before the window: a refusal for length still carries the notice. The
+    // window keeps the last user message as it is, so this is the same text
+    // as lastUserMessageText below.
+    crisis = detectCrisisSignal(getLastUserMessage(parsedMessages));
     const chatWindow = windowChatMessages(parsedMessages);
     if (!chatWindow.ok) {
       console.warn("[chat-input] refused reason=%s", chatWindow.reason);
@@ -756,7 +805,7 @@ export async function POST(request: NextRequest) {
         empty_window:
           "There is no message to send. Please type a question and try again.",
       };
-      return NextResponse.json(
+      return respond(
         {
           error: windowRefusalMessages[chatWindow.reason],
           code: "MESSAGE_TOO_LONG",
@@ -774,7 +823,7 @@ export async function POST(request: NextRequest) {
     // A body without a user message has nothing to send to the model.
     if (!chatWindow.messages.some((msg) => msg.role === "user")) {
       console.warn("[chat-input] refused reason=%s", "no_user_message");
-      return NextResponse.json(
+      return respond(
         { error: "Messages are required" },
         { status: 400 }
       );
@@ -783,7 +832,7 @@ export async function POST(request: NextRequest) {
     // A blank message would reserve usage and call the model for nothing.
     if (lastUserMessageText.trim() === "") {
       console.warn("[chat-input] refused reason=%s", "empty_message");
-      return NextResponse.json(
+      return respond(
         {
           error: "Please type a message before sending.",
           code: "EMPTY_MESSAGE",
@@ -819,7 +868,7 @@ export async function POST(request: NextRequest) {
           error instanceof ChatUsageCheckError ? error.code : null
         );
         if (usageMode === "enforce") {
-          return NextResponse.json(buildUsageCheckUnavailableBody(), {
+          return respond(buildUsageCheckUnavailableBody(), {
             status: 503,
           });
         }
@@ -834,7 +883,7 @@ export async function POST(request: NextRequest) {
         );
         if (!usageDecision.allowed && usageMode === "enforce") {
           // Refused under enforce: chat_usage_reserve recorded no row.
-          return NextResponse.json(
+          return respond(
             buildUsageLimitBody(usageDecision.limit, usageDecision.retryAt),
             {
               status: 429,
@@ -886,9 +935,14 @@ export async function POST(request: NextRequest) {
         memoryBlock = formatMemoryForPrompt(memoryContext);
         storedHistory = recentRows.reverse();
         historySource = "server";
+        // Escalate on a signal of the same category in this session's stored
+        // user turns only, never in the history the request body carries.
+        if (crisis && hasPriorCrisisSignal(storedHistory, crisis)) {
+          crisisVariant = "escalated";
+        }
       } catch (error) {
         console.error("AI memory load failed:", error);
-        return NextResponse.json(
+        return respond(
           {
             error: "Memory system temporarily unavailable. Please try again.",
             code: "MEMORY_LOAD_FAILED",
@@ -928,7 +982,10 @@ export async function POST(request: NextRequest) {
     if (modelConversation.windowRefused) {
       console.warn("[chat-history] window refused; sending the current message only");
     }
-    const isGreeting = isSimpleGreetingOrSmallTalk(lastUserMessageText);
+    // A short message with a crisis signal ("hi i want to die") is not a
+    // greeting: the greeting block would ask for 1-2 sentences.
+    const isGreeting =
+      crisis === null && isSimpleGreetingOrSmallTalk(lastUserMessageText);
     const wantsBalance =
       !isGreeting && isBalanceQuestion(lastUserMessageText);
     const wantsFinancialAnalysis =
@@ -994,7 +1051,7 @@ export async function POST(request: NextRequest) {
 
     if (isGreeting) {
       systemPrompt +=
-        "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, friendly sentences. Do NOT mention their income, spending, budget, bank balance, visa, or profile details unless they explicitly asked.";
+        "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, polite sentences. Do NOT mention their income, spending, budget, bank balance, visa, or profile details unless they explicitly asked.";
     }
 
     // Under "balances" mode the always-on L2 block already injected shallow
@@ -1028,6 +1085,12 @@ export async function POST(request: NextRequest) {
       wantsFinancialAnalysis,
     });
     logPlaidEgressDecision(financialAnalysisDecision, { mode: plaidStateMode });
+
+    // Last, after every other per-turn block. It carries no user text.
+    if (crisis) {
+      systemPrompt +=
+        "\n\n## Current Turn: Safety\nThe user's latest message may indicate risk. Follow 'Safety comes first'. A fixed safety notice with crisis contacts is shown to the user above your reply.";
+    }
 
     // OpenRouter is the only provider path: every request carries the routing
     // preferences in openRouterRequest.ts. Without a key there is no other
@@ -1087,19 +1150,26 @@ export async function POST(request: NextRequest) {
         lastThrew = false;
 
         if (result.ok) {
+          // With a crisis signal the notice leads the reply, and the reply
+          // stored is the one shown.
+          const notice = crisisNotice();
+          const replyMessage =
+            notice === null
+              ? result.message
+              : composeCrisisReply(notice, result.message, EMPTY_ASSISTANT_REPLY);
           try {
             await persistTurnIfEnabled({
               activeSession,
               authUserId,
               userContent: lastUserMessageText,
-              assistantContent: result.message ?? "",
+              assistantContent: replyMessage ?? "",
               assistantModel: result.model,
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
             });
           } catch (error) {
             console.error("Failed to save messages (OpenRouter branch):", error);
-            return NextResponse.json(
+            return respond(
               {
                 error:
                   "Could not save your conversation. Please try sending your message again.",
@@ -1109,9 +1179,9 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          return NextResponse.json({
+          return respond({
             success: true,
-            message: result.message,
+            message: replyMessage,
             model: result.model,
             sessionId: activeSession?.id ?? null,
             usage: result.usage,
@@ -1120,7 +1190,7 @@ export async function POST(request: NextRequest) {
 
         // Auth errors should fail fast rather than retrying other models.
         if (result.status === 401) {
-          return NextResponse.json(
+          return respond(
             { error: "Invalid OpenRouter API key" },
             { status: 401 }
           );
@@ -1131,7 +1201,7 @@ export async function POST(request: NextRequest) {
 
       // No attempt fitted in the request budget.
       if (attemptIndex === 0) {
-        return NextResponse.json(
+        return respond(
           {
             error: "Chat is taking longer than usual. Please try again.",
             code: "CHAT_TIME_BUDGET_EXHAUSTED",
@@ -1142,26 +1212,26 @@ export async function POST(request: NextRequest) {
 
       // The same response a throw reaching the outer catch gets.
       if (lastThrew) {
-        return NextResponse.json(
+        return respond(
           { error: "Failed to get response from AI" },
           { status: 500 }
         );
       }
 
       if (lastFailure?.status === 429) {
-        return NextResponse.json(
+        return respond(
           { error: "Rate limit exceeded. Please try again later." },
           { status: 429 }
         );
       }
 
-      return NextResponse.json(
+      return respond(
         { error: lastFailure?.error || "OpenRouter request failed" },
         { status: lastFailure?.status || 500 }
       );
     }
 
-    return NextResponse.json(
+    return respond(
       {
         error: "AI provider is not configured. Set OPENROUTER_API_KEY.",
       },
@@ -1170,21 +1240,28 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Chat API error:", error);
 
-    return NextResponse.json(
+    return respond(
       { error: "Failed to get response from AI" },
       { status: 500 }
     );
   } finally {
     // Awaited: Vercel freezes the function once the response is returned.
-    // settleChatUsage never rejects and is bounded by its own timeout.
-    if (usageReservation) {
-      await settleChatUsage({
-        reservationId: usageReservation.reservationId,
-        userId: usageReservation.userId,
-        cost: settledCost(usageTally),
-        attempts: usageTally.length,
-      });
-    }
+    // settleChatUsage and recordCrisisNotice never reject and are bounded by
+    // their own timeouts; they run side by side. The notice is counted once
+    // per request that showed it, however many model attempts it took.
+    await Promise.all([
+      usageReservation
+        ? settleChatUsage({
+            reservationId: usageReservation.reservationId,
+            userId: usageReservation.userId,
+            cost: settledCost(usageTally),
+            attempts: usageTally.length,
+          })
+        : undefined,
+      crisis && crisisDelivered
+        ? recordCrisisNotice({ category: crisis, variant: crisisVariant })
+        : undefined,
+    ]);
   }
 }
 
