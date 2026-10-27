@@ -18,6 +18,7 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import { storeSummaryUnlessCrisis } from "@/lib/summaryCrisisGate";
 import {
   CRON_MAX_RESPONDED_ATTEMPTS,
   SESSION_CANDIDATE_LIMIT,
@@ -267,7 +268,7 @@ async function summarizeOneSession(
   }
 
   const { summary, topics } = parseSummaryOutput(rawOutput);
-  await createSummary(session.id, session.user_id, {
+  await storeSummaryUnlessCrisis({ createSummary, markSessionSummarized }, session, {
     summary,
     topics,
     messageCount: session.message_count,

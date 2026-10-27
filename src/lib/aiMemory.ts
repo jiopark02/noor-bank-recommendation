@@ -25,6 +25,7 @@ import {
   findSensitiveMatches,
   maskSensitive,
 } from "@/lib/memoryOutputFilter";
+import { detectCrisisSignal } from "@/lib/crisisSignals";
 
 // -----------------------------------------------------------------------------
 // SECTION 1: Type Definitions
@@ -697,14 +698,16 @@ export async function assertFactBelongsToUser(
 
 /**
  * Thrown instead of storing a fact whose text contains an SSN-shaped or
- * card-number-shaped string (memoryOutputFilter.ts). Its message never contains
- * the fact text. Callers recognize it with {@link isSensitiveFactRejected}.
+ * card-number-shaped string (memoryOutputFilter.ts) or a crisis signal
+ * (crisisSignals.ts). Its message never contains the fact text and does not
+ * say which check refused it. Callers recognize it with
+ * {@link isSensitiveFactRejected}.
  */
 export class SensitiveFactRejectedError extends Error {
   readonly code = "SENSITIVE_FACT_REJECTED";
 
   constructor() {
-    super("Fact not stored: it contains an SSN- or card-number-shaped string");
+    super("Fact not stored: it matched the memory output filter");
     this.name = "SensitiveFactRejectedError";
     // Keeps instanceof working when the class is compiled to ES5.
     Object.setPrototypeOf(this, SensitiveFactRejectedError.prototype);
@@ -721,13 +724,18 @@ export function isSensitiveFactRejected(error: unknown): boolean {
 
 /**
  * Throws SensitiveFactRejectedError when the fact text matches the output
- * filter. Logs only the number of matches, never the text.
+ * filter or carries a crisis signal. An identifier match logs only the number
+ * of matches, never the text. A crisis signal logs nothing: the cron logs name
+ * sessions, so any line here could tie crisis content to a user.
  */
 function rejectSensitiveFact(text: string): void {
   const counts = findSensitiveMatches(text);
   const total = counts.ssn + counts.card;
   if (total > 0) {
     console.warn("[memory-filter] kind=fact masked=%d", total);
+    throw new SensitiveFactRejectedError();
+  }
+  if (detectCrisisSignal(text) !== null) {
     throw new SensitiveFactRejectedError();
   }
 }
@@ -739,8 +747,8 @@ function rejectSensitiveFact(text: string): void {
  * PREFER {@link upsertUserFact} when duplicates are possible, or
  * {@link supersedeUserFact} when you want to replace an existing fact.
  *
- * A fact containing an SSN- or card-number-shaped string is not stored: this
- * throws SensitiveFactRejectedError before any database call.
+ * A fact containing an SSN- or card-number-shaped string or a crisis signal is
+ * not stored: this throws SensitiveFactRejectedError before any database call.
  *
  * @throws Error wrapping the underlying PostgrestError (cause preserved).
  */
@@ -854,8 +862,8 @@ export async function upsertUserFact(
  *
  * SECURITY: Verifies that the old fact belongs to the user before mutation.
  *
- * A replacement containing an SSN- or card-number-shaped string is rejected
- * here, before step 1, so the old fact is never superseded by a fact that
+ * A replacement containing an SSN- or card-number-shaped string or a crisis
+ * signal is rejected here, before step 1, so the old fact is never superseded by a fact that
  * saveUserFact would then refuse to store.
  *
  * @throws Error when ownership check fails, the new fact text is empty, or

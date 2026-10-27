@@ -537,7 +537,8 @@ interface SessionFactStats {
   superseded: number;
   expired: number;
   failed: number;
-  // Not stored because the text held an SSN- or card-number-shaped string.
+  // Not stored because an output filter refused it (an identifier-shaped
+  // string or crisis content).
   filtered: number;
 }
 
