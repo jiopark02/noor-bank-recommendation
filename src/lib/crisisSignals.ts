@@ -12,7 +12,10 @@
  * suicide", "purge my old subscriptions") are then removed, and the patterns
  * below are tested on what is left. Patterns are phrases, never a single word
  * such as "die", "kill" or "dead", and "kill" / "hurt" take only a reflexive
- * pronoun or a person as their object.
+ * pronoun or a person as their object. A person followed by a possessive
+ * ("my boss's idea") is not an object, and "shoot <person> a text" is removed
+ * as an idiom. "purge" followed by a possessive or "the" is not counted as
+ * eating unless a food word comes next ("purge my meals").
  *
  * WHAT IS DELIBERATELY NOT DONE
  * Negation is not suppressed ("I'm not suicidal" matches): a notice shown in
@@ -35,22 +38,26 @@ const EXCEPTIONS: RegExp[] = [
   /\bdying to\b/g,
   /\bkill two birds\b/g,
   /\bpurg\w* (?:my |the |all |those |these )?(?:old |unused )?(?:files|accounts|subscriptions|cards|data)\b/g,
+  new RegExp(
+    `\\bshoot(?:ing)? ${PERSON} an? (?:text|email|message|note|line|dm|question)\\b`,
+    "g"
+  ),
 ];
 
 const SELF_HARM: RegExp[] = [
   new RegExp(`\\bkill(?:ing)? ${SELF}\\b`),
   /\bsuicid(?:e|al)\b/,
-  new RegExp(`\\bend ${POSSESSIVE} life\\b`),
+  new RegExp(`\\bend(?:ing)? ${POSSESSIVE} life\\b`),
   /\bend it all\b/,
   new RegExp(`\\btake ${POSSESSIVE} (?:own )?life\\b`),
-  /\bwants?(?:ed)? to die\b/,
+  /\b(?:wants?(?:ed)? to|wanna) die\b/,
   /\bwish(?:es)? (?:i|he|she|they) (?:was|were) dead\b/,
   /\bbetter off dead\b/,
   /\bno reason to (?:live|go on)\b/,
   // "live" only at the end of the message or before "anymore", "like this"
   // or "this way", so "I don't want to live paycheck to paycheck" does not
   // match.
-  /\bdo(?:n'?t|es ?n'?t) want to (?:live anymore\b|live like this\b|live this way\b|live$|be alive\b|be here anymore\b)/,
+  /\bdo(?:es)? ?(?:n'?t|not) want to (?:live anymore\b|live like this\b|live this way\b|live$|be alive\b|be here anymore\b)/,
   new RegExp(`\\b(?:hurt(?:ing)?|harm(?:ing)?|cut(?:ting)?) ${SELF}\\b`),
   /\bself ?harm(?:ing)?\b/,
   /\boverdos(?:e|ing)\b/,
@@ -59,7 +66,7 @@ const SELF_HARM: RegExp[] = [
 
 const HARM_TO_OTHERS: RegExp[] = [
   new RegExp(
-    `\\b(?:want to|wants to|going to|gonna|i'?ll|i will|thinking (?:of|about)) (?:kill(?:ing)?|hurt(?:ing)?|shoot(?:ing)?|stab(?:bing)?|strangl(?:e|ing)|beat(?:ing)? up) ${PERSON}\\b`
+    `\\b(?:want to|wants to|going to|gonna|i'?ll|i will|thinking (?:of|about)) (?:kill(?:ing)?|hurt(?:ing)?|shoot(?:ing)?|stab(?:bing)?|strangl(?:e|ing)|beat(?:ing)? up) ${PERSON}\\b(?!'s\\b)`
   ),
 ];
 
@@ -68,7 +75,10 @@ const EATING: RegExp[] = [
   /\beating disorder\b/,
   new RegExp(`\\bstarv(?:e|es|ing) ${SELF}\\b`),
   new RegExp(`\\bma(?:ke|kes|king|de) ${SELF} (?:throw up|vomit|sick)\\b`),
-  /\bpurg(?:e|es|ed|ing)\b/,
+  // Not before a possessive or "the" ("purge my statements"), unless a food
+  // word follows it ("purge my meals"). "a", "this" and "all" are left out:
+  // "purge a lot", "purging this week" and "purge all the time" are eating.
+  /\bpurg(?:e|es|ed|ing)\b(?! (?:my|your|his|her|their|our|the) (?!(?:food|meal|meals|dinner|lunch|breakfast|snack|snacks)\b))/,
   /\bbinge (?:eat|eating)\b/,
 ];
 
@@ -79,6 +89,13 @@ const CATEGORIES: Array<[CrisisCategory, RegExp[]]> = [
   ["harm_to_others", HARM_TO_OTHERS],
   ["eating", EATING],
 ];
+
+function matchesAny(normalized: string, patterns: RegExp[]): boolean {
+  for (let i = 0; i < patterns.length; i += 1) {
+    if (patterns[i].test(normalized)) return true;
+  }
+  return false;
+}
 
 /** The text the patterns are tested on. Exported for tests. */
 export function normalizeCrisisText(text: string): string {
@@ -101,25 +118,29 @@ export function detectCrisisSignal(text: string): CrisisCategory | null {
   if (normalized === "") return null;
   for (let i = 0; i < CATEGORIES.length; i += 1) {
     const [category, patterns] = CATEGORIES[i];
-    for (let j = 0; j < patterns.length; j += 1) {
-      if (patterns[j].test(normalized)) return category;
-    }
+    if (matchesAny(normalized, patterns)) return category;
   }
   return null;
 }
 
 /**
- * True when any user row carries a crisis signal. Assistant rows are not
- * read: they hold the notices Noor itself showed, which name the same topics.
+ * True when any user row carries a signal of the given category, whether or
+ * not it is that row's highest-priority one. Assistant rows are not read:
+ * they hold the notices Noor itself showed, which name the same topics.
  */
 export function hasPriorCrisisSignal(
-  rows: ReadonlyArray<{ role: string; content: string | null }>
+  rows: ReadonlyArray<{ role: string; content: string | null }>,
+  category: CrisisCategory
 ): boolean {
+  let patterns: RegExp[] = [];
+  for (let i = 0; i < CATEGORIES.length; i += 1) {
+    if (CATEGORIES[i][0] === category) patterns = CATEGORIES[i][1];
+  }
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i];
-    if (row.role === "user" && detectCrisisSignal(row.content ?? "") !== null) {
-      return true;
-    }
+    if (row.role !== "user" || !row.content) continue;
+    const normalized = normalizeCrisisText(row.content);
+    if (normalized !== "" && matchesAny(normalized, patterns)) return true;
   }
   return false;
 }

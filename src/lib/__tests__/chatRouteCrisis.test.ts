@@ -301,6 +301,28 @@ describe("the escalated notice comes from stored user turns only", () => {
     expect(tally.records).toEqual([{ category: "self_harm", variant: "escalated" }]);
   });
 
+  it("memory on, a stored user turn of another category: standard", async () => {
+    memory.enabled = true;
+    memory.history = [
+      { role: "user", content: "I purge after I eat" },
+      { role: "assistant", content: CRISIS_NOTICES.eating.standard },
+    ];
+    const res = await post(say(CRISIS));
+    expect(res.json.crisisNotice).toBe(STANDARD);
+    expect(tally.records).toEqual([{ category: "self_harm", variant: "standard" }]);
+  });
+
+  it("memory on, a stored user turn of the same non-self-harm category: escalated", async () => {
+    memory.enabled = true;
+    memory.history = [
+      { role: "user", content: "I've been purging after meals" },
+      { role: "assistant", content: CRISIS_NOTICES.eating.standard },
+    ];
+    const res = await post(say("I purge after I eat"));
+    expect(res.json.crisisNotice).toBe(CRISIS_NOTICES.eating.escalated);
+    expect(tally.records).toEqual([{ category: "eating", variant: "escalated" }]);
+  });
+
   it("memory on, only Noor's own notice in the stored turns: standard", async () => {
     memory.enabled = true;
     memory.history = [

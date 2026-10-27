@@ -217,13 +217,23 @@ export function useChat({
           timestamp: new Date(),
         };
 
+        // No notice from the server: the response was not JSON, no response
+        // arrived, or the route refused before parsing. Shown from here as on
+        // the over-long refusal: always the standard one, and not counted.
+        const fallbackCrisis = crisisNoticeText
+          ? null
+          : detectCrisisSignal(userMessage.content);
+        const noticeText =
+          crisisNoticeText ??
+          (fallbackCrisis ? CRISIS_NOTICES[fallbackCrisis].standard : null);
+
         // The crisis notice comes first, as it does on a successful reply.
-        const noticeMessages: ChatMessage[] = crisisNoticeText
+        const noticeMessages: ChatMessage[] = noticeText
           ? [
               {
                 id: generateId(),
                 role: "assistant",
-                content: crisisNoticeText,
+                content: noticeText,
                 timestamp: new Date(),
               },
             ]

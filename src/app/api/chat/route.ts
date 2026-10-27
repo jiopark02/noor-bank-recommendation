@@ -935,9 +935,9 @@ export async function POST(request: NextRequest) {
         memoryBlock = formatMemoryForPrompt(memoryContext);
         storedHistory = recentRows.reverse();
         historySource = "server";
-        // Escalate on a signal in this session's stored user turns only,
-        // never in the history the request body carries.
-        if (crisis && hasPriorCrisisSignal(storedHistory)) {
+        // Escalate on a signal of the same category in this session's stored
+        // user turns only, never in the history the request body carries.
+        if (crisis && hasPriorCrisisSignal(storedHistory, crisis)) {
           crisisVariant = "escalated";
         }
       } catch (error) {

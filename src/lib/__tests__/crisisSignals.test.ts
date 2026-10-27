@@ -35,7 +35,12 @@ const FIRST_PERSON: Array<[string, CrisisCategory]> = [
   ["I thought about an overdose", "self_harm"],
   ["my life is not worth living", "self_harm"],
   ["SUICIDE", "self_harm"],
+  ["I do not want to live anymore", "self_harm"],
+  ["I do not want to be alive", "self_harm"],
+  ["I wanna die", "self_harm"],
+  ["I'm thinking of ending my life", "self_harm"],
   ["I want to hurt someone", "harm_to_others"],
+  ["I'm going to shoot him", "harm_to_others"],
   ["I'm going to kill my landlord", "harm_to_others"],
   ["I'll hurt him if he touches my money again", "harm_to_others"],
   ["I'm thinking about hurting my roommate", "harm_to_others"],
@@ -47,6 +52,12 @@ const FIRST_PERSON: Array<[string, CrisisCategory]> = [
   ["I make myself throw up after meals", "eating"],
   ["I made myself sick after dinner", "eating"],
   ["I purge after I eat", "eating"],
+  ["I've been purging after meals", "eating"],
+  ["I purge when I'm stressed", "eating"],
+  ["I've been purging this week", "eating"],
+  ["I purge a lot after dinner", "eating"],
+  ["I purge my meals", "eating"],
+  ["I purged my dinner last night", "eating"],
   ["I binge eat when I'm stressed about bills", "eating"],
 ];
 
@@ -58,6 +69,7 @@ const THIRD_PERSON: Array<[string, CrisisCategory]> = [
   ["User said he wishes he was dead", "self_harm"],
   ["User has been cutting themself", "self_harm"],
   ["User talked about suicide", "self_harm"],
+  ["User does not want to live anymore", "self_harm"],
   ["User wants to harm herself", "self_harm"],
   ["User is starving herself", "eating"],
   ["User makes himself vomit", "eating"],
@@ -86,6 +98,11 @@ const NEGATIVE: string[] = [
   "my phone battery is dead",
   "I'm dead broke until Friday",
   "I'll shoot you a question about taxes later",
+  "I'll shoot him a text",
+  "im going to shoot her an email",
+  "I'm going to kill my boss's idea",
+  "should I purge my credit card statements",
+  "I purged my budget spreadsheet",
   "I binge-watched a show instead of budgeting",
   "my side hustle is killing it",
   "I'm going to beat my savings goal",
@@ -159,14 +176,32 @@ describe("normalizeCrisisText", () => {
 });
 
 describe("hasPriorCrisisSignal", () => {
-  it("true when a user row carries a signal", () => {
+  it("true when a user row carries a signal of the same category", () => {
     expect(
-      hasPriorCrisisSignal([
-        { role: "user", content: "how do I budget?" },
-        { role: "assistant", content: "Here is how." },
-        { role: "user", content: "I want to die" },
-      ])
+      hasPriorCrisisSignal(
+        [
+          { role: "user", content: "how do I budget?" },
+          { role: "assistant", content: "Here is how." },
+          { role: "user", content: "I want to die" },
+        ],
+        "self_harm"
+      )
     ).toBe(true);
+  });
+
+  it("false when the only prior signal is of another category", () => {
+    expect(
+      hasPriorCrisisSignal([{ role: "user", content: "I purge after I eat" }], "self_harm")
+    ).toBe(false);
+  });
+
+  it("a row counts for every category it signals, not only its highest-priority one", () => {
+    const rows = [
+      { role: "user", content: "I've been purging and I want to hurt someone" },
+    ];
+    expect(hasPriorCrisisSignal(rows, "eating")).toBe(true);
+    expect(hasPriorCrisisSignal(rows, "harm_to_others")).toBe(true);
+    expect(hasPriorCrisisSignal(rows, "self_harm")).toBe(false);
   });
 
   it("ignores assistant rows, including Noor's own notices", () => {
@@ -174,16 +209,19 @@ describe("hasPriorCrisisSignal", () => {
       n.standard,
       n.escalated,
     ]);
-    expect(
-      hasPriorCrisisSignal([
-        { role: "user", content: "how do I budget?" },
-        ...notices.map((content) => ({ role: "assistant", content })),
-      ])
-    ).toBe(false);
+    const rows = [
+      { role: "user", content: "how do I budget?" },
+      ...notices.map((content) => ({ role: "assistant", content })),
+    ];
+    for (const category of Object.keys(CRISIS_NOTICES) as CrisisCategory[]) {
+      expect(hasPriorCrisisSignal(rows, category)).toBe(false);
+    }
   });
 
   it("false on no rows and on null content", () => {
-    expect(hasPriorCrisisSignal([])).toBe(false);
-    expect(hasPriorCrisisSignal([{ role: "user", content: null }])).toBe(false);
+    expect(hasPriorCrisisSignal([], "self_harm")).toBe(false);
+    expect(
+      hasPriorCrisisSignal([{ role: "user", content: null }], "self_harm")
+    ).toBe(false);
   });
 });
