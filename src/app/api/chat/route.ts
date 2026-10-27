@@ -74,10 +74,15 @@ import {
   buildOpenRouterRequestBody,
   resolveOpenRouterApiKey,
 } from "@/lib/openRouterRequest";
-import { CHAT_LLM_TIMEOUT_MS, logLlmTimeout } from "@/lib/llmTimeouts";
+import {
+  CHAT_LLM_TIMEOUT_MS,
+  chatHasBudgetForAnotherAttempt,
+  logLlmTimeout,
+} from "@/lib/llmTimeouts";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const DEFAULT_SIMPLE_MODEL = "google/gemini-2.5-flash-lite";
 const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
@@ -694,8 +699,8 @@ interface ChatLlmCallContext {
  *
  * recordLlmCall never rejects (llmCallLog.ts), so the row write cannot replace
  * a thrown fetch error or alter the returned result. A fetch that throws is
- * rethrown unchanged: it is still not retried on the next model, and it still
- * reaches POST's outer catch as before.
+ * rethrown unchanged; POST's model loop catches it and moves on to the next
+ * model, which starts only within the request budget (llmTimeouts.ts).
  *
  * The attempt is cut off after CHAT_LLM_TIMEOUT_MS. A timeout before the
  * response arrives makes fetch throw, which takes the path above. A timeout
@@ -962,6 +967,7 @@ async function persistTurnIfEnabled(params: {
 }
 
 export async function POST(request: NextRequest) {
+  const requestStartedAtMs = Date.now();
   // The chat usage reservation this request holds, if any, and the per-attempt
   // costs it is settled from in the finally below, on every exit.
   let usageReservation: { reservationId: string; userId: string } | null =
@@ -1393,21 +1399,42 @@ export async function POST(request: NextRequest) {
         financialSnapshot: financialSnapshotInjected,
       };
       let attemptIndex = 0;
+      let lastThrew = false;
 
       for (const model of modelsToTry) {
+        // Every attempt, the first included, starts only if it could run to
+        // its full timeout inside the request budget.
+        const elapsedMs = Date.now() - requestStartedAtMs;
+        if (!chatHasBudgetForAnotherAttempt(elapsedMs)) {
+          console.warn(
+            "[chat-deadline] attempt skipped attempt=%d elapsed_ms=%d",
+            attemptIndex + 1,
+            elapsedMs
+          );
+          break;
+        }
         attemptIndex++;
-        const result = await callOpenRouter(
-          openRouterApiKey,
-          model,
-          openRouterMessages,
-          {
-            attemptIndex,
-            userId: authUserId,
-            sessionId: activeSession?.id ?? null,
-            blocks: promptBlocks,
-            tally: usageTally,
-          }
-        );
+        let result: OpenRouterResult;
+        try {
+          result = await callOpenRouter(
+            openRouterApiKey,
+            model,
+            openRouterMessages,
+            {
+              attemptIndex,
+              userId: authUserId,
+              sessionId: activeSession?.id ?? null,
+              blocks: promptBlocks,
+              tally: usageTally,
+            }
+          );
+        } catch (error) {
+          // callOpenRouter has already recorded the attempt.
+          lastThrew = true;
+          console.error("Chat API error:", error);
+          continue;
+        }
+        lastThrew = false;
 
         if (result.ok) {
           try {
@@ -1450,6 +1477,25 @@ export async function POST(request: NextRequest) {
         }
 
         lastFailure = result;
+      }
+
+      // No attempt fitted in the request budget.
+      if (attemptIndex === 0) {
+        return NextResponse.json(
+          {
+            error: "Chat is taking longer than usual. Please try again.",
+            code: "CHAT_TIME_BUDGET_EXHAUSTED",
+          },
+          { status: 503 }
+        );
+      }
+
+      // The same response a throw reaching the outer catch gets.
+      if (lastThrew) {
+        return NextResponse.json(
+          { error: "Failed to get response from AI" },
+          { status: 500 }
+        );
       }
 
       if (lastFailure?.status === 429) {
