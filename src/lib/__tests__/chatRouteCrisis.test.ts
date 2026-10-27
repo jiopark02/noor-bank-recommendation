@@ -232,7 +232,7 @@ afterEach(() => {
 
 /** Console calls whose arguments mention a crisis category, the notice or the message. */
 function crisisConsoleCalls(): unknown[][] {
-  const pattern = /crisis|self_harm|harm_to_others|eating|escalated|want to die|988/i;
+  const pattern = /crisis|self_harm|harm_to_others|eating|escalated|want to die|\b988\b/i;
   const calls: unknown[][] = [];
   for (const method of ["log", "info", "warn", "error", "debug"] as const) {
     for (const args of vi.mocked(console[method]).mock.calls) {

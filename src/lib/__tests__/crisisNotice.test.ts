@@ -41,6 +41,7 @@ describe("CRISIS_NOTICES", () => {
 
   it.each(ALL)("%s names 741741 only after 988", (_label, text) => {
     if (text.includes("741741")) {
+      expect(text).toContain("988");
       expect(text.indexOf("988")).toBeLessThan(text.indexOf("741741"));
     }
   });
