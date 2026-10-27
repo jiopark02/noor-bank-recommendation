@@ -15,7 +15,12 @@ import { describe, it, expect } from "vitest";
  * body), the immediate 401 return, the lastFailure assignment, the 429 return
  * after the loop, and the final return that sends the last failure's error
  * text to the client. Each fixture below was copied from the route as it was
- * before telemetry, and must appear in the route exactly once.
+ * before telemetry, and must appear in the route exactly once. Since the
+ * crisis notice was added, the returns go through respond(), which adds a
+ * crisisNotice field only when a crisis signal was detected, and the success
+ * branch stores and returns the reply with the notice in front
+ * (chatRouteCrisis.test.ts executes both); the fixtures were updated to that
+ * wiring and nothing else.
  *
  * The telemetry inputs are pinned too, because a wrong value there passes
  * every CHECK and lands as quietly wrong data: the prompt-block flags, the
@@ -75,19 +80,26 @@ const EXTRACT = read("../../app/api/cron/extract-facts/route.ts");
 // (i) The success branch: persist the turn, SAVE_FAILED on a failed save, and
 // the success body the client receives.
 const FIXTURE_I = `        if (result.ok) {
+          // With a crisis signal the notice leads the reply, and the reply
+          // stored is the one shown.
+          const notice = crisisNotice();
+          const replyMessage =
+            notice === null
+              ? result.message
+              : composeCrisisReply(notice, result.message, EMPTY_ASSISTANT_REPLY);
           try {
             await persistTurnIfEnabled({
               activeSession,
               authUserId,
               userContent: lastUserMessageText,
-              assistantContent: result.message ?? "",
+              assistantContent: replyMessage ?? "",
               assistantModel: result.model,
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
             });
           } catch (error) {
             console.error("Failed to save messages (OpenRouter branch):", error);
-            return NextResponse.json(
+            return respond(
               {
                 error:
                   "Could not save your conversation. Please try sending your message again.",
@@ -97,9 +109,9 @@ const FIXTURE_I = `        if (result.ok) {
             );
           }
 
-          return NextResponse.json({
+          return respond({
             success: true,
-            message: result.message,
+            message: replyMessage,
             model: result.model,
             sessionId: activeSession?.id ?? null,
             usage: result.usage,
@@ -109,7 +121,7 @@ const FIXTURE_I = `        if (result.ok) {
 
 // (ii) A 401 from the provider returns at once, without trying the next model.
 const FIXTURE_II = `        if (result.status === 401) {
-          return NextResponse.json(
+          return respond(
             { error: "Invalid OpenRouter API key" },
             { status: 401 }
           );
@@ -123,7 +135,7 @@ const FIXTURE_III = `        lastFailure = result;
 
 // (iv) After the loop, a final 429 is reported as a rate limit.
 const FIXTURE_IV = `      if (lastFailure?.status === 429) {
-        return NextResponse.json(
+        return respond(
           { error: "Rate limit exceeded. Please try again later." },
           { status: 429 }
         );
@@ -131,7 +143,7 @@ const FIXTURE_IV = `      if (lastFailure?.status === 429) {
 `;
 
 // (v) Otherwise the last failed model's error text is returned to the client.
-const FIXTURE_V = `      return NextResponse.json(
+const FIXTURE_V = `      return respond(
         { error: lastFailure?.error || "OpenRouter request failed" },
         { status: lastFailure?.status || 500 }
       );
@@ -192,7 +204,7 @@ const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for
 
 // After the loop: no attempt fitted in the budget.
 const LOOP_NO_ATTEMPT = `      if (attemptIndex === 0) {
-        return NextResponse.json(
+        return respond(
           {
             error: "Chat is taking longer than usual. Please try again.",
             code: "CHAT_TIME_BUDGET_EXHAUSTED",
@@ -205,7 +217,7 @@ const LOOP_NO_ATTEMPT = `      if (attemptIndex === 0) {
 // After the loop: when the last attempt threw, the response is the 500 a
 // throw reaching the outer catch gets.
 const LOOP_AFTER_THROW = `      if (lastThrew) {
-        return NextResponse.json(
+        return respond(
           { error: "Failed to get response from AI" },
           { status: 500 }
         );
