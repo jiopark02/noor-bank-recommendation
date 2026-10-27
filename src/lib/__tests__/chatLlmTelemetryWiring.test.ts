@@ -147,7 +147,7 @@ const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for
         memory: memoryBlock !== "",
         plaidScaffold: capabilityScaffoldDecision.allowed,
         balance: balanceSnapshotInjected,
-        financialSnapshot: financialSnapshotInjected,
+        financialSnapshot: false,
       };
       let attemptIndex = 0;
       let lastThrew = false;
