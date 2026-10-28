@@ -449,7 +449,7 @@ function insideTry(masked: string, index: number): boolean {
   return stack.indexOf(true) !== -1;
 }
 
-const SKIPPED_DIRS = [path.join("src", "lib", "locationData"), "__tests__"];
+const SKIPPED_DIRS = ["__tests__"];
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
