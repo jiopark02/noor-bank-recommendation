@@ -911,7 +911,7 @@ export default function LandingPage() {
       </footer>
 
       {/*
-        Scoped, NOT global. styled-jsx (repo precedent: MapView.tsx) rewrites
+        Scoped, NOT global. styled-jsx rewrites
         every selector below with a per-component class, and every rule is
         additionally written under .landing. The source's document-level rules
         (:root variables, the * reset, and body) are hoisted onto .landing so
