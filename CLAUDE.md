@@ -211,7 +211,7 @@ The demo experience lives on `main` and is reachable at `/demo`. It **does not t
 
 ### Rendering & security headers
 Every `page.tsx` is `"use client"`; there are no server-dynamic pages. The build renders page routes statically and the app fetches data client-side. Security headers are set in `next.config.js` (`securityHeaders` array plus `headers()`), applied to all routes. Constraints worth knowing before touching them:
-- `Permissions-Policy` allows `geolocation=(self)`. The map component it was there for has been removed, and the `leaflet` packages are still listed in `package.json` with no importer in `src/`; check for a `navigator.geolocation` user before relying on either.
+- `Permissions-Policy` allows `geolocation=(self)`. The map component it was there for has been removed, and so have the `leaflet` packages; check for a `navigator.geolocation` user before relying on the allowance.
 - CSP is currently `frame-ancestors` only. If a script/style CSP is added later it **must be merged into the same header** — two CSP headers on one response are each enforced independently.
 
 ---
