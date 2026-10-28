@@ -310,7 +310,7 @@ Purposes only. **Values, and whether a variable is currently set, are live state
 - **Soft wrap looks like a syntax error.** In the terminal, a long string broken mid-line with no line number on the continuation is display folding, not broken code. Diff output has the same trap — an array can look unclosed when the file is fine. When in doubt, `cat` the file.
 - **Adding a feature can wake sleeping configuration.** A dormant env var, flag, or branch may activate as a side effect of unrelated work.
 - **Re-review corrected code.** A fix applied after review has not been reviewed.
-- **Grep in this environment needs care.** `LC_ALL=C` avoids a crash in the Git-for-Windows grep when `-i` is combined with multiple `-e` patterns, and a `printf` format string that begins with `-` is parsed as an option. Both bit the audit scripts on first run.
+- **Grep in this environment needs care.** The Git-for-Windows grep (3.0) aborts when `-i` is combined with multiple `-e` patterns under the C / POSIX locale, unset included, so `LC_ALL=C` does not avoid it (use `-E 'a|b'` instead), and a `printf` format string that begins with `-` is parsed as an option. Both bit the audit scripts on first run.
   - Git Bash `grep` strips the CR before matching unless you pass `-U`, so `grep -c "$CR"` reports 0 even on a CRLF file. Count CR-bearing lines with `grep -U -c "$(printf '\r')" <file>`.
 - **Fintech SEO is YMYL**, so Google is unusually strict and a new domain has little margin. Avoid serving the same content on two hosts.
 
