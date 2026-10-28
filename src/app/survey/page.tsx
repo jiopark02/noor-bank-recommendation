@@ -413,9 +413,10 @@ export default function SurveyPage() {
     COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] ||
     COUNTRY_CONFIG.US;
 
-  // Load destination country from localStorage. This form does not ask for it;
-  // /welcome is where it gets chosen. Every fallback path lands on US, so the
-  // money inputs never render a wrong currency symbol.
+  // Load destination country from localStorage. This form does not ask for it,
+  // and no screen writes the key any more, so it is read only if an earlier
+  // build left it. When it is missing or not US/UK/CA, the country is US, so
+  // the money inputs never render a wrong currency symbol.
   useEffect(() => {
     const savedCountry = localStorage.getItem("noor_selected_country");
     if (
