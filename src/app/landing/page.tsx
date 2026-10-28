@@ -897,8 +897,8 @@ export default function LandingPage() {
           </div>
           <div>
             <h4>Legal</h4>
-            <a href="#top">Privacy</a>
-            <a href="#top">Terms</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
           </div>
         </div>
         <div className="legal">

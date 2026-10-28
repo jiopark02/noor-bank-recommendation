@@ -142,6 +142,11 @@ const Ico = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
     </svg>
   ),
+  document: (
+    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12h6m-6 4h6M7 3h7l5 5v11a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
+    </svg>
+  ),
   download: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -518,6 +523,19 @@ export default function SettingsPage() {
           description="Download everything (GDPR)"
           chevron
           onClick={handleExportData}
+        />
+        <SettingsRow
+          icon={Ico.document}
+          label="Privacy Policy"
+          chevron
+          onClick={() => router.push('/privacy')}
+        />
+        <SettingsRow
+          icon={Ico.document}
+          label="Terms of Service"
+          chevron
+          last
+          onClick={() => router.push('/terms')}
         />
       </SettingsCard>
 
