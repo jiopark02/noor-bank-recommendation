@@ -86,7 +86,7 @@ Noor is an AI personal-finance guidance PWA. **The target pivoted from "internat
 
 The core differentiator is **the quality of the financial reasoning** — how deeply it understands a user's situation and what judgments it reaches — not tone or format (already good), and not raw data access alone.
 
-Next.js 14 App Router. Two main surfaces: **Noor AI** (a personal-finance chatbot, `/chat`) and **Money** (`/money`: bank connection through Plaid and balances). The bank recommendation engine and the catalog API routes are still in the repo, but no app screen calls them any more.
+Next.js 14 App Router. Two main surfaces: **Noor AI** (a personal-finance chatbot, `/chat`) and **Money** (`/money`: bank connection through Plaid and balances).
 
 ---
 
@@ -161,11 +161,6 @@ This route is the **only** place in the repo that creates a Supabase Auth user (
 
 ⚠️ **The unauthenticated branch has an incomplete rollback.** It creates the auth user, then inserts into `users`, then inserts into `survey_responses`. Only the `users` failure triggers a compensating `auth.admin.deleteUser`. If the `survey_responses` insert fails, the auth user and the `users` row survive, and the user cannot retry — the email now collides and returns 409. There is no self-service recovery path. Anything that changes this route must preserve or fix that ordering, not work around it.
 
-### Bank recommendation (`src/lib/bankRecommendation.ts`)
-`getRecommendations()` queries `bank_accounts` + **`users`** and returns scored `BankRecommendation[]` (`recommendations_new`, upsert on `user_id, bank_account_id`). `/api/recommendations/bank` falls back to hardcoded mock data (US/UK/CA) when the DB query fails, so the UI always renders.
-
-Scoring is **rules-based across eligibility, fees, transfers, accessibility, and features**, driven by profile fields such as `fee_sensitivity`, `needs_zelle`, and `has_ssn`. (There is no `purpose` field or purpose-based logic — if you see that claim, it's wrong.) Rules-based is deliberate: determinism, auditability, and no hallucination in the judgment itself. Keep it rules-based.
-
 ⚠️ Several `survey_responses` columns are **written but never read** — among them `fee_sensitivity`, `credit_goals`, `preferred_bank_type`, `international_transfer_frequency`, and `needs_nearby_branch`. They are populated on submission and no code consumes them. Note that the client-side field names differ from the column names (`feePriority` → `fee_sensitivity`, and so on), so grepping the client identifier will not find the storage path. Don't conclude a survey field is unused from a client-side grep alone.
 
 ### Plaid (`src/lib/plaid.ts`, `src/app/api/plaid/`)
@@ -191,7 +186,7 @@ Access tokens are stored **encrypted** in `plaid_connections` (PL1): AES-256-GCM
 ⚠️ Duplicate-connection detection is **application-level only** and runs in two passes in `/api/plaid/exchange-token`: before the exchange with the client's Link-metadata `institution_id` (fails open — it only avoids minting an Item), and after it with the `institution_id` Plaid's `itemGet` reports (fails closed; a duplicate there revokes the new Item and answers 409). Only Plaid's value is stored; when Plaid reports none the row gets NULL, and rows with a NULL `institution_id` take no part in either pass. Both passes match `status = 'active'` rows only. Separately, a user may hold at most `CONNECTION_LIMIT` rows (`plaidExchange.ts`), counted over **every** row whatever its status, checked before the exchange and failing closed. There is deliberately no unique index. Note that the codebase already uses partial unique indexes elsewhere (`user_facts`, `chat_sessions`), so that pattern is established here if one is added.
 
 ### Other API surfaces
-Most remaining routes under `src/app/api/` (`banks`, `credit-cards`, `deals`, `forum`, `jobs`, `scholarships`, `apartments`, `universities`, `visa-types`, `bank-branches`, `country-config`) are **catalog reads with no recommendation engine behind them** — housing/scholarship/jobs stay catalog-only until an engine exists. Don't assume parity with the bank flow. `src/app/api/admin/*` (`cron-runs`, `import-universities`, `seed-country-data`) is operator tooling gated by `requireAdmin()`, not an end-user surface. Note that some of these catalog routes also accept POST; the public surface is wider than the read-only framing suggests.
+`src/app/api/admin/cron-runs` is operator tooling gated by `requireAdmin()`, not an end-user surface. The catalog routes, the bank recommendation route and the data modules behind them have been removed; no migration dropped the tables they read or wrote. `/api/account/export` still reads `recommendations_new`.
 
 ### Tests
 The vitest suite lives in `src/lib/__tests__/` and CI runs it on every push. Before changing a module, look there for a test that covers it (for example, `plaidChatContext.test.ts` asserts `resolvePlaidStateMode` across env values) and run the suite.
@@ -202,7 +197,7 @@ The demo experience lives on `main` and is reachable at `/demo`. It **does not t
 ⚠️ `docs/demo-mode.md` describes this surface as calling `signInAnonymously()`. That call does not exist in `src/`. The document is stale; the code above is authoritative.
 
 ### Country, i18n, theme, layout
-- `src/lib/countryConfig.ts` is a **static bank catalog plus filter helpers** for `US | UK | CA`, and also carries visa types. It does **not** drive recommendation logic — `bankRecommendation.ts` doesn't import it. Bank branch data comes from `locationData.ts` / the Supabase `bank_branches` table.
+- `src/lib/countryConfig.ts` holds only the currency code and symbol for `US | UK | CA`; `/survey` reads it for its money inputs.
 - i18n: English only. `LanguageContext` loads `messages/en.json` (top level, **not** `src/messages/`) and provides `t()`; there is no locale switch. The provider renders nothing until mount, which keeps every page under it out of the static prerender — removing that gate means checking each page renders without `window`.
 - There is no theme layer: the per-university `ThemeContext` / `schoolThemes` were removed, and colours are literals in each component.
 - `BottomNav` (`src/components/layout/BottomNav.tsx`) is a fixed, floating bar above the bottom safe area. It renders its own spacer, so it must stay the last thing in a page's normal flow; anything else pinned to the bottom of the viewport is positioned from its exported `BOTTOM_NAV_CLEARANCE` (the chat input, the floating chat button and its modal).
@@ -283,7 +278,7 @@ Purposes only. **Values, and whether a variable is currently set, are live state
 ## Strategic decisions (so they aren't re-litigated)
 
 - **Do not gate launch on Plaid or on legal answers.** Both are external and uncertain; keep the queue filled with work that doesn't depend on them, and keep a fallback path that ships without them.
-- **Recommendation architecture is evolving toward conversation-derived input.** The rules-based engine stays and expands — it owns the judgment and `fit_score` for determinism and accountability. AI does **input extraction and understanding only**, never the final judgment. A transform layer will turn survey + `chat_summaries` + Plaid into structured engine input. The `facts` schema is left untouched, keeping its general-memory role; the transform layer consumes data separately. Banks first; housing and scholarships stay catalog-only.
+- The earlier rules-based bank recommendation engine and its routes have been removed. When a recommendation engine is rebuilt, the judgment stays rules-based for determinism and accountability, and AI does input extraction and understanding only, never the final judgment.
 - **AI advice quality is prompt-level work** and can improve without a code deploy, so it isn't a launch gate — but it is the core differentiator. The remaining work is the reasoning scaffold (defining the types of financial judgment and their logic), not tone or format.
 - **Build defensively under legal uncertainty.** Where a legal answer is pending, structure the code so the answer can be accommodated rather than assuming the permissive reading.
 - **Limits on shared systems are agreed, not set unilaterally.** The number is agreed before it ships and revised from measured usage. A limit's value lives in code, so every change to it is reviewed and tested; a limit that enforces by default ships with an explicit, exact-match off switch.
@@ -293,7 +288,7 @@ Purposes only. **Values, and whether a variable is currently set, are live state
 
 ## Gotchas
 
-- **Never read `src/lib/locationData/apartmentsData.ts`.** It is over 160,000 lines. Opening it will exhaust a session's context. If you need something from it, grep for the specific value. The same caution applies to `package-lock.json`.
+- **Never read `package-lock.json` whole.** It is large enough to exhaust a session's context. If you need something from it, grep for the specific value.
 - **`docs/` is stale and is not a source of truth.** The design notes under `docs/design/` carry line numbers that no longer match the code and describe an older architecture; `docs/demo-mode.md` describes a call that does not exist. Read the code, not `docs/`. If a task requires understanding a past design decision, ask the operator rather than citing these files.
 - **The local build is not a trusted check** → the Vercel deploy is the local-build-equivalent gate; CI (`npm run test --if-present` via `.github/workflows/test.yml`) covers tests separately, on every push. A local toolchain exists, but its sanctioned uses are `tsc --noEmit`, `npm audit`, `npm ci`, and `vitest run` — not `npm run build`. (Repeated because "the local build proves it" is the most common false assumption.)
 - **Migrations are applied manually** in the Supabase SQL Editor, and the live schema contains constraints no migration creates. (Repeated for the same reason.)

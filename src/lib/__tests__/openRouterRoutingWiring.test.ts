@@ -26,13 +26,13 @@ function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
-/** Every .ts/.tsx file under src, skipping tests and the bulk data catalog. */
+/** Every .ts/.tsx file under src, skipping tests. */
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) {
-      if (name === "__tests__" || name === "locationData") continue;
+      if (name === "__tests__") continue;
       out.push(...sourceFiles(full));
     } else if (/\.tsx?$/.test(name)) {
       out.push(full);
