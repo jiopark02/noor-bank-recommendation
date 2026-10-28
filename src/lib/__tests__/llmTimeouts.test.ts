@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CHAT_LLM_TIMEOUT_MS,
+  CHAT_REQUEST_BUDGET_MS,
+  chatHasBudgetForAnotherAttempt,
   CRON_LLM_TIMEOUT_MS,
   CRON_RUN_BUDGET_MS,
   CRON_RUN_MARGIN_MS,
@@ -19,6 +23,35 @@ describe("timeout values", () => {
 
   it("leave the cron budget below the crons' 60 s maxDuration", () => {
     expect(CRON_RUN_BUDGET_MS).toBeLessThan(60000);
+  });
+
+  it("give the chat route a 55 s budget with room for two full attempts", () => {
+    expect(CHAT_REQUEST_BUDGET_MS).toBe(55000);
+    expect(CHAT_REQUEST_BUDGET_MS).toBeGreaterThanOrEqual(2 * CHAT_LLM_TIMEOUT_MS);
+  });
+
+  // A source probe: the budget assumes the chat route's maxDuration.
+  it("the chat route declares maxDuration = 60 exactly once", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../../app/api/chat/route.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(source.split("export const maxDuration = 60;").length - 1).toBe(1);
+  });
+});
+
+describe("chatHasBudgetForAnotherAttempt", () => {
+  it("allows an attempt at the start of a request", () => {
+    expect(chatHasBudgetForAnotherAttempt(0)).toBe(true);
+  });
+
+  it("allows an attempt that would end exactly at the budget", () => {
+    expect(chatHasBudgetForAnotherAttempt(30000)).toBe(true);
+  });
+
+  it("refuses an attempt that could run past it", () => {
+    expect(chatHasBudgetForAnotherAttempt(30001)).toBe(false);
+    expect(chatHasBudgetForAnotherAttempt(55000)).toBe(false);
   });
 });
 

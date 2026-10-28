@@ -1,27 +1,15 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { locales, localeNames, localeFlags, Locale } from '@/i18n/config';
-import { getSchoolTheme, hasCustomTheme } from '@/lib/schoolThemes';
 import {
-  validatePassword,
-  getPasswordStrengthColor,
-  getPasswordStrengthLabel,
-  calculateProfileCompletion,
   clearLocalAuthState,
   purgeAllNoorLocalState,
 } from '@/lib/validation';
 import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
 import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supabaseAuthHeaders';
-import {
-  UniversitySearchField,
-  type UniversitySearchInstitutionType,
-} from '@/components/survey/UniversitySearchField';
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
 const ACCENT = '#5B4EE8';
@@ -31,29 +19,9 @@ interface UserProfile {
   firstName?: string;
   lastName?: string;
   email?: string;
-  institutionId?: string;
-  institutionType?: string;
-  destinationCountry?: string;
-  university?: string;
-  countryOfOrigin?: string;
-  phone?: string;
-  monthlyIncome?: number;
-  monthlyExpenses?: number;
 }
 
-type ModalType = 'delete' | 'changePassword' | 'editProfile' | 'resetChecklist' | null;
-
-const PROFILE_FIELD_LABELS: Record<string, string> = {
-  firstName: 'First name',
-  lastName: 'Last name',
-  email: 'Email',
-  university: 'University',
-  countryOfOrigin: 'Country of Origin',
-};
-
-function formatMissingProfileFields(fields: string[]): string {
-  return fields.map((key) => PROFILE_FIELD_LABELS[key] ?? key).join(', ');
-}
+type ModalType = 'delete' | null;
 
 function getInitials(firstName?: string, lastName?: string): string {
   const f = firstName?.trim()?.[0]?.toUpperCase() ?? '';
@@ -89,35 +57,6 @@ function SettingsCard({ children }: { children: React.ReactNode }) {
 
 function Divider() {
   return <div className="mx-4" style={{ height: '1px', background: 'rgba(0,0,0,0.05)' }} />;
-}
-
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className="relative flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none"
-      style={{
-        width: 44,
-        height: 24,
-        background: checked ? '#000' : 'rgba(0,0,0,0.12)',
-      }}
-    >
-      <motion.div
-        className="absolute top-[2px] w-5 h-5 bg-white rounded-full"
-        style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.18)' }}
-        animate={{ x: checked ? 22 : 2 }}
-        transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-      />
-    </button>
-  );
 }
 
 interface RowProps {
@@ -198,25 +137,14 @@ function SettingsRow({ icon, label, description, value, chevron, danger, onClick
 // ── Icons ──────────────────────────────────────────────────────────────────
 
 const Ico = {
-  user: (
-    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />
-    </svg>
-  ),
   lock: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
     </svg>
   ),
-  palette: (
+  document: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-    </svg>
-  ),
-  globe: (
-    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12h6m-6 4h6M7 3h7l5 5v11a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
     </svg>
   ),
   download: (
@@ -232,11 +160,6 @@ const Ico = {
   clipboard: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-    </svg>
-  ),
-  checkSquare: (
-    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
   warning: (
@@ -326,12 +249,8 @@ function ModalInput({
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { theme, useSchoolTheme, toggleSchoolTheme, setTheme } = useTheme();
-  const { locale, setLocale, t } = useLanguage();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
-  const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -340,59 +259,14 @@ export default function SettingsPage() {
   // they are silent.
   const [toastError, setToastError] = useState<string | null>(null);
 
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [showPasswords, setShowPasswords] = useState(false);
-
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
-
-  const [editFirstName, setEditFirstName] = useState('');
-  const [editLastName, setEditLastName] = useState('');
-  const [editUniversity, setEditUniversity] = useState('');
-  const [editInstitutionId, setEditInstitutionId] = useState('');
-  const [editPhone, setEditPhone] = useState('');
 
   useEffect(() => {
     const profile = localStorage.getItem('noor_user_profile');
     if (profile) {
-      const parsed = JSON.parse(profile);
-      setUserProfile(parsed);
-      setEditFirstName(parsed.firstName || '');
-      setEditLastName(parsed.lastName || '');
-      setEditUniversity(parsed.university || '');
-      setEditInstitutionId(parsed.institutionId || '');
-      setEditPhone(parsed.phone || '');
+      setUserProfile(JSON.parse(profile));
     }
-    const checklistDone = localStorage.getItem('noor_checklist_completed');
-    setChecklistCompleted(checklistDone === 'true');
   }, []);
-
-  const passwordValidation = useMemo(() => validatePassword(newPassword), [newPassword]);
-  const passwordsMatch = newPassword === confirmNewPassword && confirmNewPassword.length > 0;
-
-  const profileCompletion = useMemo(
-    () => calculateProfileCompletion(userProfile as Record<string, unknown> | null),
-    [userProfile]
-  );
-
-  const schoolTheme = userProfile?.institutionId ? getSchoolTheme(userProfile.institutionId) : null;
-  const hasTheme = userProfile?.institutionId ? hasCustomTheme(userProfile.institutionId) : false;
-
-  const surveySearchCountry = useMemo(() => {
-    const fromProfile = userProfile?.destinationCountry;
-    if (fromProfile === 'US' || fromProfile === 'UK' || fromProfile === 'CA') return fromProfile;
-    if (typeof window === 'undefined') return 'US';
-    const fromLs = localStorage.getItem('noor_selected_country');
-    if (fromLs === 'US' || fromLs === 'UK' || fromLs === 'CA') return fromLs;
-    return 'US';
-  }, [userProfile?.destinationCountry]);
-
-  const surveyInstitutionSearchType = useMemo((): UniversitySearchInstitutionType => {
-    if (userProfile?.institutionType === 'community_college') return 'community_college';
-    if (userProfile?.institutionType === 'university') return 'university';
-    return 'all';
-  }, [userProfile?.institutionType]);
 
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
@@ -405,102 +279,11 @@ export default function SettingsPage() {
     setTimeout(() => setToastError(null), 4000);
   };
 
-  const handleResetChecklist = () => {
-    localStorage.removeItem('noor_checklist_completed');
-    localStorage.removeItem('noor_checklist_items');
-    const profile = localStorage.getItem('noor_user_profile');
-    if (profile) {
-      const parsed = JSON.parse(profile);
-      parsed.onboarding_checklist_completed = false;
-      delete parsed.checklist_completed_at;
-      localStorage.setItem('noor_user_profile', JSON.stringify(parsed));
-    }
-    setChecklistCompleted(false);
-    setActiveModal(null);
-    showSuccess('Checklist has been reset');
-    router.push('/');
-  };
-
   // The cached profile is deliberately left in place. The survey merges its
   // result over this key on submit rather than replacing it, so clearing it up
-  // front buys nothing and costs both the survey prefill and this page's
-  // completeness display, which read the same cache.
+  // front buys nothing and costs the survey prefill, which reads the same cache.
   const handleRetakeSurvey = () => {
     router.push('/survey');
-  };
-
-  const handleChangePassword = async () => {
-    if (!passwordValidation.isValid || !passwordsMatch) {
-      setError('Please ensure password meets requirements and matches');
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      setActiveModal(null);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmNewPassword('');
-      showSuccess('Password changed successfully');
-    } catch {
-      setError('Failed to change password. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSaveProfile = async () => {
-    // Last name is optional. The signup form no longer collects it, and nothing
-    // writes users.last_name from here, so requiring it would permanently block
-    // this handler — which is the only path that saves the school fields to the
-    // server.
-    if (!editFirstName) {
-      setError('First name is required');
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      const uniLabel = editUniversity.trim();
-      const updated = {
-        ...userProfile,
-        firstName: editFirstName,
-        lastName: editLastName,
-        university: uniLabel || undefined,
-        institutionId: editInstitutionId || undefined,
-        phone: editPhone,
-      };
-      localStorage.setItem('noor_user_profile', JSON.stringify(updated));
-      setUserProfile(updated);
-
-      const rawAuth = await getSupabaseBearerHeaders();
-      if (rawAuth.Authorization && uniLabel) {
-        const res = await fetch('/api/profile/survey-response', {
-          method: 'PATCH',
-          headers: buildJsonAuthorizedHeaders(rawAuth),
-          body: JSON.stringify({ university: uniLabel, institution_id: editInstitutionId || null }),
-        });
-        if (res.status === 401) {
-          setError('Sign in again to sync your school to the server.');
-          setIsLoading(false);
-          return;
-        }
-        if (!res.ok) {
-          const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(errBody.error || 'Could not sync school to database');
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      setActiveModal(null);
-      showSuccess('Profile updated successfully');
-    } catch {
-      setError('Failed to update profile. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const handleDeleteAccount = async () => {
@@ -713,108 +496,21 @@ export default function SettingsPage() {
               {userProfile?.email || 'No email set'}
             </div>
           </div>
-
-          <button
-            onClick={() => {
-              if (userProfile) {
-                setEditFirstName(userProfile.firstName || '');
-                setEditLastName(userProfile.lastName || '');
-                setEditUniversity(userProfile.university || '');
-                setEditInstitutionId(userProfile.institutionId || '');
-                setEditPhone(userProfile.phone || '');
-              }
-              setActiveModal('editProfile');
-            }}
-            className="flex-shrink-0 text-[13px] font-medium px-3.5 py-1.5 rounded-xl transition-colors"
-            style={{
-              color: ACCENT,
-              background: 'rgba(91,78,232,0.08)',
-              fontFamily: FONT,
-            }}
-          >
-            Edit
-          </button>
         </div>
-
-        {/* Profile completion bar */}
-        {profileCompletion.percentage < 100 && (
-          <div className="mt-4 pt-4" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[12px]" style={{ color: 'rgba(0,0,0,0.38)', fontFamily: FONT }}>
-                Profile {profileCompletion.percentage}% complete
-              </span>
-              <span className="text-[12px] font-medium" style={{ color: ACCENT, fontFamily: FONT }}>
-                {formatMissingProfileFields(profileCompletion.requiredFields)}
-              </span>
-            </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.07)' }}>
-              <motion.div
-                className="h-full rounded-full"
-                style={{ background: ACCENT_GRADIENT }}
-                initial={{ width: 0 }}
-                animate={{ width: `${profileCompletion.percentage}%` }}
-                transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
-              />
-            </div>
-          </div>
-        )}
       </motion.div>
 
       {/* ── SECURITY ── */}
+      {/* Password changes go through the email reset flow; there is no
+          in-app change that verifies the current password. */}
       <SectionLabel>Security</SectionLabel>
       <SettingsCard>
         <SettingsRow
           icon={Ico.lock}
           label="Change Password"
-          description="Use a strong, unique password"
+          description="We'll email you a reset link"
           chevron
           last
-          onClick={() => setActiveModal('changePassword')}
-        />
-      </SettingsCard>
-
-      {/* ── APPEARANCE (school theme) ── */}
-      {hasTheme && schoolTheme && (
-        <>
-          <SectionLabel>Appearance</SectionLabel>
-          <SettingsCard>
-            <div className="flex items-center gap-3.5 px-4 py-3.5">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: 'rgba(0,0,0,0.05)' }}
-              >
-                <div style={{ color: 'rgba(0,0,0,0.55)' }}>{Ico.palette}</div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] font-medium text-black leading-tight" style={{ fontFamily: FONT }}>
-                  School Theme
-                </div>
-                <div className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.35)', fontFamily: FONT }}>
-                  {schoolTheme.name}
-                </div>
-              </div>
-              <Toggle
-                checked={useSchoolTheme}
-                onChange={(v) => {
-                  toggleSchoolTheme(v);
-                  if (v && userProfile?.institutionId) setTheme(userProfile.institutionId);
-                }}
-              />
-            </div>
-          </SettingsCard>
-        </>
-      )}
-
-      {/* ── PREFERENCES ── */}
-      <SectionLabel>Preferences</SectionLabel>
-      <SettingsCard>
-        <SettingsRow
-          icon={Ico.globe}
-          label="Language"
-          value={`${localeFlags[locale]}  ${localeNames[locale]}`}
-          chevron
-          last
-          onClick={() => setShowLanguageModal(true)}
+          onClick={() => router.push('/forgot-password')}
         />
       </SettingsCard>
 
@@ -826,8 +522,20 @@ export default function SettingsPage() {
           label="Export My Data"
           description="Download everything (GDPR)"
           chevron
-          last
           onClick={handleExportData}
+        />
+        <SettingsRow
+          icon={Ico.document}
+          label="Privacy Policy"
+          chevron
+          onClick={() => router.push('/privacy?back=/settings')}
+        />
+        <SettingsRow
+          icon={Ico.document}
+          label="Terms of Service"
+          chevron
+          last
+          onClick={() => router.push('/terms?back=/settings')}
         />
       </SettingsCard>
 
@@ -839,15 +547,8 @@ export default function SettingsPage() {
           label="Retake Survey"
           description="Update your financial profile"
           chevron
-          onClick={handleRetakeSurvey}
-        />
-        <SettingsRow
-          icon={Ico.checkSquare}
-          label="Reset Checklist"
-          description={checklistCompleted ? 'Start your checklist over' : 'Checklist not completed yet'}
-          chevron
           last
-          onClick={() => setActiveModal('resetChecklist')}
+          onClick={handleRetakeSurvey}
         />
       </SettingsCard>
 
@@ -892,187 +593,6 @@ export default function SettingsPage() {
 
       {/* ── MODALS ── */}
       <AnimatePresence>
-
-        {/* Change Password */}
-        {activeModal === 'changePassword' && (
-          <Modal onClose={() => { setActiveModal(null); setError(null); }}>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.06)' }}>
-                {Ico.lock}
-              </div>
-              <div>
-                <h3 className="text-[16px] font-semibold text-black" style={{ fontFamily: FONT }}>Change Password</h3>
-                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>Must meet all requirements below</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <ModalInput label="Current Password" type={showPasswords ? 'text' : 'password'} value={currentPassword} onChange={setCurrentPassword} />
-              <div>
-                <ModalInput label="New Password" type={showPasswords ? 'text' : 'password'} value={newPassword} onChange={setNewPassword} />
-                {newPassword && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.08)' }}>
-                      <div
-                        className="h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${passwordValidation.score}%`,
-                          background: getPasswordStrengthColor(passwordValidation.strength),
-                        }}
-                      />
-                    </div>
-                    <span className="text-[11px] font-medium" style={{ color: getPasswordStrengthColor(passwordValidation.strength), fontFamily: FONT }}>
-                      {getPasswordStrengthLabel(passwordValidation.strength)}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <div>
-                <ModalInput label="Confirm New Password" type={showPasswords ? 'text' : 'password'} value={confirmNewPassword} onChange={setConfirmNewPassword} />
-                {confirmNewPassword && (
-                  <p className="text-[12px] mt-1.5" style={{ color: passwordsMatch ? '#22C55E' : '#EF4444', fontFamily: FONT }}>
-                    {passwordsMatch ? '✓ Passwords match' : '✗ Passwords don\'t match'}
-                  </p>
-                )}
-              </div>
-
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={showPasswords} onChange={(e) => setShowPasswords(e.target.checked)} className="w-4 h-4 rounded" />
-                <span className="text-[13px]" style={{ color: 'rgba(0,0,0,0.5)', fontFamily: FONT }}>Show passwords</span>
-              </label>
-
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
-                Cancel
-              </button>
-              <button
-                onClick={handleChangePassword}
-                disabled={isLoading || !passwordValidation.isValid || !passwordsMatch || !currentPassword}
-                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
-                style={{ background: '#000', fontFamily: FONT }}
-              >
-                {isLoading ? 'Saving…' : 'Update Password'}
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {/* Edit Profile */}
-        {activeModal === 'editProfile' && (
-          <Modal onClose={() => { setActiveModal(null); setError(null); }}>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.06)' }}>
-                {Ico.user}
-              </div>
-              <div>
-                <h3 className="text-[16px] font-semibold text-black" style={{ fontFamily: FONT }}>Edit Profile</h3>
-                <p className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>Update your info</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <ModalInput label="First Name *" value={editFirstName} onChange={setEditFirstName} />
-                <ModalInput label="Last Name" value={editLastName} onChange={setEditLastName} />
-              </div>
-
-              <div>
-                <label
-                  className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-                  style={{ color: 'rgba(0,0,0,0.35)', fontFamily: FONT, letterSpacing: '0.1em' }}
-                >
-                  School
-                </label>
-                <UniversitySearchField
-                  country={surveySearchCountry}
-                  institutionType={surveyInstitutionSearchType}
-                  selectedInstitutionId={editInstitutionId}
-                  searchQuery={editUniversity}
-                  onSearchQueryChange={setEditUniversity}
-                  onSelect={(inst) => { setEditInstitutionId(inst.id); setEditUniversity(inst.short_name); }}
-                  onCantFind={(typed) => { setEditInstitutionId('other'); setEditUniversity(typed || 'Other'); }}
-                  searchPlaceholder="Search by school name…"
-                  cantFindLabel="Can't find my school"
-                  noResultsLabel="No schools found — use my text as school name"
-                />
-              </div>
-
-              <ModalInput label="Phone (optional)" type="tel" value={editPhone} onChange={setEditPhone} placeholder="(555) 123-4567" />
-
-              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveProfile}
-                disabled={isLoading || !editFirstName}
-                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
-                style={{ background: '#000', fontFamily: FONT }}
-              >
-                {isLoading ? 'Saving…' : 'Save Changes'}
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {/* Reset Checklist */}
-        {activeModal === 'resetChecklist' && (
-          <Modal onClose={() => setActiveModal(null)}>
-            <div className="text-center mb-5">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(0,0,0,0.06)' }}>
-                {Ico.checkSquare}
-              </div>
-              <h3 className="text-[16px] font-semibold text-black mb-2" style={{ fontFamily: FONT }}>Reset Checklist?</h3>
-              <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}>
-                This will reset your checklist progress and show it again on the home screen.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setActiveModal(null)} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
-                Cancel
-              </button>
-              <button onClick={handleResetChecklist} className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white" style={{ background: '#000', fontFamily: FONT }}>
-                Reset
-              </button>
-            </div>
-          </Modal>
-        )}
-
-        {/* Language */}
-        {showLanguageModal && (
-          <Modal onClose={() => setShowLanguageModal(false)}>
-            <h3 className="text-[16px] font-semibold text-black mb-1" style={{ fontFamily: FONT }}>{t('settings.language.title')}</h3>
-            <p className="text-[13px] mb-5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>{t('settings.language.description')}</p>
-
-            <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
-              {locales.map((loc) => (
-                <button
-                  key={loc}
-                  onClick={() => { setLocale(loc); setShowLanguageModal(false); showSuccess(localeNames[loc] + ' selected'); }}
-                  className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all"
-                  style={{
-                    border: locale === loc ? '1.5px solid #000' : '1.5px solid rgba(0,0,0,0.1)',
-                    background: locale === loc ? '#000' : '#fff',
-                    fontFamily: FONT,
-                  }}
-                >
-                  <span className="text-xl">{localeFlags[loc]}</span>
-                  <span className="text-[13px] font-medium" style={{ color: locale === loc ? '#fff' : '#000' }}>{localeNames[loc]}</span>
-                </button>
-              ))}
-            </div>
-
-            <button onClick={() => setShowLanguageModal(false)} className="w-full py-3 mt-5 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
-              {t('common.close')}
-            </button>
-          </Modal>
-        )}
 
         {/* Delete Account */}
         {activeModal === 'delete' && (

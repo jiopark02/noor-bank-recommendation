@@ -1,7 +1,6 @@
 ---
 name: checkpoint
 description: Stop before a commit and write the unit's diff, new-file diff, status and command list for operator review.
-disable-model-invocation: true
 argument-hint: "[unit-name]"
 ---
 
@@ -15,7 +14,7 @@ Write outputs to the temporary directory outside the repo. On this machine that 
 
 ## Steps
 
-1. Tracked changes. Run `git diff > <out>/<name>.diff; echo "exit=$?"`. Redirect, never pipe, so the exit code survives. Write every redirect target in this skill as a literal path, never through a variable: permission rules cannot check a variable in a redirect target, so it opens an approval prompt whatever the allow rules say.
+1. Tracked changes, staged and unstaged. Run `git diff HEAD > <out>/<name>.diff; echo "exit=$?"`. Redirect, never pipe, so the exit code survives. Write every redirect target in this skill as a literal path, never through a variable: permission rules cannot check a variable in a redirect target, so it opens an approval prompt whatever the allow rules say.
 2. Run `git status --porcelain` and keep its output verbatim.
 3. For each untracked (`??`) file in this unit, append its content as a diff:
    `git diff --no-index -- /dev/null <file> >> <out>/<name>-new.diff; echo "exit=$?"`.

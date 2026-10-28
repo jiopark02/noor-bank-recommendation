@@ -15,7 +15,12 @@ import { describe, it, expect } from "vitest";
  * body), the immediate 401 return, the lastFailure assignment, the 429 return
  * after the loop, and the final return that sends the last failure's error
  * text to the client. Each fixture below was copied from the route as it was
- * before telemetry, and must appear in the route exactly once.
+ * before telemetry, and must appear in the route exactly once. Since the
+ * crisis notice was added, the returns go through respond(), which adds a
+ * crisisNotice field only when a crisis signal was detected, and the success
+ * branch stores and returns the reply with the notice in front
+ * (chatRouteCrisis.test.ts executes both); the fixtures were updated to that
+ * wiring and nothing else.
  *
  * The telemetry inputs are pinned too, because a wrong value there passes
  * every CHECK and lands as quietly wrong data: the prompt-block flags, the
@@ -25,9 +30,11 @@ import { describe, it, expect } from "vitest";
  * and the parsed flag are assigned (STATUS_AFTER_FETCH,
  * JSON_PARSED_AFTER_PARSE).
  *
- * Two behaviors are kept on purpose and are guarded here: a fetch that throws
- * is not retried on the next model (callOpenRouter rethrows it), and the last
- * failed model's error text still reaches the client (fixture v).
+ * Two behaviors are guarded here: a fetch that throws is recorded and rethrown
+ * by callOpenRouter, and the loop starts every attempt, the first included,
+ * only when the request budget still has room for a full one (LOOP_HEAD,
+ * LOOP_NO_ATTEMPT, LOOP_AFTER_THROW); and the last failed model's error text
+ * still reaches the client (fixture v).
  *
  * LINE ENDINGS
  * Both the route source and each fixture are normalized to \n before
@@ -73,19 +80,26 @@ const EXTRACT = read("../../app/api/cron/extract-facts/route.ts");
 // (i) The success branch: persist the turn, SAVE_FAILED on a failed save, and
 // the success body the client receives.
 const FIXTURE_I = `        if (result.ok) {
+          // With a crisis signal the notice leads the reply, and the reply
+          // stored is the one shown.
+          const notice = crisisNotice();
+          const replyMessage =
+            notice === null
+              ? result.message
+              : composeCrisisReply(notice, result.message, EMPTY_ASSISTANT_REPLY);
           try {
             await persistTurnIfEnabled({
               activeSession,
               authUserId,
               userContent: lastUserMessageText,
-              assistantContent: result.message ?? "",
+              assistantContent: replyMessage ?? "",
               assistantModel: result.model,
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
             });
           } catch (error) {
             console.error("Failed to save messages (OpenRouter branch):", error);
-            return NextResponse.json(
+            return respond(
               {
                 error:
                   "Could not save your conversation. Please try sending your message again.",
@@ -95,9 +109,9 @@ const FIXTURE_I = `        if (result.ok) {
             );
           }
 
-          return NextResponse.json({
+          return respond({
             success: true,
-            message: result.message,
+            message: replyMessage,
             model: result.model,
             sessionId: activeSession?.id ?? null,
             usage: result.usage,
@@ -107,7 +121,7 @@ const FIXTURE_I = `        if (result.ok) {
 
 // (ii) A 401 from the provider returns at once, without trying the next model.
 const FIXTURE_II = `        if (result.status === 401) {
-          return NextResponse.json(
+          return respond(
             { error: "Invalid OpenRouter API key" },
             { status: 401 }
           );
@@ -121,7 +135,7 @@ const FIXTURE_III = `        lastFailure = result;
 
 // (iv) After the loop, a final 429 is reported as a rate limit.
 const FIXTURE_IV = `      if (lastFailure?.status === 429) {
-        return NextResponse.json(
+        return respond(
           { error: "Rate limit exceeded. Please try again later." },
           { status: 429 }
         );
@@ -129,40 +143,85 @@ const FIXTURE_IV = `      if (lastFailure?.status === 429) {
 `;
 
 // (v) Otherwise the last failed model's error text is returned to the client.
-const FIXTURE_V = `      return NextResponse.json(
+const FIXTURE_V = `      return respond(
         { error: lastFailure?.error || "OpenRouter request failed" },
         { status: lastFailure?.status || 500 }
       );
 `;
 
 // The loop head as wired: the prompt-block flags written into every chat row,
-// the counter starting at 0 and incremented once per model, the call, and
-// nothing between them and the success branch (no try, no continue).
+// the budget check that leaves the loop before an attempt that cannot fit, the
+// counter starting at 0 and incremented once per attempt started, the call,
+// and the catch for a thrown attempt, which marks the throw and moves on;
+// nothing else stands between the call and the success branch.
 const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for llm_calls only.
       const promptBlocks: ChatPromptBlocks = {
         memory: memoryBlock !== "",
         plaidScaffold: capabilityScaffoldDecision.allowed,
         balance: balanceSnapshotInjected,
-        financialSnapshot: financialSnapshotInjected,
+        financialSnapshot: false,
       };
       let attemptIndex = 0;
+      let lastThrew = false;
 
       for (const model of modelsToTry) {
+        // Every attempt, the first included, starts only if it could run to
+        // its full timeout inside the request budget.
+        const elapsedMs = Date.now() - requestStartedAtMs;
+        if (!chatHasBudgetForAnotherAttempt(elapsedMs)) {
+          console.warn(
+            "[chat-deadline] attempt skipped attempt=%d elapsed_ms=%d",
+            attemptIndex + 1,
+            elapsedMs
+          );
+          break;
+        }
         attemptIndex++;
-        const result = await callOpenRouter(
-          openRouterApiKey,
-          model,
-          openRouterMessages,
-          {
-            attemptIndex,
-            userId: authUserId,
-            sessionId: activeSession?.id ?? null,
-            blocks: promptBlocks,
-            tally: usageTally,
-          }
-        );
+        let result: OpenRouterResult;
+        try {
+          result = await callOpenRouter(
+            openRouterApiKey,
+            model,
+            openRouterMessages,
+            {
+              attemptIndex,
+              userId: authUserId,
+              sessionId: activeSession?.id ?? null,
+              blocks: promptBlocks,
+              tally: usageTally,
+            }
+          );
+        } catch (error) {
+          // callOpenRouter has already recorded the attempt.
+          lastThrew = true;
+          console.error("Chat API error:", error);
+          continue;
+        }
+        lastThrew = false;
 
         if (result.ok) {
+`;
+
+// After the loop: no attempt fitted in the budget.
+const LOOP_NO_ATTEMPT = `      if (attemptIndex === 0) {
+        return respond(
+          {
+            error: "Chat is taking longer than usual. Please try again.",
+            code: "CHAT_TIME_BUDGET_EXHAUSTED",
+          },
+          { status: 503 }
+        );
+      }
+`;
+
+// After the loop: when the last attempt threw, the response is the 500 a
+// throw reaching the outer catch gets.
+const LOOP_AFTER_THROW = `      if (lastThrew) {
+        return respond(
+          { error: "Failed to get response from AI" },
+          { status: 500 }
+        );
+      }
 `;
 
 // The row callOpenRouter writes once a response arrives: the real HTTP status,
@@ -224,8 +283,20 @@ describe("chat route: the branches that decide the response are unchanged", () =
     expect(occurrences(CHAT, norm(fixture))).toBe(1);
   });
 
-  it("the loop head adds only the counter and the telemetry argument", () => {
+  it("the loop head adds only the budget check, the counter, the telemetry argument and the throw catch", () => {
     expect(occurrences(CHAT, norm(LOOP_HEAD))).toBe(1);
+  });
+
+  it("the loop is left only at the budget check, and the no-attempt and last-throw responses follow it", () => {
+    const post = functionBody(CHAT, "POST");
+    expect(occurrences(post, "continue;")).toBe(1);
+    expect(occurrences(post, "break;")).toBe(1);
+    expect(occurrences(post, "lastThrew = true;")).toBe(1);
+    expect(occurrences(post, norm(LOOP_NO_ATTEMPT))).toBe(1);
+    expect(occurrences(post, norm(LOOP_AFTER_THROW))).toBe(1);
+    expect(post.indexOf(norm(LOOP_NO_ATTEMPT))).toBeLessThan(
+      post.indexOf(norm(LOOP_AFTER_THROW))
+    );
   });
 });
 

@@ -1,44 +1,14 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Locale, locales, defaultLocale, isRTL } from '@/i18n/config';
 
-// Import all messages statically
+// English is the only locale the app ships.
 import en from '../../messages/en.json';
-import ko from '../../messages/ko.json';
-import ja from '../../messages/ja.json';
-import zhCN from '../../messages/zh-CN.json';
-import zhTW from '../../messages/zh-TW.json';
-import it from '../../messages/it.json';
-import es from '../../messages/es.json';
-import fr from '../../messages/fr.json';
-import de from '../../messages/de.json';
-import pt from '../../messages/pt.json';
-import hi from '../../messages/hi.json';
-import ar from '../../messages/ar.json';
 
-// Messages map
-const allMessages: Record<Locale, Record<string, unknown>> = {
-  en,
-  ko,
-  ja,
-  'zh-CN': zhCN,
-  'zh-TW': zhTW,
-  it,
-  es,
-  fr,
-  de,
-  pt,
-  hi,
-  ar,
-};
+const messages: Record<string, unknown> = en;
 
 interface LanguageContextType {
-  locale: Locale;
-  setLocale: (locale: Locale) => void;
-  isRTL: boolean;
   t: (key: string) => string;
-  messages: Record<string, unknown>;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -59,70 +29,24 @@ function getNestedValue(obj: Record<string, unknown>, path: string): string {
 }
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(defaultLocale);
-  const [messages, setMessages] = useState<Record<string, unknown>>(allMessages[defaultLocale]);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Load locale from localStorage on mount
+  // The provider has always rendered nothing until mount (it used to wait for
+  // the saved locale). Every page under it relies on that: none of them is
+  // rendered during the static prerender, so none has to be safe to render
+  // without `window`. Keep the gate until that is checked page by page.
   useEffect(() => {
-    const savedLocale = localStorage.getItem('noor_locale') as Locale | null;
-    if (savedLocale && locales.includes(savedLocale)) {
-      setLocaleState(savedLocale);
-      setMessages(allMessages[savedLocale]);
-    }
-    setIsLoaded(true);
+    setIsMounted(true);
   }, []);
 
-  // Update messages when locale changes
-  useEffect(() => {
-    setMessages(allMessages[locale]);
-  }, [locale]);
+  const t = useCallback((key: string): string => getNestedValue(messages, key), []);
 
-  // Update document direction for RTL languages
-  useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.dir = isRTL(locale) ? 'rtl' : 'ltr';
-      document.documentElement.lang = locale;
-    }
-  }, [locale]);
-
-  const setLocale = useCallback(async (newLocale: Locale) => {
-    setLocaleState(newLocale);
-    setMessages(allMessages[newLocale]);
-    localStorage.setItem('noor_locale', newLocale);
-
-    // Also save to user profile if available
-    const profile = localStorage.getItem('noor_user_profile');
-    if (profile) {
-      try {
-        const parsed = JSON.parse(profile);
-        parsed.language = newLocale;
-        localStorage.setItem('noor_user_profile', JSON.stringify(parsed));
-      } catch {
-        // Ignore parse errors
-      }
-    }
-  }, []);
-
-  const t = useCallback((key: string): string => {
-    return getNestedValue(messages, key);
-  }, [messages]);
-
-  // Don't render children until we've loaded the locale from localStorage
-  if (!isLoaded) {
+  if (!isMounted) {
     return null;
   }
 
   return (
-    <LanguageContext.Provider
-      value={{
-        locale,
-        setLocale,
-        isRTL: isRTL(locale),
-        t,
-        messages,
-      }}
-    >
+    <LanguageContext.Provider value={{ t }}>
       {children}
     </LanguageContext.Provider>
   );

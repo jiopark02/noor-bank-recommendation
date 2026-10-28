@@ -18,6 +18,7 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import { storeSummaryUnlessCrisis } from "@/lib/summaryCrisisGate";
 import {
   CRON_MAX_RESPONDED_ATTEMPTS,
   SESSION_CANDIDATE_LIMIT,
@@ -175,12 +176,14 @@ You will receive a conversation between a user and Noor AI. Produce a concise su
 
 Your summary must:
 - Be one dense paragraph (roughly 80-150 words).
-- Capture concrete facts about the user (financial situation, goals, decisions made, and relevant circumstances like visa status or school if mentioned) — NOT generic advice Noor gave.
+- Capture concrete facts about the user (financial situation, goals, decisions made, and relevant circumstances like school if mentioned) — NOT generic advice Noor gave.
 - Preserve specifics the user states that a connected bank feed cannot know: money received from family or other people, rent or bills paid in cash, accounts or cards that are not connected, scholarship or aid amounts and dates, deadlines, and bank names.
 - Do NOT preserve live account balances or individual transaction amounts, even if they appear in the conversation. They are read fresh from the bank feed when needed, and a stored copy goes stale.
 - Be written in third person ("The user...").
 - Omit pleasantries, greetings, and small talk.
 - Never include full sensitive identifiers (e.g. a complete SSN or card number), even if they appear in the conversation.
+- Do NOT include the user's emotions, mental health, or any mention of self-harm, suicide, harming others, or eating problems, and do not mention safety notices Noor showed.
+- Do NOT include the user's immigration or visa status (visa type, F-1, OPT, CPT, I-20, work authorization, or residency status).
 
 After the summary paragraph, output exactly one final line in this format:
 TOPICS: tag1, tag2, tag3
@@ -266,7 +269,7 @@ async function summarizeOneSession(
   }
 
   const { summary, topics } = parseSummaryOutput(rawOutput);
-  await createSummary(session.id, session.user_id, {
+  await storeSummaryUnlessCrisis({ createSummary, markSessionSummarized }, session, {
     summary,
     topics,
     messageCount: session.message_count,

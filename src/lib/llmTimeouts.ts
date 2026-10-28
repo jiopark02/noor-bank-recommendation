@@ -1,6 +1,6 @@
 /**
- * llmTimeouts — how long an OpenRouter call may take, and when a memory cron
- * stops starting new calls.
+ * llmTimeouts — how long an OpenRouter call may take, and when the chat route
+ * and the memory crons stop starting new calls.
  *
  * The values are unvalidated defaults: when they were set, llm_calls held too
  * few rows per route to measure real latency. Revisit them against
@@ -11,8 +11,17 @@
  * other network failures.
  */
 
-/** Per attempt. The chat route does not move to its fallback model after a timeout. */
+/** Per attempt, in the chat route. */
 export const CHAT_LLM_TIMEOUT_MS = 25000;
+
+/**
+ * The chat route runs with maxDuration = 60 s. Before each model attempt, the
+ * first included, it starts the attempt only when the attempt could still run
+ * to its full timeout inside this budget, measured from the start of the
+ * request. The waits before the model loop and the turn save after it have no
+ * timeout of their own, so this budget does not bound them.
+ */
+export const CHAT_REQUEST_BUDGET_MS = 55000;
 
 /** Per call, in both memory crons. */
 export const CRON_LLM_TIMEOUT_MS = 25000;
@@ -38,6 +47,14 @@ export function logLlmTimeout(
     model,
     timeoutMs
   );
+}
+
+/**
+ * True when a chat request that has been going for `elapsedMs` still has room
+ * for one more model attempt that runs to its full timeout.
+ */
+export function chatHasBudgetForAnotherAttempt(elapsedMs: number): boolean {
+  return elapsedMs + CHAT_LLM_TIMEOUT_MS <= CHAT_REQUEST_BUDGET_MS;
 }
 
 /**

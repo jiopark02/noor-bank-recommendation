@@ -1,0 +1,63 @@
+'use client';
+
+import React from 'react';
+import { useRouter } from 'next/navigation';
+import { useLanguage } from '@/contexts/LanguageContext';
+import type { LegalDocument } from '@/lib/legalDocuments';
+import { legalBackTarget } from '@/lib/legalBackTarget';
+
+/**
+ * The document text: "Last updated" line, then each section in order.
+ * Rendered by legalDocumentsParity.test.ts, so it takes no hooks.
+ */
+export function LegalDocumentBody({ doc }: { doc: LegalDocument }) {
+  return (
+    <div className="text-[15px] leading-relaxed text-gray-600">
+      <p className="mb-6">{doc.lastUpdated}</p>
+      {doc.sections.map((section) => (
+        <section key={section.heading} className="mb-6">
+          <h2 className="text-base font-medium text-gray-900 mb-2">{section.heading}</h2>
+          <p>{section.body}</p>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/** Standalone page: back button and title on top, no bottom navigation. */
+export function LegalDocumentPage({ doc }: { doc: LegalDocument }) {
+  const router = useRouter();
+  const { t } = useLanguage();
+
+  // In-app links say where they came from (?back=/settings); legalBackTarget
+  // honours only its allow-list and otherwise returns /. history.back() is
+  // never used, so arriving from another site cannot send the visitor off it.
+  // The query is read on click, not during render, so the page needs no
+  // useSearchParams Suspense boundary.
+  const handleBack = () => {
+    router.push(legalBackTarget(window.location.search));
+  };
+
+  return (
+    <div className="min-h-screen bg-white">
+      <header className="sticky top-0 z-30 bg-white border-b border-gray-100">
+        <div className="max-w-2xl mx-auto flex items-center gap-3 px-4 py-3.5">
+          <button
+            type="button"
+            onClick={handleBack}
+            aria-label="Go back"
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-black/5"
+          >
+            <svg className="w-4 h-4 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h1 className="text-[17px] font-semibold text-black tracking-tight">{t(doc.titleKey)}</h1>
+        </div>
+      </header>
+      <main className="max-w-2xl mx-auto px-6 py-8">
+        <LegalDocumentBody doc={doc} />
+      </main>
+    </div>
+  );
+}

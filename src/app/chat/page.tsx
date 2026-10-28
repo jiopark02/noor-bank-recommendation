@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { BottomNav } from "@/components/layout";
+import { BottomNav, BOTTOM_NAV_CLEARANCE } from "@/components/layout";
 import { UserLevel, getUserFinanceLevel } from "@/lib/financeProTips";
 import { useChat } from "@/hooks/useChat";
 import { UserContext } from "@/lib/noorAIPrompt";
@@ -23,14 +23,11 @@ function buildUserContext(profile: Record<string, unknown>): UserContext {
     lastName: profile.lastName as string | undefined,
     university: profile.university as string | undefined,
     institutionType: profile.institutionType as string | undefined,
-    visaType: profile.visaType as string | undefined,
     hasCreditHistory: profile.hasCreditHistory as boolean | undefined,
     monthlyIncome: profile.monthlyIncome as number | undefined,
     campusSide: profile.campusSide as string | undefined,
     isTransferStudent: profile.isTransferStudent as boolean | undefined,
     targetSchools: profile.targetSchools as string[] | undefined,
-    visaExpiry: profile.visaExpiry as string | undefined,
-    optStartDate: profile.optStartDate as string | undefined,
     monthlySpending: profile.monthlySpending as number | undefined,
     savingsGoal: profile.savingsGoal as number | undefined,
   };
@@ -267,7 +264,7 @@ export default function ChatPage() {
       </div>
 
       {/* ── MESSAGES ── */}
-      <div className="flex-1 overflow-y-auto pt-[64px] pb-[136px]">
+      <div className="flex-1 overflow-y-auto pt-[64px] pb-[168px]">
         {displayMessages.length === 0 ? (
           /* ── EMPTY STATE ── */
           <motion.div
@@ -397,7 +394,7 @@ export default function ChatPage() {
       {/* ── INPUT ── */}
       <div
         className="fixed left-0 right-0 z-20 px-4 pb-3"
-        style={{ bottom: "64px" }}
+        style={{ bottom: BOTTOM_NAV_CLEARANCE }}
       >
         {/* Fade behind input */}
         <div

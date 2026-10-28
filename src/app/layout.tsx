@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
-import { ThemeProvider } from '@/contexts/ThemeContext';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { ClientLayout } from '@/components/layout/ClientLayout';
 
@@ -40,11 +39,9 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <LanguageProvider>
-          <ThemeProvider>
-            <ClientLayout>
-              {children}
-            </ClientLayout>
-          </ThemeProvider>
+          <ClientLayout>
+            {children}
+          </ClientLayout>
         </LanguageProvider>
       </body>
     </html>

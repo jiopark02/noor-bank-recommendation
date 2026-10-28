@@ -141,6 +141,60 @@ describe("supersedeUserFact", () => {
   });
 });
 
+describe("crisis content in a fact", () => {
+  const CRISIS_FACT = "User wants to kill themselves.";
+
+  function consoleSpies(): Array<ReturnType<typeof vi.spyOn>> {
+    return [
+      warn,
+      vi.spyOn(console, "info").mockImplementation(() => {}),
+      vi.spyOn(console, "error").mockImplementation(() => {}),
+      vi.spyOn(console, "log").mockImplementation(() => {}),
+    ];
+  }
+
+  it("saveUserFact refuses it before touching the database, and logs nothing", async () => {
+    const spies = consoleSpies();
+    await expect(
+      saveUserFact(USER, { category: "personal", fact: CRISIS_FACT })
+    ).rejects.toBeInstanceOf(SensitiveFactRejectedError);
+    expect(calls).toEqual([]);
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("supersedeUserFact refuses it before the ownership check, so the old fact is untouched", async () => {
+    const spies = consoleSpies();
+    await expect(
+      supersedeUserFact(USER, OLD_FACT, { category: "personal", fact: CRISIS_FACT })
+    ).rejects.toBeInstanceOf(SensitiveFactRejectedError);
+    expect(calls).toEqual([]);
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("with an SSN as well, logs only the identifier count line", async () => {
+    const spies = consoleSpies();
+    await expect(
+      saveUserFact(USER, {
+        category: "personal",
+        fact: "User's SSN is 123-45-6789 and they want to kill themselves.",
+      })
+    ).rejects.toBeInstanceOf(SensitiveFactRejectedError);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[memory-filter] kind=fact masked=%d", 1);
+    for (const spy of spies.slice(1)) expect(spy).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+  });
+
+  it("the rejection message names neither the text nor the check", async () => {
+    const error = await saveUserFact(USER, {
+      category: "personal",
+      fact: CRISIS_FACT,
+    }).catch((e: unknown) => e);
+    expect(isSensitiveFactRejected(error)).toBe(true);
+    expect((error as Error).message).not.toMatch(/kill|crisis|suicid/i);
+  });
+});
+
 describe("createSummary", () => {
   it("masks the summary, every topic and raw_backup, and logs only the count", async () => {
     await createSummary(SESSION, USER, {

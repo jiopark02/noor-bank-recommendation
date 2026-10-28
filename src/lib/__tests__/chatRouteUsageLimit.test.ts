@@ -85,11 +85,14 @@ vi.mock("@/lib/aiMemory", () => ({
   getSessionMessages: async () => [],
 }));
 
-/** One scripted OpenRouter answer per attempt, in order. */
+/**
+ * One scripted OpenRouter answer per attempt, in order. advanceMs moves the
+ * faked clock during the attempt, for tests that run with Date faked.
+ */
 type Answer =
   | { kind: "ok"; cost?: number }
-  | { kind: "status"; status: number }
-  | { kind: "throw" };
+  | { kind: "status"; status: number; advanceMs?: number }
+  | { kind: "throw"; error?: Error; advanceMs?: number };
 
 let answers: Answer[] = [];
 let fetchCalls = 0;
@@ -166,7 +169,12 @@ beforeEach(() => {
       fetchCalls += 1;
       const body = JSON.parse(String(init?.body)) as { model: string };
       const answer = answers.shift() ?? { kind: "throw" };
-      if (answer.kind === "throw") throw new TypeError("fetch failed");
+      if (answer.kind !== "ok" && answer.advanceMs) {
+        vi.setSystemTime(Date.now() + answer.advanceMs);
+      }
+      if (answer.kind === "throw") {
+        throw answer.error ?? new TypeError("fetch failed");
+      }
       if (answer.kind === "status") {
         return new Response(
           JSON.stringify({ error: { message: `upstream ${answer.status}` } }),
@@ -437,19 +445,66 @@ describe("one settle per admitted request, from the attempt tally", () => {
     });
   });
 
-  it("fetch throws (outer catch): one attempt at the hold", async () => {
+  it("fetch throws on every model: both attempts at the hold", async () => {
     answers = [{ kind: "throw" }];
     const res = await post();
     expect(res.status).toBe(500);
     expect(res.json).toEqual({ error: "Failed to get response from AI" });
-    expect(fetchCalls).toBe(1);
+    expect(fetchCalls).toBe(2);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({
       reservationId: usage.reserveInputs[0].reservationId,
-      cost: 0.05,
-      attempts: 1,
+      cost: 0.1,
+      attempts: 2,
     });
+  });
+
+  it("fetch throws on the first model: the fallback answers, 200, both attempts settled", async () => {
+    answers = [{ kind: "throw" }, { kind: "ok", cost: 0.01 }];
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(res.json.success).toBe(true);
+    expect(fetchCalls).toBe(2);
+    expect(res.settledAtResponse).toBe(1);
+    expect(usage.settled).toHaveLength(1);
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0.06,
+      attempts: 2,
+    });
+  });
+
+  it("an AbortError on the first model also falls back", async () => {
+    answers = [
+      { kind: "throw", error: new DOMException("The operation was aborted.", "AbortError") },
+      { kind: "ok", cost: 0.01 },
+    ];
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(fetchCalls).toBe(2);
+    expect(usage.settled[0]).toMatchObject({ attempts: 2 });
+  });
+
+  it("a throw, then a non-2xx fallback: the fallback's failure is the response", async () => {
+    answers = [{ kind: "throw" }, { kind: "status", status: 502 }];
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual({ error: "upstream 502" });
+    expect(fetchCalls).toBe(2);
+    expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
+  });
+
+  it("a non-2xx, then a fallback that times out: 500, both attempts settled", async () => {
+    answers = [
+      { kind: "status", status: 500 },
+      { kind: "throw", error: new DOMException("The operation was aborted.", "AbortError") },
+    ];
+    const res = await post();
+    expect(res.status).toBe(500);
+    expect(res.json).toEqual({ error: "Failed to get response from AI" });
+    expect(fetchCalls).toBe(2);
+    expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
   });
 
   it("memory 503: settled at zero, no model call", async () => {
@@ -480,5 +535,95 @@ describe("one settle per admitted request, from the attempt tally", () => {
       cost: 0,
       attempts: 0,
     });
+  });
+});
+
+/**
+ * The request budget: an attempt starts only while elapsed + 25000 ms is at
+ * most 55000 ms, so 30000 ms elapsed is the last moment one may start. Date is
+ * faked and moved by the scripted reserve or attempt; the real clock is
+ * restored in finally, and again in afterEach.
+ */
+describe("the request time budget", () => {
+  async function postWithFakeClock(): ReturnType<typeof post> {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-17T11:00:00.000Z"));
+    try {
+      return await post();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  function reserveAfter(ms: number): void {
+    usage.reserve = async () => {
+      vi.setSystemTime(Date.now() + ms);
+      return { allowed: true, limit: null, retryAt: null };
+    };
+  }
+
+  it("no room before the first attempt: 503 CHAT_TIME_BUDGET_EXHAUSTED, no model call, settled at zero", async () => {
+    reserveAfter(30001);
+    const res = await postWithFakeClock();
+    expect(res.status).toBe(503);
+    expect(res.json).toEqual({
+      error: "Chat is taking longer than usual. Please try again.",
+      code: "CHAT_TIME_BUDGET_EXHAUSTED",
+    });
+    expect(fetchCalls).toBe(0);
+    expect(res.settledAtResponse).toBe(1);
+    expect(usage.settled[0]).toMatchObject({
+      reservationId: usage.reserveInputs[0].reservationId,
+      cost: 0,
+      attempts: 0,
+    });
+    expect(
+      vi.mocked(console.warn).mock.calls.filter(
+        (args) => args[0] === "[chat-deadline] attempt skipped attempt=%d elapsed_ms=%d"
+      )
+    ).toEqual([["[chat-deadline] attempt skipped attempt=%d elapsed_ms=%d", 1, 30001]]);
+  });
+
+  it("exactly at the edge before the first attempt: the attempt starts", async () => {
+    reserveAfter(30000);
+    const res = await postWithFakeClock();
+    expect(res.status).toBe(200);
+    expect(fetchCalls).toBe(1);
+    expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
+  });
+
+  it("a throw with no room left: no fallback, 500, one attempt", async () => {
+    answers = [{ kind: "throw", advanceMs: 30001 }, { kind: "ok", cost: 0.01 }];
+    const res = await postWithFakeClock();
+    expect(res.status).toBe(500);
+    expect(res.json).toEqual({ error: "Failed to get response from AI" });
+    expect(fetchCalls).toBe(1);
+    expect(res.settledAtResponse).toBe(1);
+    expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
+  });
+
+  it("a throw exactly at the edge: the fallback starts", async () => {
+    answers = [{ kind: "throw", advanceMs: 30000 }, { kind: "ok", cost: 0.01 }];
+    const res = await postWithFakeClock();
+    expect(res.status).toBe(200);
+    expect(fetchCalls).toBe(2);
+    expect(usage.settled[0]).toMatchObject({ cost: 0.06, attempts: 2 });
+  });
+
+  it("a non-2xx with no room left: no fallback, the failure is the response", async () => {
+    answers = [{ kind: "status", status: 500, advanceMs: 30001 }, { kind: "ok", cost: 0.01 }];
+    const res = await postWithFakeClock();
+    expect(res.status).toBe(500);
+    expect(res.json).toEqual({ error: "upstream 500" });
+    expect(fetchCalls).toBe(1);
+    expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
+  });
+
+  it("a non-2xx exactly at the edge: the fallback starts", async () => {
+    answers = [{ kind: "status", status: 500, advanceMs: 30000 }, { kind: "ok", cost: 0.01 }];
+    const res = await postWithFakeClock();
+    expect(res.status).toBe(200);
+    expect(fetchCalls).toBe(2);
+    expect(usage.settled[0]).toMatchObject({ cost: 0.06, attempts: 2 });
   });
 });
