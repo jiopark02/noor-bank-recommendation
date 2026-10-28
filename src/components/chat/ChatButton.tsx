@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useTheme } from '@/contexts/ThemeContext';
 
 interface ChatButtonProps {
   isOpen: boolean;
@@ -11,12 +10,8 @@ interface ChatButtonProps {
 }
 
 export function ChatButton({ isOpen, onClick, hasNewMessage = false }: ChatButtonProps) {
-  const { theme, useSchoolTheme } = useTheme();
-
-  const buttonColor = useSchoolTheme ? theme.primary_color : '#000000';
-  const iconColor = useSchoolTheme
-    ? (theme.text_on_primary === 'white' ? '#FFFFFF' : '#000000')
-    : '#FFFFFF';
+  const buttonColor = '#000000';
+  const iconColor = '#FFFFFF';
 
   return (
     <motion.button

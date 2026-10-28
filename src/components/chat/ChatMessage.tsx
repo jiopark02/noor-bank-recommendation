@@ -2,7 +2,6 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { useTheme } from "@/contexts/ThemeContext";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
@@ -17,15 +16,10 @@ export function ChatMessage({
   timestamp,
   isTyping = false,
 }: ChatMessageProps) {
-  const { theme, useSchoolTheme } = useTheme();
   const isUser = role === "user";
 
-  const userBgColor = useSchoolTheme ? theme.primary_color : "#000000";
-  const userTextColor = useSchoolTheme
-    ? theme.text_on_primary === "white"
-      ? "#FFFFFF"
-      : "#000000"
-    : "#FFFFFF";
+  const userBgColor = "#000000";
+  const userTextColor = "#FFFFFF";
 
   return (
     <motion.div
@@ -39,12 +33,12 @@ export function ChatMessage({
         <div
           className="w-8 h-8 rounded-full flex items-center justify-center mr-2 flex-shrink-0"
           style={{
-            backgroundColor: useSchoolTheme ? theme.secondary_color : "#F5F5F5",
+            backgroundColor: "#F5F5F5",
           }}
         >
           <span
             className="text-xs font-medium"
-            style={{ color: useSchoolTheme ? theme.primary_color : "#000000" }}
+            style={{ color: "#000000" }}
           >
             N
           </span>

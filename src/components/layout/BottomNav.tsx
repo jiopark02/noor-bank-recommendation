@@ -4,7 +4,6 @@ import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { useTheme } from "@/contexts/ThemeContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 interface NavItem {
@@ -56,7 +55,6 @@ function pathMatchesNavItem(safePathname: string, href: string): boolean {
 export function BottomNav() {
   const pathname = usePathname();
   const safePathname = pathname ?? "/dashboard";
-  const { theme, useSchoolTheme } = useTheme();
   const { t } = useLanguage();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const moreMenuGroups = useMemo(() => buildMoreMenuGroups(), []);
@@ -66,7 +64,7 @@ export function BottomNav() {
     [moreMenuGroups]
   );
 
-  const activeColor = useSchoolTheme ? theme.primary_color : "#000000";
+  const activeColor = "#000000";
   const inactiveColor = "#9CA3AF";
 
   const isMoreActive =

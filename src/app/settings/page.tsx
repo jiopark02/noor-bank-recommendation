@@ -4,8 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
-import { useTheme } from '@/contexts/ThemeContext';
-import { getSchoolTheme, hasCustomTheme } from '@/lib/schoolThemes';
 import {
   validatePassword,
   getPasswordStrengthColor,
@@ -87,35 +85,6 @@ function SettingsCard({ children }: { children: React.ReactNode }) {
 
 function Divider() {
   return <div className="mx-4" style={{ height: '1px', background: 'rgba(0,0,0,0.05)' }} />;
-}
-
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className="relative flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none"
-      style={{
-        width: 44,
-        height: 24,
-        background: checked ? '#000' : 'rgba(0,0,0,0.12)',
-      }}
-    >
-      <motion.div
-        className="absolute top-[2px] w-5 h-5 bg-white rounded-full"
-        style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.18)' }}
-        animate={{ x: checked ? 22 : 2 }}
-        transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-      />
-    </button>
-  );
 }
 
 interface RowProps {
@@ -204,11 +173,6 @@ const Ico = {
   lock: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-    </svg>
-  ),
-  palette: (
-    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
     </svg>
   ),
   download: (
@@ -318,7 +282,6 @@ function ModalInput({
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { theme, useSchoolTheme, toggleSchoolTheme, setTheme } = useTheme();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
@@ -365,9 +328,6 @@ export default function SettingsPage() {
     () => calculateProfileCompletion(userProfile as Record<string, unknown> | null),
     [userProfile]
   );
-
-  const schoolTheme = userProfile?.institutionId ? getSchoolTheme(userProfile.institutionId) : null;
-  const hasTheme = userProfile?.institutionId ? hasCustomTheme(userProfile.institutionId) : false;
 
   const surveySearchCountry = useMemo(() => {
     const fromProfile = userProfile?.destinationCountry;
@@ -762,38 +722,6 @@ export default function SettingsPage() {
           onClick={() => setActiveModal('changePassword')}
         />
       </SettingsCard>
-
-      {/* ── APPEARANCE (school theme) ── */}
-      {hasTheme && schoolTheme && (
-        <>
-          <SectionLabel>Appearance</SectionLabel>
-          <SettingsCard>
-            <div className="flex items-center gap-3.5 px-4 py-3.5">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: 'rgba(0,0,0,0.05)' }}
-              >
-                <div style={{ color: 'rgba(0,0,0,0.55)' }}>{Ico.palette}</div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] font-medium text-black leading-tight" style={{ fontFamily: FONT }}>
-                  School Theme
-                </div>
-                <div className="text-[12px] mt-0.5" style={{ color: 'rgba(0,0,0,0.35)', fontFamily: FONT }}>
-                  {schoolTheme.name}
-                </div>
-              </div>
-              <Toggle
-                checked={useSchoolTheme}
-                onChange={(v) => {
-                  toggleSchoolTheme(v);
-                  if (v && userProfile?.institutionId) setTheme(userProfile.institutionId);
-                }}
-              />
-            </div>
-          </SettingsCard>
-        </>
-      )}
 
       {/* ── DATA & PRIVACY ── */}
       <SectionLabel>Data &amp; Privacy</SectionLabel>

@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useTheme } from "@/contexts/ThemeContext";
 import { useChat } from "@/hooks/useChat";
 import { ChatMessage } from "./ChatMessage";
 import { UserContext } from "@/lib/noorAIPrompt";
@@ -20,7 +19,6 @@ export function ChatModal({
   userId,
   userContext,
 }: ChatModalProps) {
-  const { theme, useSchoolTheme } = useTheme();
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -31,12 +29,8 @@ export function ChatModal({
     loadHistory: true,
   });
 
-  const headerColor = useSchoolTheme ? theme.primary_color : "#000000";
-  const headerTextColor = useSchoolTheme
-    ? theme.text_on_primary === "white"
-      ? "#FFFFFF"
-      : "#000000"
-    : "#FFFFFF";
+  const headerColor = "#000000";
+  const headerTextColor = "#FFFFFF";
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -84,15 +78,13 @@ export function ChatModal({
               <div
                 className="w-10 h-10 rounded-full flex items-center justify-center"
                 style={{
-                  backgroundColor: useSchoolTheme
-                    ? theme.secondary_color
-                    : "#FFFFFF",
+                  backgroundColor: "#FFFFFF",
                 }}
               >
                 <span
                   className="text-sm font-semibold"
                   style={{
-                    color: useSchoolTheme ? theme.primary_color : "#000000",
+                    color: "#000000",
                   }}
                 >
                   N
@@ -141,15 +133,13 @@ export function ChatModal({
                 <div
                   className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
                   style={{
-                    backgroundColor: useSchoolTheme
-                      ? `${theme.primary_color}15`
-                      : "#F5F5F5",
+                    backgroundColor: "#F5F5F5",
                   }}
                 >
                   <span
                     className="text-2xl font-semibold"
                     style={{
-                      color: useSchoolTheme ? theme.primary_color : "#000000",
+                      color: "#000000",
                     }}
                   >
                     N
@@ -237,9 +227,7 @@ export function ChatModal({
                 disabled={!inputValue.trim() || isLoading}
                 className="p-3 rounded-xl transition-all disabled:opacity-30"
                 style={{
-                  backgroundColor: useSchoolTheme
-                    ? theme.primary_color
-                    : "#000000",
+                  backgroundColor: "#000000",
                 }}
               >
                 <svg

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
-import { useTheme } from "@/contexts/ThemeContext";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
 import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
@@ -119,7 +118,6 @@ function MoneyFigure({
 
 export default function HomePage() {
   const router = useRouter();
-  const { theme, useSchoolTheme } = useTheme();
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // True only once the accounts and transactions routes have both answered
@@ -575,9 +573,8 @@ export default function HomePage() {
     userName,
   ]);
 
-  const accentColor = useSchoolTheme ? theme.primary_color : "#111111";
-  const accentTextColor =
-    useSchoolTheme && theme.text_on_primary === "black" ? "#111111" : "#FFFFFF";
+  const accentColor = "#111111";
+  const accentTextColor = "#FFFFFF";
   const openFullChat = () => {
     router.push("/chat");
   };
@@ -605,7 +602,7 @@ export default function HomePage() {
   }
 
   return (
-    <PageLayout userName={userName}>
+    <PageLayout>
       <motion.header
         className="mb-8 md:mb-10"
         initial={{ opacity: 0, y: 10 }}
