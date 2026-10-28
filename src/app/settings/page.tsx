@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { locales, localeNames, localeFlags, Locale } from '@/i18n/config';
 import { getSchoolTheme, hasCustomTheme } from '@/lib/schoolThemes';
 import {
   validatePassword,
@@ -213,12 +211,6 @@ const Ico = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
     </svg>
   ),
-  globe: (
-    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-    </svg>
-  ),
   download: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -327,9 +319,7 @@ function ModalInput({
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, useSchoolTheme, toggleSchoolTheme, setTheme } = useTheme();
-  const { locale, setLocale, t } = useLanguage();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -805,19 +795,6 @@ export default function SettingsPage() {
         </>
       )}
 
-      {/* ── PREFERENCES ── */}
-      <SectionLabel>Preferences</SectionLabel>
-      <SettingsCard>
-        <SettingsRow
-          icon={Ico.globe}
-          label="Language"
-          value={`${localeFlags[locale]}  ${localeNames[locale]}`}
-          chevron
-          last
-          onClick={() => setShowLanguageModal(true)}
-        />
-      </SettingsCard>
-
       {/* ── DATA & PRIVACY ── */}
       <SectionLabel>Data &amp; Privacy</SectionLabel>
       <SettingsCard>
@@ -1041,36 +1018,6 @@ export default function SettingsPage() {
                 Reset
               </button>
             </div>
-          </Modal>
-        )}
-
-        {/* Language */}
-        {showLanguageModal && (
-          <Modal onClose={() => setShowLanguageModal(false)}>
-            <h3 className="text-[16px] font-semibold text-black mb-1" style={{ fontFamily: FONT }}>{t('settings.language.title')}</h3>
-            <p className="text-[13px] mb-5" style={{ color: 'rgba(0,0,0,0.4)', fontFamily: FONT }}>{t('settings.language.description')}</p>
-
-            <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
-              {locales.map((loc) => (
-                <button
-                  key={loc}
-                  onClick={() => { setLocale(loc); setShowLanguageModal(false); showSuccess(localeNames[loc] + ' selected'); }}
-                  className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all"
-                  style={{
-                    border: locale === loc ? '1.5px solid #000' : '1.5px solid rgba(0,0,0,0.1)',
-                    background: locale === loc ? '#000' : '#fff',
-                    fontFamily: FONT,
-                  }}
-                >
-                  <span className="text-xl">{localeFlags[loc]}</span>
-                  <span className="text-[13px] font-medium" style={{ color: locale === loc ? '#fff' : '#000' }}>{localeNames[loc]}</span>
-                </button>
-              ))}
-            </div>
-
-            <button onClick={() => setShowLanguageModal(false)} className="w-full py-3 mt-5 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
-              {t('common.close')}
-            </button>
           </Modal>
         )}
 
