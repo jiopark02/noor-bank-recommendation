@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { BOTTOM_NAV_CLEARANCE } from "@/components/layout/BottomNav";
 import { useChat } from "@/hooks/useChat";
 import { ChatMessage } from "./ChatMessage";
 import { UserContext } from "@/lib/noorAIPrompt";
@@ -66,8 +67,8 @@ export function ChatModal({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 20, scale: 0.95 }}
           transition={{ duration: 0.3, ease: "easeOut" }}
-          className="fixed bottom-28 right-4 z-50 w-[calc(100%-2rem)] max-w-md h-[70vh] max-h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-          style={{ border: "1px solid #E5E5E5" }}
+          className="fixed right-4 z-50 w-[calc(100%-2rem)] max-w-md h-[70vh] max-h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          style={{ border: "1px solid #E5E5E5", bottom: `calc(${BOTTOM_NAV_CLEARANCE} + 0.5rem)` }}
         >
           {/* Header */}
           <div

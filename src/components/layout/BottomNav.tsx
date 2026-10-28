@@ -1,45 +1,42 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { useLanguage } from "@/contexts/LanguageContext";
 
 interface NavItem {
   href: string;
-  labelKey: string;
-  icon: React.ComponentType<IconProps>;
+  label: string;
+  icon: React.ComponentType;
 }
 
-function buildMoreMenuGroups(): {
-  title: string;
-  items: NavItem[];
-}[] {
-  const finance: NavItem[] = [
-    { href: "/banking", labelKey: "nav.banking", icon: BankingIcon },
-    { href: "/grow", labelKey: "nav.grow", icon: GrowIcon },
-    { href: "/money", labelKey: "nav.money", icon: MoneyIcon },
-  ];
+const NAV_ITEMS: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard", icon: HomeIcon },
+  { href: "/chat", label: "AI", icon: ChatIcon },
+  { href: "/money", label: "Money", icon: WalletIcon },
+  { href: "/settings", label: "Settings", icon: SettingsIcon },
+];
 
-  const life: NavItem[] = [
-    { href: "/housing", labelKey: "nav.housing", icon: HousingIcon },
-    { href: "/jobs", labelKey: "nav.jobs", icon: JobsIcon },
-    { href: "/funding", labelKey: "nav.funding", icon: FundingIcon },
-    { href: "/deals", labelKey: "nav.deals", icon: DealsIcon },
-  ];
+// Bar geometry: it floats BAR_GAP above the bottom safe area and is BAR_HEIGHT
+// tall. Anything pinned above it, and the spacer that keeps page content
+// clear of it, use BOTTOM_NAV_CLEARANCE (gap + bar + 16px breathing room).
+const BAR_GAP = "0.75rem";
+const BAR_HEIGHT = "4rem";
+export const BOTTOM_NAV_CLEARANCE = "calc(5.75rem + env(safe-area-inset-bottom))";
 
-  const settings: NavItem[] = [
-    { href: "/settings", labelKey: "common.settings", icon: SettingsIcon },
-    { href: "/waitlist", labelKey: "nav.landing", icon: LandingPageIcon },
-  ];
-
-  return [
-    { title: "Finance", items: finance },
-    { title: "Life", items: life },
-    { title: "Settings", items: settings },
-  ];
-}
+// Brand colour for the active tab, grey for the rest. The bar is white at 85%
+// opacity over a blur. Composited over a pure black backdrop (the worst case)
+// that keeps the inactive grey at 5.35:1 and the active black at 14.88:1,
+// above the WCAG AA 4.5:1 for text; 0.78 is the lowest opacity that still
+// clears 4.5:1 for the grey. Without backdrop-filter support the bar is opaque
+// white instead.
+const ACTIVE_COLOR = "#000000";
+const INACTIVE_COLOR = "#4B5563";
+// Written out in full: Tailwind only generates classes it finds as literal text.
+const BAR_SURFACE =
+  "bg-white " +
+  "supports-[(backdrop-filter:blur(0px))_or_(-webkit-backdrop-filter:blur(0px))]:bg-white/85 " +
+  "supports-[(backdrop-filter:blur(0px))_or_(-webkit-backdrop-filter:blur(0px))]:backdrop-blur-lg";
 
 function isPathActive(pathname: string, href: string): boolean {
   return (
@@ -48,479 +45,84 @@ function isPathActive(pathname: string, href: string): boolean {
   );
 }
 
-function pathMatchesNavItem(safePathname: string, href: string): boolean {
-  return safePathname === href || safePathname.startsWith(`${href}/`);
-}
-
 export function BottomNav() {
   const pathname = usePathname();
   const safePathname = pathname ?? "/dashboard";
-  const { t } = useLanguage();
-  const [isMoreOpen, setIsMoreOpen] = useState(false);
-  const moreMenuGroups = useMemo(() => buildMoreMenuGroups(), []);
-
-  const allMoreItems = useMemo(
-    () => moreMenuGroups.flatMap((g) => g.items),
-    [moreMenuGroups]
-  );
-
-  const activeColor = "#000000";
-  const inactiveColor = "#9CA3AF";
-
-  const isMoreActive =
-    allMoreItems.some((item) => isPathActive(safePathname, item.href)) ||
-    isMoreOpen;
-
-  const isAiActive = isPathActive(safePathname, "/chat");
 
   return (
     <>
-      <div className="h-24" />
+      <div aria-hidden="true" style={{ height: BOTTOM_NAV_CLEARANCE }} />
 
-      <AnimatePresence>
-        {isMoreOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/30 z-40"
-              onClick={() => setIsMoreOpen(false)}
-            />
+      <nav
+        aria-label="Main"
+        className="fixed inset-x-0 z-50 flex justify-center px-4 pointer-events-none"
+        style={{ bottom: `calc(${BAR_GAP} + env(safe-area-inset-bottom))` }}
+      >
+        <div
+          className={`pointer-events-auto w-full max-w-md grid grid-cols-4 rounded-full border border-black/[0.06] shadow-[0_8px_24px_rgba(0,0,0,0.12)] ${BAR_SURFACE}`}
+          style={{ height: BAR_HEIGHT }}
+        >
+          {NAV_ITEMS.map((item) => {
+            const isActive = isPathActive(safePathname, item.href);
+            const Icon = item.icon;
 
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 pb-24 max-h-[85vh] overflow-y-auto"
-            >
-              <div className="p-4">
-                <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
-
-                <div className="flex items-center justify-between mb-4 px-2">
-                  <h3 className="text-lg font-medium text-gray-900">More</h3>
-                  <button
-                    type="button"
-                    onClick={() => setIsMoreOpen(false)}
-                    className="p-2 rounded-full hover:bg-gray-100"
-                    aria-label="Close menu"
-                  >
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#6B7280"
-                      strokeWidth="2"
-                    >
-                      <path
-                        d="M18 6L6 18M6 6l12 12"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className="space-y-6">
-                  {moreMenuGroups.map((group) => (
-                    <div key={group.title}>
-                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider px-2 mb-2">
-                        {group.title}
-                      </p>
-                      <div className="grid grid-cols-3 gap-3">
-                        {group.items.map((item) => {
-                          const isActive = isPathActive(safePathname, item.href);
-                          const Icon = item.icon;
-
-                          return (
-                            <Link
-                              key={item.href}
-                              href={item.href}
-                              onClick={() => setIsMoreOpen(false)}
-                              className="flex flex-col items-center justify-center p-4 rounded-2xl transition-all"
-                              style={{
-                                backgroundColor: isActive
-                                  ? `${activeColor}10`
-                                  : "#F9FAFB",
-                                color: isActive ? activeColor : "#4B5563",
-                              }}
-                            >
-                              <Icon
-                                active={isActive}
-                                activeColor={activeColor}
-                              />
-                              <span
-                                className={`text-xs mt-2 text-center ${
-                                  isActive ? "font-medium" : ""
-                                }`}
-                              >
-                                {t(item.labelKey)}
-                              </span>
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50">
-        <div className="max-w-2xl mx-auto px-6">
-          <div className="flex items-center justify-between h-20">
-            <Link
-              href="/chat"
-              className="flex flex-col items-center justify-center gap-1.5 px-4 py-2 rounded-xl transition-all duration-300 min-w-[72px]"
-              style={{ color: isAiActive ? activeColor : inactiveColor }}
-            >
-              <AiTabIcon active={isAiActive} activeColor={activeColor} />
-              <span
-                className={`text-[10px] tracking-wide ${
-                  isAiActive ? "font-medium" : ""
-                }`}
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={isActive ? "page" : undefined}
+                className="flex flex-col items-center justify-center gap-1 rounded-full transition-colors duration-200"
+                style={{ color: isActive ? ACTIVE_COLOR : INACTIVE_COLOR }}
               >
-                AI
-              </span>
-            </Link>
-
-            <button
-              type="button"
-              onClick={() => setIsMoreOpen(!isMoreOpen)}
-              className="flex flex-col items-center justify-center gap-1.5 px-4 py-2 rounded-xl transition-all duration-300 min-w-[72px]"
-              style={{
-                color: isMoreActive ? activeColor : inactiveColor,
-              }}
-              aria-expanded={isMoreOpen}
-              aria-label="Open more menu"
-            >
-              <MoreIcon
-                active={isMoreActive}
-                activeColor={activeColor}
-              />
-              <span
-                className={`text-[10px] tracking-wide ${
-                  isMoreActive ? "font-medium" : ""
-                }`}
-              >
-                More
-              </span>
-            </button>
-          </div>
+                <Icon />
+                <span
+                  className={`text-[11px] leading-none tracking-wide ${
+                    isActive ? "font-semibold" : "font-medium"
+                  }`}
+                >
+                  {item.label}
+                </span>
+              </Link>
+            );
+          })}
         </div>
-
-        <div className="h-safe-bottom bg-white" />
       </nav>
     </>
   );
 }
 
-interface IconProps {
-  active?: boolean;
-  activeColor?: string;
-}
-
-function HomeIcon({ active }: IconProps) {
+function HomeIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M9 21V12h6v9" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2.5l9.5 8.1V21a1 1 0 01-1 1h-6v-6.5h-5V22h-6a1 1 0 01-1-1V10.6L12 2.5z" />
     </svg>
   );
 }
 
-function AiTabIcon({ active }: IconProps) {
+function ChatIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 3C6.75 3 2.5 6.58 2.5 11c0 2.2 1.05 4.2 2.76 5.65L4.5 21l4.53-2.27c.95.25 1.94.37 2.97.37 5.25 0 9.5-3.58 9.5-8S17.25 3 12 3z" />
     </svg>
   );
 }
 
-function ChatSheetIcon({ active }: IconProps) {
+function WalletIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9 10h6M9 14h4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M4 5.5A2.5 2.5 0 001.5 8v10A2.5 2.5 0 004 20.5h16a2.5 2.5 0 002.5-2.5v-2.5H17a3.5 3.5 0 010-7h5.5V8A2.5 2.5 0 0020 5.5H4z" />
+      <path d="M17 10.5a1.5 1.5 0 000 3h5.5v-3H17z" />
     </svg>
   );
 }
 
-function BankingIcon({ active }: IconProps) {
+function SettingsIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path
-        d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        fillRule="evenodd"
+        d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"
       />
-    </svg>
-  );
-}
-
-function HousingIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx="12"
-        cy="9"
-        r="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function GrowIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path d="M12 20V10" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M18 20V4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6 20v-4" strokeLinecap="round" strokeLinejoin="round" />
-      <circle
-        cx="12"
-        cy="6"
-        r="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9 8c-1.5.5-3 2-3 4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M15 8c1.5.5 3 2 3 4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function MoreIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <circle cx="12" cy="12" r="1" fill="currentColor" />
-      <circle cx="19" cy="12" r="1" fill="currentColor" />
-      <circle cx="5" cy="12" r="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function JobsIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <rect
-        x="2"
-        y="7"
-        width="20"
-        height="14"
-        rx="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function FundingIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M22 10v6M2 10l10-5 10 5-10 5-10-5z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6 12v5c3 3 9 3 12 0v-5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function DealsIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path
-        d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="7" cy="7" r="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-function SettingsIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <circle
-        cx="12"
-        cy="12"
-        r="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function MoneyIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <circle
-        cx="12"
-        cy="12"
-        r="10"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 6v12M9 9h4.5a1.5 1.5 0 010 3H9h5.5a1.5 1.5 0 110 3H9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function LandingPageIcon({ active }: IconProps) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={active ? 1.75 : 1.25}
-    >
-      <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M9 21V12h6v9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

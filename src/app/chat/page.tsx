@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { BottomNav } from "@/components/layout";
+import { BottomNav, BOTTOM_NAV_CLEARANCE } from "@/components/layout";
 import { UserLevel, getUserFinanceLevel } from "@/lib/financeProTips";
 import { useChat } from "@/hooks/useChat";
 import { UserContext } from "@/lib/noorAIPrompt";
@@ -264,7 +264,7 @@ export default function ChatPage() {
       </div>
 
       {/* ── MESSAGES ── */}
-      <div className="flex-1 overflow-y-auto pt-[64px] pb-[136px]">
+      <div className="flex-1 overflow-y-auto pt-[64px] pb-[168px]">
         {displayMessages.length === 0 ? (
           /* ── EMPTY STATE ── */
           <motion.div
@@ -394,7 +394,7 @@ export default function ChatPage() {
       {/* ── INPUT ── */}
       <div
         className="fixed left-0 right-0 z-20 px-4 pb-3"
-        style={{ bottom: "64px" }}
+        style={{ bottom: BOTTOM_NAV_CLEARANCE }}
       >
         {/* Fade behind input */}
         <div

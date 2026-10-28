@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { BOTTOM_NAV_CLEARANCE } from '@/components/layout/BottomNav';
 
 interface ChatButtonProps {
   isOpen: boolean;
@@ -16,8 +17,8 @@ export function ChatButton({ isOpen, onClick, hasNewMessage = false }: ChatButto
   return (
     <motion.button
       onClick={onClick}
-      className="fixed bottom-28 right-4 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center"
-      style={{ backgroundColor: buttonColor }}
+      className="fixed right-4 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center"
+      style={{ backgroundColor: buttonColor, bottom: `calc(${BOTTOM_NAV_CLEARANCE} + 0.5rem)` }}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
       initial={{ opacity: 0, scale: 0.8 }}

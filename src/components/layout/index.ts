@@ -1,4 +1,4 @@
 export { Header } from './Header';
-export { BottomNav } from './BottomNav';
+export { BottomNav, BOTTOM_NAV_CLEARANCE } from './BottomNav';
 export { ClientLayout } from './ClientLayout';
 export { PageLayout } from './PageLayout';
