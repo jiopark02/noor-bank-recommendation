@@ -528,14 +528,14 @@ export default function SettingsPage() {
           icon={Ico.document}
           label="Privacy Policy"
           chevron
-          onClick={() => router.push('/privacy')}
+          onClick={() => router.push('/privacy?back=/settings')}
         />
         <SettingsRow
           icon={Ico.document}
           label="Terms of Service"
           chevron
           last
-          onClick={() => router.push('/terms')}
+          onClick={() => router.push('/terms?back=/settings')}
         />
       </SettingsCard>
 

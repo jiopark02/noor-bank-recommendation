@@ -4,6 +4,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { LegalDocument } from '@/lib/legalDocuments';
+import { legalBackTarget } from '@/lib/legalBackTarget';
 
 /**
  * The document text: "Last updated" line, then each section in order.
@@ -28,16 +29,13 @@ export function LegalDocumentPage({ doc }: { doc: LegalDocument }) {
   const router = useRouter();
   const { t } = useLanguage();
 
-  // Go back only when the previous page was this app. Arriving from another
-  // site, a search result or a fresh tab, history.back() would leave the app,
-  // so go to / instead; / sends a signed-in user on to /dashboard and anyone
-  // else to /landing.
+  // In-app links say where they came from (?back=/settings); legalBackTarget
+  // honours only its allow-list and otherwise returns /. history.back() is
+  // never used, so arriving from another site cannot send the visitor off it.
+  // The query is read on click, not during render, so the page needs no
+  // useSearchParams Suspense boundary.
   const handleBack = () => {
-    if (document.referrer.startsWith(window.location.origin)) {
-      router.back();
-    } else {
-      router.push('/');
-    }
+    router.push(legalBackTarget(window.location.search));
   };
 
   return (
