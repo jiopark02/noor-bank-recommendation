@@ -69,12 +69,15 @@ export type SessionReadResult =
  * value is printed verbatim to the console.
  *
  * "session-safe" means the read came through the getSessionSafe() wrapper,
- * whose 10 callers are not individually identified.
+ * whose callers are not individually identified.
  */
 export type SessionReadLabel =
   | "session-safe"
   | "survey-submit"
-  | "survey-submit-retry";
+  | "survey-submit-retry"
+  | "dashboard-mount"
+  | "login-mount"
+  | "auth-callback";
 
 type SessionReadLogFields = {
   label: SessionReadLabel;
