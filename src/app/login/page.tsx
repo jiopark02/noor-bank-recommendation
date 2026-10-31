@@ -11,7 +11,8 @@ import {
   clearLocalAuthState,
   ERROR_MESSAGES,
 } from "@/lib/validation";
-import { supabase, getSessionSafe } from "@/lib/supabase-browser";
+import { supabase, readSession } from "@/lib/supabase-browser";
+import { decideLoginMount } from "@/lib/sessionFlow";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 import { firstNameForClient } from "@/lib/defaultFirstName";
 
@@ -25,17 +26,23 @@ export default function LoginPage() {
   // source of truth; if it lingers after the session has expired, redirecting on
   // it alone bounces the user to /dashboard, where middleware immediately sends
   // them back to /login (an infinite loop while every API returns 401). So we
-  // verify the session and clear the stale cache when there is none.
+  // verify the session and clear the stale cache when there is none. A read
+  // that never answered says nothing about the session, so it clears nothing.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!localStorage.getItem("noor_user_id")) return;
-      const session = await getSessionSafe();
+      const read = await readSession(undefined, "login-mount");
       if (cancelled) return;
-      if (session) {
-        router.replace("/dashboard");
-      } else {
-        clearLocalAuthState();
+      switch (decideLoginMount(read)) {
+        case "go-dashboard":
+          router.replace("/dashboard");
+          break;
+        case "clear-local":
+          clearLocalAuthState();
+          break;
+        case "stay":
+          break;
       }
     })();
     return () => {
