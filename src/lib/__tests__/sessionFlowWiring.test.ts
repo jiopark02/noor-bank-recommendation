@@ -61,6 +61,45 @@ describe("login page mount", () => {
   });
 });
 
+describe("login page submit", () => {
+  const SUBMIT = slice(LOGIN, "const handleSubmit = async", "const isFormValid").replace(
+    /\s+/g,
+    " "
+  );
+
+  it("P3 the password call runs under its time limit", () => {
+    expect(SUBMIT).toContain("const signIn = supabase.auth.signInWithPassword(");
+    expect(SUBMIT).toContain(
+      "const outcome = await settleWithin(signIn, SIGN_IN_TIMEOUT_MS);"
+    );
+  });
+
+  it("P4 a timeout tells the user, handles a late result and stops", () => {
+    const timedOut = slice(
+      SUBMIT,
+      "if (outcome.timedOut) {",
+      "const { data: authData, error: signInError } = outcome.value;"
+    );
+    expect(timedOut).toContain(
+      "Signing in is taking longer than expected. Please check your connection and try again."
+    );
+    expect(timedOut).toContain("signIn.then(");
+    expect(timedOut).toContain("const action = decideLateSignIn({");
+    expect(timedOut).toContain('if (action !== "adopt" || !data.user) return;');
+    expect(timedOut).toContain("await finishSignIn(data.user, normalizedEmail);");
+    expect(timedOut.trimEnd().endsWith("return; }")).toBe(true);
+  });
+
+  it("P5 both follow-up reads run under their time limit", () => {
+    expect(SUBMIT).toMatch(
+      /settleWithin\( supabase \.from\("users"\)[^;]*?\.maybeSingle\(\), PROFILE_READ_TIMEOUT_MS \)/
+    );
+    expect(SUBMIT).toContain(
+      "settleWithin( getSurveyFieldsForUserProfile(supabase, user.id), PROFILE_READ_TIMEOUT_MS )"
+    );
+  });
+});
+
 describe("dashboard mount", () => {
   const EFFECT = slice(DASHBOARD, "useEffect(() => {", "const fetchLiveMoneyData =");
 
