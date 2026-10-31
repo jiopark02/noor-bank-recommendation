@@ -29,9 +29,14 @@ export const DASHBOARD_SESSION_RETRY: RetryPlan = {
 
 // Longer than the default read. The first read on /auth/callback waits on the
 // OAuth code exchange, a network round trip, where other pages mostly read a
-// cookie. A failed exchange ends at once, as "none" or, with an earlier session
-// still in the cookie, as "session", so this budget only ever costs a longer
-// spinner.
+// cookie. A failed exchange does not itself clear an earlier session, so what the
+// read answers depends on that session. None: "none", at once. Valid, or expired
+// with a refresh that succeeds: "session", for that earlier user. Expired with a
+// refresh that fails: "unavailable". On a 400 or 500 the library clears it and
+// fires SIGNED_OUT, so the retry reads "none". On a retryable failure such as a
+// 503, its own refresh retries can outlast this budget and end as a timeout.
+// Either way this budget only ever costs a longer spinner. This is auth-js 2.91.0
+// as installed: re-check it when upgrading.
 export const CALLBACK_SESSION_RETRY: RetryPlan = {
   timeoutsMs: [8000, 4000],
   gapsMs: [500],

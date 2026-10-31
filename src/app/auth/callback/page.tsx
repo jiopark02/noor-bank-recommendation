@@ -42,9 +42,14 @@ export default function AuthCallbackPage() {
       try {
         // supabase-js exchanges the OAuth code while the client initializes,
         // and a session read waits for that. A failed exchange is not an error
-        // here: the library swallows it and the read answers "none", unless an
-        // earlier session is still in the cookie: then it answers "session" for
-        // that earlier user.
+        // here: the library swallows it and does not itself clear an earlier
+        // session in the cookie, so what the read answers depends on that session.
+        // None: "none". Valid, or expired with a refresh that succeeds: "session",
+        // for that earlier user. Expired with a refresh that fails: "unavailable".
+        // On a 400 or 500 the library then clears it and fires SIGNED_OUT, so the
+        // retry reads "none". On a retryable failure such as a 503, the library's
+        // own refresh retries can outlast the read's budget and end as a timeout.
+        // This is auth-js 2.91.0 as installed: re-check it when upgrading.
         const read = await retryUntilAnswered(
           (timeoutMs, attempt) =>
             readSession(timeoutMs, "auth-callback", attempt),
