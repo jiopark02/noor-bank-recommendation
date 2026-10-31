@@ -6,7 +6,14 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
+import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
+import {
+  DASHBOARD_SESSION_RETRY,
+  decideDashboardMount,
+  retryUntilAnswered,
+  shouldRetrySessionRead,
+  waitMs,
+} from "@/lib/sessionFlow";
 import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
@@ -120,6 +127,9 @@ export default function HomePage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // The session read never answered, even after the retries. Nothing is known
+  // about the session, so the page waits on the user instead of signing out.
+  const [sessionDelayed, setSessionDelayed] = useState(false);
   // True only once the accounts and transactions routes have both answered
   // successfully in this visit. Nothing else may make the figures "ready".
   const [hasMoneyData, setHasMoneyData] = useState(false);
@@ -190,13 +200,26 @@ export default function HomePage() {
         // The authoritative auth signal is the live Supabase session, not the
         // legacy noor_user_id cache read above. If the session has expired, clear
         // the stale cache and send the user to /login instead of rendering the
-        // dashboard and firing 401s at every money/Plaid endpoint.
-        const session = await getSessionSafe();
+        // dashboard and firing 401s at every money/Plaid endpoint. Only "none"
+        // means that: a read that never answered can come from a valid session,
+        // so it is retried, and it never clears anything.
+        const read = await retryUntilAnswered(
+          (timeoutMs, attempt) =>
+            readSession(timeoutMs, "dashboard-mount", attempt),
+          shouldRetrySessionRead,
+          DASHBOARD_SESSION_RETRY,
+          { sleep: waitMs, isCancelled: () => cancelled }
+        );
         if (cancelled) return;
-        if (!session) {
+        const action = decideDashboardMount(read);
+        if (action === "sign-out") {
           redirecting = true;
           clearLocalAuthState();
           router.replace("/login");
+          return;
+        }
+        if (action === "show-delayed") {
+          setSessionDelayed(true);
           return;
         }
 
@@ -585,6 +608,30 @@ export default function HomePage() {
     localStorage.setItem("noor_quick_prompt", text);
     router.push("/chat");
   };
+
+  // Reloads rather than reading again: a client whose auth read has hung stays
+  // hung until the page recreates it.
+  if (sessionDelayed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-xl font-semibold text-black mb-2">
+            We couldn&apos;t confirm your sign-in
+          </h1>
+          <p className="text-gray-500 mb-6">
+            Please check your connection and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
