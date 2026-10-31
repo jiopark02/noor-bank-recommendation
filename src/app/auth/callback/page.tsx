@@ -42,7 +42,9 @@ export default function AuthCallbackPage() {
       try {
         // supabase-js exchanges the OAuth code while the client initializes,
         // and a session read waits for that. A failed exchange is not an error
-        // here: the library swallows it and the read answers "none".
+        // here: the library swallows it and the read answers "none", unless an
+        // earlier session is still in the cookie: then it answers "session" for
+        // that earlier user.
         const read = await retryUntilAnswered(
           (timeoutMs, attempt) =>
             readSession(timeoutMs, "auth-callback", attempt),

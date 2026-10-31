@@ -29,8 +29,9 @@ export const DASHBOARD_SESSION_RETRY: RetryPlan = {
 
 // Longer than the default read. The first read on /auth/callback waits on the
 // OAuth code exchange, a network round trip, where other pages mostly read a
-// cookie. A failed exchange ends at once as "none", so this budget only ever
-// costs a longer spinner.
+// cookie. A failed exchange ends at once, as "none" or, with an earlier session
+// still in the cookie, as "session", so this budget only ever costs a longer
+// spinner.
 export const CALLBACK_SESSION_RETRY: RetryPlan = {
   timeoutsMs: [8000, 4000],
   gapsMs: [500],

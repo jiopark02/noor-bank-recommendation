@@ -379,4 +379,16 @@ describe("surveyLookupLogDetail", () => {
     );
     expect(surveyLookupLogDetail(failedWith(null))).toBe("code=unknown");
   });
+
+  it("E42 an email short enough for the length limit is not repeated", () => {
+    expect(surveyLookupLogDetail(failedWith({ code: "me@example.com" }))).toBe(
+      "code=unknown"
+    );
+  });
+
+  it("E43 a code over the length limit is not repeated", () => {
+    expect(surveyLookupLogDetail(failedWith({ code: "ABCDEFGHIJKLMNOPQ" }))).toBe(
+      "code=unknown"
+    );
+  });
 });

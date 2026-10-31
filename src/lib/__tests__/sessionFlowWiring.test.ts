@@ -67,6 +67,12 @@ describe("login page mount", () => {
     expect(count(LOGIN, "clearLocalAuthState()")).toBe(1);
   });
 
+  it("P29 the page removes browser storage only through clearLocalAuthState", () => {
+    expect(LOGIN).not.toContain("removeItem");
+    expect(LOGIN).not.toContain("Storage.clear(");
+    expect(count(LOGIN, "clearLocalAuthState()")).toBe(1);
+  });
+
   it("P22 the page marks itself mounted and unmounted", () => {
     expect(LOGIN.replace(/\s+/g, " ")).toContain(
       "useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);"
@@ -125,6 +131,12 @@ describe("login page submit", () => {
     expect(TIMED_OUT).toMatch(/\}, \(\) => \{\} \); return; \}\s*$/);
   });
 
+  it("P26 the outer finally releases the spinner on every submit", () => {
+    expect(SUBMIT).toContain(
+      "} catch (err) { setError(ERROR_MESSAGES.SERVER_ERROR); } finally { setIsLoading(false); } }; const finishSignIn = async"
+    );
+  });
+
   it("P5 both follow-up reads run under their time limit", () => {
     expect(SUBMIT).toMatch(
       /settleWithin\( supabase \.from\("users"\)[^;]*?\.maybeSingle\(\), PROFILE_READ_TIMEOUT_MS \)/
@@ -174,6 +186,17 @@ describe("dashboard mount", () => {
     );
   });
 
+  it("P27 the redirect flag starts false and only the sign-out branch sets it", () => {
+    expect(EFFECT).toContain("let redirecting = false;");
+    expect(EFFECT.match(/\bredirecting = (?:true|false);/g)).toEqual([
+      "redirecting = false;",
+      "redirecting = true;",
+    ]);
+    expect(
+      slice(EFFECT, 'if (action === "sign-out") {', 'if (action === "show-delayed") {')
+    ).toContain("redirecting = true;");
+  });
+
   it("P7 the delayed screen comes before the spinner and offers a reload", () => {
     const delayedAt = DASHBOARD.indexOf("if (sessionDelayed) {");
     const spinnerAt = DASHBOARD.indexOf("if (isLoading) {");
@@ -221,6 +244,14 @@ describe("auth callback", () => {
     const failed = slice(CALLBACK, 'if (lookup === "failed") {', "let syncOk");
     expect(failed).toContain("setRetryMessage(");
     expect(failed).not.toContain("setError(");
+  });
+
+  it("P28 both retry messages are non-empty fixed strings", () => {
+    const calls = FLAT.match(/setRetryMessage\([^)]*\)/g) ?? [];
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call).toMatch(/^setRetryMessage\(\s*"[^"]+"\s*,?\s*\)$/);
+    }
   });
 
   it("P25 a failed lookup logs only the reduced detail", () => {
