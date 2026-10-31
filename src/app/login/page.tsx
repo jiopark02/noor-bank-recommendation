@@ -41,15 +41,14 @@ export default function LoginPage() {
       if (!localStorage.getItem("noor_user_id")) return;
       const read = await readSession(undefined, "login-mount");
       if (cancelled) return;
-      switch (decideLoginMount(read)) {
-        case "go-dashboard":
-          router.replace("/dashboard");
-          break;
-        case "clear-local":
-          clearLocalAuthState();
-          break;
-        case "stay":
-          break;
+      const action = decideLoginMount(read);
+      if (action === "go-dashboard") {
+        router.replace("/dashboard");
+        return;
+      }
+      if (action === "clear-local") {
+        clearLocalAuthState();
+        return;
       }
     })();
     return () => {

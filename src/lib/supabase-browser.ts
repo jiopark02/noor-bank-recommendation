@@ -121,14 +121,15 @@ function warnSessionReadUnavailable(fields: SessionReadLogFields): void {
  *                  budget getSessionSafe has always used, so the wrapper's
  *                  behavior is unchanged.
  * @param label     which call site this read belongs to (diagnostics only).
- * @param attempt   1 for the first read, 2 for a retry. A retry's outcome is
- *                  always logged — success included — so the value of retrying
- *                  can be judged from real data rather than assumed.
+ * @param attempt   1 for the first read, then 2, 3 for retries. A retry's
+ *                  outcome is always logged — success included — so the value
+ *                  of retrying can be judged from real data rather than assumed.
  *
- * Timing note: elapsedMs is logged next to timeoutMs on purpose. A retry runs
- * on a smaller budget, so "did it run out of budget" (elapsedMs ~= timeoutMs)
- * and "did it fail outright" (elapsedMs well under timeoutMs) are only
- * distinguishable when both numbers are present.
+ * Timing note: elapsedMs is logged next to timeoutMs on purpose. The budget is
+ * the caller's, and a retry's can be the same as the first read's or smaller,
+ * so "did it run out of budget" (elapsedMs ~= timeoutMs) and "did it fail
+ * outright" (elapsedMs well under timeoutMs) are only distinguishable when both
+ * numbers are present.
  */
 export async function readSession(
   timeoutMs: number = GET_SESSION_TIMEOUT_MS,

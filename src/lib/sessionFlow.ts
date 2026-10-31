@@ -153,6 +153,23 @@ export function readSurveyLookup(
   return outcome.value.data ? "found" : "missing";
 }
 
+const POSTGREST_CODE = /^[A-Za-z0-9_-]{1,16}$/;
+
+/**
+ * What a failed survey lookup may say in the browser console: that it timed
+ * out, or the PostgREST error code. An error's message, details and hint can
+ * quote values, so they stay out, and a code of any other shape is not repeated.
+ */
+export function surveyLookupLogDetail(
+  outcome: SettleOutcome<{ data: unknown; error: unknown }>
+): string {
+  if (outcome.timedOut) return "timed-out";
+  const code = (outcome.value.error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && POSTGREST_CODE.test(code)
+    ? `code=${code}`
+    : "code=unknown";
+}
+
 export type CallbackRoute = "dashboard" | "survey" | "setup-error";
 
 /**

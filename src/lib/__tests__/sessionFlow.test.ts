@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CALLBACK_SESSION_RETRY,
   CALLBACK_SURVEY_RETRY,
+  CALLBACK_SYNC_TIMEOUT_MS,
   DASHBOARD_SESSION_RETRY,
+  PROFILE_READ_TIMEOUT_MS,
+  SIGN_IN_TIMEOUT_MS,
   decideCallbackRoute,
   decideCallbackSession,
   decideDashboardMount,
@@ -12,6 +15,7 @@ import {
   retryUntilAnswered,
   settleWithin,
   shouldRetrySessionRead,
+  surveyLookupLogDetail,
   type RetryPlan,
 } from "../sessionFlow";
 import type { SessionReadResult } from "../supabase-browser";
@@ -306,5 +310,73 @@ describe("retry plans", () => {
     ["CALLBACK_SURVEY_RETRY", CALLBACK_SURVEY_RETRY],
   ])("E32 %s has one gap between each pair of attempts", (_, plan) => {
     expect(plan.timeoutsMs.length).toBe(plan.gapsMs.length + 1);
+  });
+});
+
+describe("time values", () => {
+  it("E33 DASHBOARD_SESSION_RETRY", () => {
+    expect(DASHBOARD_SESSION_RETRY).toEqual({
+      timeoutsMs: [3000, 3000, 3000],
+      gapsMs: [500, 1000],
+    });
+  });
+
+  it("E34 CALLBACK_SESSION_RETRY", () => {
+    expect(CALLBACK_SESSION_RETRY).toEqual({
+      timeoutsMs: [8000, 4000],
+      gapsMs: [500],
+    });
+  });
+
+  it("E35 CALLBACK_SURVEY_RETRY", () => {
+    expect(CALLBACK_SURVEY_RETRY).toEqual({
+      timeoutsMs: [4000, 4000],
+      gapsMs: [500],
+    });
+  });
+
+  it("E36 SIGN_IN_TIMEOUT_MS", () => {
+    expect(SIGN_IN_TIMEOUT_MS).toBe(10000);
+  });
+
+  it("E37 PROFILE_READ_TIMEOUT_MS", () => {
+    expect(PROFILE_READ_TIMEOUT_MS).toBe(3000);
+  });
+
+  it("E38 CALLBACK_SYNC_TIMEOUT_MS", () => {
+    expect(CALLBACK_SYNC_TIMEOUT_MS).toBe(8000);
+  });
+});
+
+describe("surveyLookupLogDetail", () => {
+  function failedWith(error: unknown) {
+    return { timedOut: false as const, value: { data: null, error } };
+  }
+
+  it("E39 a timeout says so", () => {
+    expect(surveyLookupLogDetail({ timedOut: true })).toBe("timed-out");
+  });
+
+  it("E40 only the code leaves an error, whatever else it carries", () => {
+    expect(
+      surveyLookupLogDetail(
+        failedWith({
+          code: "42501",
+          message: "denied for person@example.com",
+          details: "user 123",
+          hint: "ask person@example.com",
+        })
+      )
+    ).toBe("code=42501");
+  });
+
+  it("E41 a missing or unexpected code is not repeated", () => {
+    expect(surveyLookupLogDetail(failedWith({ message: "x" }))).toBe("code=unknown");
+    expect(surveyLookupLogDetail(failedWith({ code: "" }))).toBe("code=unknown");
+    expect(surveyLookupLogDetail(failedWith({ code: 42501 }))).toBe("code=unknown");
+    expect(surveyLookupLogDetail(failedWith({ code: "person@example.com" }))).toBe(
+      "code=unknown"
+    );
+    expect(surveyLookupLogDetail(failedWith(null))).toBe("code=unknown");
   });
 });

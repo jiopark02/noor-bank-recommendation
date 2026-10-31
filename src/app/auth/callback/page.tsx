@@ -14,6 +14,7 @@ import {
   retryUntilAnswered,
   settleWithin,
   shouldRetrySessionRead,
+  surveyLookupLogDetail,
   waitMs,
 } from "@/lib/sessionFlow";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
@@ -100,19 +101,21 @@ export default function AuthCallbackPage() {
         // the key were added on 2026-07-06, in the change that replaced the
         // check, and have since been removed; no code ever read what they
         // wrote.)
+        let lookupFailure = "";
         const lookup = await retryUntilAnswered(
-          async (timeoutMs) =>
-            readSurveyLookup(
-              await settleWithin(
-                client
-                  .from("survey_responses")
-                  .select("id")
-                  .eq("user_id", user.id)
-                  .limit(1)
-                  .maybeSingle(),
-                timeoutMs
-              )
-            ),
+          async (timeoutMs) => {
+            const outcome = await settleWithin(
+              client
+                .from("survey_responses")
+                .select("id")
+                .eq("user_id", user.id)
+                .limit(1)
+                .maybeSingle(),
+              timeoutMs
+            );
+            lookupFailure = surveyLookupLogDetail(outcome);
+            return readSurveyLookup(outcome);
+          },
           (result) => result === "failed",
           CALLBACK_SURVEY_RETRY,
           { sleep: waitMs, isCancelled }
@@ -124,7 +127,7 @@ export default function AuthCallbackPage() {
         // sync loses nothing, since the retry reloads and runs it, and the
         // upsert behind it can be repeated.
         if (lookup === "failed") {
-          console.error("Survey lookup failed");
+          console.error("Survey lookup failed:", lookupFailure);
           setRetryMessage(
             "We couldn't load your account details. Please try again."
           );
