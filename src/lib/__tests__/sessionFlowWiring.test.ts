@@ -28,6 +28,7 @@ function code(source: string): string {
 
 const LOGIN = code(read("../../app/login/page.tsx"));
 const DASHBOARD = code(read("../../app/dashboard/page.tsx"));
+const CALLBACK = code(read("../../app/auth/callback/page.tsx"));
 
 function slice(source: string, from: string, to: string): string {
   const start = source.indexOf(from);
@@ -138,5 +139,60 @@ describe("dashboard mount", () => {
     const screen = DASHBOARD.slice(delayedAt, spinnerAt);
     expect(screen).toContain("onClick={() => window.location.reload()}");
     expect(screen).toContain("Try again");
+  });
+});
+
+describe("auth callback", () => {
+  const FLAT = CALLBACK.replace(/\s+/g, " ");
+
+  it("P8 reads the session through readSession with this page's budget", () => {
+    expect(CALLBACK).not.toContain("auth.getSession(");
+    expect(CALLBACK).toContain('readSession(timeoutMs, "auth-callback", attempt)');
+    expect(CALLBACK).toContain("CALLBACK_SESSION_RETRY");
+    expect(CALLBACK).toContain("const action = decideCallbackSession(read);");
+  });
+
+  it("P9 the survey lookup hands the whole query result to readSurveyLookup", () => {
+    expect(CALLBACK).not.toContain("Boolean(surveyRow)");
+    expect(FLAT).toMatch(
+      /readSurveyLookup\( await settleWithin\( client \.from\("survey_responses"\) \.select\("id"\)/
+    );
+    expect(CALLBACK).toContain("CALLBACK_SURVEY_RETRY");
+  });
+
+  it("P10 a failed lookup stops before the sync and before any local write", () => {
+    const failedAt = CALLBACK.indexOf('if (lookup === "failed") {');
+    const syncAt = CALLBACK.indexOf('fetch("/api/auth/sync-profile"');
+    const storeAt = CALLBACK.indexOf("localStorage.setItem(");
+    expect(failedAt).toBeGreaterThan(-1);
+    expect(syncAt).toBeGreaterThan(failedAt);
+    expect(storeAt).toBeGreaterThan(failedAt);
+    expect(slice(CALLBACK, 'if (lookup === "failed") {', "let syncOk")).toContain(
+      "return;"
+    );
+  });
+
+  it("P11 the survey is reached only through the survey route", () => {
+    expect(count(CALLBACK, 'router.push("/survey")')).toBe(1);
+    expect(CALLBACK).toContain("const route = decideCallbackRoute(lookup, syncOk);");
+    expect(FLAT).toMatch(/if \(route === "survey"\) \{ router\.push\("\/survey"\);/);
+  });
+
+  it("P12 the retry screen reloads and does not send the user to /login", () => {
+    const screen = slice(CALLBACK, "if (retryMessage) {", "if (error) {");
+    expect(screen).toContain("onClick={() => window.location.reload()}");
+    expect(screen).toContain("Try again");
+    expect(screen).not.toContain('router.push("/login")');
+  });
+
+  it("P13 the profile sync can be aborted at its time limit", () => {
+    expect(FLAT).toMatch(
+      /fetch\("\/api\/auth\/sync-profile", \{ method: "POST", signal: syncAbort\.signal,/
+    );
+    expect(FLAT).toContain("() => syncAbort.abort(), CALLBACK_SYNC_TIMEOUT_MS");
+  });
+
+  it("P14 the effect cancels on unmount", () => {
+    expect(FLAT).toMatch(/return \(\) => \{ cancelled = true; \}; \}, \[router\]\);/);
   });
 });
