@@ -11,7 +11,15 @@ import {
   type EmailSignupInput,
 } from "../emailSignup";
 import { DEFAULT_FIRST_NAME } from "../defaultFirstName";
-import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
+import {
+  ACCOUNT_INCOMPLETE,
+  INVALID_MONTHLY_AMOUNT,
+  SURVEY_SAVE_FAILED,
+} from "../signupCodes";
+import {
+  INVALID_MONTHLY_INCOME_MESSAGE,
+  INVALID_MONTHLY_SPENDING_MESSAGE,
+} from "../surveyMoney";
 
 /**
  * The email/password signup decision, executed with injected fakes. Auth
@@ -55,6 +63,11 @@ import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "../signupCodes";
  *   M33 the raw first name returned to the client                -> V8
  *   M34 the last name not sanitized in the module, or an empty
  *       one kept instead of null                                 -> V9
+ *   M35 the money check moved after createAuthUser, or removed   -> M1, M2
+ *   M36 the money check moved ahead of the pause gate            -> M3
+ *   M37 the money check moved ahead of the name check            -> M4
+ *   M38 the refusal without its code                             -> M1, M2
+ *   M39 the refused value placed in a log line or the body       -> M5
  */
 
 const EMAIL = "Person.Name@Example.com";
@@ -72,6 +85,7 @@ function input(overrides: Partial<EmailSignupInput> = {}): EmailSignupInput {
     institutionId: "inst_1",
     university: "Example University",
     countryOfOrigin: "KR",
+    surveyBody: { monthly_income: 2000, monthly_budget: 1500 },
     ...overrides,
   };
 }
@@ -697,5 +711,74 @@ describe("duplicate email: is there a profile row?", () => {
     const secondResult = await createEmailAccount(input(), second);
     expect(secondResult.status).toBe(409);
     expect(secondResult.body).toMatchObject({ code: ACCOUNT_INCOMPLETE });
+  });
+});
+
+describe("monthly money answers, checked before the Auth user exists", () => {
+  it("M1 an income sent as a string is 400 INVALID_MONTHLY_AMOUNT and nothing is created", async () => {
+    const d = deps();
+    const result = await createEmailAccount(
+      input({ surveyBody: { monthly_income: "2000", monthly_budget: 1500 } }),
+      d
+    );
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({
+      success: false,
+      message: INVALID_MONTHLY_INCOME_MESSAGE,
+      code: INVALID_MONTHLY_AMOUNT,
+    });
+    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+    expect(d.sendWelcomeEmail).not.toHaveBeenCalled();
+  });
+
+  it("M2 a missing monthly_budget is refused the same way", async () => {
+    const d = deps();
+    const result = await createEmailAccount(
+      input({ surveyBody: { monthly_income: 2000 } }),
+      d
+    );
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({
+      success: false,
+      message: INVALID_MONTHLY_SPENDING_MESSAGE,
+      code: INVALID_MONTHLY_AMOUNT,
+    });
+    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+  });
+
+  it("M3 a paused signup answers 403 whatever the amounts are", async () => {
+    const d = deps({ isSignupDisabled: vi.fn(() => true) });
+    const result = await createEmailAccount(
+      input({ surveyBody: { monthly_income: 0 } }),
+      d
+    );
+    expect(result.status).toBe(403);
+    expect(d.createAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("M4 the first name is checked before the amounts", async () => {
+    const d = deps();
+    const result = await createEmailAccount(
+      input({ firstName: null, surveyBody: { monthly_income: -5 } }),
+      d
+    );
+    expect(result.body).toEqual({ success: false, message: "First name is required" });
+  });
+
+  it("M5 the refused value appears in no log line and not in the body", async () => {
+    const d = deps();
+    const result = await createEmailAccount(
+      input({ surveyBody: { monthly_income: 7654321, monthly_budget: 1500 } }),
+      d
+    );
+    expect(result.status).toBe(400);
+    expect(JSON.stringify(result.body)).not.toContain("7654321");
+    for (const line of logLines(d)) {
+      expect(line).not.toContain("7654321");
+    }
   });
 });

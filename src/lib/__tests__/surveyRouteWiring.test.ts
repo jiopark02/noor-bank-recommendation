@@ -30,6 +30,8 @@ import { describe, it, expect } from "vitest";
  *   R18 the refusal moved after the stored-name lookup, or not
  *       returning a 400 with the shared message                -> W9
  *   R19 the body names no longer sanitized before the branch   -> W10
+ *   R20 the survey_responses read moved back after the users
+ *       update, or a survey write moved ahead of it            -> W7
  *
  * Two masked views of the source are used, as in
  * syncProfileRouteWiring.test.ts: `code` has comments and string contents
@@ -162,11 +164,18 @@ describe("survey route wiring: signed-in names", () => {
     );
     const stop = signedIn.indexOf("if (lookupError) {");
     const update = signedIn.indexOf(".update(profileUpdate)");
-    const surveyWrite = signedIn.indexOf('.from("survey_responses")');
+    // The survey row is READ before the users update (the money check needs
+    // to know whether a row exists) and WRITTEN after it.
+    const surveyRead = signedIn.indexOf('.from("survey_responses")');
+    const surveyUpdate = signedIn.indexOf(".update(surveyUpdate)");
+    const surveyInsert = signedIn.indexOf(".insert(surveyRow)");
     expect(lookup).toBeGreaterThan(-1);
     expect(stop).toBeGreaterThan(lookup);
     expect(update).toBeGreaterThan(stop);
-    expect(surveyWrite).toBeGreaterThan(update);
+    expect(surveyRead).toBeGreaterThan(-1);
+    expect(surveyRead).toBeLessThan(update);
+    expect(surveyUpdate).toBeGreaterThan(update);
+    expect(surveyInsert).toBeGreaterThan(update);
 
     const stopBlock = between(signedIn, "if (lookupError) {", "const profileUpdate");
     expect(stopBlock).toMatch(/return NextResponse\.json\(/);
