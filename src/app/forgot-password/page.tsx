@@ -12,10 +12,12 @@ import {
   ERROR_MESSAGES,
 } from "@/lib/validation";
 import { supabase } from "@/lib/supabase-browser";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 type Step = "email" | "sent" | "reset" | "success";
 
 export default function ForgotPasswordPage() {
+  const { t } = useLanguage();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [step, setStep] = useState<Step>("email");
@@ -559,7 +561,7 @@ export default function ForgotPasswordPage() {
                             { key: "hasUppercase", label: "Uppercase" },
                             { key: "hasLowercase", label: "Lowercase" },
                             { key: "hasNumber", label: "Number" },
-                            { key: "hasSpecial", label: "Special char" },
+                            { key: "hasSpecial", label: t("survey.password.special") },
                           ].map((item) => (
                             <div
                               key={item.key}

@@ -18,13 +18,33 @@ export interface PasswordValidation {
   };
 }
 
+/**
+ * The symbols Supabase Auth accepts for its "symbols" password requirement,
+ * exactly: the set documented at
+ * https://supabase.com/docs/guides/auth/password-security, which is what
+ * supabase/auth's PasswordRequiredCharacters.Decode makes of the Management
+ * API's symbols preset (its "\\:" keeps one backslash and the colon). 32
+ * characters; passwordValidation.test.ts pins every char code.
+ *
+ * Matched as a plain list of characters, not as a regex class, so no
+ * character here needs escaping beyond the string literal itself.
+ */
+export const PASSWORD_SYMBOLS = "!@#$%^&*()_+-=[]{};'\\:\"|<>?,./`~";
+
+/** True when the password contains at least one of PASSWORD_SYMBOLS. */
+function containsPasswordSymbol(password: string): boolean {
+  return PASSWORD_SYMBOLS.split("").some(
+    (symbol) => password.indexOf(symbol) !== -1
+  );
+}
+
 export function validatePassword(password: string): PasswordValidation {
   const checks = {
     minLength: password.length >= 8,
     hasUppercase: /[A-Z]/.test(password),
     hasLowercase: /[a-z]/.test(password),
     hasNumber: /[0-9]/.test(password),
-    hasSpecial: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+    hasSpecial: containsPasswordSymbol(password),
   };
 
   const errors: string[] = [];
@@ -32,7 +52,7 @@ export function validatePassword(password: string): PasswordValidation {
   if (!checks.hasUppercase) errors.push('Password must contain an uppercase letter');
   if (!checks.hasLowercase) errors.push('Password must contain a lowercase letter');
   if (!checks.hasNumber) errors.push('Password must contain a number');
-  if (!checks.hasSpecial) errors.push('Password must contain a special character (!@#$%^&*)');
+  if (!checks.hasSpecial) errors.push('Password must contain a symbol: ' + PASSWORD_SYMBOLS);
 
   const passedChecks = Object.values(checks).filter(Boolean).length;
   const score = Math.round((passedChecks / 5) * 100);

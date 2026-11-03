@@ -1,7 +1,12 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { toLogSafeError } from "./logSafeError";
 import { firstNameForClient } from "./defaultFirstName";
-import { ACCOUNT_INCOMPLETE, SURVEY_SAVE_FAILED } from "./signupCodes";
+import {
+  ACCOUNT_INCOMPLETE,
+  INVALID_MONTHLY_AMOUNT,
+  SURVEY_SAVE_FAILED,
+} from "./signupCodes";
+import { checkSurveyMoney } from "./surveyMoney";
 import { sanitizeNameField, validateEmail } from "./validation";
 
 /**
@@ -24,6 +29,11 @@ import { sanitizeNameField, validateEmail } from "./validation";
  *      first name that is empty after sanitizing is 400, and a last name that
  *      is empty after sanitizing becomes null. The sanitized values are the
  *      ones stored, sent and returned. None of these carries a code.
+ *      Then the monthly money answers in the request body, as a new survey
+ *      row needs them (checkSurveyMoney, mode "insert"): a missing or invalid
+ *      amount is 400 INVALID_MONTHLY_AMOUNT. This is the last check before the
+ *      Auth user exists, so a refused amount creates nothing. Neither the
+ *      response nor a log line carries the value.
  *   4. Create the Auth user. The attributes are built here, not by the caller.
  *      A refusal is classified by its error code first (see
  *      classifyCreateUserError). For a duplicate email, the public.users row
@@ -87,6 +97,12 @@ export type EmailSignupInput = {
   institutionId: unknown;
   university: unknown;
   countryOfOrigin: unknown;
+  /**
+   * The whole request body. Only its monthly money keys are read here, to be
+   * checked before the Auth user is created; insertSurveyResponse builds the
+   * survey row from the same body.
+   */
+  surveyBody: unknown;
 };
 
 export type EmailSignupDeps = {
@@ -256,6 +272,11 @@ export async function createEmailAccount(
     return failure(400, NAME_REQUIRED_MESSAGE);
   }
   const lastName = sanitizeNameField(input.lastName) || null;
+
+  const money = checkSurveyMoney(input.surveyBody, "insert");
+  if (!money.ok) {
+    return failure(400, money.message, { code: INVALID_MONTHLY_AMOUNT });
+  }
 
   const password = input.password as string;
   const now = deps.now();

@@ -27,6 +27,7 @@ import {
   staySignedInAfterSubmit,
   SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE,
 } from "@/lib/surveySubmitOutcome";
+import { MAX_MONTHLY_AMOUNT_DIGITS } from "@/lib/surveyMoney";
 
 interface SurveyData {
   firstName: string;
@@ -132,6 +133,7 @@ const PasswordInput = ({
     checks: Record<string, boolean>;
   };
 }) => {
+  const { t } = useLanguage();
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -220,7 +222,7 @@ const PasswordInput = ({
               { key: "hasUppercase", label: "Uppercase (A-Z)" },
               { key: "hasLowercase", label: "Lowercase (a-z)" },
               { key: "hasNumber", label: "Number (0-9)" },
-              { key: "hasSpecial", label: "Special (!@#$%)" },
+              { key: "hasSpecial", label: t("survey.password.special") },
             ].map((item) => (
               <div
                 key={item.key}
@@ -299,14 +301,18 @@ const ToggleButtons = ({
 );
 
 // Money Input - handles leading zeros properly
+// At most MAX_MONTHLY_AMOUNT_DIGITS digits: the cap is all nines, so the digit
+// limit alone keeps the value within what the server accepts.
 const MoneyInput = ({
   value,
   onChange,
+  onBlur,
   placeholder = "0",
   currencySymbol = "$",
 }: {
   value: number;
   onChange: (v: number) => void;
+  onBlur?: () => void;
   placeholder?: string;
   currencySymbol?: string;
 }) => {
@@ -327,7 +333,9 @@ const MoneyInput = ({
       <input
         type="text"
         inputMode="numeric"
+        maxLength={MAX_MONTHLY_AMOUNT_DIGITS}
         value={text}
+        onBlur={onBlur}
         placeholder={placeholder}
         onKeyDown={(e) => {
           // Block "0" key when field is empty (prevents leading zeros)
@@ -347,7 +355,12 @@ const MoneyInput = ({
         }}
         onChange={(e) => {
           // Get raw value and strip any non-digits and leading zeros
-          const raw = e.target.value.replace(/\D/g, "").replace(/^0+/, "");
+          // Sliced as well as maxLength'd: a paste can carry non-digits that
+          // are stripped here, leaving more digits than the limit.
+          const raw = e.target.value
+            .replace(/\D/g, "")
+            .replace(/^0+/, "")
+            .slice(0, MAX_MONTHLY_AMOUNT_DIGITS);
           setText(raw);
           onChange(raw ? parseInt(raw, 10) : 0);
         }}
@@ -890,11 +903,20 @@ export default function SurveyPage() {
               <MoneyInput
                 value={data.monthlyIncome}
                 onChange={(v) => updateField("monthlyIncome", v)}
+                onBlur={() => markTouched("monthlyIncome")}
                 currencySymbol={countryConfig.currency}
               />
               <p className="text-gray-400 text-xs mt-1.5">
                 {t("survey.step4.incomeHint")}
               </p>
+              {/* Zero is not accepted: Noor is for people with a monthly
+                  income (the server refuses 0 as well, see surveyMoney.ts). */}
+              {data.monthlyIncome === 0 &&
+                touchedFields.has("monthlyIncome") && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {t("survey.step4.incomeRequired")}
+                  </p>
+                )}
             </div>
 
             {/* Money out */}

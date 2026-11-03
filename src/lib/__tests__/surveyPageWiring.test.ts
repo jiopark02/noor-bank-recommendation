@@ -19,11 +19,15 @@ import { describe, it, expect } from "vitest";
  *       it to a signed-in submit                                    -> W5
  *   P8  the first-name field no longer marking itself touched       -> W6
  *   P9  the first-name error testing the unsanitized name           -> W6
+ *   P10 the money input's length limit written as a literal         -> PW1
+ *   P11 the zero-income notice's condition or key removed           -> PW2
+ *   P12 an en.json key the pages read removed or changed            -> PW3
  *
  * The masking matches surveyRouteWiring.test.ts: comments are blanked and,
  * in `code`, so are string contents; whitespace is collapsed. Besides
- * handleSubmit, only three short regions are searched (the derived input
- * checks, the first-name field and the submit button's disabled condition),
+ * handleSubmit, only short regions are searched (the derived input checks,
+ * the first-name field, the submit button's disabled condition, MoneyInput
+ * and the income field),
  * so JSX text elsewhere in the file cannot confuse the quote tracking.
  */
 
@@ -172,5 +176,42 @@ describe("survey page wiring: sanitized name and email checks", () => {
       /onChange=\{\(v\) => \{ updateField\("firstName", v\); markTouched\("firstName"\); \}\}/
     );
     expect(field).toContain('touchedFields.has("firstName") && firstNameMissing');
+  });
+});
+
+describe("survey page wiring: monthly money inputs", () => {
+  it("PW1 the money input's length limit is the shared digit constant", () => {
+    const input = pageRegion("const MoneyInput = (", "const ViewedMark");
+    expect(input).toContain("maxLength={MAX_MONTHLY_AMOUNT_DIGITS}");
+    expect(input).toContain(".slice(0, MAX_MONTHLY_AMOUNT_DIGITS)");
+    expect(input).not.toMatch(/maxLength=\{\d/);
+    expect(readFileSync(PAGE, "utf8")).toContain(
+      'import { MAX_MONTHLY_AMOUNT_DIGITS } from "@/lib/surveyMoney";'
+    );
+  });
+
+  it("PW2 a zero income shows the income notice once the field was left", () => {
+    const income = pageRegion(
+      "value={data.monthlyIncome}",
+      't("survey.step4.expenses")'
+    );
+    expect(income).toContain('onBlur={() => markTouched("monthlyIncome")}');
+    expect(income).toMatch(
+      /\{data\.monthlyIncome === 0 && touchedFields\.has\("monthlyIncome"\) && \( <p [^>]*> \{t\("survey\.step4\.incomeRequired"\)\} <\/p> \)\}/
+    );
+  });
+
+  it("PW3 the two message keys the pages read exist with their text", () => {
+    const messages = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL("../../../messages/en.json", import.meta.url)),
+        "utf8"
+      )
+    ) as { survey: { step4: Record<string, unknown>; password: Record<string, unknown> } };
+    expect(messages.survey.step4.incomeRequired).toBe(
+      "Noor is built for people with a monthly income. Enter your income to continue."
+    );
+    expect(typeof messages.survey.password.special).toBe("string");
+    expect(messages.survey.password.special).not.toBe("");
   });
 });

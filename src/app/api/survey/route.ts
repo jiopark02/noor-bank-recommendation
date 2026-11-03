@@ -8,6 +8,8 @@ import { toLogSafeError } from "@/lib/logSafeError";
 import { createEmailAccount, NAME_REQUIRED_MESSAGE } from "@/lib/emailSignup";
 import { decideNameUpdate } from "@/lib/surveyNameUpdate";
 import { DEFAULT_FIRST_NAME, firstNameForClient } from "@/lib/defaultFirstName";
+import { checkSurveyMoney } from "@/lib/surveyMoney";
+import { INVALID_MONTHLY_AMOUNT } from "@/lib/signupCodes";
 
 // Temporary signup pause (fail-open). Gates ONLY the unauthenticated
 // email/password signup path below; the authenticated OAuth
@@ -200,6 +202,7 @@ export async function POST(request: NextRequest) {
           institutionId: surveyData.institution_id,
           university: surveyData.university,
           countryOfOrigin: surveyData.country_of_origin,
+          surveyBody: surveyData,
         },
         {
           isSignupDisabled,
@@ -255,6 +258,29 @@ export async function POST(request: NextRequest) {
     if (!firstName) {
       return NextResponse.json(
         { success: false, message: NAME_REQUIRED_MESSAGE },
+        { status: 400 }
+      );
+    }
+
+    // Whether a survey row already exists decides how the monthly money
+    // answers are checked (and, below, whether the row is updated or
+    // inserted), so it is read before anything is written. A refused amount
+    // then stops the request with no write at all. The read's error is not
+    // examined (as before this check existed): an error reads as "no row",
+    // which applies the stricter insert check.
+    const { data: existingSurvey } = await supabaseAdmin
+      .from("survey_responses")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const money = checkSurveyMoney(
+      surveyData,
+      existingSurvey ? "update" : "insert"
+    );
+    if (!money.ok) {
+      return NextResponse.json(
+        { success: false, message: money.message, code: INVALID_MONTHLY_AMOUNT },
         { status: 400 }
       );
     }
@@ -315,12 +341,7 @@ export async function POST(request: NextRequest) {
 
     let surveyWriteError: { message?: string } | null = null;
 
-    const { data: existingSurvey } = await supabaseAdmin
-      .from("survey_responses")
-      .select("id")
-      .eq("user_id", userId)
-      .maybeSingle();
-
+    // existingSurvey was read before the users update, above.
     if (existingSurvey) {
       // Update only the columns the request actually carries. Overwriting the
       // whole row would blank every column the caller omitted, which silently
