@@ -7,15 +7,13 @@ import {
 import {
   classifyCreateUserError,
   createEmailAccount,
+  CONFIRMATION_REQUIRED_MESSAGE,
   type EmailSignupDeps,
   type EmailSignupInput,
+  type ProfileRow,
 } from "../emailSignup";
 import { DEFAULT_FIRST_NAME } from "../defaultFirstName";
-import {
-  ACCOUNT_INCOMPLETE,
-  INVALID_MONTHLY_AMOUNT,
-  SURVEY_SAVE_FAILED,
-} from "../signupCodes";
+import { ACCOUNT_INCOMPLETE, INVALID_MONTHLY_AMOUNT } from "../signupCodes";
 import {
   INVALID_MONTHLY_INCOME_MESSAGE,
   INVALID_MONTHLY_SPENDING_MESSAGE,
@@ -26,54 +24,39 @@ import {
  * errors are real auth-js error instances, so the retryable check sees what
  * the admin API would return.
  *
- * Mutations of emailSignup.ts and the tests each one turns red:
- *   M1  the rollback's returned error is not read                -> R1, R3, R5
- *   M2  the retry removed                                        -> R2
- *   M3  the retry made unbounded or repeated                     -> R3
- *   M4  every rollback error retried                             -> R4
- *   M5  user_not_found / 404 not treated as already gone         -> R6, R7
- *   M6  a throwing delete not caught                             -> R5
- *   M7  email_confirm removed from the createUser attributes     -> C1
- *   M8  email lower-casing or trimming removed                   -> C1, S1
- *   M9  the metadata names changed                               -> C1, C2
- *   M10 the pause gate ignored or made constant false            -> G2
- *   M11 the password check moved after the pause gate            -> G1
- *   M12 an email address or raw error object in a log line       -> L1, L2
- *   M13 a welcome email sent after a failed survey save          -> F2
- *   M14 the email checked before it is trimmed                   -> V2
- *   M15 classification by message text ahead of the code         -> D1, D2, D6
- *   M16 the weak_password branch removed                         -> D3
- *   M17 the message fallback removed for errors without a code   -> D4
- *   M18 Auth error text placed in a response body                -> D7
- *   M19 a createUser refusal not logged, or logged without code  -> D8
- *   M20 the duplicate-email profile lookup removed               -> B1, B4
- *   M21 a failed lookup treated as "no row"                      -> B3
- *   M22 the duplicate path deleting or creating anything         -> B1, B2, B3
- *   M23 the SURVEY_SAVE_FAILED code missing from the failure     -> F3
- *   M24 the response's first-name mapping changed                -> V7
- *   M25 a failed rollback changing the response                  -> R1, R3, R5
- *   M26 a users insert error logged without toLogSafeError       -> L1
- *   M27 an input check moved ahead of the pause gate             -> V1
- *   M28 a non-string email reaching the normalization            -> V3
- *   M29 the email format check removed                           -> V4
- *   M30 the first-name check removed or replaced by a default    -> V5
- *   M31 the first name checked ahead of the email                -> V6
- *   M32 the first name not sanitized in the module before it is
- *       checked, or the raw value stored or sent                 -> V5, V8
- *   M33 the raw first name returned to the client                -> V8
- *   M34 the last name not sanitized in the module, or an empty
- *       one kept instead of null                                 -> V9
- *   M35 the money check moved after createAuthUser, or removed   -> M1, M2
- *   M36 the money check moved ahead of the pause gate            -> M3
- *   M37 the money check moved ahead of the name check            -> M4
- *   M38 the refusal without its code                             -> M1, M2
- *   M39 the refused value placed in a log line or the body       -> M5
+ * Plan mutations (Gate 1) and the tests each one turns red:
+ *   M1  createUser with email_confirm restored               -> C1
+ *   M2  the confirmation email skipped after a failed survey -> F2
+ *   M3  a rollback on the resignup path                      -> RS1
+ *   M4  a rollback on a 23505                                -> RS5
+ *   M5  the request's names on the resignup path             -> RS1
+ *   M6  sending without a claim                              -> RS2
+ *   M7  a failed lookup read as "no row"                     -> RS4
+ *   M20 sending on an id mismatch                            -> RS7, RS8
+ *   M21 sending when the 23505 re-read fails                 -> RS9
+ *
+ * Earlier mutations kept from the createUser version:
+ *   the rollback's returned error not read                   -> R1, R3, R5
+ *   the retry removed / unbounded / every error retried      -> R2, R3, R4
+ *   user_not_found / 404 not treated as already gone         -> R6, R7
+ *   email lower-casing or trimming removed                   -> C1, S1
+ *   the pause gate ignored / password check after it         -> G1, G2
+ *   an email address or raw error object in a log line       -> L1, L2
+ *   classification by message ahead of code, etc.            -> D1-D8
+ *   input checks reordered or removed                        -> V1-V9
+ *   the money check moved or its code lost                   -> M1-M5
  */
 
 const EMAIL = "Person.Name@Example.com";
 const NORMALIZED = "person.name@example.com";
 const USER_ID = "4f1c2a9e-0000-4000-8000-000000000001";
+const OTHER_ID = "4f1c2a9e-0000-4000-8000-0000000000ff";
+const TOKEN = "tok_1";
+const APP = "https://noor.example";
+const LINK = APP + "/auth/callback#token_hash=" + TOKEN + "&type=signup";
 const NOW = "2026-10-05T00:00:00.000Z";
+
+const STORED_ROW: ProfileRow = { id: USER_ID, first_name: "Stored", last_name: "Row" };
 
 function input(overrides: Partial<EmailSignupInput> = {}): EmailSignupInput {
   return {
@@ -82,9 +65,6 @@ function input(overrides: Partial<EmailSignupInput> = {}): EmailSignupInput {
     firstName: "Ann",
     lastName: "Lee",
     destinationCountry: "US",
-    institutionId: "inst_1",
-    university: "Example University",
-    countryOfOrigin: "KR",
     surveyBody: { monthly_income: 2000, monthly_budget: 1500 },
     ...overrides,
   };
@@ -92,26 +72,37 @@ function input(overrides: Partial<EmailSignupInput> = {}): EmailSignupInput {
 
 type Spied = EmailSignupDeps & {
   isSignupDisabled: ReturnType<typeof vi.fn>;
-  createAuthUser: ReturnType<typeof vi.fn>;
+  generateSignupLink: ReturnType<typeof vi.fn>;
+  findProfileByEmail: ReturnType<typeof vi.fn>;
   insertProfile: ReturnType<typeof vi.fn>;
   deleteAuthUser: ReturnType<typeof vi.fn>;
   insertSurveyResponse: ReturnType<typeof vi.fn>;
-  sendWelcomeEmail: ReturnType<typeof vi.fn>;
+  claimConfirmationSend: ReturnType<typeof vi.fn>;
+  sendConfirmationEmail: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
 };
 
 function deps(overrides: Partial<EmailSignupDeps> = {}): Spied {
   return {
     isSignupDisabled: vi.fn(() => false),
-    createAuthUser: vi.fn(async () => ({ userId: USER_ID, error: null })),
+    generateSignupLink: vi.fn(async () => ({ userId: USER_ID, hashedToken: TOKEN, error: null })),
+    findProfileByEmail: vi.fn(async () => ({ row: null, error: null })),
     insertProfile: vi.fn(async () => ({ error: null })),
     deleteAuthUser: vi.fn(async () => ({ error: null })),
     insertSurveyResponse: vi.fn(async () => ({ error: null })),
-    sendWelcomeEmail: vi.fn(async () => true),
+    claimConfirmationSend: vi.fn(async () => "claimed" as const),
+    sendConfirmationEmail: vi.fn(async () => true),
+    appUrl: APP,
     now: () => NOW,
     log: vi.fn(),
     ...overrides,
   } as Spied;
+}
+
+/** findProfileByEmail answering each call in turn, the last one repeating. */
+function lookups(...answers: Array<{ row: ProfileRow | null; error: unknown }>) {
+  let i = 0;
+  return vi.fn(async () => answers[Math.min(i++, answers.length - 1)]);
 }
 
 function logLines(d: Spied): string[] {
@@ -122,17 +113,26 @@ function rollbackLines(d: Spied): string[] {
   return logLines(d).filter((line) => line.includes("rollback"));
 }
 
-/** Deps whose users insert fails, so the rollback runs. */
+/** Deps whose users insert fails with a code other than 23505, so the rollback runs. */
 function failingProfileDeps(
   deleteAuthUser: EmailSignupDeps["deleteAuthUser"]
 ): Spied {
   return deps({
     insertProfile: vi.fn(async () => ({
-      error: { code: "23505", message: "duplicate key value" },
+      error: { code: "23503", message: "insert or update violates foreign key" },
     })),
     deleteAuthUser: vi.fn(deleteAuthUser),
   });
 }
+
+/** The body of a signup that fully succeeded. */
+const ACCEPTED_BODY = {
+  success: true,
+  confirmationRequired: true,
+  confirmationEmailSent: true,
+  surveySaved: true,
+  message: CONFIRMATION_REQUIRED_MESSAGE,
+};
 
 describe("gates before account creation", () => {
   it("G1 a request without a password is AUTH_REQUIRED, checked before the pause gate", async () => {
@@ -141,19 +141,20 @@ describe("gates before account creation", () => {
     expect(result.status).toBe(401);
     expect(result.body).toMatchObject({ success: false, code: "AUTH_REQUIRED" });
     expect(d.isSignupDisabled).not.toHaveBeenCalled();
-    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
   });
 
   it("G2 the pause gate blocks creation when on and lets it through when off", async () => {
     const paused = deps({ isSignupDisabled: vi.fn(() => true) });
     const blocked = await createEmailAccount(input(), paused);
     expect(blocked.status).toBe(403);
-    expect(paused.createAuthUser).not.toHaveBeenCalled();
+    expect(paused.generateSignupLink).not.toHaveBeenCalled();
+    expect(paused.findProfileByEmail).not.toHaveBeenCalled();
 
     const open = deps({ isSignupDisabled: vi.fn(() => false) });
     const allowed = await createEmailAccount(input(), open);
     expect(allowed.status).toBe(200);
-    expect(open.createAuthUser).toHaveBeenCalledTimes(1);
+    expect(open.generateSignupLink).toHaveBeenCalledTimes(1);
   });
 
   it("G3 a request without an email is 400 and creates nothing", async () => {
@@ -161,27 +162,28 @@ describe("gates before account creation", () => {
     const result = await createEmailAccount(input({ email: "" }), d);
     expect(result.status).toBe(400);
     expect(result.body).toEqual({ success: false, message: "Email is required" });
-    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
   });
 });
 
-describe("createUser attributes", () => {
-  it("C1 are built here: normalized email, password, email_confirm, metadata names", async () => {
+describe("generateLink arguments", () => {
+  it("C1 are built here: normalized email, password, the request's names, and no email_confirm", async () => {
     const d = deps();
     await createEmailAccount(input(), d);
-    expect(d.createAuthUser).toHaveBeenCalledTimes(1);
-    expect(d.createAuthUser.mock.calls[0][0]).toEqual({
+    expect(d.generateSignupLink).toHaveBeenCalledTimes(1);
+    const args = d.generateSignupLink.mock.calls[0][0];
+    expect(args).toEqual({
       email: NORMALIZED,
       password: "correct horse battery",
-      email_confirm: true,
-      user_metadata: { first_name: "Ann", last_name: "Lee" },
+      data: { first_name: "Ann", last_name: "Lee" },
     });
+    expect(JSON.stringify(d.generateSignupLink.mock.calls)).not.toContain("email_confirm");
   });
 
   it("C2 an empty last name stays null", async () => {
     const d = deps();
     await createEmailAccount(input({ firstName: "Ann", lastName: null }), d);
-    expect(d.createAuthUser.mock.calls[0][0].user_metadata).toEqual({
+    expect(d.generateSignupLink.mock.calls[0][0].data).toEqual({
       first_name: "Ann",
       last_name: null,
     });
@@ -204,18 +206,19 @@ describe("input checks after the gates", () => {
       const d = deps({ isSignupDisabled: vi.fn(() => true) });
       const result = await createEmailAccount(input(overrides), d);
       expect(result.status).toBe(403);
-      expect(d.createAuthUser).not.toHaveBeenCalled();
+      expect(d.generateSignupLink).not.toHaveBeenCalled();
     }
   });
 
-  it("V2 an email of only whitespace is 400 Email is required and creates nothing", async () => {
+  it("V2 an email of only whitespace is 400 Email is required and reads nothing", async () => {
     const d = deps();
     const result = await createEmailAccount(input({ email: "   " }), d);
     expect(result.status).toBe(400);
     expect(result.body).toEqual({ success: false, message: "Email is required" });
-    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
     expect(d.insertProfile).not.toHaveBeenCalled();
-    expect(d.sendWelcomeEmail).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
   });
 
   it.each([42, {}, ["a@b.co"]])(
@@ -225,7 +228,7 @@ describe("input checks after the gates", () => {
       const result = await createEmailAccount(input({ email }), d);
       expect(result.status).toBe(400);
       expect(result.body).toEqual({ success: false, message: "Email is required" });
-      expect(d.createAuthUser).not.toHaveBeenCalled();
+      expect(d.generateSignupLink).not.toHaveBeenCalled();
     }
   );
 
@@ -239,7 +242,7 @@ describe("input checks after the gates", () => {
         success: false,
         message: "Please enter a valid email address",
       });
-      expect(d.createAuthUser).not.toHaveBeenCalled();
+      expect(d.generateSignupLink).not.toHaveBeenCalled();
     }
   );
 
@@ -250,7 +253,7 @@ describe("input checks after the gates", () => {
       const result = await createEmailAccount(input({ firstName }), d);
       expect(result.status).toBe(400);
       expect(result.body).toEqual({ success: false, message: "First name is required" });
-      expect(d.createAuthUser).not.toHaveBeenCalled();
+      expect(d.generateSignupLink).not.toHaveBeenCalled();
       expect(d.insertProfile).not.toHaveBeenCalled();
     }
   );
@@ -264,35 +267,32 @@ describe("input checks after the gates", () => {
     });
   });
 
-  it("V8 the sanitized first name is the one stored, put in the metadata and sent", async () => {
+  it("V8 the sanitized first name is the one stored and put in the metadata", async () => {
     const d = deps();
-    const result = await createEmailAccount(input({ firstName: "  Ann   Lee " }), d);
+    await createEmailAccount(input({ firstName: "  Ann   Lee " }), d);
     expect(d.insertProfile.mock.calls[0][0].first_name).toBe("Ann Lee");
-    expect(d.createAuthUser.mock.calls[0][0].user_metadata.first_name).toBe("Ann Lee");
-    expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, "Ann Lee");
-    expect((result.body.profile as Record<string, unknown>).firstName).toBe("Ann Lee");
+    expect(d.generateSignupLink.mock.calls[0][0].data.first_name).toBe("Ann Lee");
   });
 
   it("V9 the last name is sanitized here, and one that sanitizes to nothing is null", async () => {
     const d = deps();
-    const result = await createEmailAccount(input({ lastName: "  Lee \u0001 " }), d);
-    expect(d.createAuthUser.mock.calls[0][0].user_metadata.last_name).toBe("Lee");
+    await createEmailAccount(input({ lastName: "  Lee \u0001 " }), d);
+    expect(d.generateSignupLink.mock.calls[0][0].data.last_name).toBe("Lee");
     expect(d.insertProfile.mock.calls[0][0].last_name).toBe("Lee");
-    expect((result.body.profile as Record<string, unknown>).lastName).toBe("Lee");
 
     const blank = deps();
-    const blankResult = await createEmailAccount(input({ lastName: "   " }), blank);
-    expect(blank.createAuthUser.mock.calls[0][0].user_metadata.last_name).toBeNull();
+    await createEmailAccount(input({ lastName: "   " }), blank);
+    expect(blank.generateSignupLink.mock.calls[0][0].data.last_name).toBeNull();
     expect(blank.insertProfile.mock.calls[0][0].last_name).toBeNull();
-    expect((blankResult.body.profile as Record<string, unknown>).lastName).toBeNull();
   });
 });
 
 describe("success path", () => {
-  it("S1 writes the profile row, the survey row and the welcome email with one email value", async () => {
+  it("S1 writes the profile and survey rows, claims, and sends the link only", async () => {
     const d = deps();
     const result = await createEmailAccount(input(), d);
 
+    expect(d.findProfileByEmail).toHaveBeenCalledWith(NORMALIZED);
     expect(d.insertProfile.mock.calls[0][0]).toEqual({
       id: USER_ID,
       email: NORMALIZED,
@@ -303,66 +303,71 @@ describe("success path", () => {
       updated_at: NOW,
     });
     expect(d.insertSurveyResponse).toHaveBeenCalledWith(USER_ID);
-    expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, "Ann");
+    expect(d.claimConfirmationSend).toHaveBeenCalledWith(USER_ID);
+    expect(d.sendConfirmationEmail).toHaveBeenCalledTimes(1);
+    // The recipient and the link, nothing else: no name reaches the email.
+    expect(d.sendConfirmationEmail.mock.calls[0]).toEqual([NORMALIZED, LINK]);
 
-    expect(result.status).toBe(200);
-    expect(result.body).toEqual({
-      success: true,
-      userId: USER_ID,
-      profile: {
-        firstName: "Ann",
-        lastName: "Lee",
-        email: NORMALIZED,
-        institutionId: "inst_1",
-        university: "Example University",
-        countryOfOrigin: "KR",
-      },
-      message: "Account created successfully",
-    });
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+    expect(result.body).not.toHaveProperty("userId");
+    expect(result.body).not.toHaveProperty("profile");
+    expect(result.body).not.toHaveProperty("email");
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
     expect(d.log).not.toHaveBeenCalled();
   });
 
-  it("S2 a welcome email that is not sent is logged and does not change the 200", async () => {
-    const notSent = deps({ sendWelcomeEmail: vi.fn(async () => false) });
-    expect((await createEmailAccount(input(), notSent)).status).toBe(200);
+  it("S2 a confirmation email that is not sent is logged and answered 200, confirmationEmailSent false", async () => {
+    const notSent = deps({ sendConfirmationEmail: vi.fn(async () => false) });
+    const r1 = await createEmailAccount(input(), notSent);
+    expect(r1).toEqual({ status: 200, body: { ...ACCEPTED_BODY, confirmationEmailSent: false } });
     expect(logLines(notSent)).toEqual([
-      "[signup] welcome email not sent (returned false) user_id=" + USER_ID,
+      "[signup] signup confirmation not sent (returned false) user_id=" + USER_ID,
     ]);
 
     const threw = deps({
-      sendWelcomeEmail: vi.fn(async () => {
+      sendConfirmationEmail: vi.fn(async () => {
         throw new Error("send failed for " + NORMALIZED);
       }),
     });
-    expect((await createEmailAccount(input(), threw)).status).toBe(200);
+    const r2 = await createEmailAccount(input(), threw);
+    expect(r2.status).toBe(200);
+    expect(r2.body.confirmationEmailSent).toBe(false);
     expect(logLines(threw)).toHaveLength(1);
     expect(logLines(threw)[0]).toContain("(threw) user_id=" + USER_ID);
   });
+
+  it.each(["held", "error"] as const)(
+    "S3 a claim that answers %s sends nothing and says so",
+    async (claim) => {
+      const d = deps({ claimConfirmationSend: vi.fn(async () => claim) });
+      const result = await createEmailAccount(input(), d);
+      expect(result).toEqual({
+        status: 200,
+        body: { ...ACCEPTED_BODY, confirmationEmailSent: false },
+      });
+      expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+      expect(logLines(d)).toEqual([
+        "[signup] signup confirmation not sent (claim=" + claim + ") user_id=" + USER_ID,
+      ]);
+    }
+  );
 });
 
 describe("a real first name equal to the placeholder", () => {
   // Records current behavior; it is not the intended one. The placeholder and
-  // a real first name that happens to equal it cannot be told apart, so this
-  // name is stored as given and returned to the client as empty. A change that
-  // resolves the collision turns this test red and should update it.
-  it("V7 records current behavior, a known collision: a real first name \"User\" is stored as is and returned empty", async () => {
+  // a real first name that happens to equal it cannot be told apart. A change
+  // that resolves the collision turns this test red and should update it.
+  it("V7 records current behavior, a known collision: a real first name \"User\" is stored and sent as metadata as is", async () => {
     const d = deps();
-    const result = await createEmailAccount(
-      input({ firstName: DEFAULT_FIRST_NAME }),
-      d
-    );
+    const result = await createEmailAccount(input({ firstName: DEFAULT_FIRST_NAME }), d);
     expect(result.status).toBe(200);
     expect(d.insertProfile.mock.calls[0][0].first_name).toBe(DEFAULT_FIRST_NAME);
-    expect(d.createAuthUser.mock.calls[0][0].user_metadata.first_name).toBe(
-      DEFAULT_FIRST_NAME
-    );
-    expect((result.body.profile as Record<string, unknown>).firstName).toBe("");
-    expect(d.sendWelcomeEmail).toHaveBeenCalledWith(NORMALIZED, DEFAULT_FIRST_NAME);
+    expect(d.generateSignupLink.mock.calls[0][0].data.first_name).toBe(DEFAULT_FIRST_NAME);
   });
 });
 
 describe("failures after the Auth user exists", () => {
-  it("F1 a failed users insert answers 500 and deletes the Auth user it created", async () => {
+  it("F1 a users insert failing with a code other than 23505 answers 500 and deletes the Auth user", async () => {
     const d = failingProfileDeps(async () => ({ error: null }));
     const result = await createEmailAccount(input(), d);
     expect(result).toEqual({
@@ -372,42 +377,21 @@ describe("failures after the Auth user exists", () => {
     expect(d.deleteAuthUser).toHaveBeenCalledTimes(1);
     expect(d.deleteAuthUser).toHaveBeenCalledWith(USER_ID);
     expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
     expect(rollbackLines(d)).toEqual([]);
   });
 
-  it("F2 a failed survey insert answers 500 with the user id and sends no welcome email", async () => {
-    const d = deps({
-      insertSurveyResponse: vi.fn(async () => ({ error: { code: "22P02" } })),
-    });
-    const result = await createEmailAccount(input(), d);
-    expect(result.status).toBe(500);
-    expect(result.body).toMatchObject({
-      success: false,
-      message:
-        "Account was created, but saving survey data failed. Please contact support.",
-      userId: USER_ID,
-    });
-    expect(d.sendWelcomeEmail).not.toHaveBeenCalled();
-    expect(d.deleteAuthUser).not.toHaveBeenCalled();
-  });
-});
-
-describe("survey save failure code", () => {
-  it("F3 carries SURVEY_SAVE_FAILED so the page can sign in and resave", async () => {
+  it("F2 a failed survey insert answers 200 surveySaved false, and the email is still sent", async () => {
     const d = deps({
       insertSurveyResponse: vi.fn(async () => ({ error: { code: "22P02" } })),
     });
     const result = await createEmailAccount(input(), d);
     expect(result).toEqual({
-      status: 500,
-      body: {
-        success: false,
-        message:
-          "Account was created, but saving survey data failed. Please contact support.",
-        userId: USER_ID,
-        code: SURVEY_SAVE_FAILED,
-      },
+      status: 200,
+      body: { ...ACCEPTED_BODY, surveySaved: false },
     });
+    expect(d.sendConfirmationEmail).toHaveBeenCalledTimes(1);
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
   });
 });
 
@@ -498,8 +482,9 @@ describe("log lines", () => {
   it("L1 carry no email address, even when the error message quotes it", async () => {
     const scenarios: Spied[] = [
       deps({
-        createAuthUser: vi.fn(async () => ({
+        generateSignupLink: vi.fn(async () => ({
           userId: null,
+          hashedToken: null,
           error: new AuthApiError("rejected " + NORMALIZED, 500, "unexpected_failure"),
         })),
       }),
@@ -522,6 +507,15 @@ describe("log lines", () => {
           },
         })),
       }),
+      deps({
+        findProfileByEmail: vi.fn(async () => ({
+          row: null,
+          error: { code: "PGRST000", message: "lookup " + NORMALIZED },
+        })),
+      }),
+      deps({
+        findProfileByEmail: vi.fn(async () => ({ row: { ...STORED_ROW, id: OTHER_ID }, error: null })),
+      }),
     ];
     for (const d of scenarios) {
       await createEmailAccount(input(), d);
@@ -538,21 +532,24 @@ describe("log lines", () => {
     const lines = logLines(d);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("[signup] profile insert failed: user_id=" + USER_ID);
-    expect(lines[0]).toContain('"code":"23505"');
+    expect(lines[0]).toContain('"code":"23503"');
   });
 });
 
 const SENTINEL = "SENTINEL_auth_text_never_in_a_body_51c3";
 
-/** Deps whose createUser refuses with `error`; the lookup answers `lookup`. */
+/**
+ * Deps where no row exists before the signup, generateLink refuses with
+ * `error`, and answerDuplicate's lookup answers `duplicateLookup`.
+ */
 function refusingDeps(
   error: unknown,
-  lookup: { found: boolean; error: unknown } = { found: true, error: null }
-): Spied & { findProfileByEmail: ReturnType<typeof vi.fn> } {
+  duplicateLookup: { row: ProfileRow | null; error: unknown } = { row: STORED_ROW, error: null }
+): Spied {
   return deps({
-    createAuthUser: vi.fn(async () => ({ userId: null, error })),
-    findProfileByEmail: vi.fn(async () => lookup),
-  }) as Spied & { findProfileByEmail: ReturnType<typeof vi.fn> };
+    generateSignupLink: vi.fn(async () => ({ userId: null, hashedToken: null, error })),
+    findProfileByEmail: lookups({ row: null, error: null }, duplicateLookup),
+  });
 }
 
 const DUPLICATE_BODY = {
@@ -560,18 +557,19 @@ const DUPLICATE_BODY = {
   message: "An account with this email already exists",
 };
 
-describe("createUser refusals are classified by code first", () => {
+describe("generateLink refusals are classified by code first", () => {
   it("D1 email_exists is a duplicate even when the message says nothing about it", async () => {
     const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"));
     const result = await createEmailAccount(input(), d);
     expect(result).toEqual({ status: 409, body: DUPLICATE_BODY });
-    expect(d.findProfileByEmail).toHaveBeenCalledWith(NORMALIZED);
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(2);
+    expect(d.findProfileByEmail).toHaveBeenLastCalledWith(NORMALIZED);
   });
 
   it("D2 user_already_exists is a duplicate too", async () => {
     const d = refusingDeps(new AuthApiError("Conflict", 422, "user_already_exists"));
     expect((await createEmailAccount(input(), d)).status).toBe(409);
-    expect(d.findProfileByEmail).toHaveBeenCalledTimes(1);
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(2);
   });
 
   it("D3 weak_password is a 400 with fixed text", async () => {
@@ -583,7 +581,7 @@ describe("createUser refusals are classified by code first", () => {
       status: 400,
       body: { success: false, message: "Please choose a stronger password." },
     });
-    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(1);
   });
 
   it("D4 without a code, the message text still identifies a duplicate", async () => {
@@ -591,7 +589,7 @@ describe("createUser refusals are classified by code first", () => {
       message: "A user with this email address has already been registered",
     });
     expect((await createEmailAccount(input(), d)).status).toBe(409);
-    expect(d.findProfileByEmail).toHaveBeenCalledTimes(1);
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(2);
   });
 
   it("D5 without a code and without duplicate wording, it is a 500 with fixed text", async () => {
@@ -601,7 +599,7 @@ describe("createUser refusals are classified by code first", () => {
       status: 500,
       body: { success: false, message: "Failed to create account. Please try again." },
     });
-    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(1);
   });
 
   it("D6 a different code wins over duplicate wording in the message", async () => {
@@ -609,7 +607,7 @@ describe("createUser refusals are classified by code first", () => {
       new AuthApiError("user already exists in another region", 500, "unexpected_failure")
     );
     expect((await createEmailAccount(input(), d)).status).toBe(500);
-    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(1);
     expect(
       classifyCreateUserError(new AuthApiError("already exists", 500, "unexpected_failure"))
     ).toBe("failed");
@@ -625,9 +623,9 @@ describe("createUser refusals are classified by code first", () => {
     ];
     for (const error of errors) {
       for (const lookup of [
-        { found: true, error: null },
-        { found: false, error: null },
-        { found: false, error: { code: "PGRST000", message: SENTINEL } },
+        { row: STORED_ROW, error: null },
+        { row: null, error: null },
+        { row: null, error: { code: "PGRST000", message: SENTINEL } },
       ]) {
         const result = await createEmailAccount(input(), refusingDeps(error, lookup));
         expect(JSON.stringify(result.body)).not.toContain(SENTINEL);
@@ -642,17 +640,19 @@ describe("createUser refusals are classified by code first", () => {
     expect(refused).toHaveLength(1);
     expect(refused[0]).toContain('"code":"email_exists"');
 
-    const noUser = deps({ createAuthUser: vi.fn(async () => ({ userId: null, error: null })) });
+    const noUser = deps({
+      generateSignupLink: vi.fn(async () => ({ userId: null, hashedToken: null, error: null })),
+    });
     const result = await createEmailAccount(input(), noUser);
     expect(result.status).toBe(500);
     expect(logLines(noUser).filter((l) => l.includes("auth user creation refused"))).toHaveLength(1);
   });
 });
 
-describe("duplicate email: is there a profile row?", () => {
-  it("B1 no row: 409 ACCOUNT_INCOMPLETE with fixed text and one log line, nothing written or deleted", async () => {
+describe("duplicate refusal with no row before the signup: answerDuplicate", () => {
+  it("B1 still no row: 409 ACCOUNT_INCOMPLETE with fixed text and one log line, nothing written or deleted", async () => {
     const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
-      found: false,
+      row: null,
       error: null,
     });
     const result = await createEmailAccount(input(), d);
@@ -671,11 +671,12 @@ describe("duplicate email: is there a profile row?", () => {
     expect(d.insertProfile).not.toHaveBeenCalled();
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
     expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
   });
 
-  it("B2 a row exists: the ordinary duplicate answer, no extra log line", async () => {
+  it("B2 a row appeared since: the ordinary duplicate answer, no extra log line", async () => {
     const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
-      found: true,
+      row: STORED_ROW,
       error: null,
     });
     expect(await createEmailAccount(input(), d)).toEqual({ status: 409, body: DUPLICATE_BODY });
@@ -683,9 +684,9 @@ describe("duplicate email: is there a profile row?", () => {
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
   });
 
-  it("B3 a failed lookup is not read as 'no row': ordinary duplicate answer, logged with its code", async () => {
+  it("B3 a failed duplicate lookup is not read as 'no row': ordinary duplicate answer, logged with its code", async () => {
     const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
-      found: false,
+      row: null,
       error: { code: "PGRST000", message: "connection reset" },
     });
     expect(await createEmailAccount(input(), d)).toEqual({ status: 409, body: DUPLICATE_BODY });
@@ -695,27 +696,157 @@ describe("duplicate email: is there a profile row?", () => {
     expect(d.insertProfile).not.toHaveBeenCalled();
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
   });
+});
 
-  it("B4 a lost creation response: the retry hits the duplicate and reports the unfinished account", async () => {
-    // First attempt: the user was created, but the response never arrived.
-    const first = refusingDeps(new AuthRetryableFetchError("network down", 0));
-    const firstResult = await createEmailAccount(input(), first);
-    expect(firstResult.status).toBe(500);
-    expect(first.insertProfile).not.toHaveBeenCalled();
+describe("resignup and the 23505 race (STOP-1)", () => {
+  it("RS1 a row exists: generateLink gets the row's names, nothing is inserted or deleted, claim then send, full-success body", async () => {
+    const d = deps({ findProfileByEmail: vi.fn(async () => ({ row: STORED_ROW, error: null })) });
+    const result = await createEmailAccount(input(), d);
+    const args = d.generateSignupLink.mock.calls[0][0];
+    expect(args.data).toEqual({ first_name: "Stored", last_name: "Row" });
+    expect(args.data).not.toEqual({ first_name: "Ann", last_name: "Lee" });
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+    expect(d.claimConfirmationSend).toHaveBeenCalledTimes(1);
+    expect(d.claimConfirmationSend).toHaveBeenCalledWith(USER_ID);
+    expect(d.sendConfirmationEmail).toHaveBeenCalledTimes(1);
+    expect(d.sendConfirmationEmail.mock.calls[0]).toEqual([NORMALIZED, LINK]);
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+  });
 
-    // Second attempt: Auth now knows the email, public.users does not.
-    const second = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"), {
-      found: false,
-      error: null,
+  it("RS2 a held claim on resignup sends nothing; the body is the same", async () => {
+    const d = deps({
+      findProfileByEmail: vi.fn(async () => ({ row: STORED_ROW, error: null })),
+      claimConfirmationSend: vi.fn(async () => "held" as const),
     });
-    const secondResult = await createEmailAccount(input(), second);
-    expect(secondResult.status).toBe(409);
-    expect(secondResult.body).toMatchObject({ code: ACCOUNT_INCOMPLETE });
+    const result = await createEmailAccount(input(), d);
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+  });
+
+  it("RS3 a claim error on resignup sends nothing, answers the same body, and is logged", async () => {
+    const d = deps({
+      findProfileByEmail: vi.fn(async () => ({ row: STORED_ROW, error: null })),
+      claimConfirmationSend: vi.fn(async () => "error" as const),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+    expect(logLines(d)).toEqual([
+      "[signup] resignup confirmation not sent (claim=error) user_id=" + USER_ID,
+    ]);
+  });
+
+  it("RS4 a failed lookup before the signup is 500 and calls nothing else", async () => {
+    const d = deps({
+      findProfileByEmail: vi.fn(async () => ({ row: null, error: { code: "PGRST000" } })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({
+      status: 500,
+      body: { success: false, message: "Failed to create account. Please try again." },
+    });
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.claimConfirmationSend).not.toHaveBeenCalled();
+    expect(logLines(d)).toEqual([
+      "[signup] profile lookup before signup failed: code=PGRST000",
+    ]);
+  });
+
+  it("RS5 no row, then a 23505 whose re-read finds the same id: no rollback, no survey, claim then send, same body", async () => {
+    const d = deps({
+      findProfileByEmail: lookups({ row: null, error: null }, { row: STORED_ROW, error: null }),
+      insertProfile: vi.fn(async () => ({ error: { code: "23505", message: "duplicate" } })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+    expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+    expect(d.findProfileByEmail).toHaveBeenCalledTimes(2);
+    expect(d.claimConfirmationSend).toHaveBeenCalledWith(USER_ID);
+    expect(d.sendConfirmationEmail).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+  });
+
+  it("RS6 a row exists and generateLink says email_exists: the ordinary 409, not ACCOUNT_INCOMPLETE", async () => {
+    const d = deps({
+      findProfileByEmail: vi.fn(async () => ({ row: STORED_ROW, error: null })),
+      generateSignupLink: vi.fn(async () => ({
+        userId: null,
+        hashedToken: null,
+        error: new AuthApiError("Conflict", 422, "email_exists"),
+      })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({ status: 409, body: DUPLICATE_BODY });
+    expect(result.body).not.toHaveProperty("code");
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+  });
+
+  it("RS7 resignup with a row id that is not generateLink's id: no claim, no send, same body, both ids logged", async () => {
+    const d = deps({
+      findProfileByEmail: vi.fn(async () => ({ row: { ...STORED_ROW, id: OTHER_ID }, error: null })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(d.claimConfirmationSend).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+    expect(logLines(d)).toEqual([
+      "[signup] resignup id mismatch branch=resignup row_id=" + OTHER_ID + " auth_id=" + USER_ID,
+    ]);
+  });
+
+  it("RS8 a 23505 whose re-read finds another id: no claim, no send, same body, both ids logged", async () => {
+    const d = deps({
+      findProfileByEmail: lookups(
+        { row: null, error: null },
+        { row: { ...STORED_ROW, id: OTHER_ID }, error: null }
+      ),
+      insertProfile: vi.fn(async () => ({ error: { code: "23505" } })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(d.claimConfirmationSend).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+    expect(logLines(d)).toEqual([
+      "[signup] resignup id mismatch branch=race-23505 row_id=" + OTHER_ID + " auth_id=" + USER_ID,
+    ]);
+  });
+
+  it("RS9 a 23505 whose re-read fails: no claim, no send, same body, logged", async () => {
+    const d = deps({
+      findProfileByEmail: lookups({ row: null, error: null }, { row: null, error: { code: "PGRST000" } }),
+      insertProfile: vi.fn(async () => ({ error: { code: "23505" } })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(d.claimConfirmationSend).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+    expect(logLines(d)).toEqual([
+      "[signup] resignup race-23505 lookup=error code=PGRST000 auth_id=" + USER_ID,
+    ]);
+  });
+
+  it("RS10 a 23505 whose re-read finds no row: no claim, no send, same body, logged", async () => {
+    const d = deps({
+      insertProfile: vi.fn(async () => ({ error: { code: "23505" } })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(d.claimConfirmationSend).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+    expect(logLines(d)).toEqual([
+      "[signup] resignup id mismatch branch=race-23505 lookup=none auth_id=" + USER_ID,
+    ]);
   });
 });
 
-describe("monthly money answers, checked before the Auth user exists", () => {
-  it("M1 an income sent as a string is 400 INVALID_MONTHLY_AMOUNT and nothing is created", async () => {
+describe("monthly money answers, checked before anything is read or created", () => {
+  it("M1 an income sent as a string is 400 INVALID_MONTHLY_AMOUNT and nothing is read or created", async () => {
     const d = deps();
     const result = await createEmailAccount(
       input({ surveyBody: { monthly_income: "2000", monthly_budget: 1500 } }),
@@ -727,10 +858,11 @@ describe("monthly money answers, checked before the Auth user exists", () => {
       message: INVALID_MONTHLY_INCOME_MESSAGE,
       code: INVALID_MONTHLY_AMOUNT,
     });
-    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
     expect(d.insertProfile).not.toHaveBeenCalled();
     expect(d.insertSurveyResponse).not.toHaveBeenCalled();
-    expect(d.sendWelcomeEmail).not.toHaveBeenCalled();
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
   });
 
   it("M2 a missing monthly_budget is refused the same way", async () => {
@@ -745,7 +877,7 @@ describe("monthly money answers, checked before the Auth user exists", () => {
       message: INVALID_MONTHLY_SPENDING_MESSAGE,
       code: INVALID_MONTHLY_AMOUNT,
     });
-    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
     expect(d.insertProfile).not.toHaveBeenCalled();
     expect(d.insertSurveyResponse).not.toHaveBeenCalled();
   });
@@ -757,7 +889,7 @@ describe("monthly money answers, checked before the Auth user exists", () => {
       d
     );
     expect(result.status).toBe(403);
-    expect(d.createAuthUser).not.toHaveBeenCalled();
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
   });
 
   it("M4 the first name is checked before the amounts", async () => {

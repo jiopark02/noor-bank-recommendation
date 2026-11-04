@@ -1,13 +1,10 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { toLogSafeError } from "./logSafeError";
-import { firstNameForClient } from "./defaultFirstName";
-import {
-  ACCOUNT_INCOMPLETE,
-  INVALID_MONTHLY_AMOUNT,
-  SURVEY_SAVE_FAILED,
-} from "./signupCodes";
+import { ACCOUNT_INCOMPLETE, INVALID_MONTHLY_AMOUNT } from "./signupCodes";
 import { checkSurveyMoney } from "./surveyMoney";
 import { sanitizeNameField, validateEmail } from "./validation";
+import { buildConfirmationLink } from "./emailConfirmation";
+import type { ConfirmationClaim } from "./confirmationSendLimit";
 
 /**
  * The email/password signup half of POST /api/survey — every branch, none of
@@ -15,37 +12,58 @@ import { sanitizeNameField, validateEmail } from "./validation";
  * builds the real dependencies, and serializes the result. emailSignup.test.ts
  * runs each branch with injected fakes.
  *
+ * The account this creates is UNCONFIRMED. It cannot sign in until its owner
+ * opens the confirmation link this sends and presses the button on
+ * /auth/callback; nothing here signs anyone in.
+ *
  * ORDER
  *   1. No password: 401 AUTH_REQUIRED. A signed-in client whose token went
  *      missing looks anonymous here, but it sends no password; a real signup
  *      does. This comes before the pause gate so a signed-in user is not told
  *      that signups are paused.
- *   2. Signups paused: 403, before any account is created and before any
- *      input is checked, so a paused signup answers 403 whatever it sends.
+ *   2. Signups paused: 403, before anything is read or created, so a paused
+ *      signup answers 403 whatever it sends.
  *   3. Input, checked on cleaned values, email first: an email that is
  *      missing, empty after trimming or not a string is 400; an email that
  *      fails the same format check the survey page uses is 400. Both names
  *      are sanitized here (sanitizeNameField), whatever the caller did: a
  *      first name that is empty after sanitizing is 400, and a last name that
- *      is empty after sanitizing becomes null. The sanitized values are the
- *      ones stored, sent and returned. None of these carries a code.
- *      Then the monthly money answers in the request body, as a new survey
- *      row needs them (checkSurveyMoney, mode "insert"): a missing or invalid
- *      amount is 400 INVALID_MONTHLY_AMOUNT. This is the last check before the
- *      Auth user exists, so a refused amount creates nothing. Neither the
- *      response nor a log line carries the value.
- *   4. Create the Auth user. The attributes are built here, not by the caller.
- *      A refusal is classified by its error code first (see
- *      classifyCreateUserError). For a duplicate email, the public.users row
- *      for that email is looked up: an Auth account without one cannot finish
- *      signing up through this route, so the answer says so instead of
- *      claiming an ordinary duplicate. Nothing is deleted or created here.
- *      No response body carries Auth error text.
- *   5. Insert the public.users row. If that fails, delete the Auth user again
- *      (see ROLLBACK) and answer 500.
- *   6. Insert the survey_responses row.
- *   7. Send the welcome email. Awaited, because a serverless function is frozen
- *      once the response returns; a failure is logged and never blocks success.
+ *      is empty after sanitizing becomes null. Then the monthly money answers
+ *      (checkSurveyMoney, mode "insert"): a missing or invalid amount is 400
+ *      INVALID_MONTHLY_AMOUNT. A refused request reads and creates nothing.
+ *   4. Look the email up in public.users. A failed read is a 500 and nothing
+ *      is created: it is never read as "no row".
+ *   5a. A row exists (a second signup for the same email): RESIGNUP below.
+ *   5b. No row: generateLink signup creates the unconfirmed Auth user (or, for
+ *      an unconfirmed Auth user left without a row, returns it with a new
+ *      token) with the request's names as metadata. A refusal is classified by
+ *      code (classifyCreateUserError); a duplicate is answered by
+ *      answerDuplicate, read-only.
+ *   6. Insert the public.users row. A 23505 is RACE below. Any other failure
+ *      deletes the Auth user again (ROLLBACK) and answers 500.
+ *   7. Insert the survey_responses row. A failure is logged and answered as
+ *      surveySaved: false; the account stays.
+ *   8. Claim a confirmation send and, only when claimed, send the email.
+ *      Awaited, because a serverless function is frozen once the response
+ *      returns. confirmationEmailSent says whether it went out.
+ *
+ * RESIGNUP (5a)
+ * generateLink is called with the ROW's names, because it overwrites
+ * user_metadata with whatever `data` it is given; the request's names, its
+ * password and its survey answers are dropped. Nothing is inserted or rolled
+ * back. When the Auth user it returns is not the row's id, nothing is sent.
+ * Otherwise claim, then send only when claimed. The body is the full-success
+ * body whatever happened, so the response does not say whether an
+ * unconfirmed account exists or was mailed; what happened is logged.
+ * A duplicate refusal from generateLink (the account is confirmed) is the
+ * ordinary 409, as before.
+ *
+ * RACE (23505 on the users insert)
+ * Another request created the row between steps 4 and 6. No rollback (the
+ * Auth user is the other request's too) and no survey insert. The row is read
+ * again by email: a failed read or no row sends nothing; a row whose id is not
+ * the Auth user's sends nothing; the same id claims and sends. Every case
+ * answers the full-success body.
  *
  * ROLLBACK
  * The admin API returns an Auth error as a value rather than throwing it, so
@@ -74,15 +92,21 @@ const ACCOUNT_INCOMPLETE_MESSAGE =
 const WEAK_PASSWORD_MESSAGE = "Please choose a stronger password.";
 const CREATE_ACCOUNT_FAILED_MESSAGE = "Failed to create account. Please try again.";
 const PROFILE_INSERT_FAILED_MESSAGE = "Failed to create user profile record";
-const SURVEY_SAVE_FAILED_MESSAGE =
-  "Account was created, but saving survey data failed. Please contact support.";
-const SUCCESS_MESSAGE = "Account created successfully";
+export const CONFIRMATION_REQUIRED_MESSAGE =
+  "Account created. Please check your email to confirm your address.";
 
-export type CreateAuthUserAttributes = {
+export type SignupMetadata = { first_name: string | null; last_name: string | null };
+
+export type GenerateSignupLinkArgs = {
   email: string;
   password: string;
-  email_confirm: true;
-  user_metadata: { first_name: string; last_name: string | null };
+  data: SignupMetadata;
+};
+
+export type ProfileRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
 };
 
 export type EmailSignupInput = {
@@ -94,13 +118,10 @@ export type EmailSignupInput = {
   /** Sanitized again here; empty after sanitizing becomes null. */
   lastName: string | null;
   destinationCountry: unknown;
-  institutionId: unknown;
-  university: unknown;
-  countryOfOrigin: unknown;
   /**
    * The whole request body. Only its monthly money keys are read here, to be
-   * checked before the Auth user is created; insertSurveyResponse builds the
-   * survey row from the same body.
+   * checked before anything is read or created; insertSurveyResponse builds
+   * the survey row from the same body.
    */
   surveyBody: unknown;
 };
@@ -108,19 +129,27 @@ export type EmailSignupInput = {
 export type EmailSignupDeps = {
   /** The SIGNUP_DISABLED gate. */
   isSignupDisabled: () => boolean;
-  /** userId null with error null still counts as a failed creation. */
-  createAuthUser: (
-    attributes: CreateAuthUserAttributes
-  ) => Promise<{ userId: string | null; error: unknown }>;
-  /** Whether a public.users row has this (normalized) email. */
+  /**
+   * auth.admin.generateLink type signup. userId or hashedToken null with
+   * error null still counts as a failed creation.
+   */
+  generateSignupLink: (
+    args: GenerateSignupLinkArgs
+  ) => Promise<{ userId: string | null; hashedToken: string | null; error: unknown }>;
+  /** The public.users row with this (normalized) email, or null. */
   findProfileByEmail: (
     email: string
-  ) => Promise<{ found: boolean; error: unknown }>;
+  ) => Promise<{ row: ProfileRow | null; error: unknown }>;
+  /** Keeps the error's `code` (23505 decides a branch). */
   insertProfile: (row: Record<string, unknown>) => Promise<{ error: unknown }>;
   /** May also throw; a throw is handled like a returned error. */
   deleteAuthUser: (userId: string) => Promise<{ error: unknown }>;
   insertSurveyResponse: (userId: string) => Promise<{ error: unknown }>;
-  sendWelcomeEmail: (email: string, firstName: string) => Promise<boolean>;
+  /** claimConfirmationSend bound to the service-role rpc. */
+  claimConfirmationSend: (userId: string) => Promise<ConfirmationClaim>;
+  sendConfirmationEmail: (email: string, link: string) => Promise<boolean>;
+  /** Base of the confirmation link. */
+  appUrl: string;
   /** ISO timestamp used for created_at and updated_at. */
   now: () => string;
   /** Defaults to console.error. Injected so tests stay quiet. */
@@ -148,6 +177,19 @@ function failure(
   return { status, body: { success: false, message, ...extra } };
 }
 
+function accepted(confirmationEmailSent: boolean, surveySaved: boolean): EmailSignupResult {
+  return {
+    status: 200,
+    body: {
+      success: true,
+      confirmationRequired: true,
+      confirmationEmailSent,
+      surveySaved,
+      message: CONFIRMATION_REQUIRED_MESSAGE,
+    },
+  };
+}
+
 function safeErrorText(error: unknown): string {
   return JSON.stringify(toLogSafeError(error));
 }
@@ -157,11 +199,15 @@ function errorField(error: unknown, field: "code" | "status" | "message"): unkno
   return (error as Record<string, unknown>)[field];
 }
 
+function codeText(error: unknown): string {
+  return String(toLogSafeError(error).code ?? "none");
+}
+
 export type CreateUserRefusal = "duplicate" | "weak_password" | "failed";
 
 /**
- * Why createUser refused. The error code decides when there is one; only an
- * error without a code falls back to the message text.
+ * Why createUser / generateLink refused. The error code decides when there is
+ * one; only an error without a code falls back to the message text.
  */
 export function classifyCreateUserError(error: unknown): CreateUserRefusal {
   const code = errorField(error, "code");
@@ -228,20 +274,93 @@ async function answerDuplicate(
   email: string,
   deps: EmailSignupDeps
 ): Promise<EmailSignupResult> {
-  const { found, error } = await deps.findProfileByEmail(email);
+  const { row, error } = await deps.findProfileByEmail(email);
   if (error) {
     emit(
       deps,
-      "[signup] profile lookup for a duplicate email failed: code=" +
-        (toLogSafeError(error).code ?? "none")
+      "[signup] profile lookup for a duplicate email failed: code=" + codeText(error)
     );
     return failure(409, DUPLICATE_EMAIL_MESSAGE);
   }
-  if (!found) {
+  if (!row) {
     emit(deps, "[signup] duplicate email has an Auth account but no profile row");
     return failure(409, ACCOUNT_INCOMPLETE_MESSAGE, { code: ACCOUNT_INCOMPLETE });
   }
   return failure(409, DUPLICATE_EMAIL_MESSAGE);
+}
+
+/** The answer to a refused or empty generateLink. */
+async function answerLinkRefusal(
+  email: string,
+  error: unknown,
+  deps: EmailSignupDeps
+): Promise<EmailSignupResult> {
+  emit(deps, "[signup] auth user creation refused: " + safeErrorText(error));
+  const refusal = error ? classifyCreateUserError(error) : "failed";
+  if (refusal === "duplicate") {
+    return answerDuplicate(email, deps);
+  }
+  if (refusal === "weak_password") {
+    return failure(400, WEAK_PASSWORD_MESSAGE);
+  }
+  return failure(500, CREATE_ACCOUNT_FAILED_MESSAGE);
+}
+
+/**
+ * Claims a send for userId and sends only when claimed. Returns whether an
+ * email went out. `label` names the branch in the log lines.
+ */
+async function claimAndSend(
+  email: string,
+  userId: string,
+  hashedToken: string,
+  label: string,
+  deps: EmailSignupDeps
+): Promise<boolean> {
+  const claim = await deps.claimConfirmationSend(userId);
+  if (claim !== "claimed") {
+    emit(
+      deps,
+      "[signup] " + label + " confirmation not sent (claim=" + claim + ") user_id=" + userId
+    );
+    return false;
+  }
+  try {
+    const sent = await deps.sendConfirmationEmail(
+      email,
+      buildConfirmationLink(deps.appUrl, hashedToken)
+    );
+    if (!sent) {
+      emit(
+        deps,
+        "[signup] " + label + " confirmation not sent (returned false) user_id=" + userId
+      );
+    }
+    return sent;
+  } catch (error) {
+    emit(
+      deps,
+      "[signup] " +
+        label +
+        " confirmation not sent (threw) user_id=" +
+        userId +
+        " " +
+        safeErrorText(error)
+    );
+    return false;
+  }
+}
+
+function logMismatch(
+  deps: EmailSignupDeps,
+  branch: "resignup" | "race-23505",
+  rowId: string,
+  authId: string
+): void {
+  emit(
+    deps,
+    "[signup] resignup id mismatch branch=" + branch + " row_id=" + rowId + " auth_id=" + authId
+  );
 }
 
 export async function createEmailAccount(
@@ -281,25 +400,42 @@ export async function createEmailAccount(
   const password = input.password as string;
   const now = deps.now();
 
-  const { userId, error: createError } = await deps.createAuthUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { first_name: firstName, last_name: lastName },
-  });
-
-  if (createError || !userId) {
-    emit(deps, "[signup] auth user creation refused: " + safeErrorText(createError));
-
-    const refusal = createError ? classifyCreateUserError(createError) : "failed";
-    if (refusal === "duplicate") {
-      return answerDuplicate(email, deps);
-    }
-    if (refusal === "weak_password") {
-      return failure(400, WEAK_PASSWORD_MESSAGE);
-    }
+  const existing = await deps.findProfileByEmail(email);
+  if (existing.error) {
+    emit(deps, "[signup] profile lookup before signup failed: code=" + codeText(existing.error));
     return failure(500, CREATE_ACCOUNT_FAILED_MESSAGE);
   }
+
+  // ---- RESIGNUP: a users row already has this email ----
+  if (existing.row) {
+    const row = existing.row;
+    const link = await deps.generateSignupLink({
+      email,
+      password,
+      data: { first_name: row.first_name, last_name: row.last_name },
+    });
+    if (link.error || !link.userId || !link.hashedToken) {
+      return answerLinkRefusal(email, link.error, deps);
+    }
+    if (link.userId !== row.id) {
+      logMismatch(deps, "resignup", row.id, link.userId);
+      return accepted(true, true);
+    }
+    await claimAndSend(email, link.userId, link.hashedToken, "resignup", deps);
+    return accepted(true, true);
+  }
+
+  // ---- NEW SIGNUP ----
+  const link = await deps.generateSignupLink({
+    email,
+    password,
+    data: { first_name: firstName, last_name: lastName },
+  });
+  if (link.error || !link.userId || !link.hashedToken) {
+    return answerLinkRefusal(email, link.error, deps);
+  }
+  const userId = link.userId;
+  const hashedToken = link.hashedToken;
 
   const { error: profileError } = await deps.insertProfile({
     id: userId,
@@ -314,6 +450,31 @@ export async function createEmailAccount(
     updated_at: now,
   });
 
+  if (profileError && errorField(profileError, "code") === "23505") {
+    // ---- RACE: the row appeared after the lookup ----
+    const again = await deps.findProfileByEmail(email);
+    if (again.error) {
+      emit(
+        deps,
+        "[signup] resignup race-23505 lookup=error code=" +
+          codeText(again.error) +
+          " auth_id=" +
+          userId
+      );
+      return accepted(true, true);
+    }
+    if (!again.row) {
+      emit(deps, "[signup] resignup id mismatch branch=race-23505 lookup=none auth_id=" + userId);
+      return accepted(true, true);
+    }
+    if (again.row.id !== userId) {
+      logMismatch(deps, "race-23505", again.row.id, userId);
+      return accepted(true, true);
+    }
+    await claimAndSend(email, userId, hashedToken, "race-23505", deps);
+    return accepted(true, true);
+  }
+
   if (profileError) {
     emit(
       deps,
@@ -327,6 +488,7 @@ export async function createEmailAccount(
   }
 
   const { error: surveyError } = await deps.insertSurveyResponse(userId);
+  const surveySaved = !surveyError;
   if (surveyError) {
     emit(
       deps,
@@ -335,43 +497,8 @@ export async function createEmailAccount(
         " " +
         safeErrorText(surveyError)
     );
-    // The code lets the page sign the new account in and save the answers
-    // again through the signed-in path.
-    return failure(500, SURVEY_SAVE_FAILED_MESSAGE, {
-      userId,
-      code: SURVEY_SAVE_FAILED,
-    });
   }
 
-  try {
-    const sent = await deps.sendWelcomeEmail(email, firstName);
-    if (!sent) {
-      emit(deps, "[signup] welcome email not sent (returned false) user_id=" + userId);
-    }
-  } catch (error) {
-    emit(
-      deps,
-      "[signup] welcome email not sent (threw) user_id=" +
-        userId +
-        " " +
-        safeErrorText(error)
-    );
-  }
-
-  return {
-    status: 200,
-    body: {
-      success: true,
-      userId,
-      profile: {
-        firstName: firstNameForClient(firstName),
-        lastName,
-        email,
-        institutionId: input.institutionId || null,
-        university: input.university || null,
-        countryOfOrigin: input.countryOfOrigin || null,
-      },
-      message: SUCCESS_MESSAGE,
-    },
-  };
+  const sent = await claimAndSend(email, userId, hashedToken, "signup", deps);
+  return accepted(sent, surveySaved);
 }

@@ -43,21 +43,29 @@ function fakeAdmin() {
   return {
     auth: {
       admin: {
-        createUser: async () => {
+        generateLink: async () => {
           state.createUserCalls += 1;
-          return { data: { user: { id: NEW_USER_ID } }, error: null };
+          return {
+            data: { user: { id: NEW_USER_ID }, properties: { hashed_token: "tok" } },
+            error: null,
+          };
         },
         deleteUser: async () => ({ error: null }),
       },
     },
+    rpc: async () => ({ data: true, error: null }),
     from: (table: string) => ({
       select: () => {
         state.calls.push({ table, op: "select" });
         return {
-          eq: () => ({
+          eq: (column: string) => ({
             maybeSingle: async () => {
               if (table === "survey_responses") {
                 return { data: state.existingSurvey ? { id: "row-1" } : null, error: null };
+              }
+              // The signup's lookup by email: no account has this email yet.
+              if (column === "email") {
+                return { data: null, error: null };
               }
               return { data: { first_name: "Ann", last_name: null }, error: null };
             },
@@ -87,7 +95,7 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 vi.mock("@/lib/email", () => ({
-  sendWelcomeEmail: async () => true,
+  sendSignupConfirmationEmail: async () => true,
 }));
 
 async function post(body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
