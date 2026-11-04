@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
@@ -268,29 +268,74 @@ describe("account export: what each section reads", () => {
   const EXPECTED_FILTER: Record<string, string> = {
     users: "id",
     survey_responses: "user_id",
+    chat_sessions: "user_id",
     chat_messages: "user_id",
     chat_summaries: "user_id",
     user_facts: "user_id",
-    recommendations_new: "user_id",
-    posts: "user_id",
-    comments: "user_id",
     plaid_connections: "user_id",
     llm_calls: "user_id",
+    chat_usage_reservations: "user_id",
+    email_confirmation_sends: "user_id",
   };
 
   /** Each table's primary key, the column the keyset pages on. */
   const EXPECTED_ORDER: Record<string, string> = {
     users: "id",
     survey_responses: "id",
+    chat_sessions: "id",
     chat_messages: "id",
     chat_summaries: "id",
     user_facts: "id",
-    recommendations_new: "id",
-    posts: "id",
-    comments: "id",
     plaid_connections: "id",
     llm_calls: "id",
+    chat_usage_reservations: "id",
+    email_confirmation_sends: "user_id",
   };
+
+  it("E5 the file carries exactly these top-level keys", async () => {
+    const { result } = await exportOf({}, EXPORT_SECTIONS);
+    expect(result.status).toBe(200);
+    expect(Object.keys(result.body).sort()).toEqual(
+      [
+        "exported_at",
+        "user_id",
+        "users",
+        "survey_responses",
+        "chat_sessions",
+        "chat_messages",
+        "chat_summaries",
+        "user_facts",
+        "plaid_connections",
+        "llm_calls",
+        "chat_usage_reservations",
+        "email_confirmation_sends",
+      ].sort()
+    );
+  });
+
+  it("E6 no section reads a table the drop migration removes", () => {
+    const DROPPED = [
+      "universities",
+      "visa_types",
+      "banks",
+      "apartments",
+      "credit_cards",
+      "deals",
+      "jobs",
+      "scholarships",
+      "posts",
+      "comments",
+      "recommendations_new",
+      "bank_accounts",
+      "bank_branches",
+      "health_insurance_options",
+      "required_documents",
+      "user_country_preferences",
+    ];
+    for (const section of EXPORT_SECTIONS) {
+      expect(DROPPED, section.key).not.toContain(section.table);
+    }
+  });
 
   it("E7 every read is filtered by the caller's id, on the column the table keys users by", async () => {
     const { calls } = await exportOf({}, EXPORT_SECTIONS);
@@ -324,6 +369,20 @@ describe("account export: what each section reads", () => {
       {
         plaid_connections: plaidRows([1, 2]),
         chat_messages: messages(2),
+        email_confirmation_sends: [
+          {
+            user_id: USER,
+            last_sent_at: "2026-11-04T00:00:00Z",
+            window_start: "2026-11-03T12:00:00Z",
+            window_count: 2,
+          },
+          {
+            user_id: OTHER,
+            last_sent_at: "2026-11-04T00:00:00Z",
+            window_start: "2026-11-04T00:00:00Z",
+            window_count: 1,
+          },
+        ],
       },
       EXPORT_SECTIONS
     );
@@ -338,7 +397,93 @@ describe("account export: what each section reads", () => {
     for (const row of result.body.chat_messages as ExportRow[]) {
       expect(row).toHaveProperty("id");
     }
+
+    expect(callsFor(calls, "email_confirmation_sends")[0].select).toBe(
+      "last_sent_at, window_start, window_count, user_id"
+    );
+    expect(result.body.email_confirmation_sends).toEqual([
+      {
+        last_sent_at: "2026-11-04T00:00:00Z",
+        window_start: "2026-11-03T12:00:00Z",
+        window_count: 2,
+      },
+    ]);
   });
+});
+
+describe("account export: explicit column lists match the schema", () => {
+  const MIGRATIONS_DIR = new URL("../../../supabase/migrations/", import.meta.url);
+
+  function readMigration(name: string): string {
+    return readFileSync(fileURLToPath(new URL(name, MIGRATIONS_DIR)), "utf8")
+      .replace(/\r\n?/g, "\n");
+  }
+
+  const MIGRATION_FILES = readdirSync(fileURLToPath(MIGRATIONS_DIR))
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+
+  /**
+   * The table's columns as the migrations leave them: the CREATE TABLE's
+   * column lines, then every later ADD COLUMN / DROP COLUMN on the table, in
+   * file order.
+   */
+  function migrationColumns(table: string): string[] {
+    const columns: string[] = [];
+    let created = 0;
+    const createHead = `create table if not exists public.${table} (`;
+    const alterHead = new RegExp(
+      `alter table (?:if exists )?(?:only )?public\\.${table}\\b([\\s\\S]*?);`,
+      "gi"
+    );
+    for (const name of MIGRATION_FILES) {
+      const text = readMigration(name);
+      const start = text.indexOf(createHead);
+      if (start !== -1) {
+        created += 1;
+        const end = text.indexOf("\n);", start);
+        const body = text.slice(start + createHead.length, end);
+        const constraint = body.indexOf("\n  constraint ");
+        const columnPart = constraint === -1 ? body : body.slice(0, constraint);
+        const pattern = /^ {2}([a-z_]+) /gm;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(columnPart)) !== null) columns.push(match[1]);
+      }
+      let alter: RegExpExecArray | null;
+      alterHead.lastIndex = 0;
+      while ((alter = alterHead.exec(text)) !== null) {
+        const clause = /\b(add|drop) column (?:if (?:not )?exists )?([a-z_]+)/gi;
+        let change: RegExpExecArray | null;
+        while ((change = clause.exec(alter[1])) !== null) {
+          const column = change[2].toLowerCase();
+          if (change[1].toLowerCase() === "add") {
+            columns.push(column);
+          } else {
+            const at = columns.indexOf(column);
+            if (at !== -1) columns.splice(at, 1);
+          }
+        }
+      }
+    }
+    expect(created, `CREATE TABLE for ${table}`).toBe(1);
+    return columns;
+  }
+
+  const EXPLICIT = ["chat_sessions", "chat_usage_reservations", "email_confirmation_sends"];
+
+  for (const table of EXPLICIT) {
+    it(`E10 ${table}: the export's columns are the table's columns minus user_id`, () => {
+      const section = sectionFor(table);
+      expect(section.columns).not.toBe("*");
+      const exported = section.columns.split(", ");
+      const schema = migrationColumns(table);
+      expect(schema).toContain("user_id");
+      expect(new Set(exported).size).toBe(exported.length);
+      expect([...exported].sort()).toEqual(
+        schema.filter((c) => c !== "user_id").sort()
+      );
+    });
+  }
 });
 
 describe("account export: the production page reader", () => {

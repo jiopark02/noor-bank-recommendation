@@ -51,12 +51,18 @@ export type ExportSection = {
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
   { key: "users", table: "users", columns: "*", filterColumn: "id", orderColumn: "id", orderKeyType: "uuid" },
   { key: "survey_responses", table: "survey_responses", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
+  {
+    key: "chat_sessions",
+    table: "chat_sessions",
+    columns:
+      "id, title, started_at, ended_at, last_message_at, message_count, summarized, facts_extracted, created_at, updated_at",
+    filterColumn: "user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
   { key: "chat_messages", table: "chat_messages", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   { key: "chat_summaries", table: "chat_summaries", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   { key: "user_facts", table: "user_facts", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
-  { key: "recommendations", table: "recommendations_new", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
-  { key: "posts", table: "posts", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
-  { key: "comments", table: "comments", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   // The stored bank credential is never selected; only these three columns.
   { key: "plaid_connections", table: "plaid_connections", columns: "institution_name, status, item_id", filterColumn: "user_id", orderColumn: "id", orderKeyType: "int8" },
   {
@@ -66,6 +72,23 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
       "id, created_at, started_at, route, attempt_index, request_model, response_model, generation_id, succeeded, http_status, error_class, finish_reason, latency_ms, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, provider_cost, has_memory_block, has_plaid_scaffold_block, has_balance_block, has_financial_snapshot_block, engine_reason_code, session_id",
     filterColumn: "user_id",
     orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  {
+    key: "chat_usage_reservations",
+    table: "chat_usage_reservations",
+    columns: "id, created_at, mode, hold_cost, settled_cost, attempts, settled_at",
+    filterColumn: "user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // One row per user, keyed by user_id, which the output leaves out.
+  {
+    key: "email_confirmation_sends",
+    table: "email_confirmation_sends",
+    columns: "last_sent_at, window_start, window_count",
+    filterColumn: "user_id",
+    orderColumn: "user_id",
     orderKeyType: "uuid",
   },
 ];

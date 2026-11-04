@@ -18,7 +18,8 @@ export const dynamic = "force-dynamic";
  *     institution_name / status / item_id are exported.
  *   - admin_users — internal access-control data, not user-owned content.
  *   - waitlist_signups — pre-signup data with no user_id link.
- *   - llm_calls.user_id — the payload's top-level user_id already carries it.
+ *   - user_id in sections with an explicit column list — the payload's
+ *     top-level user_id already carries it.
  *
  * If any page of any section fails, the whole export returns 500 rather than
  * silently handing back an incomplete file the user believes is complete.
