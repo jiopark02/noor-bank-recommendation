@@ -19,8 +19,8 @@
 -- block checks the end state by property and rolls the file back unless every
 -- property holds.
 --
--- Deletion: the table has no foreign key to auth.users; deleting an Auth user
--- leaves its row.
+-- Deletion: user_id cascades from auth.users, so deleting the Auth user
+-- removes its row. The cascade runs as the table's owner, which keeps DELETE.
 --
 -- The application treats a failed claim as "do not send", so this file is
 -- applied before the code that calls the function is deployed, and removed
@@ -36,7 +36,7 @@ begin;
 set local lock_timeout = '5s';
 
 create table if not exists public.email_confirmation_sends (
-  user_id       uuid primary key,
+  user_id       uuid primary key references auth.users(id) on delete cascade,
   last_sent_at  timestamptz not null,
   window_start  timestamptz not null,
   window_count  int not null
@@ -97,6 +97,7 @@ declare
   v_proacl aclitem[];
   v_prosecdef boolean;
   v_proconfig text[];
+  v_fk_ok boolean;
 begin
   -- MAINTAIN exists from PostgreSQL 17; has_table_privilege rejects it before.
   if current_setting('server_version_num')::integer >= 170000 then
@@ -154,7 +155,37 @@ begin
       v_remaining;
   end if;
 
-  -- 5. The function: no EXECUTE for anon, authenticated or PUBLIC, EXECUTE for
+  -- 5. user_id references auth.users and cascades on delete, and the owner
+  --    keeps DELETE so the cascade can run (it would not if this file ran as
+  --    service_role and revoked its own privilege above). A table created
+  --    before this file, without the key, fails here.
+  select exists (
+    select 1
+      from pg_constraint k
+      join pg_attribute a
+        on a.attrelid = k.conrelid
+       and a.attnum = k.conkey[1]
+     where k.conrelid = v_table
+       and k.contype = 'f'
+       and cardinality(k.conkey) = 1
+       and a.attname = 'user_id'
+       and k.confrelid = 'auth.users'::regclass
+       and k.confdeltype = 'c'
+  ) into v_fk_ok;
+  if not v_fk_ok then
+    raise exception
+      'public.email_confirmation_sends: user_id does not reference auth.users with on delete cascade';
+  end if;
+  if not exists (
+    select 1 from pg_class c
+     where c.oid = v_table
+       and has_table_privilege(c.relowner, v_table, 'DELETE')
+  ) then
+    raise exception
+      'public.email_confirmation_sends: the table owner lacks DELETE, so the cascade from auth.users would fail';
+  end if;
+
+  -- 6. The function: no EXECUTE for anon, authenticated or PUBLIC, EXECUTE for
   --    service_role, SECURITY INVOKER, empty search_path.
   if has_function_privilege('anon', v_fn, 'EXECUTE')
      or has_function_privilege('authenticated', v_fn, 'EXECUTE') then

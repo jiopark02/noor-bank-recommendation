@@ -17,6 +17,7 @@ import path from "path";
  *   M22 the set search_path line removed               -> P2
  *   M23 the service_role table or EXECUTE grant removed -> P4, P5
  *   M24 security invoker changed to security definer   -> P1
+ *   the cascade FK on user_id removed, or its check    -> P10
  */
 
 const MIGRATION = path.resolve(
@@ -106,6 +107,18 @@ describe("email confirmation sends migration", () => {
     expect(occurrences("on conflict (user_id) do update")).toBe(1);
     expect(body).toContain("returning true");
     expect(body).toContain("select exists (select 1 from claimed);");
+  });
+
+  it("P10 user_id cascades from auth.users, and the DO block checks that it does", () => {
+    expect(sql).toContain(
+      "user_id       uuid primary key references auth.users(id) on delete cascade,"
+    );
+    const block = sql.slice(sql.indexOf("do $$"));
+    expect(block).toContain("k.confrelid = 'auth.users'::regclass");
+    expect(block).toContain("k.confdeltype = 'c'");
+    expect(block).toContain("a.attname = 'user_id'");
+    expect(block).toMatch(/if not v_fk_ok then\s+raise exception/);
+    expect(block).toContain("has_table_privilege(c.relowner, v_table, 'DELETE')");
   });
 
   it("P9 runs in one transaction with a closing DO block", () => {
