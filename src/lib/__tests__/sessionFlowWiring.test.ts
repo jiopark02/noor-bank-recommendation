@@ -246,8 +246,11 @@ describe("auth callback", () => {
     expect(failed).not.toContain("setError(");
   });
 
-  it("P28 both retry messages are non-empty fixed strings", () => {
-    const calls = FLAT.match(/setRetryMessage\([^)]*\)/g) ?? [];
+  it("P28 both retry messages are non-empty fixed strings; the only other call clears it for a confirm retry", () => {
+    const all = FLAT.match(/setRetryMessage\([^)]*\)/g) ?? [];
+    const clears = all.filter((call) => call === "setRetryMessage(null)");
+    expect(clears).toHaveLength(1);
+    const calls = all.filter((call) => call !== "setRetryMessage(null)");
     expect(calls).toHaveLength(2);
     for (const call of calls) {
       expect(call).toMatch(/^setRetryMessage\(\s*"[^"]+"\s*,?\s*\)$/);
@@ -292,11 +295,16 @@ describe("auth callback", () => {
     ]);
   });
 
-  it("P12 the retry screen reloads and does not send the user to /login", () => {
+  it("P12 the retry screen reloads for OAuth, re-runs the confirmed sign-in in confirm mode, and does not send the user to /login", () => {
     const screen = slice(CALLBACK, "if (retryMessage) {", "if (error) {");
-    expect(screen).toContain("onClick={() => window.location.reload()}");
+    expect(screen).toContain("onClick={retrySignIn}");
     expect(screen).toContain("Try again");
     expect(screen).not.toContain('router.push("/login")');
+    const retry = slice(CALLBACK, "const retrySignIn = () => {", "const handleResend = async");
+    expect(retry.replace(/\s+/g, " ")).toContain(
+      'if (retryMode === "confirm") { setRetryMessage(null); void runConfirmedSignIn(); return; } window.location.reload();'
+    );
+    expect(count(CALLBACK, "window.location.reload()")).toBe(1);
   });
 
   it("P13 the profile sync can be aborted at its time limit", () => {
@@ -316,7 +324,7 @@ describe("auth callback: email confirmation", () => {
   const HANDLER = slice(CALLBACK, "const handleConfirm = async", "const handleResend = async");
   const MOUNT = slice(
     CALLBACK,
-    "const url = readCallbackUrl(window.location.href);",
+    "const remembered = tokenHashRef.current;",
     "const handleConfirm = async"
   );
 
@@ -329,8 +337,12 @@ describe("auth callback: email confirmation", () => {
     expect(count(CALLBACK, "onClick={handleConfirm}")).toBe(2);
   });
 
-  it("P31 the fragment is removed whatever verifyOtp answers", () => {
-    expect(HANDLER.replace(/\s+/g, " ")).toMatch(/\} finally \{ removeFragment\(\); \}/);
+  it("P31 the fragment is removed on entry, right after the token is taken into memory, not in the handler", () => {
+    expect(MOUNT.replace(/\s+/g, " ")).toContain(
+      "tokenHashRef.current = url.tokenHash; removeFragment();"
+    );
+    expect(HANDLER).not.toContain("removeFragment");
+    expect(count(CALLBACK, "removeFragment();")).toBe(1);
     expect(FLAT).toContain(
       'window.history.replaceState( window.history.state, "", window.location.pathname + window.location.search );'
     );
@@ -357,8 +369,29 @@ describe("auth callback: email confirmation", () => {
     );
     expect(confirm).not.toContain("user_metadata");
     expect(confirm).not.toContain("profile.firstName");
-    expect(HANDLER.replace(/\s+/g, " ")).toContain('await completeSignIn("confirm", {');
+    expect(HANDLER.replace(/\s+/g, " ")).toContain('completeSignIn("confirm", {');
     expect(MOUNT.replace(/\s+/g, " ")).toContain('void completeSignIn("oauth", {');
+  });
+
+  it("P37 the mount reads the remembered token before the URL, so a second effect run (Strict Mode) after the fragment is gone still confirms", () => {
+    const flat = MOUNT.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      'const remembered = tokenHashRef.current; const url: CallbackUrlState = remembered ? { kind: "confirm", tokenHash: remembered } : readCallbackUrl(window.location.href);'
+    );
+    expect(count(CALLBACK, "readCallbackUrl(")).toBe(1);
+    expect(flat.indexOf("tokenHashRef.current;")).toBeLessThan(flat.indexOf("readCallbackUrl("));
+    expect(flat.indexOf("readCallbackUrl(")).toBeLessThan(flat.indexOf("removeFragment();"));
+  });
+
+  it("P36 the confirmed sign-in is one function, run after verifyOtp and from the retry button", () => {
+    expect(count(CALLBACK, 'completeSignIn("confirm"')).toBe(1);
+    expect(CALLBACK.replace(/\s+/g, " ")).toContain(
+      'const runConfirmedSignIn = () => completeSignIn("confirm", {'
+    );
+    expect(HANDLER.replace(/\s+/g, " ")).toContain(
+      'setConfirmPhase(null); setRetryMode("confirm"); await runConfirmedSignIn();'
+    );
+    expect(count(CALLBACK, "runConfirmedSignIn()")).toBe(2);
   });
 
   it("P34 the confirm button waits for a session read before it is enabled", () => {

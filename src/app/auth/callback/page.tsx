@@ -21,6 +21,7 @@ import {
   storedNamesFromRow,
   surveyLookupLogDetail,
   waitMs,
+  type CallbackUrlState,
   type ConfirmResult,
   type DisplayNames,
 } from "@/lib/sessionFlow";
@@ -283,6 +284,8 @@ export default function AuthCallbackPage() {
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
   // Set only when the page was opened with a signup confirmation link.
   const [confirmPhase, setConfirmPhase] = useState<ConfirmPhase | null>(null);
+  // Which sign-in the retry screen repeats.
+  const [retryMode, setRetryMode] = useState<SignInMode>("oauth");
   const tokenHashRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const [resendEmail, setResendEmail] = useState("");
@@ -299,7 +302,14 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     let cancelled = false;
     const isCancelled = () => cancelled;
-    const url = readCallbackUrl(window.location.href);
+    // The token taken on an earlier run of this effect wins over the URL: that
+    // run removed the fragment, so the URL no longer says this is a
+    // confirmation. React Strict Mode (on in next.config.js) runs the effect
+    // twice in development, and refs survive between the two runs.
+    const remembered = tokenHashRef.current;
+    const url: CallbackUrlState = remembered
+      ? { kind: "confirm", tokenHash: remembered }
+      : readCallbackUrl(window.location.href);
 
     if (url.kind === "url-error") {
       // Only an OAuth redirect puts an error in this URL; a confirmation
@@ -311,6 +321,11 @@ export default function AuthCallbackPage() {
       // not use the token up. The button is enabled once a session read has
       // returned, which means auth-js has finished initializing.
       tokenHashRef.current = url.tokenHash;
+      // The token now lives in memory only. Removing it from the address bar
+      // and this history entry at once means leaving without pressing the
+      // button leaves nothing behind; a reload then has no token and takes
+      // the plain path below, while the link in the email still works.
+      removeFragment();
       setConfirmPhase("preparing");
       void readSession(undefined, "auth-callback").then(() => {
         if (!cancelled) setConfirmPhase("ready");
@@ -344,8 +359,6 @@ export default function AuthCallbackPage() {
         : decideConfirmResult(outcome.value.error, Boolean(outcome.value.data?.session));
     } catch {
       result = "retry";
-    } finally {
-      removeFragment();
     }
     if (!mountedRef.current) return;
 
@@ -364,12 +377,28 @@ export default function AuthCallbackPage() {
       return;
     }
     setConfirmPhase(null);
-    await completeSignIn("confirm", {
+    setRetryMode("confirm");
+    await runConfirmedSignIn();
+  };
+
+  // The confirmed half: after verifyOtp, and again from the retry button. It
+  // is re-run rather than reloaded, because a reload no longer has the token
+  // and would take the OAuth path, whose names come from user_metadata.
+  const runConfirmedSignIn = () =>
+    completeSignIn("confirm", {
       router,
       setError,
       setRetryMessage,
       isCancelled: () => !mountedRef.current,
     });
+
+  const retrySignIn = () => {
+    if (retryMode === "confirm") {
+      setRetryMessage(null);
+      void runConfirmedSignIn();
+      return;
+    }
+    window.location.reload();
   };
 
   const handleResend = async () => {
@@ -394,9 +423,12 @@ export default function AuthCallbackPage() {
     }
   };
 
-  // Reloads rather than reading again: a hung code exchange never settles in
-  // this client, and a reload starts it over. After a finished exchange the
-  // code is gone from the URL, so a reload simply finds the session.
+  // OAuth: reloads rather than reading again: a hung code exchange never
+  // settles in this client, and a reload starts it over. After a finished
+  // exchange the code is gone from the URL, so a reload simply finds the
+  // session. Confirm mode re-runs the confirmed sign-in instead
+  // (retrySignIn): the client had finished initializing before the confirm
+  // button was enabled, so there is no exchange to start over.
   if (retryMessage) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
@@ -407,7 +439,7 @@ export default function AuthCallbackPage() {
           <p className="text-gray-500 mb-6">{retryMessage}</p>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={retrySignIn}
             className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
           >
             Try again
