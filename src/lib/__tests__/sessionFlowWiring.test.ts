@@ -246,11 +246,8 @@ describe("auth callback", () => {
     expect(failed).not.toContain("setError(");
   });
 
-  it("P28 both retry messages are non-empty fixed strings; the only other call clears it for a confirm retry", () => {
-    const all = FLAT.match(/setRetryMessage\([^)]*\)/g) ?? [];
-    const clears = all.filter((call) => call === "setRetryMessage(null)");
-    expect(clears).toHaveLength(1);
-    const calls = all.filter((call) => call !== "setRetryMessage(null)");
+  it("P28 both retry messages are non-empty fixed strings, and nothing else sets or clears it", () => {
+    const calls = FLAT.match(/setRetryMessage\([^)]*\)/g) ?? [];
     expect(calls).toHaveLength(2);
     for (const call of calls) {
       expect(call).toMatch(/^setRetryMessage\(\s*"[^"]+"\s*,?\s*\)$/);
@@ -295,16 +292,15 @@ describe("auth callback", () => {
     ]);
   });
 
-  it("P12 the retry screen reloads for OAuth, re-runs the confirmed sign-in in confirm mode, and does not send the user to /login", () => {
+  it("P12 the retry screen reloads in every mode and does not send the user to /login", () => {
     const screen = slice(CALLBACK, "if (retryMessage) {", "if (error) {");
-    expect(screen).toContain("onClick={retrySignIn}");
+    expect(screen).toContain("onClick={() => window.location.reload()}");
     expect(screen).toContain("Try again");
     expect(screen).not.toContain('router.push("/login")');
-    const retry = slice(CALLBACK, "const retrySignIn = () => {", "const handleResend = async");
-    expect(retry.replace(/\s+/g, " ")).toContain(
-      'if (retryMode === "confirm") { setRetryMessage(null); void runConfirmedSignIn(); return; } window.location.reload();'
-    );
     expect(count(CALLBACK, "window.location.reload()")).toBe(1);
+    expect(CALLBACK).not.toContain("retrySignIn");
+    expect(CALLBACK).not.toContain("retryMode");
+    expect(CALLBACK).not.toContain("runConfirmedSignIn");
   });
 
   it("P13 the profile sync can be aborted at its time limit", () => {
@@ -369,7 +365,7 @@ describe("auth callback: email confirmation", () => {
     );
     expect(confirm).not.toContain("user_metadata");
     expect(confirm).not.toContain("profile.firstName");
-    expect(HANDLER.replace(/\s+/g, " ")).toContain('completeSignIn("confirm", {');
+    expect(HANDLER.replace(/\s+/g, " ")).toContain('await completeSignIn("confirm", {');
     expect(MOUNT.replace(/\s+/g, " ")).toContain('void completeSignIn("oauth", {');
   });
 
@@ -383,15 +379,11 @@ describe("auth callback: email confirmation", () => {
     expect(flat.indexOf("readCallbackUrl(")).toBeLessThan(flat.indexOf("removeFragment();"));
   });
 
-  it("P36 the confirmed sign-in is one function, run after verifyOtp and from the retry button", () => {
+  it("P36 the confirmed sign-in runs from one place, the confirm handler, after verifyOtp", () => {
     expect(count(CALLBACK, 'completeSignIn("confirm"')).toBe(1);
-    expect(CALLBACK.replace(/\s+/g, " ")).toContain(
-      'const runConfirmedSignIn = () => completeSignIn("confirm", {'
-    );
     expect(HANDLER.replace(/\s+/g, " ")).toContain(
-      'setConfirmPhase(null); setRetryMode("confirm"); await runConfirmedSignIn();'
+      'setConfirmPhase(null); await completeSignIn("confirm", {'
     );
-    expect(count(CALLBACK, "runConfirmedSignIn()")).toBe(2);
   });
 
   it("P34 the confirm button waits for a session read before it is enabled", () => {

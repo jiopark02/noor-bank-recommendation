@@ -284,8 +284,6 @@ export default function AuthCallbackPage() {
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
   // Set only when the page was opened with a signup confirmation link.
   const [confirmPhase, setConfirmPhase] = useState<ConfirmPhase | null>(null);
-  // Which sign-in the retry screen repeats.
-  const [retryMode, setRetryMode] = useState<SignInMode>("oauth");
   const tokenHashRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const [resendEmail, setResendEmail] = useState("");
@@ -319,12 +317,14 @@ export default function AuthCallbackPage() {
     } else if (url.kind === "confirm") {
       // The link is not verified on load: a mail scanner that opens it must
       // not use the token up. The button is enabled once a session read has
-      // returned, which means auth-js has finished initializing.
+      // returned, answered or timed out; a timeout does not mean auth-js has
+      // finished initializing.
       tokenHashRef.current = url.tokenHash;
-      // The token now lives in memory only. Removing it from the address bar
-      // and this history entry at once means leaving without pressing the
-      // button leaves nothing behind; a reload then has no token and takes
-      // the plain path below, while the link in the email still works.
+      // The token now lives in memory only. It is removed at once from the
+      // address bar and this history entry, which is all a page can remove:
+      // the browser's own history may already hold the full URL. A reload
+      // then has no token and takes the plain path below, while the link in
+      // the email still works.
       removeFragment();
       setConfirmPhase("preparing");
       void readSession(undefined, "auth-callback").then(() => {
@@ -377,28 +377,12 @@ export default function AuthCallbackPage() {
       return;
     }
     setConfirmPhase(null);
-    setRetryMode("confirm");
-    await runConfirmedSignIn();
-  };
-
-  // The confirmed half: after verifyOtp, and again from the retry button. It
-  // is re-run rather than reloaded, because a reload no longer has the token
-  // and would take the OAuth path, whose names come from user_metadata.
-  const runConfirmedSignIn = () =>
-    completeSignIn("confirm", {
+    await completeSignIn("confirm", {
       router,
       setError,
       setRetryMessage,
       isCancelled: () => !mountedRef.current,
     });
-
-  const retrySignIn = () => {
-    if (retryMode === "confirm") {
-      setRetryMessage(null);
-      void runConfirmedSignIn();
-      return;
-    }
-    window.location.reload();
   };
 
   const handleResend = async () => {
@@ -423,12 +407,11 @@ export default function AuthCallbackPage() {
     }
   };
 
-  // OAuth: reloads rather than reading again: a hung code exchange never
-  // settles in this client, and a reload starts it over. After a finished
-  // exchange the code is gone from the URL, so a reload simply finds the
-  // session. Confirm mode re-runs the confirmed sign-in instead
-  // (retrySignIn): the client had finished initializing before the confirm
-  // button was enabled, so there is no exchange to start over.
+  // Reloads rather than reading again: a hung code exchange never settles in
+  // this client, and a reload starts it over. After a finished exchange the
+  // code is gone from the URL, so a reload simply finds the session. After a
+  // confirmation the reload has no token either, so it takes the OAuth path
+  // and reads the session verifyOtp stored.
   if (retryMessage) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
@@ -439,7 +422,7 @@ export default function AuthCallbackPage() {
           <p className="text-gray-500 mb-6">{retryMessage}</p>
           <button
             type="button"
-            onClick={retrySignIn}
+            onClick={() => window.location.reload()}
             className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
           >
             Try again
