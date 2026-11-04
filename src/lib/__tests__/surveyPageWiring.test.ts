@@ -3,17 +3,16 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 
 /**
- * Source probe of the survey page's wiring for a failed survey save. The
- * decisions themselves are executed in surveySubmitOutcome.test.ts; this file
- * checks that the page hands them the right values and passes their results
- * on. It does not render the page.
+ * Source probe of the survey page's submit wiring. The decisions themselves
+ * are executed in surveySubmitOutcome.test.ts; this file checks that the page
+ * hands them the right values and passes their results on. It does not
+ * render the page.
  *
  * Mutations of page.tsx and the tests each one turns red:
- *   P1  the failure decision given a constant instead of isAuthed   -> W1
- *   P2  the recovery record adapter not remembering the choice      -> W2
- *   P3  the recovery record adapter recording a different value     -> W2
- *   P4  clearPassword leaving confirmPassword in place              -> W3
- *   P5  the success path ignoring the recovered choice              -> W4
+ *   P1  a failure not shown through surveyFailureMessage            -> W1
+ *   M18 the unconfirmed signup recorded or signed in locally        -> W7
+ *   M25 the stay-signed-in checkbox rendered again                  -> W8
+ *   P5  the signed-in path recording something other than true      -> W4
  *   P6  the submit gate testing the unsanitized first name          -> W5
  *   P7  the submit gate dropping the email format check, or applying
  *       it to a signed-in submit                                    -> W5
@@ -98,43 +97,53 @@ function between(text: string, start: string, end: string): string {
   return text.slice(from, to);
 }
 
-describe("survey page wiring: failed survey save", () => {
-  it("W1 a failed response goes through surveyFailureAction with isAuthed", () => {
-    const failure = between(code, "if (!result.success) {", "resumeAfterSurveySaveFailure");
-    expect(failure).toMatch(
-      /const action = surveyFailureAction\( ?isAuthed, ?result ?\);/
-    );
-    expect(failure).toMatch(
-      /if \(action\.kind === " ?"\) \{ setSubmitError\(action\.message\); return; \}/
+describe("survey page wiring: submit result", () => {
+  it("W1 a failed response shows surveyFailureMessage and stops", () => {
+    expect(code).toContain(
+      "if (!result.success) { setSubmitError(surveyFailureMessage(result)); return; }"
     );
   });
 
-  it("W2 the recovery records the user and remembers the same choice", () => {
-    const deps = between(
-      code,
-      "resumeAfterSurveySaveFailure<Session>(",
-      "setSubmitError(resumed.message)"
+  it("W7 a new signup is not signed in or recorded: only consent, the password reset and the panel", () => {
+    const signup = between(codeWithStrings, "if (!isAuthed) { if (data.agreeToTerms)", "recordSignedInUser(result.userId, true);");
+    expect(signup).toContain("if (data.agreeToTerms) acceptTerms();");
+    expect(signup).toContain(
+      'setData((prev) => ({ ...prev, password: "", confirmPassword: "" }));'
     );
-    expect(deps).toMatch(
-      /recordSignedInUser: \( ?userId, ?staySignedIn ?\) => \{ recordSignedInUser\( ?userId, ?staySignedIn ?\); setRecoveredStaySignedIn\( ?staySignedIn ?\); \}/
-    );
+    expect(signup).toContain("setSignupNotice(signupOutcome(result));");
+    expect(signup.trimEnd().endsWith("return; }")).toBe(true);
+    for (const forbidden of [
+      "signInWithPassword",
+      "recordSignedInUser",
+      "noor_user_profile",
+      "noor_user_id",
+      "localStorage",
+      "createSession",
+      "router.",
+    ]) {
+      expect(signup).not.toContain(forbidden);
+    }
+    // Nowhere in the page does a password sign-in remain.
+    expect(readFileSync(PAGE, "utf8")).not.toContain("signInWithPassword");
   });
 
-  it("W3 clearPassword empties both password fields", () => {
-    const deps = between(
-      codeWithStrings,
-      "resumeAfterSurveySaveFailure<Session>(",
-      "setSubmitError(resumed.message)"
-    );
-    expect(deps).toMatch(
-      /clearPassword: \(\) => setData\(\( ?prev ?\) => \(\{ \.\.\.prev, password: "", confirmPassword: "" ?\}\)\)/
-    );
+  it("W4 the signed-in path records the user with true", () => {
+    expect(code).toContain("recordSignedInUser(result.userId, true);");
+    expect(code.split("recordSignedInUser(").length - 1).toBe(1);
   });
 
-  it("W4 the success path records the choice decided by staySignedInAfterSubmit", () => {
-    const success = code.slice(code.indexOf("setSubmitError(resumed.message)"));
-    expect(success).toMatch(
-      /recordSignedInUser\( ?result\.userId, staySignedInAfterSubmit\(\{ isAuthed, recoveredChoice: recoveredStaySignedIn, formChoice: data\.staySignedIn,? \}\) ?\);/
+  it("W8 no stay-signed-in identifier or message key is left on the page", () => {
+    const page = readFileSync(PAGE, "utf8");
+    expect(page).not.toMatch(/staySignedIn/i);
+    expect(page).not.toContain("survey.step1.staySignedIn");
+    expect(page).not.toContain("recoveredStaySignedIn");
+  });
+
+  it("W9 the panel's resend posts the signup email only and shows fixed text", () => {
+    expect(codeWithStrings).toContain('fetch("/api/auth/resend-confirmation", {');
+    expect(codeWithStrings).toContain("body: JSON.stringify({ email: signupEmail }),");
+    expect(codeWithStrings).toContain(
+      "setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);"
     );
   });
 });
