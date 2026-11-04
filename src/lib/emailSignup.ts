@@ -322,7 +322,7 @@ async function answerLinkRefusal(
   error: unknown,
   deps: EmailSignupDeps
 ): Promise<EmailSignupResult> {
-  emit(deps, "[signup] auth user creation refused: " + safeErrorText(error));
+  emit(deps, "[signup] generateLink refused: " + safeErrorText(error));
   const refusal = error ? classifyCreateUserError(error) : "failed";
   if (refusal === "duplicate") {
     return answerDuplicate(email, deps);
@@ -556,7 +556,7 @@ export async function createEmailAccount(
     if (again.error) {
       emit(
         deps,
-        "[signup] id mismatch branch=race-23505 lookup=error code=" +
+        "[signup] race-23505 lookup=error code=" +
           codeText(again.error) +
           " auth_id=" +
           userId
@@ -564,7 +564,7 @@ export async function createEmailAccount(
       return accepted(true, true);
     }
     if (!again.row) {
-      emit(deps, "[signup] id mismatch branch=race-23505 lookup=none auth_id=" + userId);
+      emit(deps, "[signup] race-23505 lookup=none auth_id=" + userId);
       return accepted(true, true);
     }
     if (again.row.id !== userId) {

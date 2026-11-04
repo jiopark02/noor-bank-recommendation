@@ -46,6 +46,10 @@ import {
  *   M47 race re-read log lines back to the old prefix        -> RS9, RS10
  *   M51 resignup: the Auth email's trim / lower-casing
  *       removed (either one alone)                           -> RS17
+ *   M52 resignup: only a refusal that carries an error read
+ *       as one (`if (outcome.kind === "link-refused" &&
+ *       outcome.error)`), so an empty answer is the full-
+ *       success body                                         -> RS18
  *
  * The generateLink fake rotates its token on every call (rotatingLinks), as
  * the server does, so "the token sent" can be checked against the only token
@@ -747,7 +751,7 @@ describe("generateLink refusals are classified by code first", () => {
   it("D8 every refusal is logged once, with its code", async () => {
     const d = refusingDeps(new AuthApiError("Conflict", 422, "email_exists"));
     await createEmailAccount(input(), d);
-    const refused = logLines(d).filter((line) => line.includes("auth user creation refused"));
+    const refused = logLines(d).filter((line) => line.includes("generateLink refused"));
     expect(refused).toHaveLength(1);
     expect(refused[0]).toContain('"code":"email_exists"');
 
@@ -756,7 +760,7 @@ describe("generateLink refusals are classified by code first", () => {
     });
     const result = await createEmailAccount(input(), noUser);
     expect(result.status).toBe(500);
-    expect(logLines(noUser).filter((l) => l.includes("auth user creation refused"))).toHaveLength(1);
+    expect(logLines(noUser).filter((l) => l.includes("generateLink refused"))).toHaveLength(1);
   });
 });
 
@@ -946,7 +950,7 @@ describe("resignup and the 23505 race (STOP-1)", () => {
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
     expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
     expect(logLines(d)).toEqual([
-      "[signup] id mismatch branch=race-23505 lookup=error code=PGRST000 auth_id=" + USER_ID,
+      "[signup] race-23505 lookup=error code=PGRST000 auth_id=" + USER_ID,
     ]);
   });
 
@@ -961,7 +965,7 @@ describe("resignup and the 23505 race (STOP-1)", () => {
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
     expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
     expect(logLines(d)).toEqual([
-      "[signup] id mismatch branch=race-23505 lookup=none auth_id=" + USER_ID,
+      "[signup] race-23505 lookup=none auth_id=" + USER_ID,
     ]);
   });
 
@@ -1072,6 +1076,27 @@ describe("resignup and the 23505 race (STOP-1)", () => {
       }
     }
   );
+
+  it("RS18 resignup where generateLink answers empty after the claim: 500, nothing sent, nothing inserted or deleted", async () => {
+    const d = resignupDeps({
+      generateSignupLink: vi.fn(async () => ({ userId: null, hashedToken: null, error: null })),
+    });
+    const result = await createEmailAccount(input(), d);
+    expect(result).toEqual({
+      status: 500,
+      body: { success: false, message: "Failed to create account. Please try again." },
+    });
+    expect(d.claimConfirmationSend).toHaveBeenCalledTimes(1);
+    expect(d.claimConfirmationSend).toHaveBeenCalledWith(USER_ID);
+    expect(d.generateSignupLink).toHaveBeenCalledTimes(1);
+    expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+    expect(d.insertProfile).not.toHaveBeenCalled();
+    expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+    expect(d.deleteAuthUser).not.toHaveBeenCalled();
+    expect(logLines(d)).toContain(
+      "[signup] resignup confirmation not sent (link=empty) user_id=" + USER_ID
+    );
+  });
 
   it.each([
     { name: "surrounding whitespace", authEmail: " " + NORMALIZED + " " },
