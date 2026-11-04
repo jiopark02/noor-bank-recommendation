@@ -310,3 +310,71 @@ describe("auth callback", () => {
     expect(FLAT).toMatch(/return \(\) => \{ cancelled = true; \}; \}, \[router\]\);/);
   });
 });
+
+describe("auth callback: email confirmation", () => {
+  const FLAT = CALLBACK.replace(/\s+/g, " ");
+  const HANDLER = slice(CALLBACK, "const handleConfirm = async", "const handleResend = async");
+  const MOUNT = slice(
+    CALLBACK,
+    "const url = readCallbackUrl(window.location.href);",
+    "const handleConfirm = async"
+  );
+
+  it("P30 verifyOtp is called once, inside the button's handler, never on mount", () => {
+    expect(count(CALLBACK, "verifyOtp(")).toBe(1);
+    expect(HANDLER.replace(/\s+/g, " ")).toContain(
+      'client.auth.verifyOtp({ token_hash: tokenHash, type: "signup" })'
+    );
+    expect(MOUNT).not.toContain("verifyOtp");
+    expect(count(CALLBACK, "onClick={handleConfirm}")).toBe(2);
+  });
+
+  it("P31 the fragment is removed whatever verifyOtp answers", () => {
+    expect(HANDLER.replace(/\s+/g, " ")).toMatch(/\} finally \{ removeFragment\(\); \}/);
+    expect(FLAT).toContain(
+      'window.history.replaceState( window.history.state, "", window.location.pathname + window.location.search );'
+    );
+  });
+
+  it("P32 the page never reads or renders error_description", () => {
+    expect(CALLBACK).not.toContain("error_description");
+    expect(CALLBACK).not.toContain("searchParams");
+    expect(MOUNT.replace(/\s+/g, " ")).toContain(
+      'const copy = copyForAuthError(url.code, "confirm-link");'
+    );
+  });
+
+  it("P33 the confirm mode takes its names from chooseConfirmedNames, not metadata", () => {
+    const confirm = slice(CALLBACK, 'if (mode === "confirm") {', "} else if (syncedNames) {");
+    const flat = confirm.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      "const stored = syncedNames ? null : await readStoredNames(client, user.id);"
+    );
+    expect(flat).toContain(
+      "profile = { ...profile, ...chooseConfirmedNames({ synced: syncedNames, stored }), };"
+    );
+    expect(confirm).not.toContain("user_metadata");
+    expect(confirm).not.toContain("profile.firstName");
+    expect(HANDLER.replace(/\s+/g, " ")).toContain('await completeSignIn("confirm", {');
+    expect(MOUNT.replace(/\s+/g, " ")).toContain('void completeSignIn("oauth", {');
+  });
+
+  it("P34 the confirm button waits for a session read before it is enabled", () => {
+    const flat = MOUNT.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      'void readSession(undefined, "auth-callback").then(() => { if (!cancelled) setConfirmPhase("ready"); });'
+    );
+    expect(FLAT).toContain('disabled={confirmPhase !== "ready"}');
+  });
+
+  it("P35 the resend on the expired screen posts the email only and shows fixed text", () => {
+    const resend = slice(CALLBACK, "const handleResend = async", "if (retryMessage) {");
+    const flat = resend.replace(/\s+/g, " ");
+    expect(flat).toContain('fetch("/api/auth/resend-confirmation", {');
+    expect(flat).toContain("body: JSON.stringify({ email: resendEmail.trim().toLowerCase() }),");
+    expect(flat).toContain(
+      "setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);"
+    );
+    expect(resend).not.toContain(".json()");
+  });
+});

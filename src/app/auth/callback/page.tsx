@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, readSession } from "@/lib/supabase-browser";
 import {
@@ -8,18 +8,272 @@ import {
   CALLBACK_SURVEY_RETRY,
   CALLBACK_SYNC_TIMEOUT_MS,
   PROFILE_READ_TIMEOUT_MS,
+  SIGN_IN_TIMEOUT_MS,
+  chooseConfirmedNames,
   decideCallbackRoute,
   decideCallbackSession,
+  decideConfirmResult,
+  readCallbackUrl,
   readSurveyLookup,
   retryUntilAnswered,
   settleWithin,
   shouldRetrySessionRead,
+  storedNamesFromRow,
   surveyLookupLogDetail,
   waitMs,
+  type ConfirmResult,
+  type DisplayNames,
 } from "@/lib/sessionFlow";
+import { AUTH_COPY, copyForAuthError } from "@/lib/authErrorCopy";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
-import { createSession } from "@/lib/validation";
+import { createSession, validateEmail } from "@/lib/validation";
 import { namesFromSyncResponse } from "@/lib/syncProfileNames";
+
+/**
+ * "oauth": the page was reached from an OAuth redirect (or with nothing in
+ * the URL). "confirm": verifyOtp has just confirmed a signup email in this
+ * page. The two differ only in where the local profile's names come from.
+ */
+type SignInMode = "oauth" | "confirm";
+
+type SignInContext = {
+  router: ReturnType<typeof useRouter>;
+  setError: (message: string) => void;
+  setRetryMessage: (message: string) => void;
+  isCancelled: () => boolean;
+};
+
+type ConfirmPhase = "preparing" | "ready" | "verifying" | "expired" | "retry";
+
+/** A users row's names, read with the browser client, or null. */
+async function readStoredNames(
+  client: NonNullable<typeof supabase>,
+  userId: string
+): Promise<DisplayNames | null> {
+  const outcome = await settleWithin(
+    client
+      .from("users")
+      .select("first_name, last_name")
+      .eq("id", userId)
+      .maybeSingle(),
+    PROFILE_READ_TIMEOUT_MS
+  );
+  if (outcome.timedOut || outcome.value.error) return null;
+  return storedNamesFromRow(outcome.value.data);
+}
+
+/** Removes the fragment (and the token in it) from the address bar. */
+function removeFragment(): void {
+  window.history.replaceState(
+    window.history.state,
+    "",
+    window.location.pathname + window.location.search
+  );
+}
+
+async function completeSignIn(mode: SignInMode, ctx: SignInContext) {
+  const { router, setError, setRetryMessage, isCancelled } = ctx;
+  if (!supabase) {
+    setError("Authentication service unavailable");
+    return;
+  }
+  const client = supabase;
+
+  try {
+    // supabase-js exchanges the OAuth code while the client initializes,
+    // and a session read waits for that. A failed exchange is not an error
+    // here: the library swallows it and does not itself clear an earlier
+    // session in the cookie, so what the read answers depends on that session.
+    // None: "none". Valid, or expired with a refresh that succeeds: "session",
+    // for that earlier user. Expired with a refresh that fails: "unavailable".
+    // On a 400 or 500 the library then clears it and fires SIGNED_OUT, so the
+    // retry reads "none". On a retryable failure such as a 503, the library's
+    // own refresh retries can outlast the read's budget and end as a timeout.
+    // This is auth-js 2.91.0 as installed: re-check it when upgrading.
+    const read = await retryUntilAnswered(
+      (timeoutMs, attempt) =>
+        readSession(timeoutMs, "auth-callback", attempt),
+      shouldRetrySessionRead,
+      CALLBACK_SESSION_RETRY,
+      { sleep: waitMs, isCancelled }
+    );
+    if (isCancelled()) return;
+
+    const action = decideCallbackSession(read);
+    if (action === "show-retry") {
+      setRetryMessage(
+        "We couldn't reach the sign-in service. Please check your connection and try again."
+      );
+      return;
+    }
+    if (action === "no-session" || read.status !== "session") {
+      setError("No session found. Please try again.");
+      return;
+    }
+
+    // Save user info to localStorage
+    const session = read.session;
+    const user = session.user;
+    const fullName =
+      user.user_metadata?.full_name || user.user_metadata?.name || "";
+    const firstNameFromFull = fullName ? fullName.split(" ")[0] : "";
+    const lastNameFromFull = fullName
+      ? fullName.split(" ").slice(1).join(" ")
+      : "";
+    let profile: Record<string, unknown> = {
+      id: user.id,
+      email: user.email,
+      firstName: user.user_metadata?.first_name || firstNameFromFull,
+      lastName: user.user_metadata?.last_name || lastNameFromFull,
+      avatar:
+        user.user_metadata?.avatar_url ||
+        user.user_metadata?.picture ||
+        "",
+    };
+
+    const surveyFields = await settleWithin(
+      getSurveyFieldsForUserProfile(client, user.id),
+      PROFILE_READ_TIMEOUT_MS
+    );
+    if (isCancelled()) return;
+    profile = {
+      ...profile,
+      ...(surveyFields.timedOut ? {} : surveyFields.value),
+    };
+
+    // New vs returning is decided by the DB, not a local cache: does a
+    // survey_responses row exist for this user? (The old
+    // noor_onboarding_completed check read a key nothing wrote while the
+    // check existed, so every OAuth login was treated as new. Writers for
+    // the key were added on 2026-07-06, in the change that replaced the
+    // check, and have since been removed; no code ever read what they
+    // wrote.)
+    let lookupFailure = "";
+    const lookup = await retryUntilAnswered(
+      async (timeoutMs) => {
+        const outcome = await settleWithin(
+          client
+            .from("survey_responses")
+            .select("id")
+            .eq("user_id", user.id)
+            .limit(1)
+            .maybeSingle(),
+          timeoutMs
+        );
+        lookupFailure = surveyLookupLogDetail(outcome);
+        return readSurveyLookup(outcome);
+      },
+      (result) => result === "failed",
+      CALLBACK_SURVEY_RETRY,
+      { sleep: waitMs, isCancelled }
+    );
+    if (isCancelled()) return;
+
+    // Not knowing is not the same as being new: a returning user must not
+    // land on the survey because this read failed. Stopping before the
+    // sync loses nothing, since the retry reloads and runs it, and the
+    // upsert behind it can be repeated.
+    if (lookup === "failed") {
+      console.error("Survey lookup failed:", lookupFailure);
+      setRetryMessage(
+        "We couldn't load your account details. Please try again."
+      );
+      return;
+    }
+
+    // Sync the profile row to public.users. We MUST check res.ok: a silent
+    // failure leaves the user without a users row, which breaks
+    // recommendations and — via the survey_responses FK — blocks survey
+    // completion.
+    let syncOk = false;
+    let syncedNames: DisplayNames | null = null;
+    const syncAbort = new AbortController();
+    const syncTimer = setTimeout(
+      () => syncAbort.abort(),
+      CALLBACK_SYNC_TIMEOUT_MS
+    );
+    try {
+      const syncRes = await fetch("/api/auth/sync-profile", {
+        method: "POST",
+        signal: syncAbort.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        // The server takes email and metadata from the verified token,
+        // so only the id and display names are sent.
+        body: JSON.stringify({
+          id: user.id,
+          first_name: profile.firstName,
+          last_name: profile.lastName,
+        }),
+      });
+      syncOk = syncRes.ok;
+      if (syncOk) {
+        // The names the server wrote, with its placeholder first name as
+        // empty, so the local profile follows the database.
+        syncedNames = namesFromSyncResponse(
+          await syncRes.json().catch(() => null)
+        );
+      } else {
+        console.error(
+          "Profile sync failed:",
+          syncRes.status,
+          await syncRes.text().catch(() => "")
+        );
+      }
+    } catch (syncError) {
+      console.error("Profile sync failed:", syncError);
+    } finally {
+      clearTimeout(syncTimer);
+    }
+    if (isCancelled()) return;
+
+    if (mode === "confirm") {
+      // After an email confirmation, user_metadata may hold the names of a
+      // later signup request for the same email, so it is not a source:
+      // the synced names, else the stored row, else empty.
+      const stored = syncedNames ? null : await readStoredNames(client, user.id);
+      if (isCancelled()) return;
+      profile = {
+        ...profile,
+        ...chooseConfirmedNames({ synced: syncedNames, stored }),
+      };
+    } else if (syncedNames) {
+      // Without them, the names computed above are kept.
+      profile = { ...profile, ...syncedNames };
+    }
+
+    // Surface the failure only when it actually blocks the user: a NEW
+    // user needs the users row before they can complete the survey (FK),
+    // so stop and let them retry via re-login rather than dropping them
+    // into a broken state. A RETURNING user already has their row, so a
+    // non-critical sync refresh failure must not lock them out.
+    const route = decideCallbackRoute(lookup, syncOk);
+    if (route === "setup-error") {
+      setError(
+        "We couldn't finish setting up your account. Please try signing in again."
+      );
+      return;
+    }
+
+    localStorage.setItem("noor_user_id", user.id);
+    localStorage.setItem("noor_user_profile", JSON.stringify(profile));
+
+    // Create session (keep signed in by default for OAuth)
+    createSession(true);
+
+    if (route === "survey") {
+      // No survey yet — send them to complete their profile.
+      router.push("/survey");
+    } else {
+      router.push("/dashboard");
+    }
+  } catch (err) {
+    console.error("Callback error:", err);
+    setError("Authentication failed. Please try again.");
+  }
+}
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -27,208 +281,122 @@ export default function AuthCallbackPage() {
   // Something we could not find out, as opposed to `error`, which is an answer.
   // The user stays here with a retry and is not sent to /login.
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
+  // Set only when the page was opened with a signup confirmation link, or
+  // with an auth error that offers a new one.
+  const [confirmPhase, setConfirmPhase] = useState<ConfirmPhase | null>(null);
+  const tokenHashRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
+  const [resendEmail, setResendEmail] = useState("");
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+  const [isResending, setIsResending] = useState(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     const isCancelled = () => cancelled;
+    const url = readCallbackUrl(window.location.href);
 
-    const handleCallback = async () => {
-      if (!supabase) {
-        setError("Authentication service unavailable");
-        return;
+    if (url.kind === "url-error") {
+      // Only the code is read; the redirect's own description is never shown.
+      const copy = copyForAuthError(url.code, "confirm-link");
+      if (copy.offerResend) {
+        setConfirmPhase("expired");
+      } else {
+        setError(copy.message);
       }
-      const client = supabase;
-
-      try {
-        // supabase-js exchanges the OAuth code while the client initializes,
-        // and a session read waits for that. A failed exchange is not an error
-        // here: the library swallows it and does not itself clear an earlier
-        // session in the cookie, so what the read answers depends on that session.
-        // None: "none". Valid, or expired with a refresh that succeeds: "session",
-        // for that earlier user. Expired with a refresh that fails: "unavailable".
-        // On a 400 or 500 the library then clears it and fires SIGNED_OUT, so the
-        // retry reads "none". On a retryable failure such as a 503, the library's
-        // own refresh retries can outlast the read's budget and end as a timeout.
-        // This is auth-js 2.91.0 as installed: re-check it when upgrading.
-        const read = await retryUntilAnswered(
-          (timeoutMs, attempt) =>
-            readSession(timeoutMs, "auth-callback", attempt),
-          shouldRetrySessionRead,
-          CALLBACK_SESSION_RETRY,
-          { sleep: waitMs, isCancelled }
-        );
-        if (cancelled) return;
-
-        const action = decideCallbackSession(read);
-        if (action === "show-retry") {
-          setRetryMessage(
-            "We couldn't reach the sign-in service. Please check your connection and try again."
-          );
-          return;
-        }
-        if (action === "no-session" || read.status !== "session") {
-          setError("No session found. Please try again.");
-          return;
-        }
-
-        // Save user info to localStorage
-        const session = read.session;
-        const user = session.user;
-        const fullName =
-          user.user_metadata?.full_name || user.user_metadata?.name || "";
-        const firstNameFromFull = fullName ? fullName.split(" ")[0] : "";
-        const lastNameFromFull = fullName
-          ? fullName.split(" ").slice(1).join(" ")
-          : "";
-        let profile: Record<string, unknown> = {
-          id: user.id,
-          email: user.email,
-          firstName: user.user_metadata?.first_name || firstNameFromFull,
-          lastName: user.user_metadata?.last_name || lastNameFromFull,
-          avatar:
-            user.user_metadata?.avatar_url ||
-            user.user_metadata?.picture ||
-            "",
-        };
-
-        const surveyFields = await settleWithin(
-          getSurveyFieldsForUserProfile(client, user.id),
-          PROFILE_READ_TIMEOUT_MS
-        );
-        if (cancelled) return;
-        profile = {
-          ...profile,
-          ...(surveyFields.timedOut ? {} : surveyFields.value),
-        };
-
-        // New vs returning is decided by the DB, not a local cache: does a
-        // survey_responses row exist for this user? (The old
-        // noor_onboarding_completed check read a key nothing wrote while the
-        // check existed, so every OAuth login was treated as new. Writers for
-        // the key were added on 2026-07-06, in the change that replaced the
-        // check, and have since been removed; no code ever read what they
-        // wrote.)
-        let lookupFailure = "";
-        const lookup = await retryUntilAnswered(
-          async (timeoutMs) => {
-            const outcome = await settleWithin(
-              client
-                .from("survey_responses")
-                .select("id")
-                .eq("user_id", user.id)
-                .limit(1)
-                .maybeSingle(),
-              timeoutMs
-            );
-            lookupFailure = surveyLookupLogDetail(outcome);
-            return readSurveyLookup(outcome);
-          },
-          (result) => result === "failed",
-          CALLBACK_SURVEY_RETRY,
-          { sleep: waitMs, isCancelled }
-        );
-        if (cancelled) return;
-
-        // Not knowing is not the same as being new: a returning user must not
-        // land on the survey because this read failed. Stopping before the
-        // sync loses nothing, since the retry reloads and runs it, and the
-        // upsert behind it can be repeated.
-        if (lookup === "failed") {
-          console.error("Survey lookup failed:", lookupFailure);
-          setRetryMessage(
-            "We couldn't load your account details. Please try again."
-          );
-          return;
-        }
-
-        // Sync the profile row to public.users. We MUST check res.ok: a silent
-        // failure leaves the user without a users row, which breaks
-        // recommendations and — via the survey_responses FK — blocks survey
-        // completion.
-        let syncOk = false;
-        const syncAbort = new AbortController();
-        const syncTimer = setTimeout(
-          () => syncAbort.abort(),
-          CALLBACK_SYNC_TIMEOUT_MS
-        );
-        try {
-          const syncRes = await fetch("/api/auth/sync-profile", {
-            method: "POST",
-            signal: syncAbort.signal,
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
-            },
-            // The server takes email and metadata from the verified token,
-            // so only the id and display names are sent.
-            body: JSON.stringify({
-              id: user.id,
-              first_name: profile.firstName,
-              last_name: profile.lastName,
-            }),
-          });
-          syncOk = syncRes.ok;
-          if (syncOk) {
-            // Store the names the server wrote, with its placeholder first
-            // name as empty, so the local profile follows the database.
-            // Without them, the names computed above are kept.
-            const syncedNames = namesFromSyncResponse(
-              await syncRes.json().catch(() => null)
-            );
-            if (syncedNames) {
-              profile = { ...profile, ...syncedNames };
-            }
-          } else {
-            console.error(
-              "Profile sync failed:",
-              syncRes.status,
-              await syncRes.text().catch(() => "")
-            );
-          }
-        } catch (syncError) {
-          console.error("Profile sync failed:", syncError);
-        } finally {
-          clearTimeout(syncTimer);
-        }
-        if (cancelled) return;
-
-        // Surface the failure only when it actually blocks the user: a NEW
-        // user needs the users row before they can complete the survey (FK),
-        // so stop and let them retry via re-login rather than dropping them
-        // into a broken state. A RETURNING user already has their row, so a
-        // non-critical sync refresh failure must not lock them out.
-        const route = decideCallbackRoute(lookup, syncOk);
-        if (route === "setup-error") {
-          setError(
-            "We couldn't finish setting up your account. Please try signing in again."
-          );
-          return;
-        }
-
-        localStorage.setItem("noor_user_id", user.id);
-        localStorage.setItem("noor_user_profile", JSON.stringify(profile));
-
-        // Create session (keep signed in by default for OAuth)
-        createSession(true);
-
-        if (route === "survey") {
-          // No survey yet — send them to complete their profile.
-          router.push("/survey");
-        } else {
-          router.push("/dashboard");
-        }
-      } catch (err) {
-        console.error("Callback error:", err);
-        setError("Authentication failed. Please try again.");
-      }
-    };
-
-    handleCallback();
+    } else if (url.kind === "confirm") {
+      // The link is not verified on load: a mail scanner that opens it must
+      // not use the token up. The button is enabled once a session read has
+      // returned, which means auth-js has finished initializing.
+      tokenHashRef.current = url.tokenHash;
+      setConfirmPhase("preparing");
+      void readSession(undefined, "auth-callback").then(() => {
+        if (!cancelled) setConfirmPhase("ready");
+      });
+    } else {
+      void completeSignIn("oauth", { router, setError, setRetryMessage, isCancelled });
+    }
 
     return () => {
       cancelled = true;
     };
   }, [router]);
+
+  // Runs only from the confirm button.
+  const handleConfirm = async () => {
+    const tokenHash = tokenHashRef.current;
+    if (!supabase || !tokenHash) {
+      setError(AUTH_COPY.CONFIRM_LINK_FAILED);
+      return;
+    }
+    const client = supabase;
+    setConfirmPhase("verifying");
+    let result: ConfirmResult;
+    try {
+      const outcome = await settleWithin(
+        client.auth.verifyOtp({ token_hash: tokenHash, type: "signup" }),
+        SIGN_IN_TIMEOUT_MS
+      );
+      result = outcome.timedOut
+        ? "retry"
+        : decideConfirmResult(outcome.value.error, Boolean(outcome.value.data?.session));
+    } catch {
+      result = "retry";
+    } finally {
+      removeFragment();
+    }
+    if (!mountedRef.current) return;
+
+    if (result === "retry") {
+      setConfirmPhase("retry");
+      return;
+    }
+    tokenHashRef.current = null;
+    if (result === "expired") {
+      setConfirmPhase("expired");
+      return;
+    }
+    if (result === "failed") {
+      setConfirmPhase(null);
+      setError(AUTH_COPY.CONFIRM_LINK_FAILED);
+      return;
+    }
+    setConfirmPhase(null);
+    await completeSignIn("confirm", {
+      router,
+      setError,
+      setRetryMessage,
+      isCancelled: () => !mountedRef.current,
+    });
+  };
+
+  const handleResend = async () => {
+    const validation = validateEmail(resendEmail);
+    if (!validation.isValid) {
+      setResendNotice(validation.error);
+      return;
+    }
+    setIsResending(true);
+    setResendNotice(null);
+    try {
+      const res = await fetch("/api/auth/resend-confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: resendEmail.trim().toLowerCase() }),
+      });
+      setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);
+    } catch {
+      setResendNotice(AUTH_COPY.RESEND_FAILED);
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   // Reloads rather than reading again: a hung code exchange never settles in
   // this client, and a reload starts it over. After a finished exchange the
@@ -281,6 +449,88 @@ export default function AuthCallbackPage() {
             className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
           >
             Back to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (confirmPhase === "expired") {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-xl font-semibold text-black mb-2">
+            This link can&apos;t be used
+          </h1>
+          <p className="text-gray-500 mb-6">{AUTH_COPY.CONFIRM_LINK_EXPIRED}</p>
+          <input
+            type="email"
+            value={resendEmail}
+            onChange={(e) => setResendEmail(e.target.value)}
+            placeholder="Email"
+            className="w-full px-4 py-3 mb-3 border border-gray-200 rounded-xl text-base outline-none focus:border-black placeholder:text-gray-400"
+          />
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={isResending || !resendEmail}
+            className="w-full py-3 mb-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors disabled:opacity-50"
+          >
+            {isResending ? "Sending..." : "Send a new confirmation link"}
+          </button>
+          {resendNotice && (
+            <p className="text-sm text-gray-600 mb-3">{resendNotice}</p>
+          )}
+          <button
+            type="button"
+            onClick={() => router.push("/login")}
+            className="w-full py-3 border border-gray-200 rounded-xl font-medium hover:bg-gray-50 transition-colors"
+          >
+            Go to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (confirmPhase === "retry") {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-xl font-semibold text-black mb-2">
+            We couldn&apos;t confirm your email yet
+          </h1>
+          <p className="text-gray-500 mb-6">{AUTH_COPY.CONFIRM_RETRY}</p>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (confirmPhase !== null) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-xl font-semibold text-black mb-2">
+            Confirm your email
+          </h1>
+          <p className="text-gray-500 mb-6">
+            Press the button below to confirm your email address and finish
+            creating your account.
+          </p>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={confirmPhase !== "ready"}
+            className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors disabled:opacity-50"
+          >
+            {confirmPhase === "verifying" ? "Confirming..." : "Confirm email"}
           </button>
         </div>
       </div>
