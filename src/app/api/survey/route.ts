@@ -223,6 +223,28 @@ export async function POST(request: NextRequest) {
             };
           },
 
+          // Read-only. A user that does not exist is "no user", not an error;
+          // only the email and whether it is confirmed are read.
+          getAuthUser: async (userId) => {
+            const { data, error } =
+              await supabaseAdmin.auth.admin.getUserById(userId);
+            if (error) {
+              const missing =
+                (error as { code?: unknown }).code === "user_not_found" ||
+                (error as { status?: unknown }).status === 404;
+              return missing ? { user: null, error: null } : { user: null, error };
+            }
+            const user = data?.user;
+            if (!user) return { user: null, error: null };
+            return {
+              user: {
+                email: user.email ?? null,
+                emailConfirmed: Boolean(user.email_confirmed_at),
+              },
+              error: null,
+            };
+          },
+
           // The error is returned as PostgREST gave it, so its code (23505
           // decides a branch) reaches the decision.
           insertProfile: async (row) => {

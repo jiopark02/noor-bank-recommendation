@@ -130,6 +130,21 @@ describe("survey route wiring: email/password signup", () => {
     expect(code).not.toMatch(/\buser_metadata\b/);
   });
 
+  it("W12 the Auth read adapter is getUserById, reads the email and confirmation only, and turns not-found into no user", () => {
+    const block = between(codeWithStrings, "getAuthUser:", "insertProfile:");
+    expect(block).toMatch(/async \( ?userId ?\) =>/);
+    expect(block).toMatch(
+      /const \{ data, error \} = await supabaseAdmin\.auth\.admin\.getUserById\( ?userId ?\);/
+    );
+    expect(block).toContain('(error as { code?: unknown }).code === "user_not_found"');
+    expect(block).toContain("(error as { status?: unknown }).status === 404");
+    expect(block).toMatch(/return missing \? \{ user: null, error: null \} : \{ user: null, error \};/);
+    expect(block).toMatch(
+      /user: \{ email: user\.email \?\? null, emailConfirmed: Boolean\(user\.email_confirmed_at\), \}, error: null,/
+    );
+    expect(block).not.toMatch(/user_metadata|generateLink|\.(insert|upsert|update|delete)\(/);
+  });
+
   it("W4 the delete adapter returns the admin API's error instead of catching it", () => {
     const block = between(code, "deleteAuthUser:", "insertSurveyResponse:");
     expect(block).toMatch(

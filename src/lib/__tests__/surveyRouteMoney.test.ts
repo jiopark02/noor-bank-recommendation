@@ -51,6 +51,10 @@ function fakeAdmin() {
           };
         },
         deleteUser: async () => ({ error: null }),
+        getUserById: async () => ({
+          data: { user: { id: NEW_USER_ID, email: null, email_confirmed_at: null } },
+          error: null,
+        }),
       },
     },
     rpc: async () => ({ data: true, error: null }),
@@ -149,7 +153,8 @@ describe("email signup", () => {
   it("RM6 the survey row stores the same amounts the check read from the body", async () => {
     const result = await post({ ...SIGNUP, monthly_income: 3210, monthly_budget: 1234 });
     expect(result.status).toBe(200);
-    expect(state.createUserCalls).toBe(1);
+    // generateLink: once to create the user, once after the claim.
+    expect(state.createUserCalls).toBe(2);
     const surveyInserts = writes().filter(
       (c) => c.table === "survey_responses" && c.op === "insert"
     );

@@ -36,34 +36,47 @@ import type { ConfirmationClaim } from "./confirmationSendLimit";
  *   5a. A row exists (a second signup for the same email): RESIGNUP below.
  *   5b. No row: generateLink signup creates the unconfirmed Auth user (or, for
  *      an unconfirmed Auth user left without a row, returns it with a new
- *      token) with the request's names as metadata. A refusal is classified by
- *      code (classifyCreateUserError); a duplicate is answered by
- *      answerDuplicate, read-only.
+ *      token) with the request's names as metadata. Its token is never sent.
+ *      A refusal is classified by code (classifyCreateUserError); a duplicate
+ *      is answered by answerDuplicate, read-only.
  *   6. Insert the public.users row. A 23505 is RACE below. Any other failure
  *      deletes the Auth user again (ROLLBACK) and answers 500.
  *   7. Insert the survey_responses row. A failure is logged and answered as
  *      surveySaved: false; the account stays.
- *   8. Claim a confirmation send and, only when claimed, send the email.
- *      Awaited, because a serverless function is frozen once the response
- *      returns. confirmationEmailSent says whether it went out.
+ *   8. Claim a confirmation send; only when claimed, call generateLink again
+ *      (the inserted names) and send that token. Awaited, because a
+ *      serverless function is frozen once the response returns.
+ *      confirmationEmailSent says whether it went out.
+ *
+ * TOKEN ORDER
+ * The token that is emailed is always one generateLink made AFTER its claim
+ * passed. Every generateLink call replaces an unconfirmed user's token, so a
+ * call made before the claim, by a request the claim then holds, would kill
+ * the link the user already has and send nothing in its place. A held or
+ * failed claim therefore makes no token at all.
  *
  * RESIGNUP (5a)
- * generateLink is called with the ROW's names, because it overwrites
- * user_metadata with whatever `data` it is given; the request's names, its
- * password and its survey answers are dropped. Nothing is inserted or rolled
- * back. When the Auth user it returns is not the row's id, nothing is sent.
- * Otherwise claim, then send only when claimed. The body is the full-success
- * body whatever happened, so the response does not say whether an
- * unconfirmed account exists or was mailed; what happened is logged.
- * A duplicate refusal from generateLink (the account is confirmed) is the
- * ordinary 409, as before.
+ * The Auth user is read first (getAuthUser, read-only): a failed read is 500;
+ * no user, or an Auth user under another email, sends nothing; a confirmed
+ * one is the ordinary 409. Then claim, and only when claimed generateLink
+ * with the ROW's names, because it overwrites user_metadata with whatever
+ * `data` it is given; the request's names, its password and its survey
+ * answers are dropped. Nothing is inserted or rolled back. When the Auth user
+ * generateLink returns is not the row's id, nothing is sent. The body is the
+ * full-success body whatever happened, so the response does not say whether
+ * an unconfirmed account exists or was mailed; what happened is logged. A
+ * duplicate refusal from generateLink (confirmed in the meantime) is the
+ * ordinary 409.
  *
  * RACE (23505 on the users insert)
  * Another request created the row between steps 4 and 6. No rollback (the
  * Auth user is the other request's too) and no survey insert. The row is read
  * again by email: a failed read or no row sends nothing; a row whose id is not
- * the Auth user's sends nothing; the same id claims and sends. Every case
- * answers the full-success body.
+ * the Auth user's sends nothing; the same id claims, then generateLink with
+ * the row's names, then sends. Every case answers the full-success body.
+ * A window this order cannot close: a concurrent new signup that read "no
+ * row" before this row existed may call its first generateLink after this
+ * request's token was made, replacing it.
  *
  * ROLLBACK
  * The admin API returns an Auth error as a value rather than throwing it, so
@@ -109,6 +122,11 @@ export type ProfileRow = {
   last_name: string | null;
 };
 
+export type SignupAuthUser = {
+  email: string | null;
+  emailConfirmed: boolean;
+};
+
 export type EmailSignupInput = {
   /** Raw request values; email and password are not yet validated. */
   email: unknown;
@@ -131,11 +149,20 @@ export type EmailSignupDeps = {
   isSignupDisabled: () => boolean;
   /**
    * auth.admin.generateLink type signup. userId or hashedToken null with
-   * error null still counts as a failed creation.
+   * error null still counts as a failed creation. Every call replaces an
+   * unconfirmed user's token, so the token that is sent is always made
+   * after its claim (see TOKEN ORDER).
    */
   generateSignupLink: (
     args: GenerateSignupLinkArgs
   ) => Promise<{ userId: string | null; hashedToken: string | null; error: unknown }>;
+  /**
+   * auth.admin.getUserById, read-only. A user that does not exist is
+   * { user: null, error: null }; any other failure is an error.
+   */
+  getAuthUser: (
+    userId: string
+  ) => Promise<{ user: SignupAuthUser | null; error: unknown }>;
   /** The public.users row with this (normalized) email, or null. */
   findProfileByEmail: (
     email: string
@@ -306,25 +333,71 @@ async function answerLinkRefusal(
   return failure(500, CREATE_ACCOUNT_FAILED_MESSAGE);
 }
 
+type ClaimLinkOutcome =
+  | { kind: "not-claimed" }
+  | { kind: "link-refused"; error: unknown }
+  | { kind: "link-mismatch"; authId: string }
+  | { kind: "sent"; sent: boolean };
+
 /**
- * Claims a send for userId and sends only when claimed. Returns whether an
- * email went out. `label` names the branch in the log lines.
+ * Claims a send for expectedId, and only once claimed makes the token it
+ * sends: generateLink replaces an unconfirmed user's token on every call, so
+ * a token made before the claim could be replaced by a request the claim
+ * would have held, and a held claim must leave the user's current link alone.
+ * Nothing is sent when generateLink refuses, returns no token, or returns a
+ * user other than expectedId. `label` names the branch in the log lines.
  */
-async function claimAndSend(
+async function claimLinkAndSend(
+  args: {
+    email: string;
+    password: string;
+    expectedId: string;
+    names: SignupMetadata;
+    label: string;
+  },
+  deps: EmailSignupDeps
+): Promise<ClaimLinkOutcome> {
+  const { email, expectedId, label } = args;
+  const claim = await deps.claimConfirmationSend(expectedId);
+  if (claim !== "claimed") {
+    emit(
+      deps,
+      "[signup] " + label + " confirmation not sent (claim=" + claim + ") user_id=" + expectedId
+    );
+    return { kind: "not-claimed" };
+  }
+
+  const link = await deps.generateSignupLink({
+    email,
+    password: args.password,
+    data: args.names,
+  });
+  if (link.error || !link.userId || !link.hashedToken) {
+    emit(
+      deps,
+      "[signup] " +
+        label +
+        " confirmation not sent (link=" +
+        (link.error ? "refused" : "empty") +
+        ") user_id=" +
+        expectedId
+    );
+    return { kind: "link-refused", error: link.error };
+  }
+  if (link.userId !== expectedId) {
+    return { kind: "link-mismatch", authId: link.userId };
+  }
+  return { kind: "sent", sent: await sendLink(email, expectedId, link.hashedToken, label, deps) };
+}
+
+/** Sends the confirmation email for hashedToken. Returns whether it went out. */
+async function sendLink(
   email: string,
   userId: string,
   hashedToken: string,
   label: string,
   deps: EmailSignupDeps
 ): Promise<boolean> {
-  const claim = await deps.claimConfirmationSend(userId);
-  if (claim !== "claimed") {
-    emit(
-      deps,
-      "[signup] " + label + " confirmation not sent (claim=" + claim + ") user_id=" + userId
-    );
-    return false;
-  }
   try {
     const sent = await deps.sendConfirmationEmail(
       email,
@@ -353,13 +426,13 @@ async function claimAndSend(
 
 function logMismatch(
   deps: EmailSignupDeps,
-  branch: "resignup" | "race-23505",
+  branch: "resignup" | "race-23505" | "signup",
   rowId: string,
   authId: string
 ): void {
   emit(
     deps,
-    "[signup] resignup id mismatch branch=" + branch + " row_id=" + rowId + " auth_id=" + authId
+    "[signup] id mismatch branch=" + branch + " row_id=" + rowId + " auth_id=" + authId
   );
 }
 
@@ -409,19 +482,46 @@ export async function createEmailAccount(
   // ---- RESIGNUP: a users row already has this email ----
   if (existing.row) {
     const row = existing.row;
-    const link = await deps.generateSignupLink({
-      email,
-      password,
-      data: { first_name: row.first_name, last_name: row.last_name },
-    });
-    if (link.error || !link.userId || !link.hashedToken) {
-      return answerLinkRefusal(email, link.error, deps);
+    // Read-only, so a confirmed account is answered 409 without a claim or a
+    // token, whatever the timing of earlier requests.
+    const auth = await deps.getAuthUser(row.id);
+    if (auth.error) {
+      emit(
+        deps,
+        "[signup] resignup auth read failed: code=" + codeText(auth.error) + " user_id=" + row.id
+      );
+      return failure(500, CREATE_ACCOUNT_FAILED_MESSAGE);
     }
-    if (link.userId !== row.id) {
-      logMismatch(deps, "resignup", row.id, link.userId);
+    if (!auth.user) {
+      emit(deps, "[signup] resignup auth=none user_id=" + row.id);
       return accepted(true, true);
     }
-    await claimAndSend(email, link.userId, link.hashedToken, "resignup", deps);
+    // generateLink is keyed by email: an Auth user under another email could
+    // lead it to a different (or a new) Auth user.
+    if ((auth.user.email ?? "").trim().toLowerCase() !== email) {
+      emit(deps, "[signup] resignup auth=email-mismatch user_id=" + row.id);
+      return accepted(true, true);
+    }
+    if (auth.user.emailConfirmed) {
+      return failure(409, DUPLICATE_EMAIL_MESSAGE);
+    }
+
+    const outcome = await claimLinkAndSend(
+      {
+        email,
+        password,
+        expectedId: row.id,
+        names: { first_name: row.first_name, last_name: row.last_name },
+        label: "resignup",
+      },
+      deps
+    );
+    if (outcome.kind === "link-refused") {
+      return answerLinkRefusal(email, outcome.error, deps);
+    }
+    if (outcome.kind === "link-mismatch") {
+      logMismatch(deps, "resignup", row.id, outcome.authId);
+    }
     return accepted(true, true);
   }
 
@@ -434,8 +534,8 @@ export async function createEmailAccount(
   if (link.error || !link.userId || !link.hashedToken) {
     return answerLinkRefusal(email, link.error, deps);
   }
+  // This first token is never sent: it was made before any claim.
   const userId = link.userId;
-  const hashedToken = link.hashedToken;
 
   const { error: profileError } = await deps.insertProfile({
     id: userId,
@@ -471,7 +571,21 @@ export async function createEmailAccount(
       logMismatch(deps, "race-23505", again.row.id, userId);
       return accepted(true, true);
     }
-    await claimAndSend(email, userId, hashedToken, "race-23505", deps);
+    // The row's names, as on a resignup: the first generateLink wrote this
+    // request's names into user_metadata, and this call puts the row's back.
+    const outcome = await claimLinkAndSend(
+      {
+        email,
+        password,
+        expectedId: userId,
+        names: { first_name: again.row.first_name, last_name: again.row.last_name },
+        label: "race-23505",
+      },
+      deps
+    );
+    if (outcome.kind === "link-mismatch") {
+      logMismatch(deps, "race-23505", userId, outcome.authId);
+    }
     return accepted(true, true);
   }
 
@@ -499,6 +613,18 @@ export async function createEmailAccount(
     );
   }
 
-  const sent = await claimAndSend(email, userId, hashedToken, "signup", deps);
-  return accepted(sent, surveySaved);
+  const outcome = await claimLinkAndSend(
+    {
+      email,
+      password,
+      expectedId: userId,
+      names: { first_name: firstName, last_name: lastName },
+      label: "signup",
+    },
+    deps
+  );
+  if (outcome.kind === "link-mismatch") {
+    logMismatch(deps, "signup", userId, outcome.authId);
+  }
+  return accepted(outcome.kind === "sent" && outcome.sent, surveySaved);
 }
