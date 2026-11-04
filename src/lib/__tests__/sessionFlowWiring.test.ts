@@ -336,12 +336,14 @@ describe("auth callback: email confirmation", () => {
     );
   });
 
-  it("P32 the page never reads or renders error_description", () => {
+  it("P32 a URL error shows the fixed OAuth message only: no error text, no confirmation resend", () => {
     expect(CALLBACK).not.toContain("error_description");
     expect(CALLBACK).not.toContain("searchParams");
-    expect(MOUNT.replace(/\s+/g, " ")).toContain(
-      'const copy = copyForAuthError(url.code, "confirm-link");'
-    );
+    const urlError = slice(MOUNT, 'if (url.kind === "url-error") {', '} else if (url.kind === "confirm") {');
+    expect(urlError.replace(/\s+/g, " ")).toContain("setError(AUTH_COPY.OAUTH_CALLBACK_FAILED);");
+    expect(urlError).not.toContain("setConfirmPhase");
+    expect(CALLBACK).not.toContain("copyForAuthError");
+    expect(CALLBACK).not.toContain("url.code");
   });
 
   it("P33 the confirm mode takes its names from chooseConfirmedNames, not metadata", () => {

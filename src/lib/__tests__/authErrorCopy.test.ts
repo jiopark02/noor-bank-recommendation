@@ -15,7 +15,6 @@ import {
 const CONTEXTS: AuthErrorContext[] = [
   "sign-in",
   "oauth",
-  "confirm-link",
   "reset-request",
   "reset-link",
   "reset-update",
@@ -56,16 +55,19 @@ describe("copyForAuthError", () => {
     );
   });
 
-  it("A2 an expired confirmation link offers a resend; access_denied alone does not", () => {
-    for (const code of ["otp_expired", "flow_state_expired", "flow_state_not_found"]) {
-      expect(copyForAuthError(code, "confirm-link")).toEqual({
-        message: AUTH_COPY.CONFIRM_LINK_EXPIRED,
-        offerResend: true,
-      });
+  it("A2 only an unconfirmed sign-in offers a confirmation resend", () => {
+    for (const context of CONTEXTS) {
+      for (const code of CODES) {
+        const offered = copyForAuthError(code, context).offerResend === true;
+        expect(offered).toBe(context === "sign-in" && code === "email_not_confirmed");
+      }
     }
-    expect(copyForAuthError("access_denied", "confirm-link")).toEqual({
-      message: AUTH_COPY.CONFIRM_LINK_FAILED,
-    });
+  });
+
+  it("AC1 the callback's URL-error copy is about Google sign-in, not a link, an email or confirming", () => {
+    expect(AUTH_COPY_MESSAGES).toContain(AUTH_COPY.OAUTH_CALLBACK_FAILED);
+    expect(AUTH_COPY.OAUTH_CALLBACK_FAILED).toMatch(/Google/);
+    expect(AUTH_COPY.OAUTH_CALLBACK_FAILED).not.toMatch(/link|email|confirm/i);
   });
 
   it("A3 reset codes, each offering a new link where the old one is unusable", () => {
@@ -89,7 +91,6 @@ describe("copyForAuthError", () => {
   it("A4 an unknown code gets the context's general message", () => {
     expect(copyForAuthError("unexpected_failure", "sign-in").message).toBe(AUTH_COPY.SIGN_IN_FAILED);
     expect(copyForAuthError("unexpected_failure", "oauth").message).toBe(AUTH_COPY.OAUTH_FAILED);
-    expect(copyForAuthError(null, "confirm-link").message).toBe(AUTH_COPY.CONFIRM_LINK_FAILED);
     expect(copyForAuthError(undefined, "reset-update").message).toBe(AUTH_COPY.RESET_UPDATE_FAILED);
   });
 

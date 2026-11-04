@@ -216,17 +216,17 @@ export function decideLateSignIn(input: {
 
 export type CallbackUrlState =
   | { kind: "confirm"; tokenHash: string }
-  | { kind: "url-error"; code: string | null }
+  | { kind: "url-error" }
   | { kind: "none" };
-
-const AUTH_ERROR_CODE = /^[a-z0-9_]{1,64}$/;
 
 /**
  * What /auth/callback was opened with.
  *
  * An auth error in the query or the fragment wins over everything else, and
- * only its code is kept: error_description is text whoever wrote the link
- * chose, so it is never read. A code of any other shape is dropped.
+ * nothing of it is kept: the page answers it with one fixed OAuth message, so
+ * neither the code nor error_description (text whoever wrote the link chose)
+ * is read. Only OAuth redirects carry an error here; a confirmation link's
+ * errors come from verifyOtp in the page.
  *
  * A signup confirmation carries its token in the FRAGMENT (see
  * buildConfirmationLink). A token_hash in the query is not accepted, nor is
@@ -247,8 +247,7 @@ export function readCallbackUrl(href: string): CallbackUrlState {
   for (let i = 0; i < sources.length; i++) {
     const params = sources[i];
     if (params.has("error") || params.has("error_code")) {
-      const raw = params.get("error_code") || params.get("error") || "";
-      return { kind: "url-error", code: AUTH_ERROR_CODE.test(raw) ? raw : null };
+      return { kind: "url-error" };
     }
   }
 

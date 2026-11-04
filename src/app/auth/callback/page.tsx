@@ -24,7 +24,7 @@ import {
   type ConfirmResult,
   type DisplayNames,
 } from "@/lib/sessionFlow";
-import { AUTH_COPY, copyForAuthError } from "@/lib/authErrorCopy";
+import { AUTH_COPY } from "@/lib/authErrorCopy";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 import { createSession, validateEmail } from "@/lib/validation";
 import { namesFromSyncResponse } from "@/lib/syncProfileNames";
@@ -281,8 +281,7 @@ export default function AuthCallbackPage() {
   // Something we could not find out, as opposed to `error`, which is an answer.
   // The user stays here with a retry and is not sent to /login.
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
-  // Set only when the page was opened with a signup confirmation link, or
-  // with an auth error that offers a new one.
+  // Set only when the page was opened with a signup confirmation link.
   const [confirmPhase, setConfirmPhase] = useState<ConfirmPhase | null>(null);
   const tokenHashRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
@@ -303,13 +302,10 @@ export default function AuthCallbackPage() {
     const url = readCallbackUrl(window.location.href);
 
     if (url.kind === "url-error") {
-      // Only the code is read; the redirect's own description is never shown.
-      const copy = copyForAuthError(url.code, "confirm-link");
-      if (copy.offerResend) {
-        setConfirmPhase("expired");
-      } else {
-        setError(copy.message);
-      }
+      // Only an OAuth redirect puts an error in this URL; a confirmation
+      // link's errors come from verifyOtp below. One fixed message, and no
+      // offer of a confirmation email.
+      setError(AUTH_COPY.OAUTH_CALLBACK_FAILED);
     } else if (url.kind === "confirm") {
       // The link is not verified on load: a mail scanner that opens it must
       // not use the token up. The button is enabled once a session read has

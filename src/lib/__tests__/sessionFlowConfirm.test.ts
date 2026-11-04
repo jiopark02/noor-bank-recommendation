@@ -39,28 +39,23 @@ describe("readCallbackUrl", () => {
     expect(readCallbackUrl("not a url")).toEqual({ kind: "none" });
   });
 
-  it("U4 an error wins, keeps only its code, and never its description", () => {
+  it("U4 an error in the query or the fragment wins over a token, and nothing of it is kept", () => {
     const query = readCallbackUrl(
       BASE + "?error=access_denied&error_code=otp_expired&error_description=Visit+evil.example"
     );
-    expect(query).toEqual({ kind: "url-error", code: "otp_expired" });
-    expect(JSON.stringify(query)).not.toContain("evil");
+    expect(query).toEqual({ kind: "url-error" });
 
     const fragment = readCallbackUrl(
       BASE + "#error=access_denied&error_description=hello&token_hash=abc&type=signup"
     );
-    expect(fragment).toEqual({ kind: "url-error", code: "access_denied" });
+    expect(fragment).toEqual({ kind: "url-error" });
+
+    expect(readCallbackUrl(BASE + "#error_code=flow_state_expired")).toEqual({ kind: "url-error" });
   });
 
-  it("U5 a code of an unexpected shape is dropped", () => {
-    expect(readCallbackUrl(BASE + "?error_code=%3Cscript%3E")).toEqual({
-      kind: "url-error",
-      code: null,
-    });
-    expect(readCallbackUrl(BASE + "?error=" + "a".repeat(65))).toEqual({
-      kind: "url-error",
-      code: null,
-    });
+  it("U5 an error of any shape is the same answer", () => {
+    expect(readCallbackUrl(BASE + "?error_code=%3Cscript%3E")).toEqual({ kind: "url-error" });
+    expect(readCallbackUrl(BASE + "?error=" + "a".repeat(65))).toEqual({ kind: "url-error" });
   });
 });
 

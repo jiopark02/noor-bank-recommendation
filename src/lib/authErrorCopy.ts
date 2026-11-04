@@ -16,7 +16,6 @@
 export type AuthErrorContext =
   | "sign-in"
   | "oauth"
-  | "confirm-link"
   | "reset-request"
   | "reset-link"
   | "reset-update";
@@ -36,6 +35,10 @@ export const AUTH_COPY = {
   RATE_LIMITED: "Too many attempts. Please wait a moment and try again.",
   SIGN_IN_FAILED: "We couldn't sign you in. Please try again.",
   OAUTH_FAILED: "We couldn't start Google sign-in. Please try again.",
+  // /auth/callback opened with an error in its URL. Only OAuth redirects put
+  // one there; a signup confirmation link's errors come from verifyOtp in the
+  // page, so this says nothing about links, email or confirming.
+  OAUTH_CALLBACK_FAILED: "We couldn't complete sign-in with Google. Please try again.",
   CONFIRM_LINK_EXPIRED:
     "This link has expired or has already been used. If you've already confirmed your email, please sign in.",
   CONFIRM_LINK_FAILED:
@@ -59,9 +62,7 @@ export const AUTH_COPY_MESSAGES: readonly string[] = Object.keys(AUTH_COPY).map(
 );
 
 const RATE_LIMIT_CODES = ["over_request_rate_limit", "over_email_send_rate_limit"];
-// access_denied is not here: an OAuth consent the user cancelled arrives as
-// error=access_denied too, and an expired email link carries its own
-// error_code, which readCallbackUrl prefers.
+// Codes of an expired or used password-reset link.
 const LINK_EXPIRED_CODES = ["otp_expired", "flow_state_expired", "flow_state_not_found"];
 
 export function copyForAuthError(
@@ -83,11 +84,6 @@ export function copyForAuthError(
       return { message: AUTH_COPY.SIGN_IN_FAILED };
     case "oauth":
       return { message: AUTH_COPY.OAUTH_FAILED };
-    case "confirm-link":
-      if (LINK_EXPIRED_CODES.indexOf(c) !== -1) {
-        return { message: AUTH_COPY.CONFIRM_LINK_EXPIRED, offerResend: true };
-      }
-      return { message: AUTH_COPY.CONFIRM_LINK_FAILED };
     case "reset-request":
       return { message: AUTH_COPY.RESET_REQUEST_FAILED };
     case "reset-link":
