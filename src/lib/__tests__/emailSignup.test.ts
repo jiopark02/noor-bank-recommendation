@@ -41,7 +41,11 @@ import {
  *   M30 race: the request's names on the second call         -> RS5
  *   M31 resignup: the confirmed check removed                -> RS11
  *   M32 resignup: an Auth read error read as "no user"       -> RS13
+ *   M46 resignup: a refusal after the claim answered as
+ *       the full-success body                                -> RS16, RS6
  *   M47 race re-read log lines back to the old prefix        -> RS9, RS10
+ *   M51 resignup: the Auth email's trim / lower-casing
+ *       removed (either one alone)                           -> RS17
  *
  * The generateLink fake rotates its token on every call (rotatingLinks), as
  * the server does, so "the token sent" can be checked against the only token
@@ -1028,6 +1032,63 @@ describe("resignup and the 23505 race (STOP-1)", () => {
       const result = await createEmailAccount(input(), d);
       expect(d.generateSignupLink).toHaveBeenCalledTimes(1);
       expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+      expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
+    }
+  );
+
+  it.each([
+    {
+      name: "an unexpected refusal is 500",
+      error: new AuthApiError("server error", 500, "unexpected_failure"),
+      status: 500,
+      message: "Failed to create account. Please try again.",
+    },
+    {
+      name: "a weak password is 400",
+      error: new AuthWeakPasswordError("Password should be at least 6 characters", 422, ["length"]),
+      status: 400,
+      message: "Please choose a stronger password.",
+    },
+  ])(
+    "RS16 resignup where generateLink refuses after the claim: $name, nothing sent, nothing inserted or deleted",
+    async ({ error, status, message }) => {
+      const d = resignupDeps({
+        generateSignupLink: vi.fn(async () => ({ userId: null, hashedToken: null, error })),
+      });
+      const result = await createEmailAccount(input(), d);
+      expect(result).toEqual({ status, body: { success: false, message } });
+      expect(d.claimConfirmationSend).toHaveBeenCalledTimes(1);
+      expect(d.claimConfirmationSend).toHaveBeenCalledWith(USER_ID);
+      expect(d.generateSignupLink).toHaveBeenCalledTimes(1);
+      expect(d.sendConfirmationEmail).not.toHaveBeenCalled();
+      expect(d.insertProfile).not.toHaveBeenCalled();
+      expect(d.insertSurveyResponse).not.toHaveBeenCalled();
+      expect(d.deleteAuthUser).not.toHaveBeenCalled();
+      expect(logLines(d)).toContain(
+        "[signup] resignup confirmation not sent (link=refused) user_id=" + USER_ID
+      );
+      for (const line of logLines(d)) {
+        expect(line.toLowerCase()).not.toContain(NORMALIZED);
+      }
+    }
+  );
+
+  it.each([
+    { name: "surrounding whitespace", authEmail: " " + NORMALIZED + " " },
+    { name: "letter case", authEmail: "Person.Name@EXAMPLE.com" },
+  ])(
+    "RS17 resignup whose Auth email differs from the request's only in $name: the same user, so claim, token and send",
+    async ({ authEmail }) => {
+      const d = resignupDeps({
+        getAuthUser: vi.fn(async () => ({
+          user: { email: authEmail, emailConfirmed: false },
+          error: null,
+        })),
+      });
+      const result = await createEmailAccount(input(), d);
+      expect(logLines(d).some((line) => line.includes("auth=email-mismatch"))).toBe(false);
+      expect(d.claimConfirmationSend).toHaveBeenCalledWith(USER_ID);
+      expectSentLatestAfterClaim(d);
       expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
     }
   );
