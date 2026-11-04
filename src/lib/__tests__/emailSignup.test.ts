@@ -41,6 +41,7 @@ import {
  *   M30 race: the request's names on the second call         -> RS5
  *   M31 resignup: the confirmed check removed                -> RS11
  *   M32 resignup: an Auth read error read as "no user"       -> RS13
+ *   M47 race re-read log lines back to the old prefix        -> RS9, RS10
  *
  * The generateLink fake rotates its token on every call (rotatingLinks), as
  * the server does, so "the token sent" can be checked against the only token
@@ -941,7 +942,7 @@ describe("resignup and the 23505 race (STOP-1)", () => {
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
     expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
     expect(logLines(d)).toEqual([
-      "[signup] resignup race-23505 lookup=error code=PGRST000 auth_id=" + USER_ID,
+      "[signup] id mismatch branch=race-23505 lookup=error code=PGRST000 auth_id=" + USER_ID,
     ]);
   });
 
@@ -956,7 +957,7 @@ describe("resignup and the 23505 race (STOP-1)", () => {
     expect(d.deleteAuthUser).not.toHaveBeenCalled();
     expect(result).toEqual({ status: 200, body: ACCEPTED_BODY });
     expect(logLines(d)).toEqual([
-      "[signup] resignup id mismatch branch=race-23505 lookup=none auth_id=" + USER_ID,
+      "[signup] id mismatch branch=race-23505 lookup=none auth_id=" + USER_ID,
     ]);
   });
 

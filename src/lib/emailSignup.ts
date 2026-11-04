@@ -556,7 +556,7 @@ export async function createEmailAccount(
     if (again.error) {
       emit(
         deps,
-        "[signup] resignup race-23505 lookup=error code=" +
+        "[signup] id mismatch branch=race-23505 lookup=error code=" +
           codeText(again.error) +
           " auth_id=" +
           userId
@@ -564,7 +564,7 @@ export async function createEmailAccount(
       return accepted(true, true);
     }
     if (!again.row) {
-      emit(deps, "[signup] resignup id mismatch branch=race-23505 lookup=none auth_id=" + userId);
+      emit(deps, "[signup] id mismatch branch=race-23505 lookup=none auth_id=" + userId);
       return accepted(true, true);
     }
     if (again.row.id !== userId) {
