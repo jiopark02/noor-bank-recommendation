@@ -1,7 +1,6 @@
 import { Resend } from "resend";
 import { toLogSafeError } from "@/lib/logSafeError";
-// emailConfirmation.ts imports escapeHtml from this file. The cycle is safe:
-// each side only calls the other's function declarations, at call time.
+// One direction only: emailConfirmation.ts imports nothing from this file.
 import { buildSignupConfirmationEmail } from "@/lib/emailConfirmation";
 
 let resend: Resend | null = null;
@@ -63,33 +62,6 @@ export async function sendEmail({
     console.error("Failed to send email:", toLogSafeError(error));
     return false;
   }
-}
-
-export interface BuiltEmail {
-  subject: string;
-  html: string;
-  text: string;
-}
-
-/**
- * The five characters that can change the meaning of HTML text or of a quoted
- * attribute. The quotes are written as escapes: serverLogEmailProbe.test.ts
- * reads this file with a masker that does not understand regex literals, and a
- * literal quote inside one would confuse it.
- */
-const HTML_SPECIAL_PATTERN = /[&<>\u0022\u0027]/g;
-
-const HTML_ENTITIES: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-/** Encodes a value for an HTML text node or a quoted attribute. */
-export function escapeHtml(value: string): string {
-  return value.replace(HTML_SPECIAL_PATTERN, (ch) => HTML_ENTITIES[ch]);
 }
 
 /**

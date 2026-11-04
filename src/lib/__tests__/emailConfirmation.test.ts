@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { escapeHtml } from "../escapeHtml";
 import {
   buildConfirmationLink,
   buildSignupConfirmationEmail,
@@ -80,5 +83,22 @@ describe("buildSignupConfirmationEmail", () => {
     expect(email.text.split(link).join("")).not.toMatch(duration);
     expect(email.html.split(link.replace(/&/g, "&amp;")).join("")).not.toMatch(duration);
     expect(email.text).toContain("expires");
+  });
+});
+
+describe("module graph", () => {
+  const read = (rel: string) =>
+    readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+
+  it("E9 emailConfirmation.ts imports nothing from email.ts, and takes escapeHtml from its own module", () => {
+    const source = read("../emailConfirmation.ts");
+    expect(source).not.toMatch(/from ["'](?:@\/lib|\.)\/email["']/);
+    expect(source).toContain('import { escapeHtml } from "@/lib/escapeHtml";');
+    expect(read("../email.ts")).not.toMatch(/\bescapeHtml\b/);
+  });
+
+  it("E10 escapeHtml encodes the five characters and leaves the rest", () => {
+    expect(escapeHtml(`a&b<c>d"e'f`)).toBe("a&amp;b&lt;c&gt;d&quot;e&#39;f");
+    expect(escapeHtml("plain text / 123")).toBe("plain text / 123");
   });
 });

@@ -540,6 +540,7 @@ const TOUCHED_FILES = [
   FILES.resendConfirmation,
   FILES.emailConfirmation,
   FILES.confirmationSendLimit,
+  "../escapeHtml.ts",
   "../authErrorCopy.ts",
   "../sessionFlow.ts",
   "../../app/auth/callback/page.tsx",

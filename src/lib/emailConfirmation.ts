@@ -1,4 +1,11 @@
-import { escapeHtml, type BuiltEmail } from "@/lib/email";
+import { escapeHtml } from "@/lib/escapeHtml";
+
+/** Subject, HTML and plain-text parts of an email, before it is sent. */
+export interface BuiltEmail {
+  subject: string;
+  html: string;
+  text: string;
+}
 
 /**
  * The signup confirmation link and the email that carries it.
