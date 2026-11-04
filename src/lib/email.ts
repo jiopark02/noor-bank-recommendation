@@ -1,6 +1,9 @@
 import { Resend } from "resend";
 import { toLogSafeError } from "@/lib/logSafeError";
 import { sanitizeNameField } from "@/lib/validation";
+// emailConfirmation.ts imports escapeHtml from this file. The cycle is safe:
+// each side only calls the other's function declarations, at call time.
+import { buildSignupConfirmationEmail } from "@/lib/emailConfirmation";
 
 let resend: Resend | null = null;
 
@@ -87,7 +90,7 @@ const HTML_ENTITIES: Record<string, string> = {
 };
 
 /** Encodes a value for an HTML text node or a quoted attribute. */
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value.replace(HTML_SPECIAL_PATTERN, (ch) => HTML_ENTITIES[ch]);
 }
 
@@ -244,6 +247,19 @@ export async function sendWelcomeEmail(
   firstName?: string
 ): Promise<boolean> {
   const { subject, html, text } = buildWelcomeEmail(firstName);
+  return sendEmail({ to: email, subject, html, text });
+}
+
+/**
+ * Signup confirmation email. It takes the recipient and the link only: the
+ * builder has no parameter a name or any other request value could reach.
+ * The link is built by buildConfirmationLink.
+ */
+export async function sendSignupConfirmationEmail(
+  email: string,
+  link: string
+): Promise<boolean> {
+  const { subject, html, text } = buildSignupConfirmationEmail(link);
   return sendEmail({ to: email, subject, html, text });
 }
 
