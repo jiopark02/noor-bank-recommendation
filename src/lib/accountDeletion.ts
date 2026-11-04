@@ -266,9 +266,10 @@ export async function deleteAccountForUser(
   }
 
   // ---------------------------------------------------------------------
-  // Step 4. Delete the public.users row. FK ON DELETE CASCADE removes the child
-  // tables (survey_responses, recommendations_new, posts, comments,
-  // chat_sessions, chat_messages, user_facts, chat_summaries, admin_users).
+  // Step 4. Delete the public.users row. FK ON DELETE CASCADE removes the rows
+  // of every table whose user_id references public.users. Tables whose
+  // user_id references auth.users instead are cleared by the cascade from
+  // step 5, and plaid_connections, which has no foreign key, only in step 2.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to
