@@ -108,20 +108,41 @@ describe("survey route wiring: email/password signup", () => {
   });
 
   it("W2 passes the real SIGNUP_DISABLED gate", () => {
-    const block = between(code, "createEmailAccount(", "createAuthUser:");
+    const block = between(code, "createEmailAccount(", "generateSignupLink:");
     expect(block).toMatch(/\{ ?isSignupDisabled, ?$|isSignupDisabled: isSignupDisabled,/);
     expect(codeWithStrings).toMatch(
       /function isSignupDisabled\(\): boolean \{ return process\.env\.SIGNUP_DISABLED === "true"; \}/
     );
   });
 
-  it("W3 the createUser adapter passes the attributes through unchanged", () => {
-    const block = between(code, "createAuthUser:", "insertProfile:");
-    expect(block).toMatch(/async \( ?attributes ?\) =>/);
-    expect(block).toMatch(/\.auth\.admin\.createUser\( ?attributes ?\)/);
-    expect(block).toMatch(/return \{ userId: data\?\.user\?\.id \?\? null, error \}/);
+  it("W3 the generateLink adapter passes its arguments through and reads only the token and the id", () => {
+    const block = between(codeWithStrings, "generateSignupLink:", "insertProfile:");
+    expect(block).toMatch(/async \( ?\{ email, password, data \} ?\) =>/);
+    expect(block).toMatch(
+      /\.auth\.admin\.generateLink\(\{ type: "signup", email, password, options: \{ data \}, \}\)/
+    );
+    expect(block).toMatch(
+      /return \{ userId: link\?\.user\?\.id \?\? null, hashedToken: link\?\.properties\?\.hashed_token \?\? null, error, \}/
+    );
+    expect(code).not.toMatch(/\baction_link\b/);
+    expect(code).not.toMatch(/\bcreateUser\b/);
     expect(code).not.toMatch(/\bemail_confirm\b/);
     expect(code).not.toMatch(/\buser_metadata\b/);
+  });
+
+  it("W12 the Auth read adapter is getUserById, reads the email and confirmation only, and turns not-found into no user", () => {
+    const block = between(codeWithStrings, "getAuthUser:", "insertProfile:");
+    expect(block).toMatch(/async \( ?userId ?\) =>/);
+    expect(block).toMatch(
+      /const \{ data, error \} = await supabaseAdmin\.auth\.admin\.getUserById\( ?userId ?\);/
+    );
+    expect(block).toContain('(error as { code?: unknown }).code === "user_not_found"');
+    expect(block).toContain("(error as { status?: unknown }).status === 404");
+    expect(block).toMatch(/return missing \? \{ user: null, error: null \} : \{ user: null, error \};/);
+    expect(block).toMatch(
+      /user: \{ email: user\.email \?\? null, emailConfirmed: Boolean\(user\.email_confirmed_at\), \}, error: null,/
+    );
+    expect(block).not.toMatch(/user_metadata|generateLink|\.(insert|upsert|update|delete)\(/);
   });
 
   it("W4 the delete adapter returns the admin API's error instead of catching it", () => {
@@ -134,21 +155,35 @@ describe("survey route wiring: email/password signup", () => {
     expect(code).not.toMatch(/deleteUser\([^)]*\)\s*\.catch\(/);
   });
 
-  it("W5 the insert adapters target users and survey_responses", () => {
+  it("W5 the insert adapters target users and survey_responses and return the error as given", () => {
     const profile = between(codeWithStrings, "insertProfile:", "deleteAuthUser:");
-    expect(profile).toMatch(/\.from\("users"\) ?\.insert\( ?row ?\)/);
-    const survey = between(codeWithStrings, "insertSurveyResponse:", "sendWelcomeEmail");
+    expect(profile).toMatch(
+      /const \{ error \} = await supabaseAdmin\.from\("users"\) ?\.insert\( ?row ?\); return \{ error \};/
+    );
+    const survey = between(codeWithStrings, "insertSurveyResponse:", "claimConfirmationSend:");
     expect(survey).toMatch(/\.from\("survey_responses"\) ?\.insert\( ?buildSurveyRow\( ?userId, ?surveyData, ?now ?\) ?\)/);
   });
 
-  it("W6 the duplicate-email lookup reads users by the email it is given and returns its error", () => {
+  it("W6 the email lookup reads users by the email it is given and returns the row and its error", () => {
     const block = between(codeWithStrings, "findProfileByEmail:", "now:");
     expect(block).toMatch(/async \( ?email ?\) =>/);
     expect(block).toMatch(
-      /\.from\("users"\) ?\.select\("id"\) ?\.eq\("email", ?email ?\) ?\.maybeSingle\(\)/
+      /\.from\("users"\) ?\.select\("id, first_name, last_name"\) ?\.eq\("email", ?email ?\) ?\.maybeSingle\(\)/
     );
-    expect(block).toMatch(/return \{ found: !!data, error \}/);
+    expect(block).toMatch(
+      /row: data \? \{ id: String\(data\.id\), first_name: data\.first_name \?\? null, last_name: data\.last_name \?\? null, \} : null, error,/
+    );
     expect(block).not.toMatch(/\.(insert|upsert|update|delete)\(/);
+  });
+
+  it("W11 the claim and the send are the shared helpers; the link base is NEXT_PUBLIC_APP_URL", () => {
+    const block = between(codeWithStrings, "claimConfirmationSend:", "findProfileByEmail:");
+    expect(block).toContain(
+      "claimConfirmationSend((fn, args) => supabaseAdmin.rpc(fn, args), userId)"
+    );
+    expect(block).toContain("sendConfirmationEmail: sendSignupConfirmationEmail,");
+    expect(block).toContain("appUrl: process.env.NEXT_PUBLIC_APP_URL");
+    expect(codeWithStrings).not.toContain("sendWelcomeEmail");
   });
 });
 

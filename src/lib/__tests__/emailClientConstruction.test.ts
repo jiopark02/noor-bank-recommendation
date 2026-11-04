@@ -117,10 +117,15 @@ describe("sendEmail with a key that is not a valid header value", () => {
     expect(constructionLines()).toBe(2);
   });
 
-  it("the waitlist and welcome senders resolve false and stay clean too", async () => {
+  it("the waitlist and signup confirmation senders resolve false and stay clean too", async () => {
     const m = await load();
     await expect(m.sendWaitlistConfirmationEmail(PROBE)).resolves.toBe(false);
-    await expect(m.sendWelcomeEmail(PROBE, "Name")).resolves.toBe(false);
+    await expect(
+      m.sendSignupConfirmationEmail(
+        PROBE,
+        "https://noor.example/auth/callback#token_hash=t&type=signup"
+      )
+    ).resolves.toBe(false);
     expect(output()).not.toContain(KEY_HEAD);
     expect(output()).not.toContain(KEY_TAIL);
     expect(output()).not.toContain(PROBE);

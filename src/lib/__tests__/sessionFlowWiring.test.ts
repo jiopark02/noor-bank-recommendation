@@ -246,7 +246,7 @@ describe("auth callback", () => {
     expect(failed).not.toContain("setError(");
   });
 
-  it("P28 both retry messages are non-empty fixed strings", () => {
+  it("P28 both retry messages are non-empty fixed strings, and nothing else sets or clears it", () => {
     const calls = FLAT.match(/setRetryMessage\([^)]*\)/g) ?? [];
     expect(calls).toHaveLength(2);
     for (const call of calls) {
@@ -292,11 +292,15 @@ describe("auth callback", () => {
     ]);
   });
 
-  it("P12 the retry screen reloads and does not send the user to /login", () => {
+  it("P12 the retry screen reloads in every mode and does not send the user to /login", () => {
     const screen = slice(CALLBACK, "if (retryMessage) {", "if (error) {");
     expect(screen).toContain("onClick={() => window.location.reload()}");
     expect(screen).toContain("Try again");
     expect(screen).not.toContain('router.push("/login")');
+    expect(count(CALLBACK, "window.location.reload()")).toBe(1);
+    expect(CALLBACK).not.toContain("retrySignIn");
+    expect(CALLBACK).not.toContain("retryMode");
+    expect(CALLBACK).not.toContain("runConfirmedSignIn");
   });
 
   it("P13 the profile sync can be aborted at its time limit", () => {
@@ -308,5 +312,96 @@ describe("auth callback", () => {
 
   it("P14 the effect cancels on unmount", () => {
     expect(FLAT).toMatch(/return \(\) => \{ cancelled = true; \}; \}, \[router\]\);/);
+  });
+});
+
+describe("auth callback: email confirmation", () => {
+  const FLAT = CALLBACK.replace(/\s+/g, " ");
+  const HANDLER = slice(CALLBACK, "const handleConfirm = async", "const handleResend = async");
+  const MOUNT = slice(
+    CALLBACK,
+    "const remembered = tokenHashRef.current;",
+    "const handleConfirm = async"
+  );
+
+  it("P30 verifyOtp is called once, inside the button's handler, never on mount", () => {
+    expect(count(CALLBACK, "verifyOtp(")).toBe(1);
+    expect(HANDLER.replace(/\s+/g, " ")).toContain(
+      'client.auth.verifyOtp({ token_hash: tokenHash, type: "signup" })'
+    );
+    expect(MOUNT).not.toContain("verifyOtp");
+    expect(count(CALLBACK, "onClick={handleConfirm}")).toBe(2);
+  });
+
+  it("P31 the fragment is removed on entry, right after the token is taken into memory, not in the handler", () => {
+    expect(MOUNT.replace(/\s+/g, " ")).toContain(
+      "tokenHashRef.current = url.tokenHash; removeFragment();"
+    );
+    expect(HANDLER).not.toContain("removeFragment");
+    expect(count(CALLBACK, "removeFragment();")).toBe(1);
+    expect(FLAT).toContain(
+      'window.history.replaceState( window.history.state, "", window.location.pathname + window.location.search );'
+    );
+  });
+
+  it("P32 a URL error shows the fixed OAuth message only: no error text, no confirmation resend", () => {
+    expect(CALLBACK).not.toContain("error_description");
+    expect(CALLBACK).not.toContain("searchParams");
+    const urlError = slice(MOUNT, 'if (url.kind === "url-error") {', '} else if (url.kind === "confirm") {');
+    expect(urlError.replace(/\s+/g, " ")).toContain("setError(AUTH_COPY.OAUTH_CALLBACK_FAILED);");
+    expect(urlError).not.toContain("setConfirmPhase");
+    expect(CALLBACK).not.toContain("copyForAuthError");
+    expect(CALLBACK).not.toContain("url.code");
+  });
+
+  it("P33 the confirm mode takes its names from chooseConfirmedNames, not metadata", () => {
+    const confirm = slice(CALLBACK, 'if (mode === "confirm") {', "} else if (syncedNames) {");
+    const flat = confirm.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      "const stored = syncedNames ? null : await readStoredNames(client, user.id);"
+    );
+    expect(flat).toContain(
+      "profile = { ...profile, ...chooseConfirmedNames({ synced: syncedNames, stored }), };"
+    );
+    expect(confirm).not.toContain("user_metadata");
+    expect(confirm).not.toContain("profile.firstName");
+    expect(HANDLER.replace(/\s+/g, " ")).toContain('await completeSignIn("confirm", {');
+    expect(MOUNT.replace(/\s+/g, " ")).toContain('void completeSignIn("oauth", {');
+  });
+
+  it("P37 the mount reads the remembered token before the URL, so a second effect run (Strict Mode) after the fragment is gone still confirms", () => {
+    const flat = MOUNT.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      'const remembered = tokenHashRef.current; const url: CallbackUrlState = remembered ? { kind: "confirm", tokenHash: remembered } : readCallbackUrl(window.location.href);'
+    );
+    expect(count(CALLBACK, "readCallbackUrl(")).toBe(1);
+    expect(flat.indexOf("tokenHashRef.current;")).toBeLessThan(flat.indexOf("readCallbackUrl("));
+    expect(flat.indexOf("readCallbackUrl(")).toBeLessThan(flat.indexOf("removeFragment();"));
+  });
+
+  it("P36 the confirmed sign-in runs from one place, the confirm handler, after verifyOtp", () => {
+    expect(count(CALLBACK, 'completeSignIn("confirm"')).toBe(1);
+    expect(HANDLER.replace(/\s+/g, " ")).toContain(
+      'setConfirmPhase(null); await completeSignIn("confirm", {'
+    );
+  });
+
+  it("P34 the confirm button waits for a session read before it is enabled", () => {
+    const flat = MOUNT.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      'void readSession(undefined, "auth-callback").then(() => { if (!cancelled) setConfirmPhase("ready"); });'
+    );
+    expect(FLAT).toContain('disabled={confirmPhase !== "ready"}');
+  });
+
+  it("P35 the resend on the expired screen posts the email only and shows fixed text", () => {
+    const resend = slice(CALLBACK, "const handleResend = async", "if (retryMessage) {");
+    const flat = resend.replace(/\s+/g, " ");
+    expect(flat).toContain('fetch("/api/auth/resend-confirmation", {');
+    expect(flat).toContain("body: JSON.stringify({ email: resendEmail.trim().toLowerCase() }),");
+    expect(flat).toContain(
+      "setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);"
+    );
+    expect(resend).not.toContain(".json()");
   });
 });

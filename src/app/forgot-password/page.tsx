@@ -13,6 +13,7 @@ import {
 } from "@/lib/validation";
 import { supabase } from "@/lib/supabase-browser";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { AUTH_COPY, authErrorCode, copyForAuthError } from "@/lib/authErrorCopy";
 
 type Step = "email" | "sent" | "reset" | "success";
 
@@ -31,6 +32,8 @@ export default function ForgotPasswordPage() {
   const [countdown, setCountdown] = useState(60);
   const [canResend, setCanResend] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(false);
+  // Set when the reset link cannot be used, to offer starting over.
+  const [offerNewLink, setOfferNewLink] = useState(false);
 
   // Handle the recovery link: exchange the token_hash for a recovery session.
   // PKCE (@supabase/ssr default) requires verifyOtp here, not the ?token= flow.
@@ -74,9 +77,9 @@ export default function ForgotPasswordPage() {
       .then(({ error: verifyError }) => {
         if (!isActive) return;
         if (verifyError) {
-          setError(
-            "This reset link is invalid or has expired. Please request a new one."
-          );
+          const copy = copyForAuthError(authErrorCode(verifyError), "reset-link");
+          setError(copy.message);
+          setOfferNewLink(Boolean(copy.offerNewResetLink));
           setRecoveryReady(false);
         } else {
           verifiedHashRef.current = tokenHash;
@@ -86,9 +89,8 @@ export default function ForgotPasswordPage() {
       })
       .catch(() => {
         if (!isActive) return;
-        setError(
-          "This reset link is invalid or has expired. Please request a new one."
-        );
+        setError(AUTH_COPY.RESET_LINK_FAILED);
+        setOfferNewLink(true);
         setRecoveryReady(false);
       })
       .finally(() => {
@@ -155,16 +157,16 @@ export default function ForgotPasswordPage() {
       );
 
       if (resetError) {
-        throw new Error(resetError.message);
+        // Fixed copy by code: an Auth error message is not shown.
+        setError(copyForAuthError(authErrorCode(resetError), "reset-request").message);
+        return;
       }
 
       setStep("sent");
       setCountdown(60);
       setCanResend(false);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : ERROR_MESSAGES.SERVER_ERROR
-      );
+    } catch {
+      setError(AUTH_COPY.RESET_REQUEST_FAILED);
     } finally {
       setIsLoading(false);
     }
@@ -184,16 +186,24 @@ export default function ForgotPasswordPage() {
         }
       );
       if (resetError) {
-        throw new Error(resetError.message);
+        // Fixed copy by code: an Auth error message is not shown.
+        setError(copyForAuthError(authErrorCode(resetError), "reset-request").message);
+        return;
       }
       setError("");
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : ERROR_MESSAGES.SERVER_ERROR
-      );
+    } catch {
+      setError(AUTH_COPY.RESET_REQUEST_FAILED);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Back to the email step, to request a new reset link.
+  const handleRequestNewLink = () => {
+    setError("");
+    setOfferNewLink(false);
+    setRecoveryReady(false);
+    setStep("email");
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -213,6 +223,7 @@ export default function ForgotPasswordPage() {
     }
     if (!recoveryReady || !supabase) {
       setError("Invalid or expired reset link. Please request a new one.");
+      setOfferNewLink(true);
       setIsLoading(false);
       return;
     }
@@ -223,7 +234,11 @@ export default function ForgotPasswordPage() {
       });
 
       if (updateError) {
-        throw new Error(updateError.message);
+        // Fixed copy by code: an Auth error message is not shown.
+        const copy = copyForAuthError(authErrorCode(updateError), "reset-update");
+        setError(copy.message);
+        setOfferNewLink(Boolean(copy.offerNewResetLink));
+        return;
       }
 
       // SECURITY: tear down the recovery session so the password change does not
@@ -239,10 +254,8 @@ export default function ForgotPasswordPage() {
       }
 
       setStep("success");
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : ERROR_MESSAGES.SERVER_ERROR
-      );
+    } catch {
+      setError(AUTH_COPY.RESET_UPDATE_FAILED);
     } finally {
       setIsLoading(false);
     }
@@ -671,6 +684,16 @@ export default function ForgotPasswordPage() {
                         {error}
                       </p>
                     </motion.div>
+                  )}
+
+                  {offerNewLink && (
+                    <button
+                      type="button"
+                      onClick={handleRequestNewLink}
+                      className="w-full py-3 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
+                    >
+                      Request a new link
+                    </button>
                   )}
 
                   <button

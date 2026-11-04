@@ -1,4 +1,6 @@
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import type { SessionReadResult } from "@/lib/supabase-browser";
+import { firstNameForClient } from "@/lib/defaultFirstName";
 
 /**
  * The decisions the sign-in pages take from a session read or a follow-up read,
@@ -210,4 +212,105 @@ export function decideLateSignIn(input: {
   if (!input.mounted) return "ignore";
   if (input.hasError || !input.hasUser) return "ignore";
   return "adopt";
+}
+
+export type CallbackUrlState =
+  | { kind: "confirm"; tokenHash: string }
+  | { kind: "url-error" }
+  | { kind: "none" };
+
+/**
+ * What /auth/callback was opened with.
+ *
+ * An auth error in the query or the fragment wins over everything else, and
+ * nothing of it is kept: the page answers it with one fixed OAuth message, so
+ * neither the code nor error_description (text whoever wrote the link chose)
+ * is read. Only OAuth redirects carry an error here; a confirmation link's
+ * errors come from verifyOtp in the page.
+ *
+ * A signup confirmation carries its token in the FRAGMENT (see
+ * buildConfirmationLink). A token_hash in the query is not accepted, nor is
+ * any type other than "signup"; both come back "none", which is the existing
+ * OAuth path.
+ */
+export function readCallbackUrl(href: string): CallbackUrlState {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return { kind: "none" };
+  }
+  const query = url.searchParams;
+  const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
+
+  const sources = [query, fragment];
+  for (let i = 0; i < sources.length; i++) {
+    const params = sources[i];
+    if (params.has("error") || params.has("error_code")) {
+      return { kind: "url-error" };
+    }
+  }
+
+  const tokenHash = fragment.get("token_hash");
+  if (tokenHash && fragment.get("type") === "signup") {
+    return { kind: "confirm", tokenHash };
+  }
+  return { kind: "none" };
+}
+
+export type ConfirmResult = "continue" | "expired" | "retry" | "failed";
+
+const CONFIRM_EXPIRED_CODES = ["otp_expired", "flow_state_expired", "flow_state_not_found"];
+
+/**
+ * The outcome of verifyOtp on a signup confirmation link. "retry" is for an
+ * answer that never came (a network failure, a 5xx): the same token may
+ * still work. "expired" is a token the server refused as expired or used.
+ * A success that carries no session is "failed": there is nothing to go on
+ * with.
+ */
+export function decideConfirmResult(
+  error: unknown,
+  hasSession: boolean
+): ConfirmResult {
+  if (!error) return hasSession ? "continue" : "failed";
+  if (isAuthRetryableFetchError(error)) return "retry";
+  const fields = typeof error === "object" && error !== null
+    ? (error as Record<string, unknown>)
+    : {};
+  const status = typeof fields.status === "number" ? fields.status : undefined;
+  if (status !== undefined && (status === 0 || status >= 500)) return "retry";
+  if (typeof fields.code === "string" && CONFIRM_EXPIRED_CODES.indexOf(fields.code) !== -1) {
+    return "expired";
+  }
+  if (status === 403) return "expired";
+  return "failed";
+}
+
+export type DisplayNames = { firstName: string; lastName: string };
+
+/** A users row's names in the local-profile shape, or null without a row. */
+export function storedNamesFromRow(row: unknown): DisplayNames | null {
+  if (!row || typeof row !== "object") return null;
+  const r = row as Record<string, unknown>;
+  return {
+    firstName: firstNameForClient(typeof r.first_name === "string" ? r.first_name : ""),
+    lastName: typeof r.last_name === "string" ? r.last_name : "",
+  };
+}
+
+/**
+ * The names the local profile gets after an email confirmation: the names the
+ * profile sync reported writing, else the stored users row, else empty.
+ * user_metadata is deliberately not an input: a second signup request for the
+ * same unconfirmed email overwrites it with whatever names that request sent,
+ * while the users row keeps the first signup's names.
+ */
+export function chooseConfirmedNames(input: {
+  synced: DisplayNames | null;
+  stored: DisplayNames | null;
+}): DisplayNames {
+  if (input.synced) return { ...input.synced };
+  if (input.stored) return { ...input.stored };
+  return { firstName: "", lastName: "" };
 }

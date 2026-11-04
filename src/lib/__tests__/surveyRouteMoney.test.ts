@@ -43,21 +43,33 @@ function fakeAdmin() {
   return {
     auth: {
       admin: {
-        createUser: async () => {
+        generateLink: async () => {
           state.createUserCalls += 1;
-          return { data: { user: { id: NEW_USER_ID } }, error: null };
+          return {
+            data: { user: { id: NEW_USER_ID }, properties: { hashed_token: "tok" } },
+            error: null,
+          };
         },
         deleteUser: async () => ({ error: null }),
+        getUserById: async () => ({
+          data: { user: { id: NEW_USER_ID, email: null, email_confirmed_at: null } },
+          error: null,
+        }),
       },
     },
+    rpc: async () => ({ data: true, error: null }),
     from: (table: string) => ({
       select: () => {
         state.calls.push({ table, op: "select" });
         return {
-          eq: () => ({
+          eq: (column: string) => ({
             maybeSingle: async () => {
               if (table === "survey_responses") {
                 return { data: state.existingSurvey ? { id: "row-1" } : null, error: null };
+              }
+              // The signup's lookup by email: no account has this email yet.
+              if (column === "email") {
+                return { data: null, error: null };
               }
               return { data: { first_name: "Ann", last_name: null }, error: null };
             },
@@ -87,7 +99,7 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 vi.mock("@/lib/email", () => ({
-  sendWelcomeEmail: async () => true,
+  sendSignupConfirmationEmail: async () => true,
 }));
 
 async function post(body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
@@ -141,7 +153,8 @@ describe("email signup", () => {
   it("RM6 the survey row stores the same amounts the check read from the body", async () => {
     const result = await post({ ...SIGNUP, monthly_income: 3210, monthly_budget: 1234 });
     expect(result.status).toBe(200);
-    expect(state.createUserCalls).toBe(1);
+    // generateLink: once to create the user, once after the claim.
+    expect(state.createUserCalls).toBe(2);
     const surveyInserts = writes().filter(
       (c) => c.table === "survey_responses" && c.op === "insert"
     );

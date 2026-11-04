@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { v4 as uuidv4 } from "uuid";
-import { sendWelcomeEmail } from "@/lib/email";
+import { sendSignupConfirmationEmail } from "@/lib/email";
+import { claimConfirmationSend } from "@/lib/confirmationSendLimit";
 import { sanitizeNameField } from "@/lib/validation";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { toLogSafeError } from "@/lib/logSafeError";
@@ -199,20 +200,53 @@ export async function POST(request: NextRequest) {
           firstName,
           lastName,
           destinationCountry: surveyData.destination_country,
-          institutionId: surveyData.institution_id,
-          university: surveyData.university,
-          countryOfOrigin: surveyData.country_of_origin,
           surveyBody: surveyData,
         },
         {
           isSignupDisabled,
 
-          createAuthUser: async (attributes) => {
-            const { data, error } =
-              await supabaseAdmin.auth.admin.createUser(attributes);
-            return { userId: data?.user?.id ?? null, error };
+          // Creates the user unconfirmed, or returns an existing unconfirmed
+          // one with a new token. Only the hashed token and the user id are
+          // read; the action link is not.
+          generateSignupLink: async ({ email, password, data }) => {
+            const { data: link, error } =
+              await supabaseAdmin.auth.admin.generateLink({
+                type: "signup",
+                email,
+                password,
+                options: { data },
+              });
+            return {
+              userId: link?.user?.id ?? null,
+              hashedToken: link?.properties?.hashed_token ?? null,
+              error,
+            };
           },
 
+          // Read-only. A user that does not exist is "no user", not an error;
+          // only the email and whether it is confirmed are read.
+          getAuthUser: async (userId) => {
+            const { data, error } =
+              await supabaseAdmin.auth.admin.getUserById(userId);
+            if (error) {
+              const missing =
+                (error as { code?: unknown }).code === "user_not_found" ||
+                (error as { status?: unknown }).status === 404;
+              return missing ? { user: null, error: null } : { user: null, error };
+            }
+            const user = data?.user;
+            if (!user) return { user: null, error: null };
+            return {
+              user: {
+                email: user.email ?? null,
+                emailConfirmed: Boolean(user.email_confirmed_at),
+              },
+              error: null,
+            };
+          },
+
+          // The error is returned as PostgREST gave it, so its code (23505
+          // decides a branch) reaches the decision.
           insertProfile: async (row) => {
             const { error } = await supabaseAdmin.from("users").insert(row);
             return { error };
@@ -230,15 +264,29 @@ export async function POST(request: NextRequest) {
             return { error };
           },
 
-          sendWelcomeEmail,
+          claimConfirmationSend: (userId) =>
+            claimConfirmationSend((fn, args) => supabaseAdmin.rpc(fn, args), userId),
+
+          sendConfirmationEmail: sendSignupConfirmationEmail,
+
+          appUrl: process.env.NEXT_PUBLIC_APP_URL || "https://noor.financial",
 
           findProfileByEmail: async (email) => {
             const { data, error } = await supabaseAdmin
               .from("users")
-              .select("id")
+              .select("id, first_name, last_name")
               .eq("email", email)
               .maybeSingle();
-            return { found: !!data, error };
+            return {
+              row: data
+                ? {
+                    id: String(data.id),
+                    first_name: data.first_name ?? null,
+                    last_name: data.last_name ?? null,
+                  }
+                : null,
+              error,
+            };
           },
 
           now: () => now,
