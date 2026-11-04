@@ -22,6 +22,7 @@ import {
 } from "@/lib/sessionFlow";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 import { firstNameForClient } from "@/lib/defaultFirstName";
+import { AUTH_COPY, authErrorCode, copyForAuthError } from "@/lib/authErrorCopy";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -62,6 +63,10 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [touchedEmail, setTouchedEmail] = useState(false);
+  // Set when the password was refused because the email is not confirmed.
+  const [offerResend, setOfferResend] = useState(false);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+  const [isResending, setIsResending] = useState(false);
   // Which submit is the current one, and whether the page is still here, for a
   // sign-in that finishes after its time limit.
   const signInAttemptRef = useRef(0);
@@ -102,7 +107,8 @@ export default function LoginPage() {
 
       if (error) {
         console.error("Google login error:", error);
-        setError(error.message || "Failed to sign in with Google");
+        // Fixed copy by code: an Auth error message is not shown.
+        setError(copyForAuthError(authErrorCode(error), "oauth").message);
       }
     } catch (err) {
       console.error("Google login error:", err);
@@ -116,6 +122,8 @@ export default function LoginPage() {
     e.preventDefault();
     setIsLoading(true);
     setError("");
+    setOfferResend(false);
+    setResendNotice(null);
 
     // Validate email
     const emailValidation = validateEmail(email);
@@ -172,7 +180,10 @@ export default function LoginPage() {
         const { data: authData, error: signInError } = outcome.value;
 
         if (signInError || !authData.user) {
-          setError(signInError?.message || ERROR_MESSAGES.INVALID_CREDENTIALS);
+          // Fixed copy by code: an Auth error message is not shown.
+          const copy = copyForAuthError(authErrorCode(signInError), "sign-in");
+          setError(copy.message);
+          setOfferResend(Boolean(copy.offerResend));
           return;
         }
 
@@ -252,6 +263,25 @@ export default function LoginPage() {
     updateSessionActivity();
 
     router.push("/dashboard");
+  };
+
+  // Sends a new confirmation link to the email typed above. The answer is the
+  // same whether or not the account exists, so the notice is fixed text.
+  const handleResendConfirmation = async () => {
+    setIsResending(true);
+    setResendNotice(null);
+    try {
+      const res = await fetch("/api/auth/resend-confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);
+    } catch {
+      setResendNotice(AUTH_COPY.RESEND_FAILED);
+    } finally {
+      setIsResending(false);
+    }
   };
 
   const isFormValid = email && password && !emailError;
@@ -390,6 +420,22 @@ export default function LoginPage() {
               >
                 <p className="text-red-600 text-sm text-center">{error}</p>
               </motion.div>
+            )}
+
+            {offerResend && (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleResendConfirmation}
+                  disabled={isResending || !email}
+                  className="w-full py-3 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {isResending ? "Sending..." : "Send a new confirmation link"}
+                </button>
+                {resendNotice && (
+                  <p className="text-sm text-gray-600 text-center">{resendNotice}</p>
+                )}
+              </div>
             )}
 
             {/* Submit Button */}
