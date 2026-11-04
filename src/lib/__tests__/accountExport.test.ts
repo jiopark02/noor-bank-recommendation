@@ -314,24 +314,26 @@ describe("account export: what each section reads", () => {
   });
 
   it("E6 no section reads a table the drop migration removes", () => {
-    const DROPPED = [
-      "universities",
-      "visa_types",
-      "banks",
-      "apartments",
-      "credit_cards",
-      "deals",
-      "jobs",
-      "scholarships",
-      "posts",
-      "comments",
-      "recommendations_new",
-      "bank_accounts",
-      "bank_branches",
-      "health_insurance_options",
-      "required_documents",
-      "user_country_preferences",
-    ];
+    // Read from the migration itself, so a table added to it is covered here
+    // without a second list to keep in step.
+    const migration = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../supabase/migrations/20261104130000_drop_unused_legacy_tables.sql",
+          import.meta.url
+        )
+      ),
+      "utf8"
+    )
+      .replace(/\r\n?/g, "\n")
+      .replace(/--[^\n]*/g, "");
+    const DROPPED: string[] = [];
+    const drop = /drop table if exists public\.([a-z_][a-z0-9_]*);/g;
+    let match: RegExpExecArray | null;
+    while ((match = drop.exec(migration)) !== null) DROPPED.push(match[1]);
+    // An empty list would let every section pass.
+    expect(DROPPED.length).toBeGreaterThan(0);
+    expect(DROPPED).toContain("posts");
     for (const section of EXPORT_SECTIONS) {
       expect(DROPPED, section.key).not.toContain(section.table);
     }
@@ -585,5 +587,13 @@ describe("account export route: identity", () => {
 
     expect(ROUTE).toMatch(/buildAccountExport\(\s*authUserId,/);
     expect(ROUTE).not.toMatch(/request\.(json|text|formData|body)|searchParams/);
+
+    // One call, with exactly the id and the reader and no options: a third
+    // argument could replace the sections, the page size or the clock.
+    expect(ROUTE.split("buildAccountExport(").length - 1).toBe(1);
+    expect(ROUTE).toMatch(
+      /buildAccountExport\(\s*authUserId,\s*makeSupabasePageReader\(admin\),?\s*\)/
+    );
+    expect(ROUTE).not.toMatch(/\b(sections|pageSize|EXPORT_SECTIONS)\b/);
   });
 });
