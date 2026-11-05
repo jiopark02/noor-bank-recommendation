@@ -27,6 +27,7 @@ import path from "path";
  *   a function drop moved after the first table drop   -> D6
  *   a function drop's argument types changed           -> D1, D6
  *   a function removed from the DO block's checks      -> D4
+ *   either loop's raise removed or weakened            -> D4
  */
 
 const MIGRATIONS_DIR = path.resolve(__dirname, "../../../supabase/migrations");
@@ -139,6 +140,20 @@ function occurrences(needle: string): number {
   return sql.split(needle).length - 1;
 }
 
+/**
+ * The text between a foreach header, found at or after `from`, and the first
+ * end loop after it. Fails when either is missing, so a lost end loop cannot
+ * widen the cut to the rest of the file.
+ */
+function loopBody(header: string, from: number): string {
+  const start = sql.indexOf(header, from);
+  expect(start, header).toBeGreaterThan(-1);
+  const bodyStart = start + header.length;
+  const end = sql.indexOf("end loop;", bodyStart);
+  expect(end, header).toBeGreaterThan(bodyStart);
+  return sql.slice(bodyStart, end);
+}
+
 function dropAt(table: string): number {
   const at = sql.indexOf(dropStatement(table));
   expect(at, table).toBeGreaterThan(-1);
@@ -185,10 +200,13 @@ describe("drop unused legacy tables migration", () => {
     expect(new Set(listed).size).toBe(listed.length);
     expect([...listed].sort()).toEqual([...TABLES].sort());
 
-    const body = sql.slice(arrayEnd);
-    expect(body).toContain("foreach v_name in array v_tables loop");
-    expect(body).toContain("if to_regclass('public.' || v_name) is not null then");
-    expect(body).toContain("raise exception");
+    // Each loop is cut from its foreach to its own end loop, and the check and
+    // its raise are asserted inside that cut, raise directly in the if: a
+    // raise elsewhere in the block must not stand in for this one.
+    const tableLoop = loopBody("foreach v_name in array v_tables loop", doStart);
+    expect(tableLoop).toMatch(
+      /^\s*if to_regclass\('public\.' \|\| v_name\) is not null then\s+raise exception [^;]*;\s+end if;\s*$/
+    );
 
     const functionsStart = sql.indexOf("v_functions text[] := array[", doStart);
     expect(functionsStart).toBeGreaterThan(arrayEnd);
@@ -198,9 +216,12 @@ describe("drop unused legacy tables migration", () => {
     ).map((quoted) => quoted.slice("'public.".length, -1));
     expect([...checked].sort()).toEqual([...FUNCTIONS].sort());
 
+    const functionLoop = loopBody("foreach v_name in array v_functions loop", functionsEnd);
+    expect(functionLoop).toMatch(
+      /^\s*if to_regprocedure\(v_name\) is not null then\s+raise exception [^;]*;\s+end if;\s*$/
+    );
+
     const functionChecks = sql.slice(functionsEnd);
-    expect(functionChecks).toContain("foreach v_name in array v_functions loop");
-    expect(functionChecks).toContain("if to_regprocedure(v_name) is not null then");
 
     // The same functions by name, so a definition with other argument types
     // is caught too.
