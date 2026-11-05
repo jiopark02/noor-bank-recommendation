@@ -540,8 +540,9 @@ describe("account export: the production page reader", () => {
 
   it("E11 a first page filters, orders ascending and limits; a later page adds gt on the last key", async () => {
     const calls: Call[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const read = makeSupabasePageReader(fakeClient(calls) as any);
+    const read = makeSupabasePageReader(
+      fakeClient(calls) as unknown as Parameters<typeof makeSupabasePageReader>[0]
+    );
 
     await read(base);
     expect(calls).toEqual([
