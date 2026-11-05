@@ -108,3 +108,41 @@ describe("login page wiring: first name in the local profile", () => {
     expect(store).toBeGreaterThan(rowPath);
   });
 });
+
+describe("login page wiring: auth error copy", () => {
+  // Comments and string contents blanked, so a `.message` in either does not
+  // count; whitespace collapsed.
+  const page = mask(source, true).replace(/\s+/g, " ");
+
+  it("L5 no setError argument reads an error's message", () => {
+    const calls = page.match(/setError\([^;]*\);/g) ?? [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      // The only message a setError may read is a fixed copy's.
+      const rest = call
+        .replace("setError(copy.message);", "")
+        .replace(/copyForAuthError\((?:[^()]|\([^()]*\))*\)\.message/g, "");
+      expect(rest, call).not.toContain(".message");
+    }
+    expect(page).not.toMatch(/(?:signInError|error|err|lateError)\??\.message/);
+  });
+
+  it("L6 both Supabase refusals go through copyForAuthError by code", () => {
+    expect(page).toContain(
+      'setError(copyForAuthError(authErrorCode(error), " ").message);'
+    );
+    expect(page).toContain(
+      'const copy = copyForAuthError(authErrorCode(signInError), " "); setError(copy.message); setOfferResend(Boolean(copy.offerResend)); return;'
+    );
+  });
+
+  it("L7 the resend posts the typed email only and shows fixed text", () => {
+    const flat = mask(source, false).replace(/\s+/g, " ");
+    expect(flat).toContain('fetch("/api/auth/resend-confirmation", {');
+    expect(flat).toContain("body: JSON.stringify({ email: email.trim().toLowerCase() }),");
+    expect(flat).toContain(
+      "setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);"
+    );
+    expect(flat).toContain("{offerResend && (");
+  });
+});

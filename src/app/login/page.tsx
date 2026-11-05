@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import type { User } from "@supabase/supabase-js";
 import {
   validateEmail,
   createSession,
@@ -11,9 +12,17 @@ import {
   clearLocalAuthState,
   ERROR_MESSAGES,
 } from "@/lib/validation";
-import { supabase, getSessionSafe } from "@/lib/supabase-browser";
+import { supabase, readSession } from "@/lib/supabase-browser";
+import {
+  PROFILE_READ_TIMEOUT_MS,
+  SIGN_IN_TIMEOUT_MS,
+  decideLateSignIn,
+  decideLoginMount,
+  settleWithin,
+} from "@/lib/sessionFlow";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
 import { firstNameForClient } from "@/lib/defaultFirstName";
+import { AUTH_COPY, authErrorCode, copyForAuthError } from "@/lib/authErrorCopy";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,17 +34,22 @@ export default function LoginPage() {
   // source of truth; if it lingers after the session has expired, redirecting on
   // it alone bounces the user to /dashboard, where middleware immediately sends
   // them back to /login (an infinite loop while every API returns 401). So we
-  // verify the session and clear the stale cache when there is none.
+  // verify the session and clear the stale cache when there is none. A read
+  // that never answered says nothing about the session, so it clears nothing.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!localStorage.getItem("noor_user_id")) return;
-      const session = await getSessionSafe();
+      const read = await readSession(undefined, "login-mount");
       if (cancelled) return;
-      if (session) {
+      const action = decideLoginMount(read);
+      if (action === "go-dashboard") {
         router.replace("/dashboard");
-      } else {
+        return;
+      }
+      if (action === "clear-local") {
         clearLocalAuthState();
+        return;
       }
     })();
     return () => {
@@ -49,6 +63,21 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [touchedEmail, setTouchedEmail] = useState(false);
+  // Set when the password was refused because the email is not confirmed.
+  const [offerResend, setOfferResend] = useState(false);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+  const [isResending, setIsResending] = useState(false);
+  // Which submit is the current one, and whether the page is still here, for a
+  // sign-in that finishes after its time limit.
+  const signInAttemptRef = useRef(0);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Validate email on change
   useEffect(() => {
@@ -78,7 +107,8 @@ export default function LoginPage() {
 
       if (error) {
         console.error("Google login error:", error);
-        setError(error.message || "Failed to sign in with Google");
+        // Fixed copy by code: an Auth error message is not shown.
+        setError(copyForAuthError(authErrorCode(error), "oauth").message);
       }
     } catch (err) {
       console.error("Google login error:", err);
@@ -92,6 +122,8 @@ export default function LoginPage() {
     e.preventDefault();
     setIsLoading(true);
     setError("");
+    setOfferResend(false);
+    setResendNotice(null);
 
     // Validate email
     const emailValidation = validateEmail(email);
@@ -105,66 +137,57 @@ export default function LoginPage() {
       if (supabase) {
         const normalizedEmail = email.trim().toLowerCase();
 
-        const { data: authData, error: signInError } =
-          await supabase.auth.signInWithPassword({
-            email: normalizedEmail,
-            password,
-          });
+        signInAttemptRef.current += 1;
+        const attempt = signInAttemptRef.current;
+        const signIn = supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+        const outcome = await settleWithin(signIn, SIGN_IN_TIMEOUT_MS);
 
-        if (signInError || !authData.user) {
-          setError(signInError?.message || ERROR_MESSAGES.INVALID_CREDENTIALS);
+        if (outcome.timedOut) {
+          setError(
+            "Signing in is taking longer than expected. Please check your connection and try again."
+          );
+          // The call cannot be cancelled, so it may still succeed and store a
+          // session. Left alone, that session would sit in the cookie with no
+          // local state to match it.
+          void signIn.then(
+            async ({ data, error: lateError }) => {
+              const action = decideLateSignIn({
+                attempt,
+                latestAttempt: signInAttemptRef.current,
+                mounted: mountedRef.current,
+                hasError: Boolean(lateError),
+                hasUser: Boolean(data.user),
+              });
+              if (action !== "adopt" || !data.user) return;
+              setError("");
+              setIsLoading(true);
+              try {
+                await finishSignIn(data.user, normalizedEmail);
+              } catch {
+                setError(ERROR_MESSAGES.SERVER_ERROR);
+              } finally {
+                setIsLoading(false);
+              }
+            },
+            () => {}
+          );
           return;
         }
 
-        const user = authData.user;
-        // The placeholder first name is stored as empty, as the other writers
-        // of the local profile do, so no screen greets the user by it.
-        let profile: Record<string, unknown> = {
-          id: user.id,
-          email: user.email || normalizedEmail,
-          firstName: firstNameForClient(
-            user.user_metadata?.first_name ||
-              user.user_metadata?.full_name?.split(" ")[0] ||
-              ""
-          ),
-          lastName:
-            user.user_metadata?.last_name ||
-            user.user_metadata?.full_name?.split(" ").slice(1).join(" ") ||
-            "",
-        };
+        const { data: authData, error: signInError } = outcome.value;
 
-        const { data: profileRow } = await supabase
-          .from("users")
-          .select("id, email, first_name, last_name, raw_user_meta_data")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profileRow) {
-          profile = {
-            id: profileRow.id,
-            email: profileRow.email,
-            firstName: firstNameForClient(profileRow.first_name),
-            lastName: profileRow.last_name || "",
-            ...(profileRow.raw_user_meta_data || {}),
-          };
+        if (signInError || !authData.user) {
+          // Fixed copy by code: an Auth error message is not shown.
+          const copy = copyForAuthError(authErrorCode(signInError), "sign-in");
+          setError(copy.message);
+          setOfferResend(Boolean(copy.offerResend));
+          return;
         }
 
-        const surveyFields = await getSurveyFieldsForUserProfile(
-          supabase,
-          user.id
-        );
-        const profileWithSurvey = { ...profile, ...surveyFields };
-
-        localStorage.setItem("noor_user_id", user.id);
-        localStorage.setItem(
-          "noor_user_profile",
-          JSON.stringify(profileWithSurvey)
-        );
-
-        createSession(keepSignedIn);
-        updateSessionActivity();
-
-        router.push("/dashboard");
+        await finishSignIn(authData.user, normalizedEmail);
         return;
       }
 
@@ -176,6 +199,88 @@ export default function LoginPage() {
       setError(ERROR_MESSAGES.SERVER_ERROR);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Runs once the password has been accepted. The two reads only fill in the
+  // local profile, so past their limit sign-in goes on with what it has.
+  const finishSignIn = async (user: User, normalizedEmail: string) => {
+    if (!supabase) return;
+
+    // The placeholder first name is stored as empty, as the other writers
+    // of the local profile do, so no screen greets the user by it.
+    let profile: Record<string, unknown> = {
+      id: user.id,
+      email: user.email || normalizedEmail,
+      firstName: firstNameForClient(
+        user.user_metadata?.first_name ||
+          user.user_metadata?.full_name?.split(" ")[0] ||
+          ""
+      ),
+      lastName:
+        user.user_metadata?.last_name ||
+        user.user_metadata?.full_name?.split(" ").slice(1).join(" ") ||
+        "",
+    };
+
+    const [profileRead, surveyRead] = await Promise.all([
+      settleWithin(
+        supabase
+          .from("users")
+          .select("id, email, first_name, last_name, raw_user_meta_data")
+          .eq("id", user.id)
+          .maybeSingle(),
+        PROFILE_READ_TIMEOUT_MS
+      ),
+      settleWithin(
+        getSurveyFieldsForUserProfile(supabase, user.id),
+        PROFILE_READ_TIMEOUT_MS
+      ),
+    ]);
+
+    const profileRow = profileRead.timedOut ? null : profileRead.value.data;
+
+    if (profileRow) {
+      profile = {
+        id: profileRow.id,
+        email: profileRow.email,
+        firstName: firstNameForClient(profileRow.first_name),
+        lastName: profileRow.last_name || "",
+        ...(profileRow.raw_user_meta_data || {}),
+      };
+    }
+
+    const surveyFields = surveyRead.timedOut ? {} : surveyRead.value;
+    const profileWithSurvey = { ...profile, ...surveyFields };
+
+    localStorage.setItem("noor_user_id", user.id);
+    localStorage.setItem(
+      "noor_user_profile",
+      JSON.stringify(profileWithSurvey)
+    );
+
+    createSession(keepSignedIn);
+    updateSessionActivity();
+
+    router.push("/dashboard");
+  };
+
+  // Sends a new confirmation link to the email typed above. The answer is the
+  // same whether or not the account exists, so the notice is fixed text.
+  const handleResendConfirmation = async () => {
+    setIsResending(true);
+    setResendNotice(null);
+    try {
+      const res = await fetch("/api/auth/resend-confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);
+    } catch {
+      setResendNotice(AUTH_COPY.RESEND_FAILED);
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -315,6 +420,22 @@ export default function LoginPage() {
               >
                 <p className="text-red-600 text-sm text-center">{error}</p>
               </motion.div>
+            )}
+
+            {offerResend && (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleResendConfirmation}
+                  disabled={isResending || !email}
+                  className="w-full py-3 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {isResending ? "Sending..." : "Send a new confirmation link"}
+                </button>
+                {resendNotice && (
+                  <p className="text-sm text-gray-600 text-center">{resendNotice}</p>
+                )}
+              </div>
             )}
 
             {/* Submit Button */}

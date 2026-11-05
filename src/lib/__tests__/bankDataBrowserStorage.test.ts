@@ -134,7 +134,7 @@ describe("dashboard and connect card keep no bank keys in browser storage; Plaid
 
     const clearAt = effect.indexOf("clearPlaidLocalState()");
     const redirectAt = effect.indexOf('router.replace("/waitlist")');
-    const sessionAt = effect.indexOf("await getSessionSafe()");
+    const sessionAt = effect.indexOf("await retryUntilAnswered(");
 
     expect(redirectAt).toBeGreaterThan(-1);
     expect(sessionAt).toBeGreaterThan(-1);

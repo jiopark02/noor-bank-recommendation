@@ -105,7 +105,6 @@
       "lastName": "Last name",
       "email": "Email",
       "eduVerified": ".edu email verified",
-      "staySignedIn": "Keep me signed in",
       "agreeToTerms": "I agree to the",
       "termsOfService": "Terms of Service",
       "privacyPolicy": "Privacy Policy",
@@ -128,7 +127,7 @@
       "uppercase": "Uppercase (A-Z)",
       "lowercase": "Lowercase (a-z)",
       "number": "Number (0-9)",
-      "special": "Special (!@#$%)"
+      "special": "A symbol (e.g. ! @ # _ -)"
     },
     "step2": {
       "title": "Where you are.",
@@ -180,6 +179,7 @@
       "subtitle": "Walk Us Through",
       "income": "What comes in",
       "incomeHint": "Paycheck, side gigs, anything else",
+      "incomeRequired": "Noor is built for people with a monthly income. Enter your income to continue.",
       "expenses": "What goes out",
       "expensesHint": "Rent, food, transportation, entertainment",
       "priority": "Your priority.",
