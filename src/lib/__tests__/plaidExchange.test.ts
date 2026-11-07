@@ -526,6 +526,9 @@ describe("only a store failure that may have committed is re-read", () => {
     ["crypto", "crypto", null],
     ["db 23514 (check violation)", "db", "23514"],
     ["db 42501 (insufficient privilege)", "db", "42501"],
+    // The insert names a user with no profile row, where plaid_connections
+    // references public.users. Nothing was stored, so the new Item is revoked.
+    ["db 23503 (foreign key violation)", "db", "23503"],
   ];
 
   it.each(definite)("(b) %s: revokes without reading the row again", async (_n, kind, code) => {
@@ -608,7 +611,7 @@ describe("(f) isDefiniteDbRejection", () => {
   it("is true for SQLSTATEs the server sends when it rejects a statement", () => {
     // MUTATION: returning false for every code, or dropping the F0/HV/P0
     // classes.
-    for (const code of ["23514", "42501", "23505", "22001", "40001", "57014", "P0001", "F0000", "HV000"]) {
+    for (const code of ["23514", "23503", "42501", "23505", "22001", "40001", "57014", "P0001", "F0000", "HV000"]) {
       expect(isDefiniteDbRejection(code)).toBe(true);
     }
   });
@@ -825,6 +828,16 @@ describe("storeResultFromInsert", () => {
       ok: false,
       kind: "db",
       dbErrorCode: null,
+    });
+  });
+
+  it("reports a foreign key violation as db, not duplicate_item", () => {
+    // MUTATION: treating every class-23 code as duplicate_item, which would
+    // skip the revocation of an Item that was never stored.
+    expect(storeResultFromInsert({ code: "23503" })).toEqual({
+      ok: false,
+      kind: "db",
+      dbErrorCode: "23503",
     });
   });
 });

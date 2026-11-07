@@ -46,10 +46,18 @@ export type ExportSection = {
 /**
  * Sections whose column list is explicit leave user_id out: the file's
  * top-level user_id already carries it, and a column added to the table later
- * is not exported until someone decides it should be.
+ * is not exported until someone decides it should be. The users table has no
+ * user_id; its id is the user's own id, and its list carries it.
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
-  { key: "users", table: "users", columns: "*", filterColumn: "id", orderColumn: "id", orderKeyType: "uuid" },
+  {
+    key: "users",
+    table: "users",
+    columns: "id, email, first_name, last_name, raw_user_meta_data, created_at, updated_at, status",
+    filterColumn: "id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
   { key: "survey_responses", table: "survey_responses", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   {
     key: "chat_sessions",
