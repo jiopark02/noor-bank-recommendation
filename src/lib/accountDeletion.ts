@@ -27,17 +27,23 @@ import type { RevocableConnection, RevocationSummary } from "./plaidRevocation";
  *   4. DELETE public.users — FK ON DELETE CASCADE removes the child tables
  *   5. auth.admin.deleteUser — most irreversible, therefore last
  *
- * ⚠️ STEP 4'S CASCADE DOES NOT REACH plaid_connections. That table has no
- * foreign key to public.users and its user_id column is TEXT, not the uuid the
- * other child tables carry, so no ON DELETE CASCADE covers it. Its rows are
- * removed one at a time in step 2 and nowhere else. This is why step 3 can be a
- * gate at all: if the cascade did clean the table up, deleting the users row
- * would destroy the rows for un-revoked connections as a side effect, and
- * refusing at step 3 would be the only thing standing between a failed
- * revocation and a permanently unrevokable Item. It is also why step 2 cannot
- * be skipped as redundant — an earlier single-statement helper that deleted
- * every row for the user carried this same note, and it was deleted along with
- * the unconditional-delete behaviour it justified.
+ * ⚠️ STEP 4'S CASCADE DOES NOT REACH plaid_connections. Migration
+ * 20261107130000_add_integrity_constraints_users_plaid_connections.sql makes
+ * its user_id a uuid that references public.users with ON DELETE RESTRICT, not
+ * CASCADE; whether that migration is applied in a given database is live
+ * state. Where it is, the database refuses step 4 while any connection row for
+ * the user remains, and the query error is answered like any other step 4
+ * failure. Where it is not, nothing ties the two tables and nothing refuses.
+ * Either way the rows are removed one at a time in step 2 and nowhere else.
+ *
+ * This is why step 3 is a gate: a cascade on that key would destroy the rows
+ * for un-revoked connections as a side effect of deleting the users row, and
+ * the token each row holds is the only means of revoking its Item later.
+ * RESTRICT holds the same rule in the database, including for a row that
+ * appears between step 2 and step 4, which the gate cannot see. It is also why
+ * step 2 cannot be skipped as redundant — an earlier single-statement helper
+ * that deleted every row for the user carried this same note, and it was
+ * deleted along with the unconditional-delete behaviour it justified.
  *
  * Step 1 is new and it is a fix, not a tidy-up. The admin client used to be
  * constructed AFTER the Plaid loop, with no try around it; createAdminClient()
@@ -269,7 +275,9 @@ export async function deleteAccountForUser(
   // Step 4. Delete the public.users row. FK ON DELETE CASCADE removes the rows
   // of every table whose user_id references public.users. Tables whose
   // user_id references auth.users instead are cleared by the cascade from
-  // step 5, and plaid_connections, which has no foreign key, only in step 2.
+  // step 5. plaid_connections is cleared only in step 2: its key to
+  // public.users, where the migration adding it is applied, is ON DELETE
+  // RESTRICT, so a row left behind makes this delete fail rather than vanish.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to
@@ -291,7 +299,9 @@ export async function deleteAccountForUser(
   // ---------------------------------------------------------------------
   // Step 5. Delete the Supabase Auth user. Most irreversible, therefore last:
   // deleting it first would invalidate the token this request authenticated
-  // with and block everything above.
+  // with and block everything above. Where the integrity migration is
+  // applied, public.users.id references auth.users with ON DELETE CASCADE;
+  // step 4 has already removed that row, so the cascade finds nothing here.
   // ---------------------------------------------------------------------
   const authResult = await deps.deleteAuthUser(userId);
   if (authResult.error) {
