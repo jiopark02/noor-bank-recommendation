@@ -20,13 +20,13 @@ import {
 } from "@/lib/supabase-browser";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import type { Session } from "@supabase/supabase-js";
-import { COUNTRY_DISPLAY } from "@/lib/countryConfig";
 import {
   surveyFailureMessage,
   signupOutcome,
   type SignupOutcome,
 } from "@/lib/surveySubmitOutcome";
-import { MAX_MONTHLY_AMOUNT_DIGITS } from "@/lib/surveyMoney";
+import { MONEY_INPUT_MAX_LENGTH, moneyInputDigits } from "@/lib/moneyInputText";
+import { moneyInputKeyBlocked } from "@/lib/moneyInputText";
 import { AUTH_COPY } from "@/lib/authErrorCopy";
 
 interface SurveyData {
@@ -35,8 +35,7 @@ interface SurveyData {
   password: string;
   confirmPassword: string;
   agreeToTerms: boolean;
-  // Not asked on this form: read from localStorage, and used only to pick the
-  // currency symbol shown beside the money inputs.
+  // Not asked on this form: the app serves the US only, so this is always "US".
   destinationCountry: string;
   monthlyIncome: number;
   monthlyExpenses: number;
@@ -52,27 +51,17 @@ const INITIAL_DATA: SurveyData = {
   password: "",
   confirmPassword: "",
   agreeToTerms: false,
-  destinationCountry: "",
+  destinationCountry: "US",
   monthlyIncome: 0,
   monthlyExpenses: 0,
   hasUsCreditHistory: undefined,
 };
 
-// Currency display only. Recommendation logic does not read this.
-const COUNTRY_CONFIG = {
-  US: {
-    currency: COUNTRY_DISPLAY.US.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.US.currency,
-  },
-  UK: {
-    currency: COUNTRY_DISPLAY.UK.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.UK.currency,
-  },
-  CA: {
-    currency: COUNTRY_DISPLAY.CA.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.CA.currency,
-  },
-};
+// The app serves the US only, so the money inputs always show US dollars.
+const countryConfig = {
+  currency: "$",
+  currencyCode: "USD",
+} as const;
 
 // Input Component - MUST be outside the main component to prevent re-renders
 const Input = ({
@@ -298,9 +287,9 @@ const ToggleButtons = ({
   </div>
 );
 
-// Money Input - handles leading zeros properly
-// At most MAX_MONTHLY_AMOUNT_DIGITS digits: the cap is all nines, so the digit
-// limit alone keeps the value within what the server accepts.
+// Money Input. The text rules (cents cut off, non-digits and leading zeros
+// removed, the digit limit) live in moneyInputDigits, and the full-field key
+// rule in moneyInputKeyBlocked, where they are tested.
 const MoneyInput = ({
   value,
   onChange,
@@ -331,36 +320,55 @@ const MoneyInput = ({
       <input
         type="text"
         inputMode="numeric"
-        maxLength={MAX_MONTHLY_AMOUNT_DIGITS}
+        // Long enough for a pasted amount with separators and cents, so the
+        // browser does not cut the text before it is parsed; the digit limit
+        // is applied by moneyInputDigits.
+        maxLength={MONEY_INPUT_MAX_LENGTH}
         value={text}
         onBlur={onBlur}
         placeholder={placeholder}
         onKeyDown={(e) => {
+          // Shortcuts (paste, copy, cut, select all) pass through; what they
+          // put in the field is cleaned up in onChange.
+          if (e.ctrlKey || e.metaKey) return;
           // Block "0" key when field is empty (prevents leading zeros)
           if (e.key === "0" && text === "") {
+            e.preventDefault();
+            return;
+          }
+          // A full field takes no more digits unless they replace a
+          // selection; read from the element, not from state.
+          if (
+            moneyInputKeyBlocked(
+              e.key,
+              e.currentTarget.value,
+              e.currentTarget.selectionStart,
+              e.currentTarget.selectionEnd
+            )
+          ) {
             e.preventDefault();
             return;
           }
           // Only allow digits and control keys
           if (
             !/^\d$/.test(e.key) &&
-            !["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"].includes(
-              e.key
-            )
+            ![
+              "Backspace",
+              "Delete",
+              "ArrowLeft",
+              "ArrowRight",
+              "Home",
+              "End",
+              "Tab",
+            ].includes(e.key)
           ) {
             e.preventDefault();
           }
         }}
         onChange={(e) => {
-          // Get raw value and strip any non-digits and leading zeros
-          // Sliced as well as maxLength'd: a paste can carry non-digits that
-          // are stripped here, leaving more digits than the limit.
-          const raw = e.target.value
-            .replace(/\D/g, "")
-            .replace(/^0+/, "")
-            .slice(0, MAX_MONTHLY_AMOUNT_DIGITS);
-          setText(raw);
-          onChange(raw ? parseInt(raw, 10) : 0);
+          const digits = moneyInputDigits(e.target.value);
+          setText(digits);
+          onChange(digits ? parseInt(digits, 10) : 0);
         }}
         className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
       />
@@ -419,28 +427,6 @@ export default function SurveyPage() {
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [emailSuggestion, setEmailSuggestion] = useState<string | null>(null);
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
-
-  // Get country config
-  const countryConfig =
-    COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] ||
-    COUNTRY_CONFIG.US;
-
-  // Load destination country from localStorage. This form does not ask for it,
-  // and no screen writes the key any more, so it is read only if an earlier
-  // build left it. When it is missing or not US/UK/CA, the country is US, so
-  // the money inputs never render a wrong currency symbol.
-  useEffect(() => {
-    const savedCountry = localStorage.getItem("noor_selected_country");
-    if (
-      savedCountry &&
-      (savedCountry === "US" || savedCountry === "UK" || savedCountry === "CA")
-    ) {
-      setData((prev) => ({ ...prev, destinationCountry: savedCountry }));
-    } else {
-      // Default to US if not set
-      setData((prev) => ({ ...prev, destinationCountry: "US" }));
-    }
-  }, []);
 
   // Detect an existing session so OAuth users can complete their profile
   // without re-entering a password. Prefill the identity fields we already know.
@@ -941,11 +927,20 @@ export default function SurveyPage() {
               <MoneyInput
                 value={data.monthlyExpenses}
                 onChange={(v) => updateField("monthlyExpenses", v)}
+                onBlur={() => markTouched("monthlyExpenses")}
                 currencySymbol={countryConfig.currency}
               />
               <p className="text-gray-400 text-xs mt-1.5">
                 {t("survey.step4.expensesHint")}
               </p>
+              {/* Zero is not accepted here either: the submit button stays
+                  disabled until spending is above zero, so say why. */}
+              {data.monthlyExpenses === 0 &&
+                touchedFields.has("monthlyExpenses") && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {t("survey.step4.expensesRequired")}
+                  </p>
+                )}
             </div>
 
             {/* Credit history. Optional: leaving it blank is a real answer
