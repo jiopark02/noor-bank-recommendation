@@ -416,9 +416,21 @@ describe("account export: what each section reads", () => {
 describe("account export: explicit column lists match the schema", () => {
   const MIGRATIONS_DIR = new URL("../../../supabase/migrations/", import.meta.url);
 
+  /**
+   * Normalizes line endings and strips SQL line comments, so a statement
+   * quoted in a comment (a reversal block, an example) is not read as a
+   * schema change. Every text the column computation sees goes through here.
+   */
+  function prepareMigrationText(raw: string): string {
+    return raw
+      .replace(/\r\n?/g, "\n")
+      .replace(/--[^\n]*/g, "");
+  }
+
   function readMigration(name: string): string {
-    return readFileSync(fileURLToPath(new URL(name, MIGRATIONS_DIR)), "utf8")
-      .replace(/\r\n?/g, "\n");
+    return prepareMigrationText(
+      readFileSync(fileURLToPath(new URL(name, MIGRATIONS_DIR)), "utf8")
+    );
   }
 
   const MIGRATION_FILES = readdirSync(fileURLToPath(MIGRATIONS_DIR))
@@ -426,11 +438,14 @@ describe("account export: explicit column lists match the schema", () => {
     .sort();
 
   /**
-   * The table's columns as the migrations leave them: the CREATE TABLE's
-   * column lines, then every later ADD COLUMN / DROP COLUMN on the table, in
-   * file order.
+   * The table's columns as the given migration texts leave them, in order:
+   * the CREATE TABLE's column lines, then every later ADD COLUMN / DROP
+   * COLUMN on the table. Pure, so it can be run on synthetic texts.
    */
-  function migrationColumns(table: string): string[] {
+  function migrationColumnsFrom(
+    table: string,
+    texts: readonly string[]
+  ): { columns: string[]; created: number } {
     const columns: string[] = [];
     let created = 0;
     const createHead = `create table if not exists public.${table} (`;
@@ -438,8 +453,7 @@ describe("account export: explicit column lists match the schema", () => {
       `alter table (?:if exists )?(?:only )?public\\.${table}\\b([\\s\\S]*?);`,
       "gi"
     );
-    for (const name of MIGRATION_FILES) {
-      const text = readMigration(name);
+    for (const text of texts) {
       const start = text.indexOf(createHead);
       if (start !== -1) {
         created += 1;
@@ -467,9 +481,49 @@ describe("account export: explicit column lists match the schema", () => {
         }
       }
     }
+    return { columns, created };
+  }
+
+  /** The table's columns as the repository's migrations leave them. */
+  function migrationColumns(table: string): string[] {
+    const { columns, created } = migrationColumnsFrom(
+      table,
+      MIGRATION_FILES.map(readMigration)
+    );
     expect(created, `CREATE TABLE for ${table}`).toBe(1);
     return columns;
   }
+
+  const SYNTHETIC_CREATE =
+    "create table if not exists public.users (\n" +
+    "  id uuid primary key,\n" +
+    "  email text not null\n" +
+    ");\n";
+  const SYNTHETIC_ADD_STATUS =
+    "alter table public.users\n  add column status text not null default 'active';\n";
+
+  it("E15 a drop column quoted in a comment after the real add does not remove the column", () => {
+    // Read as a statement, the comment would hide a column the database has.
+    const { columns } = migrationColumnsFrom("users", [
+      prepareMigrationText(SYNTHETIC_CREATE),
+      prepareMigrationText(
+        SYNTHETIC_ADD_STATUS + "-- alter table public.users drop column status;\n"
+      ),
+    ]);
+    expect(columns).toEqual(["id", "email", "status"]);
+  });
+
+  it("E16 an add column quoted in a comment does not add a column", () => {
+    // Read as a statement, the comment would report a column the database
+    // lacks, and an export selecting it would pass here and fail with 42703.
+    const { columns } = migrationColumnsFrom("users", [
+      prepareMigrationText(SYNTHETIC_CREATE),
+      prepareMigrationText(
+        SYNTHETIC_ADD_STATUS + "-- alter table public.users add column ghost text;\n"
+      ),
+    ]);
+    expect(columns).toEqual(["id", "email", "status"]);
+  });
 
   const EXPLICIT = ["chat_sessions", "chat_usage_reservations", "email_confirmation_sends"];
 
