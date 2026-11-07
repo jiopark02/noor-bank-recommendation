@@ -513,6 +513,17 @@ describe("account export: explicit column lists match the schema", () => {
     expect(columns).toEqual(["id", "email", "status"]);
   });
 
+  it("E17 the real migration files are read through the comment stripping", () => {
+    // E15 and E16 call prepareMigrationText directly; this holds that the
+    // files the column computation reads go through it too. The integrity
+    // migration quotes its reversal, a drop of status, only in its header.
+    const text = readMigration(
+      "20261107130000_add_integrity_constraints_users_plaid_connections.sql"
+    );
+    expect(text).toContain("add column status");
+    expect(text).not.toContain("drop column status");
+  });
+
   it("E16 an add column quoted in a comment does not add a column", () => {
     // Read as a statement, the comment would report a column the database
     // lacks, and an export selecting it would pass here and fail with 42703.
