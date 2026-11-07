@@ -22,12 +22,14 @@ import { describe, it, expect } from "vitest";
  *       text parsed inline instead of through moneyInputDigits      -> PW1
  *   P11 the zero-income notice's condition or key removed           -> PW2
  *   P12 an en.json key the pages read removed or changed            -> PW3
+ *   P13 the zero-spending notice's blur, condition or key removed   -> PW4
+ *   P14 the full-field key check no longer called on key down       -> PW5
  *
  * The masking matches surveyRouteWiring.test.ts: comments are blanked and,
  * in `code`, so are string contents; whitespace is collapsed. Besides
  * handleSubmit, only short regions are searched (the derived input checks,
  * the first-name field, the submit button's disabled condition, MoneyInput
- * and the income field),
+ * and the income and spending fields),
  * so JSX text elsewhere in the file cannot confuse the quote tracking.
  */
 
@@ -209,6 +211,36 @@ describe("survey page wiring: monthly money inputs", () => {
     expect(income).toContain('onBlur={() => markTouched("monthlyIncome")}');
     expect(income).toMatch(
       /\{data\.monthlyIncome === 0 && touchedFields\.has\("monthlyIncome"\) && \( <p [^>]*> \{t\("survey\.step4\.incomeRequired"\)\} <\/p> \)\}/
+    );
+  });
+
+  it("PW4 a zero spending amount shows the spending notice once the field was left", () => {
+    const expenses = pageRegion(
+      "value={data.monthlyExpenses}",
+      "Do you have a credit history in the US?"
+    );
+    expect(expenses).toContain('onBlur={() => markTouched("monthlyExpenses")}');
+    expect(expenses).toMatch(
+      /\{data\.monthlyExpenses === 0 && touchedFields\.has\("monthlyExpenses"\) && \( <p [^>]*> \{t\("survey\.step4\.expensesRequired"\)\} <\/p> \)\}/
+    );
+    const messages = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL("../../../messages/en.json", import.meta.url)),
+        "utf8"
+      )
+    ) as { survey: { step4: Record<string, unknown> } };
+    expect(messages.survey.step4.expensesRequired).toBe(
+      "Enter your monthly spending to continue."
+    );
+  });
+
+  it("PW5 the key handler blocks a digit in a full field through moneyInputKeyBlocked", () => {
+    const input = pageRegion("const MoneyInput = (", "const ViewedMark");
+    expect(input).toMatch(
+      /if \( moneyInputKeyBlocked\( e\.key, e\.currentTarget\.value, e\.currentTarget\.selectionStart, e\.currentTarget\.selectionEnd \) \) \{ e\.preventDefault\(\); return; \}/
+    );
+    expect(readFileSync(PAGE, "utf8")).toContain(
+      'import { moneyInputKeyBlocked } from "@/lib/moneyInputText";'
     );
   });
 

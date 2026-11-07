@@ -3,6 +3,7 @@ import {
   MONEY_INPUT_MAX_LENGTH,
   moneyInputAmount,
   moneyInputDigits,
+  moneyInputKeyBlocked,
 } from "../moneyInputText";
 import { MAX_MONTHLY_AMOUNT, MAX_MONTHLY_AMOUNT_DIGITS } from "../surveyMoney";
 
@@ -15,6 +16,10 @@ import { MAX_MONTHLY_AMOUNT, MAX_MONTHLY_AMOUNT_DIGITS } from "../surveyMoney";
  *   rounding instead of cutting                   -> MI2, MI5
  *   leading zeros kept                            -> MI6
  *   maxLength shorter than a formatted amount     -> MI7
+ *   the full-field key check without its limit    -> MI10
+ *   the full-field key check ignoring selection   -> MI9
+ *   the full-field key check removed (never block) -> MI8
+ *   the full-field key check blocking non-digits  -> MI11
  */
 
 describe("money input text", () => {
@@ -61,6 +66,28 @@ describe("money input text", () => {
     expect(moneyInputDigits("0012")).toBe("12");
     expect(moneyInputDigits("$ 0")).toBe("");
     expect(moneyInputDigits("")).toBe("");
+  });
+
+  it("MI8 a digit is blocked in a full field with nothing selected", () => {
+    expect(moneyInputKeyBlocked("9", "123456", 1, 1)).toBe(true);
+    expect(moneyInputKeyBlocked("9", "123456", 6, 6)).toBe(true);
+    expect(moneyInputKeyBlocked("9", "123456", null, null)).toBe(true);
+  });
+
+  it("MI9 a digit replacing a selection in a full field is allowed", () => {
+    expect(moneyInputKeyBlocked("9", "123456", 1, 3)).toBe(false);
+    expect(moneyInputKeyBlocked("9", "123456", 0, 6)).toBe(false);
+  });
+
+  it("MI10 a digit is allowed below the limit", () => {
+    expect(moneyInputKeyBlocked("9", "12345", 5, 5)).toBe(false);
+    expect(moneyInputKeyBlocked("9", "", 0, 0)).toBe(false);
+  });
+
+  it("MI11 editing keys are never blocked by the limit", () => {
+    for (const key of ["Backspace", "Delete", "ArrowLeft", "Home", "End", "Tab"]) {
+      expect(moneyInputKeyBlocked(key, "123456", 6, 6)).toBe(false);
+    }
   });
 
   it("MI7 the input's maxLength holds a formatted maximum with cents", () => {

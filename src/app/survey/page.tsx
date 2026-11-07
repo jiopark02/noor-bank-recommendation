@@ -26,6 +26,7 @@ import {
   type SignupOutcome,
 } from "@/lib/surveySubmitOutcome";
 import { MONEY_INPUT_MAX_LENGTH, moneyInputDigits } from "@/lib/moneyInputText";
+import { moneyInputKeyBlocked } from "@/lib/moneyInputText";
 import { AUTH_COPY } from "@/lib/authErrorCopy";
 
 interface SurveyData {
@@ -287,7 +288,8 @@ const ToggleButtons = ({
 );
 
 // Money Input. The text rules (cents cut off, non-digits and leading zeros
-// removed, the digit limit) live in moneyInputDigits, where they are tested.
+// removed, the digit limit) live in moneyInputDigits, and the full-field key
+// rule in moneyInputKeyBlocked, where they are tested.
 const MoneyInput = ({
   value,
   onChange,
@@ -331,6 +333,19 @@ const MoneyInput = ({
           if (e.ctrlKey || e.metaKey) return;
           // Block "0" key when field is empty (prevents leading zeros)
           if (e.key === "0" && text === "") {
+            e.preventDefault();
+            return;
+          }
+          // A full field takes no more digits unless they replace a
+          // selection; read from the element, not from state.
+          if (
+            moneyInputKeyBlocked(
+              e.key,
+              e.currentTarget.value,
+              e.currentTarget.selectionStart,
+              e.currentTarget.selectionEnd
+            )
+          ) {
             e.preventDefault();
             return;
           }
