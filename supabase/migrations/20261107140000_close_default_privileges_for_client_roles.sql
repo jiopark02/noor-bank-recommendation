@@ -9,8 +9,9 @@
 -- EXECUTE on every new function. supabase_admin held the same entries in
 -- public. Every migration that created an object therefore had to revoke from
 -- the client roles by hand, and one that forgot left the client roles
--- holding every privilege on the object, with only row level security
--- between them and its rows.
+-- holding every privilege on the object: on a table only row level security
+-- stood between them and its rows, and on a sequence or a function nothing
+-- did.
 --
 -- What this file does not change:
 --   - Privileges on objects that already exist. Default privileges apply only
