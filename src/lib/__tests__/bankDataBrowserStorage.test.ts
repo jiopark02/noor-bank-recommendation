@@ -151,12 +151,12 @@ describe("dashboard and connect card keep no bank keys in browser storage; Plaid
 
   it("ClientLayout mount effect clears the Plaid keys", () => {
     const start = CLIENT_LAYOUT.indexOf("useEffect(() => {");
-    const end = CLIENT_LAYOUT.indexOf("const shouldShowChat", start);
+    const end = CLIENT_LAYOUT.indexOf("}, []);", start);
     if (start < 0 || end < 0) {
       throw new Error(
         "ClientLayout.tsx: could not bound the mount effect between the " +
-          "first `useEffect(() => {` and `const shouldShowChat`; re-point " +
-          "these anchors."
+          "first `useEffect(() => {` and the first `}, []);` after it; " +
+          "re-point these anchors."
       );
     }
     expect(CLIENT_LAYOUT.slice(start, end)).toContain("clearPlaidLocalState()");

@@ -21,7 +21,6 @@
 // ============================================================================
 
 import { useEffect, useState } from "react";
-import { PageLayout } from "@/components/layout";
 import { buildBearerOnlyHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
@@ -141,8 +140,10 @@ export default function AdminHealthPage() {
     return { job, latest, isStale };
   });
 
+  // Operator tooling, so no app header or bottom navigation. The body already
+  // supplies the white background; only the content column is set here.
   return (
-    <PageLayout>
+    <main className="max-w-2xl mx-auto px-6 py-8">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-gray-900">System Health</h1>
         <p className="mt-1 text-sm text-gray-500">
@@ -281,6 +282,6 @@ export default function AdminHealthPage() {
           </section>
         </div>
       )}
-    </PageLayout>
+    </main>
   );
 }
