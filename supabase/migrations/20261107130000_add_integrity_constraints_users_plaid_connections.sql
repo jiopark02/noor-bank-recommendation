@@ -67,8 +67,10 @@
 -- that database's constraints and column types rather than inferring them
 -- from this file.
 --
--- Running this file again fails at the status column, which already exists,
--- and the transaction rolls back with nothing changed.
+-- Running this file again where it is applied fails in the first DO block:
+-- user_id is already a uuid, and no operator matches a uuid against a text
+-- pattern (42883). The transaction rolls back with nothing changed. After the
+-- reversal below, the file applies again.
 --
 -- To reverse it. Drop the status column only after no deployed code selects
 -- it (src/lib/accountExport.ts names it):
