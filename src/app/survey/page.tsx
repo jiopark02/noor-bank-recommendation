@@ -20,7 +20,6 @@ import {
 } from "@/lib/supabase-browser";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import type { Session } from "@supabase/supabase-js";
-import { COUNTRY_DISPLAY } from "@/lib/countryConfig";
 import {
   surveyFailureMessage,
   signupOutcome,
@@ -35,8 +34,7 @@ interface SurveyData {
   password: string;
   confirmPassword: string;
   agreeToTerms: boolean;
-  // Not asked on this form: read from localStorage, and used only to pick the
-  // currency symbol shown beside the money inputs.
+  // Not asked on this form: the app serves the US only, so this is always "US".
   destinationCountry: string;
   monthlyIncome: number;
   monthlyExpenses: number;
@@ -52,27 +50,17 @@ const INITIAL_DATA: SurveyData = {
   password: "",
   confirmPassword: "",
   agreeToTerms: false,
-  destinationCountry: "",
+  destinationCountry: "US",
   monthlyIncome: 0,
   monthlyExpenses: 0,
   hasUsCreditHistory: undefined,
 };
 
-// Currency display only. Recommendation logic does not read this.
-const COUNTRY_CONFIG = {
-  US: {
-    currency: COUNTRY_DISPLAY.US.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.US.currency,
-  },
-  UK: {
-    currency: COUNTRY_DISPLAY.UK.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.UK.currency,
-  },
-  CA: {
-    currency: COUNTRY_DISPLAY.CA.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.CA.currency,
-  },
-};
+// The app serves the US only, so the money inputs always show US dollars.
+const countryConfig = {
+  currency: "$",
+  currencyCode: "USD",
+} as const;
 
 // Input Component - MUST be outside the main component to prevent re-renders
 const Input = ({
@@ -419,28 +407,6 @@ export default function SurveyPage() {
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [emailSuggestion, setEmailSuggestion] = useState<string | null>(null);
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
-
-  // Get country config
-  const countryConfig =
-    COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] ||
-    COUNTRY_CONFIG.US;
-
-  // Load destination country from localStorage. This form does not ask for it,
-  // and no screen writes the key any more, so it is read only if an earlier
-  // build left it. When it is missing or not US/UK/CA, the country is US, so
-  // the money inputs never render a wrong currency symbol.
-  useEffect(() => {
-    const savedCountry = localStorage.getItem("noor_selected_country");
-    if (
-      savedCountry &&
-      (savedCountry === "US" || savedCountry === "UK" || savedCountry === "CA")
-    ) {
-      setData((prev) => ({ ...prev, destinationCountry: savedCountry }));
-    } else {
-      // Default to US if not set
-      setData((prev) => ({ ...prev, destinationCountry: "US" }));
-    }
-  }, []);
 
   // Detect an existing session so OAuth users can complete their profile
   // without re-entering a password. Prefill the identity fields we already know.
