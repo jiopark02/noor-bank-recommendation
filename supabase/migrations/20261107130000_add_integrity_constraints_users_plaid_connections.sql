@@ -63,6 +63,10 @@
 -- it joins, auth.users included. lock_timeout bounds every wait, and a wait
 -- that runs out rolls the whole file back.
 --
+-- Deploy order: apply this file to a database before deploying code that
+-- selects users.status (src/lib/accountExport.ts) against it. Deployed
+-- first, that code makes every account export from that database fail.
+--
 -- Whether this file has been applied to a given database is live state; read
 -- that database's constraints and column types rather than inferring them
 -- from this file.
