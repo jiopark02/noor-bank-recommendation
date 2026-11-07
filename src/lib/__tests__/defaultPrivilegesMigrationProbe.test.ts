@@ -9,8 +9,12 @@ import path from "path";
  * or PUBLIC, holds that service_role and supabase_admin are named in no
  * statement, and holds that the DO block checks the end state by property and
  * by creating test objects, drops them, and fails every check by raising an
- * exception that nothing catches. Whether the file is applied, and whether
- * its DO block passed, is live state that only the database can answer.
+ * exception that nothing catches. Each privilege list is held together with
+ * the check that walks it, so a name dropped from a list, or a check moved to
+ * another list, turns the probe red. Outside the DO block, the file may run
+ * only its transaction, its lock timeout and its default-privilege
+ * statements. Whether the file is applied, and whether its DO block passed,
+ * is live state that only the database can answer.
  *
  * SQL line comments are stripped first, so a sentence in the header (which
  * quotes the reversing grants) cannot stand in for a statement or trip a
@@ -48,6 +52,18 @@ const REVERSE = [
   "--   alter default privileges for role postgres in schema public grant execute on functions to anon, authenticated;",
   "--   alter default privileges for role postgres grant execute on functions to public;",
 ];
+
+// Each privilege list, held together with the check that walks it. The table
+// check walks v_denied, which is set only by its declaration and by the
+// MAINTAIN append.
+const V_DENIED_DECLARATION =
+  "  v_denied text[] := array[\n    'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'\n  ];";
+const CLIENT_TABLE_CHECK =
+  "      from unnest(v_denied) as p(privilege)\n     where has_table_privilege(v_role, v_table, p.privilege);";
+const CLIENT_SEQUENCE_CHECK =
+  "      from unnest(array['USAGE', 'SELECT', 'UPDATE']) as p(privilege)\n     where has_sequence_privilege(v_role, v_seq, p.privilege);";
+const SERVICE_ROLE_TABLE_CHECK =
+  "    from unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE']) as p(privilege)\n   where not has_table_privilege('service_role', v_table, p.privilege);";
 
 // The DO block body: from `do $$` to the `$$;` that closes it. The inner
 // function body uses `$probe$`, which neither marker matches.
@@ -106,6 +122,37 @@ describe("default privileges: client role migration", () => {
     expect(sql).toContain("if not has_function_privilege('service_role', v_fn, 'EXECUTE') then");
     expect(occurrences("v_denied := array_append(v_denied, 'MAINTAIN');")).toBe(1);
     expect(sql).toContain("current_setting('server_version_num')::integer >= 170000");
+  });
+
+  it("checks the exact privilege lists, each tied to the check that walks it", () => {
+    expect(occurrences(V_DENIED_DECLARATION)).toBe(1);
+    expect(occurrences(CLIENT_TABLE_CHECK)).toBe(1);
+    expect(occurrences(CLIENT_SEQUENCE_CHECK)).toBe(1);
+    expect(occurrences(SERVICE_ROLE_TABLE_CHECK)).toBe(1);
+    // v_denied is set by its declaration and the MAINTAIN append, nowhere else.
+    expect(matches(/\bv_denied\s*(text\[\]\s*)?:=/gi)).toBe(2);
+    expect(matches(/\binto\s+v_denied\b/gi)).toBe(0);
+  });
+
+  it("runs nothing outside the DO block but the transaction, the lock timeout and the four statements", () => {
+    // Every revoke in the file is one of the four default-privilege statements.
+    expect(matches(/\brevoke\b/gi)).toBe(matches(/\balter\s+default\s+privileges\b/gi));
+    expect(matches(/\brevoke\b/gi)).toBe(4);
+    // The whole statement list outside the block, so a revoke, grant, comment,
+    // ownership change or role switch on any object turns this red.
+    const outside = (sql.slice(0, DO_START) + sql.slice(DO_END + "\n$$;".length))
+      .split(";")
+      .map((statement) => statement.replace(/\s+/g, " ").trim())
+      .filter((statement) => statement !== "");
+    expect(outside).toEqual([
+      "begin",
+      "set local lock_timeout = '5s'",
+      REVOKE_TABLES.slice(0, -1),
+      REVOKE_SEQUENCES.slice(0, -1),
+      REVOKE_FUNCTIONS.slice(0, -1),
+      REVOKE_PUBLIC_EXECUTE.slice(0, -1),
+      "commit",
+    ]);
   });
 
   it("refuses to run as any role other than postgres, before anything else in the block", () => {
