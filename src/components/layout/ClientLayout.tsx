@@ -2,27 +2,12 @@
 
 import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { NoorAIChat } from "@/components/chat";
 import { supabase, getSessionSafe } from "@/lib/supabase-browser";
 import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
 }
-
-// Pages where the chat button should not appear
-const HIDDEN_CHAT_PAGES = [
-  "/landing",
-  "/welcome",
-  "/survey",
-  "/login",
-  "/chat",
-  "/forgot-password",
-  "/auth/callback",
-  "/waitlist",
-  "/privacy",
-  "/terms",
-];
 
 export function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
@@ -82,16 +67,5 @@ export function ClientLayout({ children }: ClientLayoutProps) {
     };
   }, []);
 
-  const shouldShowChat =
-    isAuthReady &&
-    isAuthenticated &&
-    hasLocalSession &&
-    !HIDDEN_CHAT_PAGES.includes(safePathname);
-
-  return (
-    <>
-      {children}
-      {shouldShowChat && <NoorAIChat />}
-    </>
-  );
+  return <>{children}</>;
 }
