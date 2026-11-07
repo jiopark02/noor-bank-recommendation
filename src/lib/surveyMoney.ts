@@ -17,7 +17,7 @@
 
 export const MAX_MONTHLY_AMOUNT = 999999;
 
-/** Digits in MAX_MONTHLY_AMOUNT: the page's input length limit. */
+/** Digits in MAX_MONTHLY_AMOUNT: the most digits the page's money input keeps. */
 export const MAX_MONTHLY_AMOUNT_DIGITS = String(MAX_MONTHLY_AMOUNT).length;
 
 // Formatted with a fixed locale, so the text does not depend on the runtime's.

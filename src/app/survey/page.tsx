@@ -25,7 +25,7 @@ import {
   signupOutcome,
   type SignupOutcome,
 } from "@/lib/surveySubmitOutcome";
-import { MAX_MONTHLY_AMOUNT_DIGITS } from "@/lib/surveyMoney";
+import { MONEY_INPUT_MAX_LENGTH, moneyInputDigits } from "@/lib/moneyInputText";
 import { AUTH_COPY } from "@/lib/authErrorCopy";
 
 interface SurveyData {
@@ -286,9 +286,8 @@ const ToggleButtons = ({
   </div>
 );
 
-// Money Input - handles leading zeros properly
-// At most MAX_MONTHLY_AMOUNT_DIGITS digits: the cap is all nines, so the digit
-// limit alone keeps the value within what the server accepts.
+// Money Input. The text rules (cents cut off, non-digits and leading zeros
+// removed, the digit limit) live in moneyInputDigits, where they are tested.
 const MoneyInput = ({
   value,
   onChange,
@@ -319,11 +318,17 @@ const MoneyInput = ({
       <input
         type="text"
         inputMode="numeric"
-        maxLength={MAX_MONTHLY_AMOUNT_DIGITS}
+        // Long enough for a pasted amount with separators and cents, so the
+        // browser does not cut the text before it is parsed; the digit limit
+        // is applied by moneyInputDigits.
+        maxLength={MONEY_INPUT_MAX_LENGTH}
         value={text}
         onBlur={onBlur}
         placeholder={placeholder}
         onKeyDown={(e) => {
+          // Shortcuts (paste, copy, cut, select all) pass through; what they
+          // put in the field is cleaned up in onChange.
+          if (e.ctrlKey || e.metaKey) return;
           // Block "0" key when field is empty (prevents leading zeros)
           if (e.key === "0" && text === "") {
             e.preventDefault();
@@ -332,23 +337,23 @@ const MoneyInput = ({
           // Only allow digits and control keys
           if (
             !/^\d$/.test(e.key) &&
-            !["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"].includes(
-              e.key
-            )
+            ![
+              "Backspace",
+              "Delete",
+              "ArrowLeft",
+              "ArrowRight",
+              "Home",
+              "End",
+              "Tab",
+            ].includes(e.key)
           ) {
             e.preventDefault();
           }
         }}
         onChange={(e) => {
-          // Get raw value and strip any non-digits and leading zeros
-          // Sliced as well as maxLength'd: a paste can carry non-digits that
-          // are stripped here, leaving more digits than the limit.
-          const raw = e.target.value
-            .replace(/\D/g, "")
-            .replace(/^0+/, "")
-            .slice(0, MAX_MONTHLY_AMOUNT_DIGITS);
-          setText(raw);
-          onChange(raw ? parseInt(raw, 10) : 0);
+          const digits = moneyInputDigits(e.target.value);
+          setText(digits);
+          onChange(digits ? parseInt(digits, 10) : 0);
         }}
         className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
       />

@@ -18,7 +18,8 @@ import { describe, it, expect } from "vitest";
  *       it to a signed-in submit                                    -> W5
  *   P8  the first-name field no longer marking itself touched       -> W6
  *   P9  the first-name error testing the unsanitized name           -> W6
- *   P10 the money input's length limit written as a literal         -> PW1
+ *   P10 the money input's length limit written as a literal, or its
+ *       text parsed inline instead of through moneyInputDigits      -> PW1
  *   P11 the zero-income notice's condition or key removed           -> PW2
  *   P12 an en.json key the pages read removed or changed            -> PW3
  *
@@ -189,13 +190,14 @@ describe("survey page wiring: sanitized name and email checks", () => {
 });
 
 describe("survey page wiring: monthly money inputs", () => {
-  it("PW1 the money input's length limit is the shared digit constant", () => {
+  it("PW1 the money input parses through moneyInputDigits and its maxLength is the shared constant", () => {
     const input = pageRegion("const MoneyInput = (", "const ViewedMark");
-    expect(input).toContain("maxLength={MAX_MONTHLY_AMOUNT_DIGITS}");
-    expect(input).toContain(".slice(0, MAX_MONTHLY_AMOUNT_DIGITS)");
+    expect(input).toContain("maxLength={MONEY_INPUT_MAX_LENGTH}");
+    expect(input).toContain("const digits = moneyInputDigits(e.target.value);");
     expect(input).not.toMatch(/maxLength=\{\d/);
+    expect(input).not.toContain(".replace(");
     expect(readFileSync(PAGE, "utf8")).toContain(
-      'import { MAX_MONTHLY_AMOUNT_DIGITS } from "@/lib/surveyMoney";'
+      'import { MONEY_INPUT_MAX_LENGTH, moneyInputDigits } from "@/lib/moneyInputText";'
     );
   });
 
