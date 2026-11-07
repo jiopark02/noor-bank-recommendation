@@ -486,6 +486,20 @@ describe("account export: explicit column lists match the schema", () => {
       );
     });
   }
+
+  it("E14 users: the export's columns are the table's columns, id included", () => {
+    // users has no user_id; its id is the user's own id. A column added to
+    // the table is exported only once someone adds it here.
+    const section = sectionFor("users");
+    expect(section.columns).not.toBe("*");
+    const exported = section.columns.split(", ");
+    const schema = migrationColumns("users");
+    expect(schema).not.toContain("user_id");
+    expect(schema).toContain("id");
+    expect(schema).toContain("status");
+    expect(new Set(exported).size).toBe(exported.length);
+    expect([...exported].sort()).toEqual([...schema].sort());
+  });
 });
 
 describe("account export: the production page reader", () => {
