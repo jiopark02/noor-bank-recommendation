@@ -941,11 +941,20 @@ export default function SurveyPage() {
               <MoneyInput
                 value={data.monthlyExpenses}
                 onChange={(v) => updateField("monthlyExpenses", v)}
+                onBlur={() => markTouched("monthlyExpenses")}
                 currencySymbol={countryConfig.currency}
               />
               <p className="text-gray-400 text-xs mt-1.5">
                 {t("survey.step4.expensesHint")}
               </p>
+              {/* Zero is not accepted here either: the submit button stays
+                  disabled until spending is above zero, so say why. */}
+              {data.monthlyExpenses === 0 &&
+                touchedFields.has("monthlyExpenses") && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {t("survey.step4.expensesRequired")}
+                  </p>
+                )}
             </div>
 
             {/* Credit history. Optional: leaving it blank is a real answer
