@@ -40,7 +40,13 @@
 --     household's joint goals and share grants go with it through their own
 --     cascades.
 --   - Drops public.update_updated_at_column() and the type public.account_type.
---     Nothing depends on either. Both are named with the public schema: a
+--     Nothing depends on either once 20261104130000_drop_unused_legacy_tables.sql
+--     is applied: the legacy-table triggers that call
+--     public.update_updated_at_column() are dropped with their tables by that
+--     file. This drop therefore passes only in a database where that migration
+--     was applied first. In a database where it was not, the drop, which has
+--     no cascade, fails on those triggers and the whole file rolls back.
+--     Both are named with the public schema: a
 --     function with the same name exists in the storage schema and has a
 --     trigger on it, and it must stay.
 --
