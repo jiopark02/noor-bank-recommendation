@@ -24,7 +24,8 @@ import type { RevocableConnection, RevocationSummary } from "./plaidRevocation";
  *   1. Preconditions      — everything that can refuse BEFORE anything is spent
  *   2. Revoke + delete    — per connection, paired (see plaidRevocation.ts)
  *   3. Gate               — a single un-revoked connection stops the deletion
- *   4. DELETE public.users — FK ON DELETE CASCADE removes the child tables
+ *   4. DELETE public.users — FK ON DELETE CASCADE removes the child tables,
+ *                            and a trigger removes households left empty
  *   5. auth.admin.deleteUser — most irreversible, therefore last
  *
  * ⚠️ STEP 4'S CASCADE DOES NOT REACH plaid_connections. Migration
@@ -278,6 +279,19 @@ export async function deleteAccountForUser(
   // step 5. plaid_connections is cleared only in step 2: its key to
   // public.users, where the migration adding it is applied, is ON DELETE
   // RESTRICT, so a row left behind makes this delete fail rather than vanish.
+  //
+  // The cascade also reaches the household tables. household_members,
+  // share_grants and personal goals cascade from public.users, and joint
+  // goals have created_by set null. A database trigger on household_members
+  // (migration 20261108120000_create_households_and_goals.sql, live state
+  // like every migration) then deletes any household left with no active
+  // member, and that household's joint goals and share grants with it. It
+  // runs inside this same delete, so a trigger failure fails this step and
+  // nothing is removed; there is no separate household step and no separate
+  // failure answer. The trigger function is SECURITY INVOKER: under this
+  // cascade it runs as the table owner, but a future path that sets a member
+  // to 'left' as service_role needs DELETE on households, which is not
+  // granted, or a different design.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to
