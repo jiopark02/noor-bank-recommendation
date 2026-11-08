@@ -30,6 +30,10 @@ import {
  *   M17 kept empty stored first name written as is          -> T11h
  *   M18 a last-name-only body treated as having no names    -> T11i
  *   M19 success body reports the body's names               -> T15, T13
+ *   M20 ensureHousehold called before the upsert            -> T16
+ *   M21 ensureHousehold called with the body id             -> T19
+ *   M22 ensureHousehold called on a refusal or failed write -> T17
+ *   M23 a failed ensure answered 500                        -> T18
  *
  * Nothing here executes the route; syncProfileRouteWiring.test.ts reads its
  * source.
@@ -49,6 +53,7 @@ type SpiedDeps = ProfileSyncDeps & {
   isAdminConfigured: ReturnType<typeof vi.fn>;
   findExisting: ReturnType<typeof vi.fn>;
   upsertProfile: ReturnType<typeof vi.fn>;
+  ensureHousehold: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
 };
 
@@ -57,6 +62,7 @@ function deps(existing: ExistingProfileRow | null = null): SpiedDeps {
     isAdminConfigured: vi.fn(() => true),
     findExisting: vi.fn(async () => ({ row: existing, error: null })),
     upsertProfile: vi.fn(async () => ({ error: null })),
+    ensureHousehold: vi.fn(async () => ({ ok: true })),
     now: () => NOW,
     log: vi.fn(),
   };
@@ -358,5 +364,65 @@ describe("syncProfileForUser — the write and the response", () => {
       expect(Object.keys(result.body).sort()).toEqual(["message", "success"]);
       expect(JSON.stringify(result.body)).not.toContain(SENTINEL);
     }
+  });
+});
+
+describe("syncProfileForUser — the one-person household", () => {
+  it("T16 ensures the household once, with the token id, after the profile write", async () => {
+    const d = deps();
+    await syncProfileForUser(TOKEN_USER, { id: "user_token_1" }, d);
+    expect(d.ensureHousehold).toHaveBeenCalledTimes(1);
+    expect(d.ensureHousehold).toHaveBeenCalledWith("user_token_1");
+    expect(d.upsertProfile.mock.invocationCallOrder[0]).toBeLessThan(
+      d.ensureHousehold.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("T17 does not ensure the household on any refusal or failed write", async () => {
+    const noEmail = deps();
+    await syncProfileForUser({ ...TOKEN_USER, email: undefined }, {}, noEmail);
+
+    const otherId = deps();
+    await syncProfileForUser(TOKEN_USER, { id: "user_other" }, otherId);
+
+    const unconfigured = deps();
+    unconfigured.isAdminConfigured.mockReturnValue(false);
+    await syncProfileForUser(TOKEN_USER, {}, unconfigured);
+
+    const failingRead = deps();
+    failingRead.findExisting.mockResolvedValue({ row: null, error: { code: "57014" } });
+    await syncProfileForUser(TOKEN_USER, {}, failingRead);
+
+    const failingWrite = deps();
+    failingWrite.upsertProfile.mockResolvedValue({ error: { code: "23505" } });
+    await syncProfileForUser(TOKEN_USER, {}, failingWrite);
+
+    for (const d of [noEmail, otherId, unconfigured, failingRead, failingWrite]) {
+      expect(d.ensureHousehold).not.toHaveBeenCalled();
+    }
+  });
+
+  it("T18 a failed ensure keeps the 200 and its body, and is logged", async () => {
+    const ok = deps({ first_name: "Stored", last_name: "Name" });
+    const failing = deps({ first_name: "Stored", last_name: "Name" });
+    failing.ensureHousehold.mockResolvedValue({ ok: false });
+
+    const okResult = await syncProfileForUser(TOKEN_USER, {}, ok);
+    const failingResult = await syncProfileForUser(TOKEN_USER, {}, failing);
+
+    expect(failingResult).toEqual(okResult);
+    expect(failingResult.status).toBe(200);
+    expect(failing.log).toHaveBeenCalledWith(
+      "[sync-profile] household ensure failed; profile written, answering success"
+    );
+    expect(ok.log).not.toHaveBeenCalled();
+  });
+
+  it("T19 with no body id, ensures the household once with the token id", async () => {
+    const d = deps();
+    const result = await syncProfileForUser(TOKEN_USER, {}, d);
+    expect(result.status).toBe(200);
+    expect(d.ensureHousehold).toHaveBeenCalledTimes(1);
+    expect(d.ensureHousehold).toHaveBeenCalledWith("user_token_1");
   });
 });

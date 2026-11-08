@@ -276,6 +276,9 @@ describe("account export: what each section reads", () => {
     llm_calls: "user_id",
     chat_usage_reservations: "user_id",
     email_confirmation_sends: "user_id",
+    household_members: "user_id",
+    share_grants: "owner_user_id",
+    goals: "owner_user_id",
   };
 
   /** Each table's primary key, the column the keyset pages on. */
@@ -290,6 +293,9 @@ describe("account export: what each section reads", () => {
     llm_calls: "id",
     chat_usage_reservations: "id",
     email_confirmation_sends: "user_id",
+    household_members: "id",
+    share_grants: "id",
+    goals: "id",
   };
 
   it("E5 the file carries exactly these top-level keys", async () => {
@@ -309,6 +315,9 @@ describe("account export: what each section reads", () => {
         "llm_calls",
         "chat_usage_reservations",
         "email_confirmation_sends",
+        "household_members",
+        "share_grants",
+        "goals",
       ].sort()
     );
   });
@@ -536,18 +545,25 @@ describe("account export: explicit column lists match the schema", () => {
     expect(columns).toEqual(["id", "email", "status"]);
   });
 
-  const EXPLICIT = ["chat_sessions", "chat_usage_reservations", "email_confirmation_sends"];
+  const EXPLICIT = [
+    "chat_sessions",
+    "chat_usage_reservations",
+    "email_confirmation_sends",
+    "household_members",
+    "share_grants",
+    "goals",
+  ];
 
   for (const table of EXPLICIT) {
-    it(`E10 ${table}: the export's columns are the table's columns minus user_id`, () => {
+    it(`E10 ${table}: the export's columns are the table's columns minus its filter column`, () => {
       const section = sectionFor(table);
       expect(section.columns).not.toBe("*");
       const exported = section.columns.split(", ");
       const schema = migrationColumns(table);
-      expect(schema).toContain("user_id");
+      expect(schema).toContain(section.filterColumn);
       expect(new Set(exported).size).toBe(exported.length);
       expect([...exported].sort()).toEqual(
-        schema.filter((c) => c !== "user_id").sort()
+        schema.filter((c) => c !== section.filterColumn).sort()
       );
     });
   }
