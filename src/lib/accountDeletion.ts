@@ -288,10 +288,12 @@ export async function deleteAccountForUser(
   // member, and that household's joint goals and share grants with it. It
   // runs inside this same delete, so a trigger failure fails this step and
   // nothing is removed; there is no separate household step and no separate
-  // failure answer. The trigger function is SECURITY INVOKER: under this
-  // cascade it runs as the table owner, but a future path that sets a member
-  // to 'left' as service_role needs DELETE on households, which is not
-  // granted, or a different design.
+  // failure answer. A trigger fired by this cascade runs as the role that
+  // issued the delete (service_role here, supabase_auth_admin when an Auth
+  // user is deleted), so the trigger function is SECURITY DEFINER, owned by
+  // the owner of households: it deletes the household whoever issued the
+  // delete, and neither service_role nor any client role holds DELETE on
+  // households.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to

@@ -87,7 +87,7 @@ export type ProfileSyncDeps = {
     payload: Record<string, unknown>
   ) => Promise<{ error: unknown }>;
   /**
-   * Makes sure the user has an active household (see HOUSEHOLD below). Called
+   * Makes sure the user has an active household (see HOUSEHOLD above). Called
    * with the verified token's id, only after the profile write succeeded.
    */
   ensureHousehold: (userId: string) => Promise<{ ok: boolean }>;

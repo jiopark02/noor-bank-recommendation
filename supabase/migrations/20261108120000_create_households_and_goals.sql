@@ -57,15 +57,25 @@
 -- anon and authenticated. service_role is granted only what this stage uses:
 -- SELECT and INSERT on households and household_members (the ensure function
 -- and the account export), SELECT on share_grants and goals (the export), and
--- EXECUTE on household_ensure_for_user. Both functions are SECURITY INVOKER
--- with an empty search_path.
+-- EXECUTE on household_ensure_for_user. Both functions have an empty
+-- search_path. household_ensure_for_user is SECURITY INVOKER.
+-- household_delete_if_no_active_members is SECURITY DEFINER, owned by the
+-- owner of households, and no role holds EXECUTE on it: EXECUTE is revoked
+-- from PUBLIC, anon, authenticated and service_role.
 --
--- The cleanup trigger runs as SECURITY INVOKER. When a users delete cascades,
--- the cascade and the trigger it fires run as the owner of household_members,
--- which can delete from households. service_role holds no DELETE on
--- households, so a future path that sets a member to 'left' as service_role
--- will fail in this trigger until it is given DELETE on households or the
--- design changes. It is not granted here.
+-- Why the cleanup function is SECURITY DEFINER. An AFTER trigger fired by a
+-- foreign-key cascade runs as the role that issued the outer delete, not as
+-- the owner of the table: service_role when the account deletion deletes the
+-- public.users row, supabase_auth_admin when an Auth user is deleted. Neither
+-- holds DELETE on households, and the trigger's delete is checked for
+-- privilege even when it matches no row, so as SECURITY INVOKER the trigger
+-- made every such delete fail with 42501 and roll back. As SECURITY DEFINER
+-- the delete runs with the owner's privileges whoever issued the outer
+-- statement, and no role is granted DELETE on households. The function body
+-- names only schema-qualified objects and deletes at most the one household
+-- named by OLD.household_id, and only when it has no active member. A future
+-- path that sets a member to 'left' as service_role needs UPDATE on
+-- household_members, not DELETE on households.
 --
 -- The closing DO block checks the end state by property and raises, rolling
 -- the whole file back, unless every property holds.
@@ -243,7 +253,7 @@ create or replace function public.household_delete_if_no_active_members()
 returns trigger
 language plpgsql
 volatile
-security invoker
+security definer
 set search_path = ''
 as $$
 begin
@@ -265,7 +275,7 @@ end;
 $$;
 
 revoke all on function public.household_delete_if_no_active_members()
-  from public, anon, authenticated;
+  from public, anon, authenticated, service_role;
 
 drop trigger if exists trg_household_members_cleanup on public.household_members;
 create trigger trg_household_members_cleanup
@@ -293,6 +303,7 @@ declare
   v_proacl aclitem[];
   v_prosecdef boolean;
   v_proconfig text[];
+  v_proowner oid;
 begin
   -- MAINTAIN exists from PostgreSQL 17; has_table_privilege rejects it before.
   if current_setting('server_version_num')::integer >= 170000 then
@@ -349,8 +360,10 @@ begin
         v_table, v_expected, v_remaining;
     end if;
 
-    -- D-j. The owner keeps DELETE, so the cascades and the cleanup trigger,
-    --      which run as the owner, can delete rows.
+    -- D-j. The owner keeps DELETE, so the foreign-key cascades, which run as
+    --      the table owner, can delete rows. The cleanup trigger does not run
+    --      as the owner; D-m checks the function that gives it the owner's
+    --      privileges.
     if not exists (
       select 1 from pg_class c
        where c.oid = v_table
@@ -461,9 +474,9 @@ begin
     raise exception 'public.goals: status has no check admitting exactly active, completed and archived';
   end if;
 
-  -- D-g. Both functions: no EXECUTE for anon, authenticated or PUBLIC,
-  --      SECURITY INVOKER, empty search_path. service_role executes the
-  --      ensure function.
+  -- D-g. Both functions: no EXECUTE for anon, authenticated or PUBLIC, and
+  --      an empty search_path. The ensure function: SECURITY INVOKER, and
+  --      service_role executes it.
   foreach v_fn in array array[
     'public.household_ensure_for_user(uuid)'::regprocedure,
     'public.household_delete_if_no_active_members()'::regprocedure
@@ -481,16 +494,48 @@ begin
        or exists (select 1 from aclexplode(v_proacl) a where a.grantee = 0) then
       raise exception '%: PUBLIC still holds EXECUTE', v_fn;
     end if;
-    if v_prosecdef then
-      raise exception '%: expected SECURITY INVOKER', v_fn;
-    end if;
     if v_proconfig is null or not ('search_path=""' = any(v_proconfig)) then
       raise exception '%: expected an empty search_path, found %', v_fn, v_proconfig;
     end if;
   end loop;
+  select p.prosecdef into v_prosecdef
+    from pg_proc p
+   where p.oid = 'public.household_ensure_for_user(uuid)'::regprocedure;
+  if v_prosecdef then
+    raise exception 'public.household_ensure_for_user(uuid): expected SECURITY INVOKER';
+  end if;
   if not has_function_privilege(
        'service_role', 'public.household_ensure_for_user(uuid)'::regprocedure, 'EXECUTE') then
     raise exception 'public.household_ensure_for_user(uuid): service_role lacks EXECUTE';
+  end if;
+
+  -- D-m. The cleanup function: SECURITY DEFINER, owned by the owner of
+  --      households, that owner holds DELETE on households, and no role other
+  --      than the owner holds EXECUTE, service_role included.
+  v_fn := 'public.household_delete_if_no_active_members()'::regprocedure;
+  select p.proacl, p.prosecdef, p.proowner
+    into v_proacl, v_prosecdef, v_proowner
+    from pg_proc p
+   where p.oid = v_fn;
+  if v_prosecdef is distinct from true then
+    raise exception '%: expected SECURITY DEFINER', v_fn;
+  end if;
+  if v_proowner is distinct from (
+    select c.relowner from pg_class c where c.oid = 'public.households'::regclass
+  ) then
+    raise exception '%: not owned by the owner of public.households', v_fn;
+  end if;
+  if not has_table_privilege(v_proowner, 'public.households'::regclass, 'DELETE') then
+    raise exception '%: its owner lacks DELETE on public.households', v_fn;
+  end if;
+  if v_proacl is null
+     or exists (
+       select 1 from aclexplode(v_proacl) a where a.grantee <> v_proowner
+     ) then
+    raise exception '%: a role other than its owner holds EXECUTE', v_fn;
+  end if;
+  if has_function_privilege('service_role', v_fn, 'EXECUTE') then
+    raise exception '%: service_role holds EXECUTE', v_fn;
   end if;
 
   -- D-h. The cleanup trigger: enabled, row level, AFTER, on DELETE and UPDATE.

@@ -30,9 +30,17 @@ import path from "path";
  *   an amount column changed from bigint to numeric         -> H6
  *   a progress or accumulated column added to goals         -> H6
  *   a second resource_type value admitted                   -> H7
- *   security invoker changed to definer                     -> H8
+ *   ensure changed to security definer                      -> H8
+ *   cleanup changed back to security invoker                -> H8
+ *   a second security definer added                         -> H8
  *   a set search_path line removed                          -> H8
  *   a function's EXECUTE revoke or grant removed            -> H8
+ *   service_role dropped from the cleanup function's revoke -> H8
+ *   a grant on the cleanup function added                   -> H8
+ *   a D-m check or its raise removed                        -> H11
+ *   a public. prefix removed from the cleanup body          -> H17
+ *   an insert, update or second delete added to cleanup     -> H17
+ *   the cleanup delete's where clause changed               -> H17
  *   the schema prefix removed from a drop                   -> H9
  *   cascade added anywhere                                  -> H9
  *   the DO block moved after commit                         -> H10
@@ -198,13 +206,18 @@ describe("households migration", () => {
     );
   });
 
-  it("H8 both functions are SECURITY INVOKER with an empty search_path, and only service_role executes ensure", () => {
+  it("H8 ensure is SECURITY INVOKER and only service_role executes it; cleanup is SECURITY DEFINER and nobody executes it; both pin an empty search_path", () => {
     for (const name of ["household_ensure_for_user", "household_delete_if_no_active_members"]) {
-      const header = functionHeader(name);
-      expect(header, name).toContain("security invoker");
-      expect(header, name).toContain("set search_path = ''");
+      expect(functionHeader(name), name).toContain("set search_path = ''");
     }
-    expect(sql.toLowerCase()).not.toContain("security definer");
+    const ensure = functionHeader("household_ensure_for_user");
+    expect(ensure).toContain("security invoker");
+    expect(ensure).not.toContain("security definer");
+    const cleanup = functionHeader("household_delete_if_no_active_members");
+    expect(cleanup).toContain("security definer");
+    expect(cleanup).not.toContain("security invoker");
+    // Declarations only: the DO block's raise message also names it.
+    expect(sql.match(/^\s*security definer\s*$/gim)?.length).toBe(1);
     expect(sql).toMatch(
       /revoke all on function public\.household_ensure_for_user\(uuid\)\s+from public, anon, authenticated;/
     );
@@ -212,7 +225,7 @@ describe("households migration", () => {
       "grant execute on function public.household_ensure_for_user(uuid) to service_role;"
     );
     expect(sql).toMatch(
-      /revoke all on function public\.household_delete_if_no_active_members\(\)\s+from public, anon, authenticated;/
+      /revoke all on function public\.household_delete_if_no_active_members\(\)\s+from public, anon, authenticated, service_role;/
     );
     expect(sql).not.toMatch(
       /grant [^;]*household_delete_if_no_active_members/
@@ -263,9 +276,14 @@ describe("households migration", () => {
       ["D-f index", /pg_get_expr\(i\.indpred, i\.indrelid\) = '\(status = ''active''::text\)'\s+\) into v_ok;\s+if not v_ok then\s+raise exception/],
       ["D-g EXECUTE", /has_function_privilege\('authenticated', v_fn, 'EXECUTE'\) then\s+raise exception/],
       ["D-g PUBLIC EXECUTE", /a\.grantee = 0\) then\s+raise exception '%: PUBLIC still holds EXECUTE'/],
-      ["D-g invoker", /if v_prosecdef then\s+raise exception/],
+      ["D-g ensure invoker", /where p\.oid = 'public\.household_ensure_for_user\(uuid\)'::regprocedure;\s+if v_prosecdef then\s+raise exception 'public\.household_ensure_for_user\(uuid\): expected SECURITY INVOKER'/],
       ["D-g search_path", /'search_path=""' = any\(v_proconfig\)\) then\s+raise exception/],
       ["D-g service_role", /'EXECUTE'\) then\s+raise exception 'public\.household_ensure_for_user\(uuid\): service_role lacks EXECUTE'/],
+      ["D-m definer", /if v_prosecdef is distinct from true then\s+raise exception '%: expected SECURITY DEFINER'/],
+      ["D-m owner", /if v_proowner is distinct from \(\s+select c\.relowner from pg_class c where c\.oid = 'public\.households'::regclass\s+\) then\s+raise exception/],
+      ["D-m owner DELETE", /if not has_table_privilege\(v_proowner, 'public\.households'::regclass, 'DELETE'\) then\s+raise exception/],
+      ["D-m EXECUTE holders", /if v_proacl is null\s+or exists \(\s+select 1 from aclexplode\(v_proacl\) a where a\.grantee <> v_proowner\s+\) then\s+raise exception/],
+      ["D-m service_role", /if has_function_privilege\('service_role', v_fn, 'EXECUTE'\) then\s+raise exception/],
       ["D-h trigger", /\(t\.tgtype & 16\) = 16\s+\) into v_ok;\s+if not v_ok then\s+raise exception/],
       ["D-i public function", /p\.proname = 'update_updated_at_column'\s+\) then\s+raise exception 'public\.update_updated_at_column still exists'/],
       ["D-i type", /if to_regtype\('public\.account_type'\) is not null then\s+raise exception/],
@@ -274,6 +292,13 @@ describe("households migration", () => {
     for (const [label, pattern] of checks) {
       expect(block, label).toMatch(pattern);
     }
+    // The D-m checks read the cleanup function, assigned once just before them.
+    const dmTarget = block.indexOf(
+      "v_fn := 'public.household_delete_if_no_active_members()'::regprocedure;"
+    );
+    expect(dmTarget).toBeGreaterThan(-1);
+    expect(block.indexOf("expected SECURITY DEFINER")).toBeGreaterThan(dmTarget);
+    expect(block.split("v_fn :=").length - 1).toBe(1);
     for (const row of [
       "('household_members', 'household_id',  'public.households', 'c')",
       "('household_members', 'user_id',       'public.users',      'c')",
@@ -341,5 +366,30 @@ describe("households migration", () => {
     const body = functionBody("household_delete_if_no_active_members");
     expect(body).toContain("delete from public.households h");
     expect(body).toContain("and m.status = 'active'");
+  });
+
+  it("H17 the SECURITY DEFINER cleanup body names only qualified tables and deletes only OLD's household when it has no active member", () => {
+    const body = functionBody("household_delete_if_no_active_members");
+    // Every table name is schema-qualified.
+    expect(body.match(/(^|[^.\w])households\b/g)).toBeNull();
+    expect(body.match(/(^|[^.\w])household_members\b/g)).toBeNull();
+    // "is not distinct from new.status" compares a value; it names no table.
+    expect(
+      body.match(/(?<!distinct )\b(from|into|update|join)\s+(?!public\.)[a-z_]+/gi)
+    ).toBeNull();
+    // One delete, and no other write.
+    expect(body.match(/\bdelete\s+from\b/gi)?.length).toBe(1);
+    expect(body).not.toMatch(/\binsert\b|\bupdate\s+public\.|\btruncate\b|\bexecute\b/i);
+    // The delete's target and condition.
+    expect(body).toContain(
+      "  delete from public.households h\n" +
+        "   where h.id = old.household_id\n" +
+        "     and not exists (\n" +
+        "       select 1\n" +
+        "         from public.household_members m\n" +
+        "        where m.household_id = old.household_id\n" +
+        "          and m.status = 'active'\n" +
+        "     );"
+    );
   });
 });
