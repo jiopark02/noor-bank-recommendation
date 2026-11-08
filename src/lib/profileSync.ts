@@ -39,6 +39,17 @@ export { DEFAULT_FIRST_NAME } from "./defaultFirstName";
  * row" would reset created_at on an existing profile, so a read error stops
  * here and nothing is written.
  *
+ * HOUSEHOLD
+ * Every user is meant to have one active household, a one-person household
+ * by default. After a successful profile write this calls ensureHousehold
+ * with the verified token's id; it returns the existing household or creates
+ * one. Its failure is logged and does not change the answer: the profile was
+ * written, and the callback treats a failed sync as a reason to fall back to
+ * other names, which a household fault should not cause. No route reads
+ * households yet; one that does is meant to call the same ensure first, so a
+ * creation missed here is made up there. No call is made on any refusal or
+ * failed write.
+ *
  * Failure bodies are built from literal strings only; no error content reaches
  * them.
  */
@@ -75,6 +86,11 @@ export type ProfileSyncDeps = {
   upsertProfile: (
     payload: Record<string, unknown>
   ) => Promise<{ error: unknown }>;
+  /**
+   * Makes sure the user has an active household (see HOUSEHOLD below). Called
+   * with the verified token's id, only after the profile write succeeded.
+   */
+  ensureHousehold: (userId: string) => Promise<{ ok: boolean }>;
   /** ISO timestamp used for created_at and updated_at. */
   now: () => string;
   /** Defaults to console.error. Injected so tests stay quiet. */
@@ -176,6 +192,16 @@ export async function syncProfileForUser(
   const { error } = await deps.upsertProfile(payload);
   if (error) {
     return failure(500, SYNC_FAILED_MESSAGE);
+  }
+
+  // After the write, because the membership row references public.users.
+  // A failure does not fail the sync; see HOUSEHOLD above.
+  const household = await deps.ensureHousehold(identity.id);
+  if (!household.ok) {
+    emit(
+      deps,
+      "[sync-profile] household ensure failed; profile written, answering success"
+    );
   }
 
   return { status: 200, body: { success: true, ...names } };
