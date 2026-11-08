@@ -31,7 +31,7 @@ import {
  *   M18 a last-name-only body treated as having no names    -> T11i
  *   M19 success body reports the body's names               -> T15, T13
  *   M20 ensureHousehold called before the upsert            -> T16
- *   M21 ensureHousehold called with the body id             -> T16
+ *   M21 ensureHousehold called with the body id             -> T19
  *   M22 ensureHousehold called on a refusal or failed write -> T17
  *   M23 a failed ensure answered 500                        -> T18
  *
@@ -416,5 +416,13 @@ describe("syncProfileForUser — the one-person household", () => {
       "[sync-profile] household ensure failed; profile written, answering success"
     );
     expect(ok.log).not.toHaveBeenCalled();
+  });
+
+  it("T19 with no body id, ensures the household once with the token id", async () => {
+    const d = deps();
+    const result = await syncProfileForUser(TOKEN_USER, {}, d);
+    expect(result.status).toBe(200);
+    expect(d.ensureHousehold).toHaveBeenCalledTimes(1);
+    expect(d.ensureHousehold).toHaveBeenCalledWith("user_token_1");
   });
 });
