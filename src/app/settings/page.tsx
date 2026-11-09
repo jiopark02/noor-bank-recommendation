@@ -580,7 +580,7 @@ export default function SettingsPage() {
           }}
           whileTap={{ scale: 0.98 }}
         >
-          Sign Out
+          Log Out
         </motion.button>
       </div>
 
