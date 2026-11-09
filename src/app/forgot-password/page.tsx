@@ -11,7 +11,8 @@ import {
   getPasswordStrengthLabel,
   ERROR_MESSAGES,
 } from "@/lib/validation";
-import { supabase } from "@/lib/supabase-browser";
+import { supabase, removeSupabaseAuthCookies } from "@/lib/supabase-browser";
+import { runPasswordReset } from "@/lib/sessionFlow";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { AUTH_COPY, authErrorCode, copyForAuthError } from "@/lib/authErrorCopy";
 
@@ -35,79 +36,28 @@ export default function ForgotPasswordPage() {
   // Set when the reset link cannot be used, to offer starting over.
   const [offerNewLink, setOfferNewLink] = useState(false);
 
-  // Handle the recovery link: exchange the token_hash for a recovery session.
-  // PKCE (@supabase/ssr default) requires verifyOtp here, not the ?token= flow.
-  //
-  // Two refs guard the one-time token without deadlocking in dev:
-  //   - verifiedHashRef: set ONLY after a successful verify, so a real
-  //     double-click / refresh of a consumed link is skipped.
-  //   - inFlightRef: marks an in-progress verify for THIS mount and is released
-  //     on cleanup, so a Strict Mode double-mount can retry instead of getting
-  //     stuck with isLoading frozen true.
-  const verifiedHashRef = React.useRef<string | null>(null);
-  const inFlightRef = React.useRef<string | null>(null);
+  // The recovery link carries token_hash and type=recovery. Opening it only
+  // shows the new-password form: the token is exchanged (verifyOtp) when the
+  // form is submitted, inside runPasswordReset, so opening the link — or a
+  // mail scanner fetching it — creates no session, and leaving without
+  // finishing leaves none behind.
+  const [tokenHash, setTokenHash] = useState<string | null>(null);
 
   useEffect(() => {
-    const tokenHash = searchParams?.get("token_hash");
+    const linkTokenHash = searchParams?.get("token_hash");
     const type = searchParams?.get("type");
 
-    if (!tokenHash || type !== "recovery") {
-      return;
-    }
-    if (verifiedHashRef.current === tokenHash) {
-      return;
-    }
-    if (inFlightRef.current === tokenHash) {
+    if (!linkTokenHash || type !== "recovery") {
       return;
     }
 
+    setStep("reset");
     if (!supabase) {
-      setStep("reset");
       setError("Authentication service unavailable. Please try again later.");
       return;
     }
-
-    let isActive = true;
-    inFlightRef.current = tokenHash;
-    setStep("reset");
-    setIsLoading(true);
-
-    supabase.auth
-      .verifyOtp({ type: "recovery", token_hash: tokenHash })
-      .then(({ error: verifyError }) => {
-        if (!isActive) return;
-        if (verifyError) {
-          const copy = copyForAuthError(authErrorCode(verifyError), "reset-link");
-          setError(copy.message);
-          setOfferNewLink(Boolean(copy.offerNewResetLink));
-          setRecoveryReady(false);
-        } else {
-          verifiedHashRef.current = tokenHash;
-          setError("");
-          setRecoveryReady(true);
-        }
-      })
-      .catch(() => {
-        if (!isActive) return;
-        setError(AUTH_COPY.RESET_LINK_FAILED);
-        setOfferNewLink(true);
-        setRecoveryReady(false);
-      })
-      .finally(() => {
-        if (!isActive) return;
-        inFlightRef.current = null;
-        setIsLoading(false);
-      });
-
-    return () => {
-      isActive = false;
-      if (
-        inFlightRef.current === tokenHash &&
-        verifiedHashRef.current !== tokenHash
-      ) {
-        inFlightRef.current = null;
-      }
-    };
+    setTokenHash(linkTokenHash);
+    setRecoveryReady(true);
   }, [searchParams]);
 
   // Countdown for resend
@@ -221,41 +171,65 @@ export default function ForgotPasswordPage() {
       setIsLoading(false);
       return;
     }
-    if (!recoveryReady || !supabase) {
+    if (!recoveryReady || !supabase || !tokenHash) {
       setError("Invalid or expired reset link. Please request a new one.");
       setOfferNewLink(true);
       setIsLoading(false);
       return;
     }
 
+    const client = supabase;
     try {
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: newPassword,
+      // SECURITY: the token is exchanged here, not when the page opened, and
+      // the recovery session ends with a global sign-out — it also revokes
+      // sessions on other devices, correct after a reset since the old
+      // password may be compromised. SIGNED_OUT reaches ClientLayout, which
+      // clears local auth state. The user then signs in with the new password.
+      // Once the password has changed the reset counts as done even if the
+      // sign-out fails; see runPasswordReset.
+      const outcome = await runPasswordReset({
+        verify: () =>
+          client.auth.verifyOtp({ type: "recovery", token_hash: tokenHash }),
+        update: () => client.auth.updateUser({ password: newPassword }),
+        signOut: (scope) => client.auth.signOut({ scope }),
+        removeAuthCookies: removeSupabaseAuthCookies,
       });
 
-      if (updateError) {
-        // Fixed copy by code: an Auth error message is not shown.
-        const copy = copyForAuthError(authErrorCode(updateError), "reset-update");
-        setError(copy.message);
-        setOfferNewLink(Boolean(copy.offerNewResetLink));
+      if (outcome.kind === "success") {
+        setStep("success");
         return;
       }
 
-      // SECURITY: tear down the recovery session so the password change does not
-      // leave the user logged in. Scope 'global', stated explicitly, also
-      // revokes sessions on other devices — correct after a reset, since the old
-      // password may be compromised. signOut() emits SIGNED_OUT, which ClientLayout handles by
-      // clearing local auth state. The user re-authenticates with the new
-      // password via the normal login flow. If signOut fails we still show
-      // success (password IS changed) but log it.
-      const { error: signOutError } = await supabase.auth.signOut({
-        scope: "global",
-      });
-      if (signOutError) {
-        console.error("Sign-out after password reset failed:", signOutError);
+      // Fixed copy by code: an Auth error message is not shown.
+      if (outcome.kind === "verify-refused") {
+        const verifyError = outcome.error;
+        if (verifyError) {
+          const copy = copyForAuthError(authErrorCode(verifyError), "reset-link");
+          setError(copy.message);
+          setOfferNewLink(Boolean(copy.offerNewResetLink));
+          setRecoveryReady(false);
+        }
+        return;
       }
-
-      setStep("success");
+      if (outcome.kind === "verify-threw") {
+        setError(AUTH_COPY.RESET_LINK_FAILED);
+        setOfferNewLink(true);
+        setRecoveryReady(false);
+        return;
+      }
+      if (outcome.kind === "update-refused" || outcome.kind === "update-threw") {
+        // The token was exchanged before the update and cannot be used again,
+        // so a new link is offered whatever the copy says.
+        const updateError = outcome.kind === "update-refused" ? outcome.error : null;
+        if (updateError) {
+          const copy = copyForAuthError(authErrorCode(updateError), "reset-update");
+          setError(copy.message);
+        } else {
+          setError(AUTH_COPY.RESET_UPDATE_FAILED);
+        }
+        setOfferNewLink(true);
+        setRecoveryReady(false);
+      }
     } catch {
       setError(AUTH_COPY.RESET_UPDATE_FAILED);
     } finally {

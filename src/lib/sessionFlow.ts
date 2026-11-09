@@ -504,3 +504,103 @@ export async function runSignOut(
   }
   return serverConfirmed ? "server-confirmed" : "local-only";
 }
+
+// ---------------------------------------------------------------------------
+// Password reset
+// ---------------------------------------------------------------------------
+
+export type PasswordResetOutcome =
+  | { kind: "success" }
+  | { kind: "verify-refused"; error: unknown }
+  | { kind: "verify-threw" }
+  | { kind: "update-refused"; error: unknown }
+  | { kind: "update-threw" };
+
+export type PasswordResetDeps = {
+  /** verifyOtp with the recovery token_hash; creates the recovery session. */
+  verify: () => Promise<{ error: unknown }>;
+  /** updateUser with the new password, under the recovery session. */
+  update: () => Promise<{ error: unknown }>;
+  /** auth.signOut with the given scope. */
+  signOut: (scope: SignOutScope) => Promise<{ error: unknown }>;
+  /** Deletes the Supabase auth cookies directly (see runSignOut). */
+  removeAuthCookies: () => void;
+  /** Defaults to console.warn. Injected so tests stay quiet. */
+  log?: (line: string) => void;
+};
+
+/**
+ * Ends a recovery session that must not outlive this function. A failed or
+ * throwing sign-out falls back to deleting the auth cookies on this device.
+ */
+async function endRecoverySession(
+  scope: SignOutScope,
+  deps: PasswordResetDeps,
+  log: (line: string) => void
+): Promise<void> {
+  let ended = false;
+  try {
+    const { error } = await deps.signOut(scope);
+    if (error) {
+      log(`[auth] sign-out after password reset failed scope=${scope} ${errorFields(error)}`);
+    } else {
+      ended = true;
+    }
+  } catch (err) {
+    log(`[auth] sign-out after password reset threw scope=${scope} ${errorFields(err)}`);
+  }
+  if (!ended) {
+    try {
+      deps.removeAuthCookies();
+    } catch (err) {
+      log(`[auth] removing auth cookies failed ${errorFields(err)}`);
+    }
+  }
+}
+
+/**
+ * The password reset, run only when the user submits the new password.
+ *
+ * The recovery link's token is not exchanged when the page opens, so opening
+ * the link — or a mail scanner fetching it — creates no session. On submit:
+ * verifyOtp creates the recovery session, updateUser changes the password,
+ * and a global sign-out ends every session, this one included, since the old
+ * password may be compromised.
+ *
+ * Once the password has changed, the reset has succeeded whatever the
+ * sign-out does; a failed sign-out is logged and this device's auth cookies
+ * are deleted directly. If the update is refused or throws after the token
+ * was exchanged, the recovery session is ended on this device ('local') so a
+ * reset that was not finished leaves no session behind; the token is spent,
+ * so a retry needs a new link.
+ */
+export async function runPasswordReset(
+  deps: PasswordResetDeps
+): Promise<PasswordResetOutcome> {
+  const log = deps.log ?? ((line: string) => console.warn(line));
+
+  try {
+    const { error } = await deps.verify();
+    if (error) return { kind: "verify-refused", error };
+  } catch {
+    return { kind: "verify-threw" };
+  }
+
+  let updateFailure: PasswordResetOutcome | null = null;
+  try {
+    const { error } = await deps.update();
+    if (error) updateFailure = { kind: "update-refused", error };
+  } catch {
+    updateFailure = { kind: "update-threw" };
+  }
+  if (updateFailure) {
+    await endRecoverySession("local", deps, log);
+    return updateFailure;
+  }
+
+  await endRecoverySession("global", deps, log);
+  return { kind: "success" };
+}
+
+// The same server work as the callback's profile sync.
+export const LOGIN_SYNC_TIMEOUT_MS = CALLBACK_SYNC_TIMEOUT_MS;
