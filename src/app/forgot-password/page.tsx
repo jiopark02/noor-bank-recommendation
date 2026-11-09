@@ -40,7 +40,10 @@ export default function ForgotPasswordPage() {
   // shows the new-password form: the token is exchanged (verifyOtp) when the
   // form is submitted, inside runPasswordReset, so opening the link — or a
   // mail scanner fetching it — creates no session, and leaving without
-  // finishing leaves none behind.
+  // finishing leaves none behind. Once the token is held in state it is
+  // removed from the address bar, keeping the path. Next.js then updates
+  // useSearchParams and this effect runs again without a token; that run
+  // returns before any setter, so the token already held is kept.
   const [tokenHash, setTokenHash] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,6 +60,7 @@ export default function ForgotPasswordPage() {
       return;
     }
     setTokenHash(linkTokenHash);
+    window.history.replaceState(null, "", window.location.pathname);
     setRecoveryReady(true);
   }, [searchParams]);
 
