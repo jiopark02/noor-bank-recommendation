@@ -453,6 +453,12 @@ function errorFields(err: unknown): string {
   return `name=${name}${status}`;
 }
 
+function errorName(err: unknown): string {
+  if (!err || typeof err !== "object") return "name=UnknownError";
+  const name = (err as { name?: unknown }).name;
+  return `name=${typeof name === "string" && name ? name : "UnknownError"}`;
+}
+
 /**
  * Signs out, and always leaves the device signed out and the user on the next
  * screen, whatever the server answers.
@@ -466,7 +472,9 @@ function errorFields(err: unknown): string {
  * the server, which the log line records.
  *
  * The local clean-up and the navigation run in `finally`, so a throw never
- * leaves stale local state behind or the user on the page they left.
+ * leaves stale local state behind or the user on the page they left. A throw
+ * from the local clean-up itself is logged by name and the navigation still
+ * runs.
  */
 export async function runSignOut(
   scope: SignOutScope,
@@ -499,7 +507,11 @@ export async function runSignOut(
         log(`[auth] removing auth cookies failed ${errorFields(err)}`);
       }
     }
-    deps.clearLocal();
+    try {
+      deps.clearLocal();
+    } catch (err) {
+      log(`[auth] local sign-out clean-up failed ${errorName(err)}`);
+    }
     deps.navigate();
   }
   return serverConfirmed ? "server-confirmed" : "local-only";
