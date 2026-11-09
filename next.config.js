@@ -45,9 +45,6 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
-  images: {
-    domains: ['udkmzwscmotcyddptpko.supabase.co'],
-  },
   async headers() {
     return [
       {
