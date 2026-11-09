@@ -8,7 +8,12 @@ import {
   clearLocalAuthState,
   purgeAllNoorLocalState,
 } from '@/lib/validation';
-import { supabase, getSupabaseBearerHeaders } from '@/lib/supabase-browser';
+import {
+  supabase,
+  getSupabaseBearerHeaders,
+  removeSupabaseAuthCookies,
+} from '@/lib/supabase-browser';
+import { runSignOut } from '@/lib/sessionFlow';
 import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supabaseAuthHeaders';
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
@@ -319,17 +324,19 @@ export default function SettingsPage() {
       }
 
       // Server returned 200 = deletion is complete. Nothing after this point
-      // may surface as a deletion failure. signOut() can legitimately fail
-      // (the auth user is already deleted, so the server call may 4xx) — that
-      // is a normal outcome, not a deletion failure, so we swallow it. Local
-      // purge and navigation run unconditionally.
-      try {
-        if (supabase) await supabase.auth.signOut();
-      } catch (err) {
-        console.warn('handleDeleteAccount: signOut after deletion failed (expected — user already deleted):', err);
-      }
-      purgeAllNoorLocalState();
-      router.push('/welcome');
+      // may surface as a deletion failure. Signing out this device only
+      // ('local'): the Auth user is gone, so the server call is normally
+      // refused, which auth-js treats as signed out; any other failure is
+      // handled inside runSignOut. Local purge and navigation always run.
+      const client = supabase;
+      await runSignOut('local', {
+        signOut: client
+          ? (scope) => client.auth.signOut({ scope })
+          : null,
+        removeAuthCookies: removeSupabaseAuthCookies,
+        clearLocal: purgeAllNoorLocalState,
+        navigate: () => router.push('/welcome'),
+      });
     } catch {
       setError('Failed to delete account. Please try again.');
       setIsLoading(false);
@@ -383,10 +390,18 @@ export default function SettingsPage() {
     }
   };
 
+  // Signs out this device only ('local'); other devices stay signed in. The
+  // local clean-up and navigation run whatever the server answers.
   const handleLogout = async () => {
-    if (supabase) await supabase.auth.signOut();
-    clearLocalAuthState();
-    router.push('/welcome');
+    const client = supabase;
+    await runSignOut('local', {
+      signOut: client
+        ? (scope) => client.auth.signOut({ scope })
+        : null,
+      removeAuthCookies: removeSupabaseAuthCookies,
+      clearLocal: clearLocalAuthState,
+      navigate: () => router.push('/welcome'),
+    });
   };
 
   const initials = getInitials(userProfile?.firstName, userProfile?.lastName);

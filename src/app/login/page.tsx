@@ -12,7 +12,11 @@ import {
   clearLocalAuthState,
   ERROR_MESSAGES,
 } from "@/lib/validation";
-import { supabase, readSession } from "@/lib/supabase-browser";
+import {
+  supabase,
+  readSession,
+  setSessionPersistence,
+} from "@/lib/supabase-browser";
 import {
   PROFILE_READ_TIMEOUT_MS,
   SIGN_IN_TIMEOUT_MS,
@@ -98,6 +102,9 @@ export default function LoginPage() {
     setError("");
 
     try {
+      // The marker cookie lasts the browser session, so it is still present
+      // when /auth/callback writes the session cookie after the redirect.
+      setSessionPersistence(keepSignedIn);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -136,6 +143,9 @@ export default function LoginPage() {
     try {
       if (supabase) {
         const normalizedEmail = email.trim().toLowerCase();
+
+        // Before the sign-in call: the session cookie is written during it.
+        setSessionPersistence(keepSignedIn);
 
         signInAttemptRef.current += 1;
         const attempt = signInAttemptRef.current;

@@ -242,13 +242,15 @@ export default function ForgotPasswordPage() {
       }
 
       // SECURITY: tear down the recovery session so the password change does not
-      // leave the user logged in. Default scope 'global' also revokes sessions on
-      // other devices — correct after a reset, since the old password may be
-      // compromised. signOut() emits SIGNED_OUT, which ClientLayout handles by
+      // leave the user logged in. Scope 'global', stated explicitly, also
+      // revokes sessions on other devices — correct after a reset, since the old
+      // password may be compromised. signOut() emits SIGNED_OUT, which ClientLayout handles by
       // clearing local auth state. The user re-authenticates with the new
       // password via the normal login flow. If signOut fails we still show
       // success (password IS changed) but log it.
-      const { error: signOutError } = await supabase.auth.signOut();
+      const { error: signOutError } = await supabase.auth.signOut({
+        scope: "global",
+      });
       if (signOutError) {
         console.error("Sign-out after password reset failed:", signOutError);
       }

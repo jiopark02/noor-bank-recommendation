@@ -1,4 +1,5 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
+import { isChunkLike, type CookieOptions } from "@supabase/ssr";
 import type { SessionReadResult } from "@/lib/supabase-browser";
 import { firstNameForClient } from "@/lib/defaultFirstName";
 
@@ -340,4 +341,166 @@ export function chooseConfirmedNames(input: {
   if (input.synced) return { ...input.synced };
   if (input.stored) return { ...input.stored };
   return { firstName: "", lastName: "" };
+}
+
+// ---------------------------------------------------------------------------
+// Sign-out and session cookie lifetime
+// ---------------------------------------------------------------------------
+
+/**
+ * Marker cookie for "Keep me signed in" left unchecked. The login page sets it
+ * (with no lifetime, so it ends when the browser closes) before signing in and
+ * removes it when the box is checked. While it is present, every Supabase auth
+ * cookie written — by the browser client after sign-in or a token refresh, and
+ * by the middleware after a refresh — is written without a lifetime as well.
+ * It shortens the holder's own session and carries nothing else, so a forged
+ * marker grants nothing.
+ */
+export const SESSION_ONLY_COOKIE = "noor_session_only";
+
+export type CookieToSet = {
+  name: string;
+  value: string;
+  options: CookieOptions;
+};
+
+/**
+ * The options one auth cookie is written with. @supabase/ssr always sets a
+ * 400-day maxAge on the cookies it writes and overrides any maxAge passed as
+ * cookieOptions, so the lifetime can only be removed here, in the cookie
+ * writer. A removal (maxAge 0, or an empty value) passes through unchanged:
+ * stripping its lifetime would turn a deletion into a session cookie that
+ * outlives the sign-out.
+ */
+export function cookieOptionsForPersistence(
+  cookie: CookieToSet,
+  persistent: boolean
+): CookieOptions {
+  const options = cookie.options ?? {};
+  if (persistent) return options;
+  if (options.maxAge === 0 || cookie.value === "") return options;
+  const sessionOnly: CookieOptions = { ...options };
+  delete sessionOnly.maxAge;
+  delete sessionOnly.expires;
+  return sessionOnly;
+}
+
+export function applySessionPersistence(
+  cookies: CookieToSet[],
+  persistent: boolean
+): CookieToSet[] {
+  return cookies.map((cookie) => ({
+    ...cookie,
+    options: cookieOptionsForPersistence(cookie, persistent),
+  }));
+}
+
+/**
+ * The storage key supabase-js derives when none is configured:
+ * `sb-<first label of the project host>-auth-token`. The browser client and
+ * the middleware both use that default, so this is the name of the session
+ * cookie (and the prefix of its chunks). sessionCookiePolicy.test.ts compares
+ * it with the key the installed library derives.
+ */
+export function defaultSupabaseStorageKey(supabaseUrl: string): string | null {
+  try {
+    const host = new URL(supabaseUrl.trim()).hostname;
+    return host ? `sb-${host.split(".")[0]}-auth-token` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a cookie is one of the cookies auth-js keeps under `storageKey`:
+ * the session (whole or chunked as `<key>.0`, `<key>.1`, ...), the PKCE code
+ * verifier, and the separately stored user.
+ */
+export function isSupabaseAuthCookieName(
+  name: string,
+  storageKey: string
+): boolean {
+  return (
+    isChunkLike(name, storageKey) ||
+    isChunkLike(name, `${storageKey}-code-verifier`) ||
+    isChunkLike(name, `${storageKey}-user`)
+  );
+}
+
+export type SignOutScope = "local" | "global";
+
+export type SignOutDeps = {
+  /** Null when the browser client is not configured. */
+  signOut:
+    | ((scope: SignOutScope) => Promise<{ error: unknown }>)
+    | null;
+  /** Deletes the Supabase auth cookies directly. */
+  removeAuthCookies: () => void;
+  /** Clears the app's own browser storage. */
+  clearLocal: () => void;
+  navigate: () => void;
+  /** Defaults to console.warn. Injected so tests stay quiet. */
+  log?: (line: string) => void;
+};
+
+export type SignOutOutcome = "server-confirmed" | "local-only";
+
+function errorFields(err: unknown): string {
+  if (!err || typeof err !== "object") return "name=UnknownError";
+  const e = err as { name?: unknown; status?: unknown };
+  const name = typeof e.name === "string" && e.name ? e.name : "UnknownError";
+  const status = typeof e.status === "number" ? ` status=${e.status}` : "";
+  return `name=${name}${status}`;
+}
+
+/**
+ * Signs out, and always leaves the device signed out and the user on the next
+ * screen, whatever the server answers.
+ *
+ * auth-js removes its own session only when the server call succeeds or is
+ * refused with 401, 403 or 404. On any other error it returns the error and
+ * keeps the session, and on a network failure it throws and keeps it. Either
+ * way the cookie would keep the middleware treating the device as signed in,
+ * so on every outcome other than a clean answer the auth cookies are deleted
+ * here. That signs this device out only: the refresh token is not revoked on
+ * the server, which the log line records.
+ *
+ * The local clean-up and the navigation run in `finally`, so a throw never
+ * leaves stale local state behind or the user on the page they left.
+ */
+export async function runSignOut(
+  scope: SignOutScope,
+  deps: SignOutDeps
+): Promise<SignOutOutcome> {
+  const log = deps.log ?? ((line: string) => console.warn(line));
+  let serverConfirmed = false;
+  try {
+    if (deps.signOut) {
+      const { error } = await deps.signOut(scope);
+      if (error) {
+        log(
+          `[auth] sign-out server call failed scope=${scope} ${errorFields(error)};` +
+            " removing auth cookies on this device only"
+        );
+      } else {
+        serverConfirmed = true;
+      }
+    }
+  } catch (err) {
+    log(
+      `[auth] sign-out server call threw scope=${scope} ${errorFields(err)};` +
+        " removing auth cookies on this device only"
+    );
+  } finally {
+    if (!serverConfirmed) {
+      try {
+        deps.removeAuthCookies();
+      } catch (err) {
+        log(`[auth] removing auth cookies failed ${errorFields(err)}`);
+      }
+    }
+    deps.clearLocal();
+    deps.navigate();
+  }
+  return serverConfirmed ? "server-confirmed" : "local-only";
 }
