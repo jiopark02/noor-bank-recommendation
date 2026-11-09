@@ -1,4 +1,5 @@
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
+import { isChunkLike, type CookieOptions } from "@supabase/ssr";
 import type { SessionReadResult } from "@/lib/supabase-browser";
 import { firstNameForClient } from "@/lib/defaultFirstName";
 
@@ -28,6 +29,9 @@ export const DASHBOARD_SESSION_RETRY: RetryPlan = {
   timeoutsMs: [3000, 3000, 3000],
   gapsMs: [500, 1000],
 };
+
+// The other signed-in pages read the session the same way the dashboard does.
+export const PROTECTED_SESSION_RETRY: RetryPlan = DASHBOARD_SESSION_RETRY;
 
 // Longer than the default read. The first read on /auth/callback waits on the
 // OAuth code exchange, a network round trip, where other pages mostly read a
@@ -118,14 +122,38 @@ export function shouldRetrySessionRead(read: SessionReadResult): boolean {
   return read.status === "unavailable" && read.reason !== "not-configured";
 }
 
-export type DashboardMountAction = "proceed" | "sign-out" | "show-delayed";
+export type ProtectedMountAction = "proceed" | "sign-out" | "show-delayed";
 
-export function decideDashboardMount(
+/**
+ * The mount decision for a signed-in page (/dashboard, /money, /chat). Only a
+ * clean "none" signs out. "unavailable" — a timeout, an error, or a client that
+ * is not configured — can come from a valid session, so it shows the delayed
+ * screen and leaves local state alone.
+ */
+export function decideProtectedMount(
   read: SessionReadResult
-): DashboardMountAction {
+): ProtectedMountAction {
   if (read.status === "session") return "proceed";
   if (read.status === "none") return "sign-out";
   return "show-delayed";
+}
+
+export type DashboardMountAction = ProtectedMountAction;
+
+export const decideDashboardMount = decideProtectedMount;
+
+export type LocalIdentityAction = "keep" | "replace";
+
+/**
+ * Whether the locally cached user id belongs to the session's user. A cache
+ * left by another account on the same device is replaced, not acted on: the
+ * session is the authority, so a mismatch is not a reason to sign anyone out.
+ */
+export function decideLocalIdentity(
+  storedUserId: string | null,
+  sessionUserId: string
+): LocalIdentityAction {
+  return storedUserId === sessionUserId ? "keep" : "replace";
 }
 
 export type LoginMountAction = "go-dashboard" | "clear-local" | "stay";
@@ -314,3 +342,277 @@ export function chooseConfirmedNames(input: {
   if (input.stored) return { ...input.stored };
   return { firstName: "", lastName: "" };
 }
+
+// ---------------------------------------------------------------------------
+// Sign-out and session cookie lifetime
+// ---------------------------------------------------------------------------
+
+/**
+ * Marker cookie for "Keep me signed in" left unchecked. The login page sets it
+ * (with no lifetime, so it ends when the browser closes) before signing in and
+ * removes it when the box is checked. While it is present, every Supabase auth
+ * cookie written — by the browser client after sign-in or a token refresh, and
+ * by the middleware after a refresh — is written without a lifetime as well.
+ * It shortens the holder's own session and carries nothing else, so a forged
+ * marker grants nothing.
+ */
+export const SESSION_ONLY_COOKIE = "noor_session_only";
+
+export type CookieToSet = {
+  name: string;
+  value: string;
+  options: CookieOptions;
+};
+
+/**
+ * The options one auth cookie is written with. @supabase/ssr always sets a
+ * 400-day maxAge on the cookies it writes and overrides any maxAge passed as
+ * cookieOptions, so the lifetime can only be removed here, in the cookie
+ * writer. A removal (maxAge 0, or an empty value) passes through unchanged:
+ * stripping its lifetime would turn a deletion into a session cookie that
+ * outlives the sign-out.
+ */
+export function cookieOptionsForPersistence(
+  cookie: CookieToSet,
+  persistent: boolean
+): CookieOptions {
+  const options = cookie.options ?? {};
+  if (persistent) return options;
+  if (options.maxAge === 0 || cookie.value === "") return options;
+  const sessionOnly: CookieOptions = { ...options };
+  delete sessionOnly.maxAge;
+  delete sessionOnly.expires;
+  return sessionOnly;
+}
+
+export function applySessionPersistence(
+  cookies: CookieToSet[],
+  persistent: boolean
+): CookieToSet[] {
+  return cookies.map((cookie) => ({
+    ...cookie,
+    options: cookieOptionsForPersistence(cookie, persistent),
+  }));
+}
+
+/**
+ * The storage key supabase-js derives when none is configured:
+ * `sb-<first label of the project host>-auth-token`. The browser client and
+ * the middleware both use that default, so this is the name of the session
+ * cookie (and the prefix of its chunks). sessionCookiePolicy.test.ts compares
+ * it with the key the installed library derives.
+ */
+export function defaultSupabaseStorageKey(supabaseUrl: string): string | null {
+  try {
+    const host = new URL(supabaseUrl.trim()).hostname;
+    return host ? `sb-${host.split(".")[0]}-auth-token` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a cookie is one of the cookies auth-js keeps under `storageKey`:
+ * the session (whole or chunked as `<key>.0`, `<key>.1`, ...), the PKCE code
+ * verifier, and the separately stored user.
+ */
+export function isSupabaseAuthCookieName(
+  name: string,
+  storageKey: string
+): boolean {
+  return (
+    isChunkLike(name, storageKey) ||
+    isChunkLike(name, `${storageKey}-code-verifier`) ||
+    isChunkLike(name, `${storageKey}-user`)
+  );
+}
+
+export type SignOutScope = "local" | "global";
+
+export type SignOutDeps = {
+  /** Null when the browser client is not configured. */
+  signOut:
+    | ((scope: SignOutScope) => Promise<{ error: unknown }>)
+    | null;
+  /** Deletes the Supabase auth cookies directly. */
+  removeAuthCookies: () => void;
+  /** Clears the app's own browser storage. */
+  clearLocal: () => void;
+  navigate: () => void;
+  /** Defaults to console.warn. Injected so tests stay quiet. */
+  log?: (line: string) => void;
+};
+
+export type SignOutOutcome = "server-confirmed" | "local-only";
+
+function errorFields(err: unknown): string {
+  if (!err || typeof err !== "object") return "name=UnknownError";
+  const e = err as { name?: unknown; status?: unknown };
+  const name = typeof e.name === "string" && e.name ? e.name : "UnknownError";
+  const status = typeof e.status === "number" ? ` status=${e.status}` : "";
+  return `name=${name}${status}`;
+}
+
+function errorName(err: unknown): string {
+  if (!err || typeof err !== "object") return "name=UnknownError";
+  const name = (err as { name?: unknown }).name;
+  return `name=${typeof name === "string" && name ? name : "UnknownError"}`;
+}
+
+/**
+ * Signs out, and always leaves the device signed out and the user on the next
+ * screen, whatever the server answers.
+ *
+ * auth-js removes its own session only when the server call succeeds or is
+ * refused with 401, 403 or 404. On any other error it returns the error and
+ * keeps the session, and on a network failure it throws and keeps it. Either
+ * way the cookie would keep the middleware treating the device as signed in,
+ * so on every outcome other than a clean answer the auth cookies are deleted
+ * here. That signs this device out only: the refresh token is not revoked on
+ * the server, which the log line records.
+ *
+ * The local clean-up and the navigation run in `finally`, so a throw never
+ * leaves stale local state behind or the user on the page they left. A throw
+ * from the local clean-up itself is logged by name and the navigation still
+ * runs.
+ */
+export async function runSignOut(
+  scope: SignOutScope,
+  deps: SignOutDeps
+): Promise<SignOutOutcome> {
+  const log = deps.log ?? ((line: string) => console.warn(line));
+  let serverConfirmed = false;
+  try {
+    if (deps.signOut) {
+      const { error } = await deps.signOut(scope);
+      if (error) {
+        log(
+          `[auth] sign-out server call failed scope=${scope} ${errorFields(error)};` +
+            " removing auth cookies on this device only"
+        );
+      } else {
+        serverConfirmed = true;
+      }
+    }
+  } catch (err) {
+    log(
+      `[auth] sign-out server call threw scope=${scope} ${errorFields(err)};` +
+        " removing auth cookies on this device only"
+    );
+  } finally {
+    if (!serverConfirmed) {
+      try {
+        deps.removeAuthCookies();
+      } catch (err) {
+        log(`[auth] removing auth cookies failed ${errorFields(err)}`);
+      }
+    }
+    try {
+      deps.clearLocal();
+    } catch (err) {
+      log(`[auth] local sign-out clean-up failed ${errorName(err)}`);
+    }
+    deps.navigate();
+  }
+  return serverConfirmed ? "server-confirmed" : "local-only";
+}
+
+// ---------------------------------------------------------------------------
+// Password reset
+// ---------------------------------------------------------------------------
+
+export type PasswordResetOutcome =
+  | { kind: "success" }
+  | { kind: "verify-refused"; error: unknown }
+  | { kind: "verify-threw" }
+  | { kind: "update-refused"; error: unknown }
+  | { kind: "update-threw" };
+
+export type PasswordResetDeps = {
+  /** verifyOtp with the recovery token_hash; creates the recovery session. */
+  verify: () => Promise<{ error: unknown }>;
+  /** updateUser with the new password, under the recovery session. */
+  update: () => Promise<{ error: unknown }>;
+  /** auth.signOut with the given scope. */
+  signOut: (scope: SignOutScope) => Promise<{ error: unknown }>;
+  /** Deletes the Supabase auth cookies directly (see runSignOut). */
+  removeAuthCookies: () => void;
+  /** Defaults to console.warn. Injected so tests stay quiet. */
+  log?: (line: string) => void;
+};
+
+/**
+ * Ends a recovery session that must not outlive this function. A failed or
+ * throwing sign-out falls back to deleting the auth cookies on this device.
+ */
+async function endRecoverySession(
+  scope: SignOutScope,
+  deps: PasswordResetDeps,
+  log: (line: string) => void
+): Promise<void> {
+  let ended = false;
+  try {
+    const { error } = await deps.signOut(scope);
+    if (error) {
+      log(`[auth] sign-out after password reset failed scope=${scope} ${errorFields(error)}`);
+    } else {
+      ended = true;
+    }
+  } catch (err) {
+    log(`[auth] sign-out after password reset threw scope=${scope} ${errorFields(err)}`);
+  }
+  if (!ended) {
+    try {
+      deps.removeAuthCookies();
+    } catch (err) {
+      log(`[auth] removing auth cookies failed ${errorFields(err)}`);
+    }
+  }
+}
+
+/**
+ * The password reset, run only when the user submits the new password.
+ *
+ * The recovery link's token is not exchanged when the page opens, so opening
+ * the link — or a mail scanner fetching it — creates no session. On submit:
+ * verifyOtp creates the recovery session, updateUser changes the password,
+ * and a global sign-out ends every session, this one included, since the old
+ * password may be compromised.
+ *
+ * Once the password has changed, the reset has succeeded whatever the
+ * sign-out does; a failed sign-out is logged and this device's auth cookies
+ * are deleted directly. If the update is refused or throws after the token
+ * was exchanged, the recovery session is ended on this device ('local') so a
+ * reset that was not finished leaves no session behind; the token is spent,
+ * so a retry needs a new link.
+ */
+export async function runPasswordReset(
+  deps: PasswordResetDeps
+): Promise<PasswordResetOutcome> {
+  const log = deps.log ?? ((line: string) => console.warn(line));
+
+  try {
+    const { error } = await deps.verify();
+    if (error) return { kind: "verify-refused", error };
+  } catch {
+    return { kind: "verify-threw" };
+  }
+
+  let updateFailure: PasswordResetOutcome | null = null;
+  try {
+    const { error } = await deps.update();
+    if (error) updateFailure = { kind: "update-refused", error };
+  } catch {
+    updateFailure = { kind: "update-threw" };
+  }
+  if (updateFailure) {
+    await endRecoverySession("local", deps, log);
+    return updateFailure;
+  }
+
+  await endRecoverySession("global", deps, log);
+  return { kind: "success" };
+}
+
+// The same server work as the callback's profile sync.
+export const LOGIN_SYNC_TIMEOUT_MS = CALLBACK_SYNC_TIMEOUT_MS;

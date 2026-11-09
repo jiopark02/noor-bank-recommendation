@@ -14,7 +14,14 @@ import {
 } from "@/lib/plaid";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
+import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
+import {
+  PROTECTED_SESSION_RETRY,
+  decideProtectedMount,
+  retryUntilAnswered,
+  shouldRetrySessionRead,
+  waitMs,
+} from "@/lib/sessionFlow";
 import { clearLocalAuthState } from "@/lib/validation";
 import {
   asPlainObject,
@@ -39,6 +46,7 @@ export default function MoneyPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionDelayed, setSessionDelayed] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [accounts, setAccounts] = useState<PlaidAccount[]>([]);
   const [transactions, setTransactions] = useState<PlaidTransaction[]>([]);
@@ -75,8 +83,10 @@ export default function MoneyPage() {
 
   // Initialize user. noor_user_id is only a legacy synchronous cache; the live
   // Supabase session is the source of truth. Verify it before rendering so an
-  // expired session redirects cleanly to /login instead of showing the page
-  // with every Plaid endpoint returning 401.
+  // ended session redirects cleanly to /login instead of showing the page
+  // with every Plaid endpoint returning 401. Only a clean "none" means that: a
+  // read that never answered can come from a valid session, so it is retried,
+  // then shown as a delay, and it never clears anything.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -85,14 +95,24 @@ export default function MoneyPage() {
         router.push("/welcome");
         return;
       }
-      const session = await getSessionSafe();
+      const read = await retryUntilAnswered(
+        (timeoutMs, attempt) => readSession(timeoutMs, "money-mount", attempt),
+        shouldRetrySessionRead,
+        PROTECTED_SESSION_RETRY,
+        { sleep: waitMs, isCancelled: () => cancelled }
+      );
       if (cancelled) return;
-      if (!session) {
+      const action = decideProtectedMount(read);
+      if (action === "sign-out") {
         clearLocalAuthState();
         router.replace("/login");
         return;
       }
-      setUserId(session.user.id);
+      if (action === "show-delayed" || read.status !== "session") {
+        setSessionDelayed(true);
+        return;
+      }
+      setUserId(read.session.user.id);
       setIsLoading(false);
     })();
     return () => {
@@ -395,6 +415,30 @@ export default function MoneyPage() {
       .filter((t) => t.amount < 0)
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
   }, [transactions]);
+
+  // Reloads rather than reading again: a client whose auth read has hung stays
+  // hung until the page recreates it.
+  if (sessionDelayed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-xl font-semibold text-black mb-2">
+            We couldn&apos;t confirm your sign-in
+          </h1>
+          <p className="text-gray-500 mb-6">
+            Please check your connection and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

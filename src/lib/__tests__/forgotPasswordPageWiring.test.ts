@@ -41,9 +41,9 @@ describe("forgot-password page wiring: auth error copy", () => {
     expect(count("} catch { setError(AUTH_COPY.RESET_REQUEST_FAILED); }")).toBe(2);
   });
 
-  it("F3 the password update uses reset-update copy and may offer a new link", () => {
+  it("F3 the password update uses reset-update copy", () => {
     expect(CODE).toContain(
-      'if (updateError) { const copy = copyForAuthError(authErrorCode(updateError), "reset-update"); setError(copy.message); setOfferNewLink(Boolean(copy.offerNewResetLink)); return; }'
+      'if (updateError) { const copy = copyForAuthError(authErrorCode(updateError), "reset-update"); setError(copy.message);'
     );
     expect(CODE).toContain("} catch { setError(AUTH_COPY.RESET_UPDATE_FAILED); }");
   });
@@ -64,8 +64,25 @@ describe("forgot-password page wiring: auth error copy", () => {
     expect(CODE).toContain("{offerNewLink && ( <button type=\"button\" onClick={handleRequestNewLink}");
   });
 
-  it("F6 the reset link is still verified on load (unchanged)", () => {
-    expect(count(".verifyOtp({ type: \"recovery\", token_hash: tokenHash })")).toBe(1);
+  it("F6 verifyOtp runs once, inside the submit handler", () => {
+    expect(count("verifyOtp(")).toBe(1);
+    const submitAt = CODE.indexOf("const handleResetPassword = async");
+    const verifyAt = CODE.indexOf('.verifyOtp({ type: "recovery", token_hash: tokenHash })');
+    const handlerEnd = CODE.indexOf("return (", submitAt);
+    expect(submitAt).toBeGreaterThan(-1);
+    expect(verifyAt).toBeGreaterThan(submitAt);
+    expect(verifyAt).toBeLessThan(handlerEnd);
+  });
+
+  it("F8 a failed update offers a new link and drops the spent token, whatever the copy", () => {
+    // The token was exchanged before the update, so it cannot be used again.
+    const refused = CODE.slice(
+      CODE.indexOf('if (outcome.kind === "update-refused" || outcome.kind === "update-threw") {'),
+      CODE.indexOf("} catch { setError(AUTH_COPY.RESET_UPDATE_FAILED); }")
+    );
+    expect(refused).toContain("setOfferNewLink(true); setRecoveryReady(false);");
+    expect(refused).toContain('copyForAuthError(authErrorCode(updateError), "reset-update")');
+    expect(refused).not.toContain("setOfferNewLink(Boolean(");
   });
 
   it("F7 every setError argument is a fixed string, a copy constant or a copy's message", () => {

@@ -333,7 +333,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update the existing users row (sync-profile created it on callback),
+    // Update the existing users row (sync-profile created it on /auth/callback
+    // or after a password sign-in),
     // respecting it: never touch created_at/email. The names are written only
     // when the submitted first name differs from the stored one, as a pair
     // (see decideNameUpdate). The stored names are read first; a failed read

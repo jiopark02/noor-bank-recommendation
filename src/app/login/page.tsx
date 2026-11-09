@@ -12,8 +12,14 @@ import {
   clearLocalAuthState,
   ERROR_MESSAGES,
 } from "@/lib/validation";
-import { supabase, readSession } from "@/lib/supabase-browser";
 import {
+  supabase,
+  getSupabaseBearerHeaders,
+  readSession,
+  setSessionPersistence,
+} from "@/lib/supabase-browser";
+import {
+  LOGIN_SYNC_TIMEOUT_MS,
   PROFILE_READ_TIMEOUT_MS,
   SIGN_IN_TIMEOUT_MS,
   decideLateSignIn,
@@ -21,8 +27,43 @@ import {
   settleWithin,
 } from "@/lib/sessionFlow";
 import { getSurveyFieldsForUserProfile } from "@/lib/surveyResponseProfile";
-import { firstNameForClient } from "@/lib/defaultFirstName";
+import { namesFromSyncResponse } from "@/lib/syncProfileNames";
+import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { AUTH_COPY, authErrorCode, copyForAuthError } from "@/lib/authErrorCopy";
+
+/**
+ * POST /api/auth/sync-profile for the user who just signed in with a password.
+ * The body carries the id only: the server takes the email from the verified
+ * token and keeps the stored names, and a body without names never overwrites
+ * them. Returns the names the server reports writing, or null when there is no
+ * token, the call fails, or it runs past LOGIN_SYNC_TIMEOUT_MS.
+ */
+async function syncProfileAfterSignIn(
+  userId: string
+): Promise<{ firstName: string; lastName: string } | null> {
+  const auth = await getSupabaseBearerHeaders();
+  if (!auth.Authorization) return null;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), LOGIN_SYNC_TIMEOUT_MS);
+  try {
+    const res = await fetch("/api/auth/sync-profile", {
+      method: "POST",
+      signal: abort.signal,
+      headers: buildJsonAuthorizedHeaders(auth),
+      body: JSON.stringify({ id: userId }),
+    });
+    if (!res.ok) {
+      console.error("Profile sync failed:", res.status);
+      return null;
+    }
+    return namesFromSyncResponse(await res.json().catch(() => null));
+  } catch {
+    console.error("Profile sync failed: no answer");
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -57,7 +98,7 @@ export default function LoginPage() {
     };
   }, [router]);
   const [showPassword, setShowPassword] = useState(false);
-  const [keepSignedIn, setKeepSignedIn] = useState(false);
+  const [keepSignedIn, setKeepSignedIn] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState("");
@@ -98,6 +139,9 @@ export default function LoginPage() {
     setError("");
 
     try {
+      // The marker cookie lasts the browser session, so it is still present
+      // when /auth/callback writes the session cookie after the redirect.
+      setSessionPersistence(keepSignedIn);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -136,6 +180,9 @@ export default function LoginPage() {
     try {
       if (supabase) {
         const normalizedEmail = email.trim().toLowerCase();
+
+        // Before the sign-in call: the session cookie is written during it.
+        setSessionPersistence(keepSignedIn);
 
         signInAttemptRef.current += 1;
         const attempt = signInAttemptRef.current;
@@ -202,53 +249,32 @@ export default function LoginPage() {
     }
   };
 
-  // Runs once the password has been accepted. The two reads only fill in the
-  // local profile, so past their limit sign-in goes on with what it has.
+  // Runs once the password has been accepted. The profile sync writes the
+  // users row and makes sure the user has a household, as the OAuth and
+  // email-confirmation sign-ins do through /auth/callback. Neither it nor the
+  // survey read decides anything, so past their limit sign-in goes on.
   const finishSignIn = async (user: User, normalizedEmail: string) => {
     if (!supabase) return;
 
-    // The placeholder first name is stored as empty, as the other writers
-    // of the local profile do, so no screen greets the user by it.
-    let profile: Record<string, unknown> = {
-      id: user.id,
-      email: user.email || normalizedEmail,
-      firstName: firstNameForClient(
-        user.user_metadata?.first_name ||
-          user.user_metadata?.full_name?.split(" ")[0] ||
-          ""
-      ),
-      lastName:
-        user.user_metadata?.last_name ||
-        user.user_metadata?.full_name?.split(" ").slice(1).join(" ") ||
-        "",
-    };
-
-    const [profileRead, surveyRead] = await Promise.all([
-      settleWithin(
-        supabase
-          .from("users")
-          .select("id, email, first_name, last_name, raw_user_meta_data")
-          .eq("id", user.id)
-          .maybeSingle(),
-        PROFILE_READ_TIMEOUT_MS
-      ),
+    const [synced, surveyRead] = await Promise.all([
+      syncProfileAfterSignIn(user.id),
       settleWithin(
         getSurveyFieldsForUserProfile(supabase, user.id),
         PROFILE_READ_TIMEOUT_MS
       ),
     ]);
 
-    const profileRow = profileRead.timedOut ? null : profileRead.value.data;
-
-    if (profileRow) {
-      profile = {
-        id: profileRow.id,
-        email: profileRow.email,
-        firstName: firstNameForClient(profileRow.first_name),
-        lastName: profileRow.last_name || "",
-        ...(profileRow.raw_user_meta_data || {}),
-      };
-    }
+    // Names come only from what the sync reports writing. user_metadata is
+    // not used: a later signup request for the same email can overwrite it
+    // with other names. Without a sync answer the names stay empty, and no
+    // screen greets the user by a name the database does not hold.
+    const names = synced ?? { firstName: "", lastName: "" };
+    const profile: Record<string, unknown> = {
+      id: user.id,
+      email: user.email || normalizedEmail,
+      firstName: names.firstName,
+      lastName: names.lastName,
+    };
 
     const surveyFields = surveyRead.timedOut ? {} : surveyRead.value;
     const profileWithSurvey = { ...profile, ...surveyFields };
