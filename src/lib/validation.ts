@@ -280,6 +280,20 @@ export function clearLocalAuthState(): void {
   localStorage.removeItem('noor_plaid_transactions');
 }
 
+/**
+ * The auth-event side of the logout boundary above. ClientLayout subscribes
+ * this to supabase.auth.onAuthStateChange on every page, so a sign-out that
+ * did not go through an in-page logout handler (another tab, a refresh that
+ * the server refused, a sign-out the library performed itself) still clears
+ * the local auth state. Only SIGNED_OUT clears; every other event leaves
+ * local state alone. Returns whether it cleared, for the test suite.
+ */
+export function handleAuthEventForLocalState(event: string): boolean {
+  if (event !== 'SIGNED_OUT') return false;
+  clearLocalAuthState();
+  return true;
+}
+
 // Drops the Plaid keys from the browser. The app no longer writes them — bank
 // data is read from the server on every visit — but earlier builds stored
 // account balances, transactions and connection details under them, and those

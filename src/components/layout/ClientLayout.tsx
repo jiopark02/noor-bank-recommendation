@@ -1,42 +1,24 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
-import { supabase, getSessionSafe } from "@/lib/supabase-browser";
-import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
+import React, { useEffect } from "react";
+import { supabase } from "@/lib/supabase-browser";
+import {
+  clearPlaidLocalState,
+  handleAuthEventForLocalState,
+} from "@/lib/validation";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
 }
 
+/**
+ * Renders its children and nothing of its own. Its only job is the two
+ * browser-storage hygiene steps below, which run on every page because this
+ * component sits in the root layout — /demo included, whenever the Supabase
+ * browser client is configured.
+ */
 export function ClientLayout({ children }: ClientLayoutProps) {
-  const pathname = usePathname();
-  const safePathname = pathname ?? "";
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [hasLocalSession, setHasLocalSession] = useState(false);
-
   useEffect(() => {
-    let isMounted = true;
-
-    const syncSession = async () => {
-      if (!supabase) {
-        if (isMounted) {
-          setIsAuthenticated(false);
-          setIsAuthReady(true);
-        }
-        return;
-      }
-
-      const session = await getSessionSafe();
-
-      if (isMounted) {
-        setIsAuthenticated(Boolean(session?.user));
-        setIsAuthReady(true);
-      }
-    };
-
-    setHasLocalSession(Boolean(localStorage.getItem("noor_user_id")));
     // SECURITY: one-time cleanup of the legacy plaintext chat mirror. The app no
     // longer writes noor_chat_history; this removes any residue left on disk for
     // users who were active before this change (and never logged out).
@@ -44,25 +26,18 @@ export function ClientLayout({ children }: ClientLayoutProps) {
     // Same for bank data: the app no longer writes the Plaid keys, so drop what
     // earlier builds left, on every page and not only the dashboard.
     clearPlaidLocalState();
-    syncSession();
 
+    // SECURITY: purge local chat/profile state on sign-out so a shared device
+    // doesn't retain a prior user's plaintext financial chats. Covers other-tab
+    // logout and a sign-out the auth library performs itself, which the
+    // in-page logout handlers alone miss.
     const { data: authListener } = supabase?.auth.onAuthStateChange(
-      (event, session) => {
-        if (!isMounted) return;
-        setIsAuthenticated(Boolean(session?.user));
-        setIsAuthReady(true);
-        // SECURITY: purge local chat/profile state on sign-out so a shared
-        // device doesn't retain a prior user's plaintext financial chats.
-        // Covers other-tab logout and token expiry, which settings'
-        // handleLogout alone misses.
-        if (event === "SIGNED_OUT") {
-          clearLocalAuthState();
-        }
+      (event) => {
+        handleAuthEventForLocalState(event);
       }
     ) || { data: { subscription: null } };
 
     return () => {
-      isMounted = false;
       authListener.subscription?.unsubscribe();
     };
   }, []);
