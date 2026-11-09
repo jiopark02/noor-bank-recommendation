@@ -281,6 +281,19 @@ export function clearLocalAuthState(): void {
 }
 
 /**
+ * Replaces the local identity cache with the session's user. Used when the
+ * cached noor_user_id names a different user than the live session (another
+ * account was used on this device and its state was left behind). Everything
+ * clearLocalAuthState removes goes, then noor_user_id is written with the
+ * session's id. The cached profile is not rewritten here; the page falls back
+ * to its defaults until the next sign-in fills it.
+ */
+export function replaceLocalIdentity(sessionUserId: string): void {
+  clearLocalAuthState();
+  localStorage.setItem('noor_user_id', sessionUserId);
+}
+
+/**
  * The auth-event side of the logout boundary above. ClientLayout subscribes
  * this to supabase.auth.onAuthStateChange on every page, so a sign-out that
  * did not go through an in-page logout handler (another tab, a refresh that

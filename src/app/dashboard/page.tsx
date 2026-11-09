@@ -10,11 +10,16 @@ import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
 import {
   DASHBOARD_SESSION_RETRY,
   decideDashboardMount,
+  decideLocalIdentity,
   retryUntilAnswered,
   shouldRetrySessionRead,
   waitMs,
 } from "@/lib/sessionFlow";
-import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
+import {
+  clearLocalAuthState,
+  clearPlaidLocalState,
+  replaceLocalIdentity,
+} from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 
 interface StoredBudget {
@@ -221,6 +226,17 @@ export default function HomePage() {
         if (action === "show-delayed") {
           setSessionDelayed(true);
           return;
+        }
+        // A cached id left by another account on this device is replaced
+        // with the session's user, not acted on: the session decides who is
+        // signed in.
+        if (
+          read.status === "session" &&
+          decideLocalIdentity(storedUserId, read.session.user.id) === "replace"
+        ) {
+          replaceLocalIdentity(read.session.user.id);
+          setUserId(read.session.user.id);
+          setUserName("there");
         }
 
         const res = await fetchOrFail(

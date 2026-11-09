@@ -76,6 +76,8 @@ export type SessionReadLabel =
   | "survey-submit"
   | "survey-submit-retry"
   | "dashboard-mount"
+  | "money-mount"
+  | "chat-mount"
   | "login-mount"
   | "auth-callback";
 

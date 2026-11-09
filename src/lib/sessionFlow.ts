@@ -29,6 +29,9 @@ export const DASHBOARD_SESSION_RETRY: RetryPlan = {
   gapsMs: [500, 1000],
 };
 
+// The other signed-in pages read the session the same way the dashboard does.
+export const PROTECTED_SESSION_RETRY: RetryPlan = DASHBOARD_SESSION_RETRY;
+
 // Longer than the default read. The first read on /auth/callback waits on the
 // OAuth code exchange, a network round trip, where other pages mostly read a
 // cookie. A failed exchange does not itself clear an earlier session, so what the
@@ -118,14 +121,38 @@ export function shouldRetrySessionRead(read: SessionReadResult): boolean {
   return read.status === "unavailable" && read.reason !== "not-configured";
 }
 
-export type DashboardMountAction = "proceed" | "sign-out" | "show-delayed";
+export type ProtectedMountAction = "proceed" | "sign-out" | "show-delayed";
 
-export function decideDashboardMount(
+/**
+ * The mount decision for a signed-in page (/dashboard, /money, /chat). Only a
+ * clean "none" signs out. "unavailable" — a timeout, an error, or a client that
+ * is not configured — can come from a valid session, so it shows the delayed
+ * screen and leaves local state alone.
+ */
+export function decideProtectedMount(
   read: SessionReadResult
-): DashboardMountAction {
+): ProtectedMountAction {
   if (read.status === "session") return "proceed";
   if (read.status === "none") return "sign-out";
   return "show-delayed";
+}
+
+export type DashboardMountAction = ProtectedMountAction;
+
+export const decideDashboardMount = decideProtectedMount;
+
+export type LocalIdentityAction = "keep" | "replace";
+
+/**
+ * Whether the locally cached user id belongs to the session's user. A cache
+ * left by another account on the same device is replaced, not acted on: the
+ * session is the authority, so a mismatch is not a reason to sign anyone out.
+ */
+export function decideLocalIdentity(
+  storedUserId: string | null,
+  sessionUserId: string
+): LocalIdentityAction {
+  return storedUserId === sessionUserId ? "keep" : "replace";
 }
 
 export type LoginMountAction = "go-dashboard" | "clear-local" | "stay";
