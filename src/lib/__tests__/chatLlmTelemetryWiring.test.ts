@@ -15,7 +15,9 @@ import { describe, it, expect } from "vitest";
  * SAVE_FAILED, success body), the immediate return on a 401, and the one
  * return after the loop for a request whose attempts all failed. Each fixture
  * must appear in the route exactly once. The success branch was copied from
- * the route as it was before telemetry. Since the crisis notice was added, the
+ * the route as it was before telemetry; the one thing added to it since is
+ * the timing of the save for the [chat-stages] line, which changes nothing
+ * the branch returns or stores. Since the crisis notice was added, the
  * returns go through respond(), which adds a crisisNotice field only when a
  * crisis signal was detected, and the success branch stores and returns the
  * reply with the notice in front (chatRouteCrisis.test.ts executes both).
@@ -88,6 +90,7 @@ const FIXTURE_I = `        if (result.ok) {
             notice === null
               ? result.message
               : composeCrisisReply(notice, result.message, EMPTY_ASSISTANT_REPLY);
+          const saveStartedAtMs = Date.now();
           try {
             await persistTurnIfEnabled({
               activeSession,
@@ -108,6 +111,9 @@ const FIXTURE_I = `        if (result.ok) {
               },
               { status: 500 }
             );
+          } finally {
+            // Without a session there is no save to time.
+            if (activeSession) stageMs.save = Date.now() - saveStartedAtMs;
           }
 
           return respond({
@@ -197,14 +203,16 @@ const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for
 
 // After the loop: no attempt fitted in the budget.
 const LOOP_NO_ATTEMPT = `      if (attemptIndex === 0) {
-        return respond(
-          {
-            error: "Chat is taking longer than usual. Please try again.",
-            code: "CHAT_TIME_BUDGET_EXHAUSTED",
-          },
-          { status: 503 }
-        );
+        return respond(CHAT_TIME_BUDGET_EXHAUSTED_BODY, { status: 503 });
       }
+`;
+
+// The body of that response, which a wait cut at the pre-loop deadline also
+// gets (chatRouteDeadline.test.ts executes both).
+const TIME_BUDGET_BODY = `const CHAT_TIME_BUDGET_EXHAUSTED_BODY = {
+  error: "Chat is taking longer than usual. Please try again.",
+  code: "CHAT_TIME_BUDGET_EXHAUSTED",
+} as const;
 `;
 
 // After the loop: at least one attempt started and none answered. One return,
@@ -269,6 +277,7 @@ describe("chat route: the branches that decide the response are as pinned", () =
     ["(i) success branch", FIXTURE_I],
     ["(ii) failed-attempt log and 401 return", FIXTURE_II],
     ["(iii) model-failure response", FIXTURE_III],
+    ["(iv) time-budget response", TIME_BUDGET_BODY],
   ])("%s appears exactly once, byte for byte", (_label, fixture) => {
     expect(occurrences(CHAT, norm(fixture))).toBe(1);
   });
