@@ -20,6 +20,11 @@ import {
 import { recordLlmCall } from "@/lib/llmCallLog";
 import { storeSummaryUnlessCrisis } from "@/lib/summaryCrisisGate";
 import {
+  buildCronConversationText,
+  logCronInputBudget,
+  type CronConversation,
+} from "@/lib/cronInputBudget";
+import {
   CRON_MAX_RESPONDED_ATTEMPTS,
   SESSION_CANDIDATE_LIMIT,
   applyGiveUps,
@@ -192,17 +197,14 @@ Where tags are 2-5 short lowercase topic tags (e.g. "TOPICS: budgeting, chase_ba
 
 Output only the summary paragraph followed by the single TOPICS line. Nothing else.`;
 
-function buildConversationText(messages: DbChatMessage[]): string {
+// Serialized under the length budget in cronInputBudget.ts: a long message
+// loses its middle, and the oldest messages are left out first.
+function buildConversationText(messages: DbChatMessage[]): CronConversation {
   const trimmed =
     messages.length > MAX_MESSAGES_PER_SUMMARY
       ? messages.slice(messages.length - MAX_MESSAGES_PER_SUMMARY)
       : messages;
-  return trimmed
-    .map((m) => {
-      const speaker = m.role === "user" ? "User" : "Noor";
-      return `${speaker}: ${m.content}`;
-    })
-    .join("\n\n");
+  return buildCronConversationText(trimmed);
 }
 
 function parseSummaryOutput(raw: string): {
@@ -253,7 +255,9 @@ async function summarizeOneSession(
     return;
   }
 
-  const conversationText = buildConversationText(messages);
+  const conversation = buildConversationText(messages);
+  logCronInputBudget("cron_summarize", conversation);
+  const conversationText = conversation.text;
 
   const rawOutput = await callOpenRouterForSummary(
     apiKey,
