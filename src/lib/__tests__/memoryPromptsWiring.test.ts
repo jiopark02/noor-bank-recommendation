@@ -56,6 +56,7 @@ const SUMMARY_PROMPT = promptConstant(
   "SUMMARY_SYSTEM_PROMPT"
 );
 const EXTRACTION_SOURCE = read("../../app/api/cron/extract-facts/route.ts");
+const EXTRACTION_VALIDATION_SOURCE = read("../factExtractionValidation.ts");
 const EXTRACTION_PROMPT = promptConstant(
   EXTRACTION_SOURCE,
   "EXTRACTION_SYSTEM_PROMPT"
@@ -140,12 +141,14 @@ describe("fact-extraction prompt", () => {
   });
 
   it("validates categories through the shared guard, with no list of its own", () => {
-    expect(EXTRACTION_SOURCE).toContain(
+    expect(EXTRACTION_VALIDATION_SOURCE).toContain(
       'import { isUserFactCategory } from "@/lib/userFactCategories";'
     );
-    expect(EXTRACTION_SOURCE).toContain("return isUserFactCategory(value);");
+    expect(EXTRACTION_VALIDATION_SOURCE).toContain("return isUserFactCategory(value);");
     expect(EXTRACTION_SOURCE).not.toMatch(/"visa"/);
     expect(EXTRACTION_SOURCE).not.toContain("VALID_CATEGORIES");
+    expect(EXTRACTION_VALIDATION_SOURCE).not.toMatch(/"visa"/);
+    expect(EXTRACTION_VALIDATION_SOURCE).not.toContain("VALID_CATEGORIES");
   });
 
   it("still forbids full sensitive identifiers", () => {
