@@ -45,6 +45,25 @@ async function readJsonObjectBody(
 const INVALID_CREDIT_HISTORY_MESSAGE =
   "has_us_credit_history must be true, false or null.";
 
+// The signed-in path's answers. That path never creates an account, so
+// neither says one was created; a failure carries no user id.
+const SURVEY_SAVED_MESSAGE = "Your answers were saved.";
+const SURVEY_SAVE_FAILED_MESSAGE = "We couldn't save your answers. Please try again.";
+
+function surveySaveFailed(): NextResponse {
+  return NextResponse.json(
+    { success: false, message: SURVEY_SAVE_FAILED_MESSAGE },
+    { status: 500 }
+  );
+}
+
+// A write followed by .select("id") answers with the rows it changed. Only a
+// non-empty array confirms that a row was changed: an empty array is zero
+// rows, and anything that is not an array did not answer the question.
+function isConfirmedRow(data: unknown): boolean {
+  return Array.isArray(data) && data.length > 0;
+}
+
 // Shared survey_responses row mapping. Used by BOTH the unauthenticated signup
 // path and the authenticated (OAuth profile-completion) path, so the field
 // mapping lives in exactly one place and never drifts between the two.
@@ -294,14 +313,22 @@ export async function POST(request: NextRequest) {
     // Whether a survey row already exists decides how the monthly money
     // answers are checked (and, below, whether the row is updated or
     // inserted), so it is read before anything is written. A refused amount
-    // then stops the request with no write at all. The read's error is not
-    // examined (as before this check existed): an error reads as "no row",
-    // which applies the stricter insert check.
-    const { data: existingSurvey } = await supabaseAdmin
+    // then stops the request with no write at all. A failed read also stops
+    // it before any write: reading the error as "no row" would insert where
+    // an update was due.
+    const { data: existingSurvey, error: surveyLookupError } = await supabaseAdmin
       .from("survey_responses")
       .select("id")
       .eq("user_id", userId)
       .maybeSingle();
+
+    if (surveyLookupError) {
+      console.error(
+        "Survey lookup error (authenticated survey):",
+        toLogSafeError(surveyLookupError)
+      );
+      return surveySaveFailed();
+    }
 
     const money = checkSurveyMoney(
       surveyData,
@@ -342,16 +369,28 @@ export async function POST(request: NextRequest) {
       ...(decideNameUpdate(storedNames, firstName) ?? {}),
     };
 
-    const { error: profileUpdateError } = await supabaseAdmin
+    const { data: updatedProfile, error: profileUpdateError } = await supabaseAdmin
       .from("users")
       .update(profileUpdate)
-      .eq("id", userId);
+      .eq("id", userId)
+      .select("id");
 
     if (profileUpdateError) {
       console.error(
         "Profile update error (authenticated survey):",
         toLogSafeError(profileUpdateError)
       );
+      return NextResponse.json(
+        { success: false, message: "Failed to update user profile record" },
+        { status: 500 }
+      );
+    }
+
+    // An update that changed no users row (or whose answer did not say) means
+    // there is no profile row for this id to attach the survey to, so the
+    // survey row is not written.
+    if (!isConfirmedRow(updatedProfile)) {
+      console.error("Profile update not confirmed (authenticated survey)");
       return NextResponse.json(
         { success: false, message: "Failed to update user profile record" },
         { status: 500 }
@@ -370,6 +409,7 @@ export async function POST(request: NextRequest) {
     const surveyRow = buildSurveyRow(userId, surveyData, now);
 
     let surveyWriteError: { message?: string } | null = null;
+    let surveyUpdateUnconfirmed = false;
 
     // existingSurvey was read before the users update, above.
     if (existingSurvey) {
@@ -377,11 +417,15 @@ export async function POST(request: NextRequest) {
       // all of them would blank every answer the caller omitted.
       const surveyUpdate = buildSurveyUpdate(surveyRow, surveyData);
 
-      const { error } = await supabaseAdmin
+      const { data: updatedSurvey, error } = await supabaseAdmin
         .from("survey_responses")
         .update(surveyUpdate)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .select("id");
       surveyWriteError = error;
+      // The row was read above, but an update that changed no row saved
+      // nothing (the row went away in between, or the answer did not say).
+      surveyUpdateUnconfirmed = !error && !isConfirmedRow(updatedSurvey);
     } else {
       const { error } = await supabaseAdmin
         .from("survey_responses")
@@ -389,17 +433,15 @@ export async function POST(request: NextRequest) {
       surveyWriteError = error;
     }
 
+    // A survey write that fails after the users update leaves that update in
+    // place; re-submitting the form repeats both writes.
     if (surveyWriteError) {
       console.error("Survey write error:", toLogSafeError(surveyWriteError));
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "Account was created, but saving survey data failed. Please contact support.",
-          userId,
-        },
-        { status: 500 }
-      );
+      return surveySaveFailed();
+    }
+    if (surveyUpdateUnconfirmed) {
+      console.error("Survey update not confirmed (authenticated survey)");
+      return surveySaveFailed();
     }
 
     return NextResponse.json({
@@ -409,7 +451,7 @@ export async function POST(request: NextRequest) {
       profile: {
         firstName: firstNameForClient(firstName || DEFAULT_FIRST_NAME),
       },
-      message: "Account created successfully",
+      message: SURVEY_SAVED_MESSAGE,
     });
   } catch (error) {
     console.error("Survey API error:", toLogSafeError(error));

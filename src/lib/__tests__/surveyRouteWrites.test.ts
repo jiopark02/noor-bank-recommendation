@@ -23,6 +23,16 @@ import type { NextRequest } from "next/server";
  *   any other body value echoed in the success profile      -> SW12
  *   the credit-history type check removed or moved after a write
  *                                                           -> SW14
+ *   the survey lookup's error ignored (read as "no row")    -> SW5
+ *   the users update's row count not checked, or a missing
+ *   representation taken as success                         -> SW6
+ *   the survey update's row count not checked               -> SW7
+ *   a survey failure answered with the user id or with text saying an
+ *   account was created                                     -> SW8
+ *   a filter taking its id from the body instead of the token
+ *                                                           -> SW13
+ *   the signed-in success message saying an account was created
+ *                                                           -> SW15
  */
 
 const SIGNED_IN_ID = "00000000-0000-4000-8000-000000000001";
@@ -482,4 +492,156 @@ describe("SW14 a credit-history answer that is not true, false or null", () => {
       expect(writes()).toEqual([]);
     }
   );
+});
+
+// ---------------------------------------------------------------------------
+// The signed-in path: failed reads, unconfirmed writes, and its answers
+// ---------------------------------------------------------------------------
+
+const SURVEY_SAVE_FAILED = {
+  success: false,
+  message: "We couldn't save your answers. Please try again.",
+};
+
+const PROFILE_UPDATE_FAILED = {
+  success: false,
+  message: "Failed to update user profile record",
+};
+
+function expectNoAccountClaim(json: Record<string, unknown>): void {
+  expect(json).not.toHaveProperty("userId");
+  expect(JSON.stringify(json)).not.toMatch(/creat/i);
+}
+
+describe("SW5 a failed survey lookup", () => {
+  beforeEach(() => {
+    state.authUserId = SIGNED_IN_ID;
+    state.surveyLookupError = { code: "XX000", message: "lookup failed" };
+  });
+
+  it.each([true, false])(
+    "SW5a existing row reported as %s: 500 before any write",
+    async (existing) => {
+      state.existingSurvey = existing;
+      const result = await post(SIGNED_IN);
+      expect(result.status).toBe(500);
+      expect(result.json).toEqual(SURVEY_SAVE_FAILED);
+      expect(writes()).toEqual([]);
+    }
+  );
+
+  it("SW5b the lookup failure answers ahead of the money check", async () => {
+    const result = await post({ ...SIGNED_IN, monthly_income: 0 });
+    expect(result.status).toBe(500);
+    expect(result.json).toEqual(SURVEY_SAVE_FAILED);
+    expect(writes()).toEqual([]);
+  });
+});
+
+describe("SW6 a users update that changed no row", () => {
+  beforeEach(() => {
+    state.authUserId = SIGNED_IN_ID;
+  });
+
+  it.each([
+    ["an empty array, existing survey row", [], true],
+    ["an empty array, no survey row", [], false],
+    ["no representation, existing survey row", null, true],
+    ["no representation, no survey row", null, false],
+  ])("SW6 %s: 500, and the survey row is not written", async (_label, data, existing) => {
+    state.existingSurvey = existing as boolean;
+    state.usersUpdate = { data, error: null };
+    const result = await post(SIGNED_IN);
+    expect(result.status).toBe(500);
+    expect(result.json).toEqual(PROFILE_UPDATE_FAILED);
+    expect(writes().filter((c) => c.table === "users" && c.op === "update")).toHaveLength(1);
+    expect(writes().filter((c) => c.table === "survey_responses")).toEqual([]);
+  });
+});
+
+describe("SW7 a survey write that saved nothing", () => {
+  beforeEach(() => {
+    state.authUserId = SIGNED_IN_ID;
+  });
+
+  it.each([
+    ["an empty array", { data: [], error: null }],
+    ["no representation", { data: null, error: null }],
+    ["an error", { data: null, error: { code: "XX000", message: "update failed" } }],
+  ])("SW7a the update answered %s: 500", async (_label, outcome) => {
+    state.existingSurvey = true;
+    state.surveyUpdate = outcome as Outcome;
+    const result = await post(SIGNED_IN);
+    expect(result.status).toBe(500);
+    expect(result.json).toEqual(SURVEY_SAVE_FAILED);
+    expect(surveyWrites("update")).toHaveLength(1);
+  });
+
+  it("SW7b the insert failed: 500", async () => {
+    state.existingSurvey = false;
+    state.surveyInsertError = { code: "23505", message: "duplicate" };
+    const result = await post(SIGNED_IN);
+    expect(result.status).toBe(500);
+    expect(result.json).toEqual(SURVEY_SAVE_FAILED);
+    expect(surveyWrites("insert")).toHaveLength(1);
+  });
+});
+
+describe("SW8 no failure answer claims an account or carries the user id", () => {
+  beforeEach(() => {
+    state.authUserId = SIGNED_IN_ID;
+  });
+
+  it("SW8a the lookup failure", async () => {
+    state.surveyLookupError = { code: "XX000" };
+    expectNoAccountClaim((await post(SIGNED_IN)).json);
+  });
+
+  it("SW8b the users update changing no row", async () => {
+    state.usersUpdate = { data: [], error: null };
+    expectNoAccountClaim((await post(SIGNED_IN)).json);
+  });
+
+  it("SW8c the survey update changing no row", async () => {
+    state.existingSurvey = true;
+    state.surveyUpdate = { data: [], error: null };
+    expectNoAccountClaim((await post(SIGNED_IN)).json);
+  });
+
+  it("SW8d the survey insert failing", async () => {
+    state.surveyInsertError = { code: "XX000" };
+    expectNoAccountClaim((await post(SIGNED_IN)).json);
+  });
+});
+
+describe("SW13 every signed-in read and write is filtered by the token's id", () => {
+  it.each([true, false])("SW13 existing survey row %s", async (existing) => {
+    state.authUserId = SIGNED_IN_ID;
+    state.existingSurvey = existing;
+    const result = await post({ ...SIGNED_IN, id: NEW_USER_ID, user_id: NEW_USER_ID });
+    expect(result.status).toBe(200);
+    const filtered = state.calls.filter((c) => c.op !== "insert");
+    expect(filtered.length).toBeGreaterThan(0);
+    filtered.forEach((c) => {
+      expect(c.filters).toEqual([[c.table === "users" ? "id" : "user_id", SIGNED_IN_ID]]);
+    });
+    surveyWrites("insert").forEach((c) => {
+      expect((c.payload as Record<string, unknown>).user_id).toBe(SIGNED_IN_ID);
+    });
+  });
+});
+
+describe("SW15 the signed-in success answer", () => {
+  it.each([true, false])("SW15 existing survey row %s: saved, no account claim", async (existing) => {
+    state.authUserId = SIGNED_IN_ID;
+    state.existingSurvey = existing;
+    const result = await post(SIGNED_IN);
+    expect(result.status).toBe(200);
+    expect(result.json).toEqual({
+      success: true,
+      userId: SIGNED_IN_ID,
+      profile: { firstName: "Ann" },
+      message: "Your answers were saved.",
+    });
+  });
 });
