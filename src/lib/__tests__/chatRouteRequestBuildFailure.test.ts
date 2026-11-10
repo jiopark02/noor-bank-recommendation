@@ -17,7 +17,9 @@ import { settledCost } from "../chatUsageLimits";
  * The values asserted in the first describe block were taken from the route
  * as it stood before request-building failures were told apart in the log, and
  * must not change. What does change is the [chat-model] log line, whose name
- * field says ChatRequestBuildError for such an attempt (second block).
+ * field says ChatRequestBuildError for such an attempt, and whose cause field
+ * carries the code of the error the builder threw when that code is in the
+ * expected form (second block).
  *
  * HOW
  * The request builder is wrapped so that it throws for the models a case
@@ -34,7 +36,11 @@ const BUILD_MARKER = "REQUEST-BUILD-ERROR-TEXT";
 const ATTEMPT_LINE =
   "[chat-model] attempt failed attempt=%d kind=%s upstream_status=%s cause=%s name=%s";
 
-const build = { failFor: new Set<string>() };
+/**
+ * failFor: the models whose request body the builder refuses to build.
+ * code: when set, the error the builder throws carries it as `code`.
+ */
+const build = { failFor: new Set<string>(), code: undefined as unknown };
 const recorded = {
   rows: [] as LlmCallRow[],
   settles: [] as ChatUsageSettleInput[],
@@ -49,7 +55,11 @@ vi.mock("@/lib/openRouterRequest", async (importOriginal) => {
       input: Parameters<typeof actual.buildOpenRouterRequestBody>[0]
     ) => {
       if (build.failFor.has(input.model)) {
-        throw new TypeError(`cannot build ${BUILD_MARKER}`);
+        const failure = new TypeError(`cannot build ${BUILD_MARKER}`);
+        if (build.code !== undefined) {
+          Object.assign(failure, { code: build.code });
+        }
+        throw failure;
       }
       return actual.buildOpenRouterRequestBody(input);
     },
@@ -110,6 +120,7 @@ async function post(): Promise<{ status: number; json: Record<string, unknown> }
 
 beforeEach(() => {
   build.failFor = new Set();
+  build.code = undefined;
   recorded.rows = [];
   recorded.settles = [];
   recorded.openRouterCalls = [];
@@ -259,5 +270,29 @@ describe("the [chat-model] line names a request that could not be built", () => 
       [ATTEMPT_LINE, 1, "network_error", "none", "none", "ChatRequestBuildError"],
       [ATTEMPT_LINE, 2, "network_error", "none", "none", "ChatRequestBuildError"],
     ]);
+  });
+
+  // The cause field reads the code of the error the builder threw, which the
+  // ChatRequestBuildError carries as its cause, under the same form check as
+  // a network error's code.
+  it.each([
+    ["a code in the expected form", "ERR_X", "ERR_X"],
+    ["a Node-style code", "ERR_INVALID_ARG_TYPE", "ERR_INVALID_ARG_TYPE"],
+    ["a lower-case code", "err_x", "none"],
+    ["a code with a space", "ERR X", "none"],
+    ["a sentence", `failed ${BUILD_MARKER}`, "none"],
+    ["33 characters", "E".repeat(33), "none"],
+    ["a number", 42, "none"],
+  ])("the builder's error carries %s: cause is %s's form-checked value, name is ChatRequestBuildError", async (_label, code, logged) => {
+    build.failFor = new Set([PRIMARY]);
+    build.code = code;
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(
+      vi.mocked(console.warn).mock.calls.filter((args) => args[0] === ATTEMPT_LINE)
+    ).toEqual([
+      [ATTEMPT_LINE, 1, "network_error", "none", logged, "ChatRequestBuildError"],
+    ]);
+    expect(consoleText()).not.toContain(BUILD_MARKER);
   });
 });

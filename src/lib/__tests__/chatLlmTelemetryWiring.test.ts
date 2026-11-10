@@ -69,6 +69,17 @@ function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
+/**
+ * The text with every line that is wholly a `//` comment removed. A line of
+ * code that has `//` somewhere in it, a string included, is kept whole.
+ */
+function withoutCommentLines(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+}
+
 /** From `async function <name>(` to the first column-0 closing brace. */
 function functionBody(source: string, name: string): string {
   const start = source.indexOf(`async function ${name}(`);
@@ -321,13 +332,15 @@ describe("chat route: the branches that decide the response are as pinned", () =
   it("the thrown error of an attempt is read only by networkCauseCode and errorName", () => {
     // Inside the attempt's catch the error is passed to the two readers and
     // used nowhere else, so its message cannot reach the log or the response.
-    // Comments are removed first, so prose about the error does not count.
+    // Lines that are wholly a comment are removed first, so prose about the
+    // error does not count. Only whole lines: a `//` inside a string on a code
+    // line must not hide the code after it.
     const post = functionBody(CHAT, "POST");
     const catchAt = post.indexOf("} catch (error) {\n          // callOpenRouter has already recorded");
     expect(catchAt).toBeGreaterThan(-1);
-    const catchBody = post
-      .slice(catchAt, post.indexOf("continue;", catchAt))
-      .replace(/\/\/[^\n]*/g, "");
+    const catchBody = withoutCommentLines(
+      post.slice(catchAt, post.indexOf("continue;", catchAt))
+    );
     const uses = catchBody.match(/\berror\b/g) ?? [];
     // The binding in `catch (error)` and one argument to each reader.
     expect(uses).toHaveLength(3);
@@ -371,6 +384,17 @@ describe("chat route: callOpenRouter", () => {
     }
   });
 
+  it("no catch returns, so ending with a throw is the only way out of each", () => {
+    // Ending with a throw is not enough on its own: a return earlier in the
+    // block, under a condition, would leave by another way.
+    for (const block of catchBlocks()) {
+      expect(
+        withoutCommentLines(block.body),
+        `catch (${block.name})`
+      ).not.toMatch(/\breturn\b/);
+    }
+  });
+
   it("records and then rethrows the same error when the attempt throws", () => {
     // The outer catch: the one that records the row, at the function's indent.
     const outer = catchBlocks().filter((b) => b.indent === "  ");
@@ -384,8 +408,10 @@ describe("chat route: callOpenRouter", () => {
     const inner = catchBlocks().filter((b) => b.indent !== "  ");
     expect(inner).toHaveLength(1);
     const [{ name, body: catchBody }] = inner;
-    expect(catchBody).not.toContain("recordLlmCall(");
-    expect(catchBody.trimEnd().endsWith(`throw new ChatRequestBuildError(${name});`)).toBe(true);
+    // Its whole body, comments aside, is the one throw.
+    expect(withoutCommentLines(catchBody).trim()).toBe(
+      `throw new ChatRequestBuildError(${name});`
+    );
     // Only the build is inside the inner try; fetch is not.
     const innerTry = body.indexOf("    try {\n      requestBody = JSON.stringify(");
     expect(innerTry).toBeGreaterThan(-1);

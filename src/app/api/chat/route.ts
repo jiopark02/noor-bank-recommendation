@@ -464,8 +464,9 @@ interface ChatLlmCallContext {
 
 /**
  * Thrown by callOpenRouter when the request body could not be built. The
- * original error is its cause; its own message says nothing about it, and the
- * model loop logs only its name.
+ * original error is its cause; its own message says nothing about it. The
+ * model loop logs its name, and the cause code it finds on the original error
+ * when that code is in the expected form (networkCauseCode), never a message.
  */
 class ChatRequestBuildError extends Error {
   constructor(cause: unknown) {
@@ -875,10 +876,13 @@ const CHAT_MODEL_FAILED_STATUS = 502;
 const NETWORK_CAUSE_CODE_PATTERN = /^[A-Z0-9_]{1,32}$/;
 
 /**
- * The code on a thrown fetch error's cause (ECONNRESET, ENOTFOUND and the
- * like), or "none". Only a string made of capitals, digits and underscores, at
- * most 32 characters long, is returned: anything else, a message included, is
- * "none". The error's own message and its cause's message are never read.
+ * The code on a thrown error's cause, or "none". For a fetch that failed, that
+ * is the network error's code (ECONNRESET, ENOTFOUND and the like); for a
+ * ChatRequestBuildError, it is the code of the error the request builder
+ * threw, if that error has one. Only a string made of capitals, digits and
+ * underscores, at most 32 characters long, is returned: anything else, a
+ * message included, is "none". The error's own message and its cause's
+ * message are never read.
  */
 function networkCauseCode(error: unknown): string {
   try {
@@ -903,8 +907,8 @@ const ERROR_NAME_PATTERN = /^[A-Za-z0-9_]{1,40}$/;
  * Together with the cause code it tells apart failures the kind alone does
  * not: a timeout before a response (TimeoutError), a timeout while the body
  * was being read (Error), a request body our code could not build
- * (ChatRequestBuildError) and a network failure (TypeError, usually with a
- * cause code).
+ * (ChatRequestBuildError) and a network failure (TypeError, with a cause code
+ * only when the runtime puts one on it).
  */
 function errorName(error: unknown): string {
   try {
@@ -920,7 +924,8 @@ function errorName(error: unknown): string {
 /**
  * One line per failed model attempt: the attempt's number, its kind (the
  * error class llm_calls records for it), the upstream HTTP status, and, for
- * an attempt that threw, the network cause code and the error's name. The
+ * an attempt that threw, the cause code (see networkCauseCode) and the
+ * error's name. The
  * status is "none" for an attempt that threw, whether before a response
  * arrived or while its body was being read; the cause and the name are "none"
  * for an attempt that did not throw, and whenever networkCauseCode or

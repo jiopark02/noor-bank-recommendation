@@ -113,6 +113,16 @@ describe("chat route: callOpenRouter appends to the usage tally on every exit", 
     }
   });
 
+  it("throws in exactly three places, so a new throw has to be looked at here", () => {
+    // The check above reads a throw's block by its indentation, and a throw
+    // that is the body of a one-line `if` at the function's top level gets the
+    // whole function as its block, where an earlier push satisfies it. The
+    // count closes that gap: two throws leave the function after a push (the
+    // fetch catch and the body-read timeout guard), and one, the
+    // request-building throw, goes to the fetch catch.
+    expect(occurrences(body, "throw ")).toBe(3);
+  });
+
   it("the request-building throw is inside the function's try, so its catch records and pushes", () => {
     const { start, catchAt } = outerTry();
     const at = body.indexOf("throw new ChatRequestBuildError(");
