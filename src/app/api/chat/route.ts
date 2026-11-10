@@ -708,6 +708,68 @@ async function persistTurnIfEnabled(params: {
 }
 
 /**
+ * The response to a request whose model attempts all failed, whichever way
+ * each one failed: a provider status, a rejected key, a rate limit, a timeout
+ * or a network error. It says nothing about the provider: no upstream status
+ * and no upstream error text reach the client. What failed is recorded per
+ * attempt, in llm_calls and in the [chat-model] log line.
+ */
+const CHAT_MODEL_FAILED_BODY = {
+  error: "Chat is temporarily unavailable. Please try again.",
+  code: "CHAT_MODEL_FAILED",
+} as const;
+const CHAT_MODEL_FAILED_STATUS = 502;
+
+const NETWORK_CAUSE_CODE_PATTERN = /^[A-Z0-9_]{1,32}$/;
+
+/**
+ * The code on a thrown fetch error's cause (ECONNRESET, ENOTFOUND and the
+ * like), or "none". Only a string made of capitals, digits and underscores, at
+ * most 32 characters long, is returned: anything else, a message included, is
+ * "none". The error's own message and its cause's message are never read.
+ */
+function networkCauseCode(error: unknown): string {
+  try {
+    const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+    const code = (cause as { code?: unknown } | null | undefined)?.code;
+    return typeof code === "string" && NETWORK_CAUSE_CODE_PATTERN.test(code)
+      ? code
+      : "none";
+  } catch {
+    return "none";
+  }
+}
+
+/**
+ * One line per failed model attempt: the attempt's number, its kind (the
+ * error class llm_calls records for it), the upstream HTTP status, and the
+ * network cause code of a thrown attempt. The status is "none" for an attempt
+ * that threw, whether before a response arrived or while its body was being
+ * read; the cause is "none" unless networkCauseCode found one. Never the
+ * provider's error text and never the thrown error's message.
+ */
+function logFailedModelAttempt(
+  attemptIndex: number,
+  upstreamStatus: number | null,
+  causeCode: string = "none"
+): void {
+  const kind = classifyLlmOutcome({
+    route: "chat",
+    httpStatus: upstreamStatus,
+    threw: upstreamStatus === null,
+    jsonParsed: false,
+    contentPresent: false,
+  }).errorClass;
+  console.warn(
+    "[chat-model] attempt failed attempt=%d kind=%s upstream_status=%s cause=%s",
+    attemptIndex,
+    kind ?? "unknown",
+    upstreamStatus === null ? "none" : String(upstreamStatus),
+    causeCode
+  );
+}
+
+/**
  * The response body as given, plus a crisisNotice field when there is a
  * notice. Without one the body is unchanged: no crisisNotice key at all.
  */
@@ -1096,7 +1158,6 @@ export async function POST(request: NextRequest) {
       ];
 
       const modelsToTry = selectOpenRouterModels(modelConversation.messages);
-      let lastFailure: OpenRouterResult | null = null;
       // Which optional blocks the system prompt carries, for llm_calls only.
       const promptBlocks: ChatPromptBlocks = {
         memory: memoryBlock !== "",
@@ -1105,7 +1166,6 @@ export async function POST(request: NextRequest) {
         financialSnapshot: false,
       };
       let attemptIndex = 0;
-      let lastThrew = false;
 
       for (const model of modelsToTry) {
         // Every attempt, the first included, starts only if it could run to
@@ -1135,12 +1195,12 @@ export async function POST(request: NextRequest) {
             }
           );
         } catch (error) {
-          // callOpenRouter has already recorded the attempt.
-          lastThrew = true;
-          console.error("Chat API error:", error);
+          // callOpenRouter has already recorded the attempt. A thrown attempt
+          // has no upstream status to report; its cause code is all that is
+          // read from the error.
+          logFailedModelAttempt(attemptIndex, null, networkCauseCode(error));
           continue;
         }
-        lastThrew = false;
 
         if (result.ok) {
           // With a crisis signal the notice leads the reply, and the reply
@@ -1181,15 +1241,14 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        logFailedModelAttempt(attemptIndex, result.status);
+
         // Auth errors should fail fast rather than retrying other models.
         if (result.status === 401) {
-          return respond(
-            { error: "Invalid OpenRouter API key" },
-            { status: 401 }
-          );
+          return respond(CHAT_MODEL_FAILED_BODY, {
+            status: CHAT_MODEL_FAILED_STATUS,
+          });
         }
-
-        lastFailure = result;
       }
 
       // No attempt fitted in the request budget.
@@ -1203,25 +1262,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // The same response a throw reaching the outer catch gets.
-      if (lastThrew) {
-        return respond(
-          { error: "Failed to get response from AI" },
-          { status: 500 }
-        );
-      }
-
-      if (lastFailure?.status === 429) {
-        return respond(
-          { error: "Rate limit exceeded. Please try again later." },
-          { status: 429 }
-        );
-      }
-
-      return respond(
-        { error: lastFailure?.error || "OpenRouter request failed" },
-        { status: lastFailure?.status || 500 }
-      );
+      // Every attempt that started has failed.
+      return respond(CHAT_MODEL_FAILED_BODY, {
+        status: CHAT_MODEL_FAILED_STATUS,
+      });
     }
 
     return respond(
