@@ -77,15 +77,28 @@ function mapAccountKind(
  * happens instead.
  */
 async function fetchShallowAccounts(
-  accessTokens: string[]
+  accessTokens: string[],
+  signal?: AbortSignal
 ): Promise<PlaidChatAccount[]> {
   const accounts: PlaidChatAccount[] = [];
 
   for (const accessToken of accessTokens) {
+    // Once the caller has cancelled, the connections not yet read are left
+    // alone: each call would only be refused at once and logged as a failed
+    // connection. Without a signal this is never true.
+    if (signal?.aborted) break;
     try {
-      const res = await plaidClient.accountsGet({
-        access_token: accessToken,
-      });
+      // The signal is a per-call request option; the client's own
+      // configuration is not touched. Without one the call is made exactly
+      // as before.
+      const res = signal
+        ? await plaidClient.accountsGet(
+            { access_token: accessToken },
+            { signal }
+          )
+        : await plaidClient.accountsGet({
+            access_token: accessToken,
+          });
 
       for (const a of res.data.accounts) {
         const current = a.balances?.current;
@@ -133,21 +146,32 @@ async function fetchShallowAccounts(
  *
  * @param userId  Also the additional authenticated data for decryption, so it
  *   must be the verified-token value passed through unmodified.
+ *
+ * @param opts.signal  Optional. Passed to the connection read and to each
+ *   accounts call so a caller that has stopped waiting can cancel them. It
+ *   does not decide what this function returns: a cancelled connection read
+ *   comes back as a read error and throws like any other, but a cancelled
+ *   accounts call is skipped by the per-connection catch like any other
+ *   failed one, and the connections after it are not read at all. A caller
+ *   that cancels must therefore not use the result.
  */
 export async function getPlaidChatState(
   userId: string,
-  opts: { depth: PlaidChatDepth }
+  opts: { depth: PlaidChatDepth; signal?: AbortSignal }
 ): Promise<PlaidChatState> {
   // L1 — authoritative connection state, read directly (see file header for why
   // not getAllPlaidConnections). Multi-connection safe (no .single()). On a DB
   // error we THROW so the route can surface an explicit unknown state rather
   // than a false "not connected"; an empty result is a genuine "no connections".
   const supabase = createServerClient();
-  const { data, error } = await supabase
+  const connectionsQuery = supabase
     .from("plaid_connections")
     .select("institution_name,status,access_token")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
+  const { data, error } = await (opts.signal
+    ? connectionsQuery.abortSignal(opts.signal)
+    : connectionsQuery);
 
   if (error) {
     throw new Error(
@@ -187,7 +211,7 @@ export async function getPlaidChatState(
     const accessTokens = activeRows.map((r) =>
       decryptPlaidAccessToken(r.access_token, userId)
     );
-    state.accounts = await fetchShallowAccounts(accessTokens);
+    state.accounts = await fetchShallowAccounts(accessTokens, opts.signal);
   }
 
   return state;

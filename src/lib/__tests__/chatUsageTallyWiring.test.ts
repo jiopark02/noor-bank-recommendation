@@ -61,12 +61,79 @@ describe("chat route: callOpenRouter appends to the usage tally on every exit", 
     expect(occurrences(body, PUSH_NULL)).toBe(2);
   });
 
-  it("throws in exactly two places, so no exit is left without a push", () => {
-    expect(occurrences(body, "throw ")).toBe(2);
+  /**
+   * The function's own try: from the `try {` at its indent to the `} catch`
+   * at the same indent. A throw between the two goes to that catch, not out
+   * of the function.
+   */
+  function outerTry(): { start: number; catchAt: number } {
+    const start = body.indexOf("\n  try {\n");
+    const catchAt = body.indexOf("\n  } catch (", start);
+    expect(start, "the function's try not found").toBeGreaterThan(-1);
+    expect(catchAt, "the function's catch not found").toBeGreaterThan(start);
+    return { start, catchAt };
+  }
+
+  /**
+   * The block a position sits in: from the nearest line above it that ends
+   * with `{` and is indented less than the line at the position.
+   */
+  function enclosingBlockStart(at: number): number {
+    const lineStart = body.lastIndexOf("\n", at) + 1;
+    const indent = /^ */.exec(body.slice(lineStart))![0].length;
+    let cursor = lineStart - 1;
+    while (cursor > 0) {
+      const prevStart = body.lastIndexOf("\n", cursor - 1) + 1;
+      const line = body.slice(prevStart, cursor);
+      const lineIndent = /^ */.exec(line)![0].length;
+      if (line.trimEnd().endsWith("{") && lineIndent < indent) return prevStart;
+      cursor = prevStart - 1;
+    }
+    return 0;
+  }
+
+  it("leaves no exit without a push: every throw either pushes first or goes to the catch that does", () => {
+    const { start, catchAt } = outerTry();
+    const throws: number[] = [];
+    for (let i = body.indexOf("throw "); i !== -1; i = body.indexOf("throw ", i + 1)) {
+      throws.push(i);
+    }
+    expect(throws.length).toBeGreaterThan(0);
+    for (const at of throws) {
+      const line = body.slice(body.lastIndexOf("\n", at) + 1, body.indexOf("\n", at));
+      if (at > start && at < catchAt) {
+        // Inside the function's try: caught by its catch, which pushes
+        // (asserted below). Only the request-building throw is here.
+        expect(line.trim()).toBe("throw new ChatRequestBuildError(error);");
+      } else {
+        // Leaves the function: its own block pushes before it.
+        const block = body.slice(enclosingBlockStart(at), at);
+        expect(block, `no push before: ${line.trim()}`).toContain(PUSH_NULL);
+      }
+    }
+  });
+
+  it("throws in exactly three places, so a new throw has to be looked at here", () => {
+    // The check above reads a throw's block by its indentation, and a throw
+    // that is the body of a one-line `if` at the function's top level gets the
+    // whole function as its block, where an earlier push satisfies it. The
+    // count closes that gap: two throws leave the function after a push (the
+    // fetch catch and the body-read timeout guard), and one, the
+    // request-building throw, goes to the fetch catch.
+    expect(occurrences(body, "throw ")).toBe(3);
+  });
+
+  it("the request-building throw is inside the function's try, so its catch records and pushes", () => {
+    const { start, catchAt } = outerTry();
+    const at = body.indexOf("throw new ChatRequestBuildError(");
+    expect(at).toBeGreaterThan(start);
+    expect(at).toBeLessThan(catchAt);
   });
 
   it("pushes null in the fetch catch, before it rethrows", () => {
-    const match = /\} catch \((\w+)\) \{\n([\s\S]*?)\n {2}\}\n/.exec(body);
+    // The function's own catch, at its indent: the request-building catch
+    // inside the try is deeper and is not matched.
+    const match = /\n {2}\} catch \((\w+)\) \{\n([\s\S]*?)\n {2}\}\n/.exec(body);
     expect(match, "fetch catch block not found").not.toBeNull();
     const [, name, catchBody] = match as RegExpExecArray;
     const pushAt = catchBody.indexOf(PUSH_NULL);
