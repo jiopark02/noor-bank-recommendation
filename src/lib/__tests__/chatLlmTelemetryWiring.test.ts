@@ -158,8 +158,8 @@ const CHAT_MODEL_FAILED_STATUS = 502;
 // the budget check that leaves the loop before an attempt that cannot fit, the
 // counter starting at 0 and incremented once per attempt started, the call,
 // and the catch for a thrown attempt, which logs the attempt with the thrown
-// error's cause code and nothing else from it, and moves on; nothing else
-// stands between the call and the success branch.
+// error's cause code and name and nothing else from it, and moves on; nothing
+// else stands between the call and the success branch.
 const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for llm_calls only.
       const promptBlocks: ChatPromptBlocks = {
         memory: memoryBlock !== "",
@@ -198,9 +198,14 @@ const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for
           );
         } catch (error) {
           // callOpenRouter has already recorded the attempt. A thrown attempt
-          // has no upstream status to report; its cause code is all that is
-          // read from the error.
-          logFailedModelAttempt(attemptIndex, null, networkCauseCode(error));
+          // has no upstream status to report; its cause code and its name are
+          // all that is read from the error, never its message.
+          logFailedModelAttempt(
+            attemptIndex,
+            null,
+            networkCauseCode(error),
+            errorName(error)
+          );
           continue;
         }
 
@@ -313,31 +318,80 @@ describe("chat route: the branches that decide the response are as pinned", () =
     expect(occurrences(post, "result.status")).toBe(2);
   });
 
-  it("the thrown error of an attempt is read only by networkCauseCode", () => {
-    // Inside the attempt's catch the error is passed to networkCauseCode and
+  it("the thrown error of an attempt is read only by networkCauseCode and errorName", () => {
+    // Inside the attempt's catch the error is passed to the two readers and
     // used nowhere else, so its message cannot reach the log or the response.
+    // Comments are removed first, so prose about the error does not count.
     const post = functionBody(CHAT, "POST");
     const catchAt = post.indexOf("} catch (error) {\n          // callOpenRouter has already recorded");
     expect(catchAt).toBeGreaterThan(-1);
-    const catchBody = post.slice(catchAt, post.indexOf("continue;", catchAt));
-    expect(occurrences(catchBody, "error")).toBe(3);
+    const catchBody = post
+      .slice(catchAt, post.indexOf("continue;", catchAt))
+      .replace(/\/\/[^\n]*/g, "");
+    const uses = catchBody.match(/\berror\b/g) ?? [];
+    // The binding in `catch (error)` and one argument to each reader.
+    expect(uses).toHaveLength(3);
     expect(occurrences(catchBody, "networkCauseCode(error)")).toBe(1);
+    expect(occurrences(catchBody, "errorName(error)")).toBe(1);
   });
 });
 
 describe("chat route: callOpenRouter", () => {
   const body = functionBody(CHAT, "callOpenRouter");
 
-  it("records and then rethrows the same error when fetch throws", () => {
-    const match = /\} catch \((\w+)\) \{\n([\s\S]*?)\n {2}\}\n/.exec(body);
-    expect(match, "fetch catch block not found").not.toBeNull();
-    const [, name, catchBody] = match as RegExpExecArray;
+  /**
+   * Every catch block in callOpenRouter: its bound name and its body, from the
+   * `{` after `catch (name)` to the `}` that closes it at the same indent.
+   */
+  function catchBlocks(): Array<{ name: string; indent: string; body: string }> {
+    const blocks: Array<{ name: string; indent: string; body: string }> = [];
+    const opener = /\n( *)\} catch \((\w+)\) \{\n/g;
+    let match: RegExpExecArray | null;
+    while ((match = opener.exec(body)) !== null) {
+      const [, indent, name] = match;
+      const start = match.index + match[0].length;
+      const end = body.indexOf(`\n${indent}}\n`, start);
+      expect(end, `catch (${name}) has no closing brace`).toBeGreaterThan(start);
+      blocks.push({ name, indent, body: body.slice(start, end) });
+    }
+    return blocks;
+  }
+
+  it("finds every catch: one for building the request, one for the attempt", () => {
+    // The probe below holds for each block it finds, so it must find them all.
+    expect(catchBlocks()).toHaveLength(occurrences(body, "catch ("));
+    expect(catchBlocks().length).toBeGreaterThan(0);
+  });
+
+  it("no catch swallows an error: each one ends by throwing", () => {
+    for (const block of catchBlocks()) {
+      expect(block.body.trimEnd(), `catch (${block.name})`).toMatch(
+        /\n?\s*throw [^;]+;$/
+      );
+    }
+  });
+
+  it("records and then rethrows the same error when the attempt throws", () => {
+    // The outer catch: the one that records the row, at the function's indent.
+    const outer = catchBlocks().filter((b) => b.indent === "  ");
+    expect(outer).toHaveLength(1);
+    const [{ name, body: catchBody }] = outer;
     expect(catchBody).toContain("await recordLlmCall(");
     expect(catchBody.trimEnd().endsWith(`throw ${name};`)).toBe(true);
   });
 
-  it("has exactly one catch, so nothing else swallows an error", () => {
-    expect(occurrences(body, "catch (")).toBe(1);
+  it("a request body that cannot be built is rethrown as ChatRequestBuildError, to the catch that records it", () => {
+    const inner = catchBlocks().filter((b) => b.indent !== "  ");
+    expect(inner).toHaveLength(1);
+    const [{ name, body: catchBody }] = inner;
+    expect(catchBody).not.toContain("recordLlmCall(");
+    expect(catchBody.trimEnd().endsWith(`throw new ChatRequestBuildError(${name});`)).toBe(true);
+    // Only the build is inside the inner try; fetch is not.
+    const innerTry = body.indexOf("    try {\n      requestBody = JSON.stringify(");
+    expect(innerTry).toBeGreaterThan(-1);
+    expect(body.indexOf("fetch(OPENROUTER_URL")).toBeGreaterThan(
+      body.indexOf("throw new ChatRequestBuildError(")
+    );
   });
 
   it("reads the body and builds the result through the moved helpers", () => {

@@ -22,8 +22,9 @@ import { CRISIS_NOTICES } from "../crisisNotice";
  *
  * WHAT THIS FILE DOES NOT PROVE
  * That a cancelled Supabase query, Plaid call or fetch actually stops on the
- * wire: it holds that the signal each one was handed is aborted. The memory
- * reads take no signal at all; the request only stops waiting for them.
+ * wire: it holds that the signal each one was handed is aborted. The session
+ * read and the memory reads take no signal at all; the request only stops
+ * waiting for them.
  */
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";

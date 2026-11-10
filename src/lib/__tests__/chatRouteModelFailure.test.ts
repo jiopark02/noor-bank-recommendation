@@ -8,9 +8,11 @@ import { CRISIS_NOTICES } from "../crisisNotice";
  * the code CHAT_MODEL_FAILED. Nothing from the provider reaches the client
  * (no upstream status, no upstream error text), and the server log names each
  * failed attempt by its kind, its upstream status and, for an attempt that
- * threw, the network cause code when the thrown error carries one in the
- * expected form. The kind logged is the error class the attempt's llm_calls
- * row is given.
+ * threw, the network cause code and the error's name, each only when it is in
+ * the expected form. The thrown error's message is never logged. The kind
+ * logged is the error class the attempt's llm_calls row is given. A request
+ * body that could not be built is covered by
+ * chatRouteRequestBuildFailure.test.ts.
  *
  * HOW
  * Same harness as chatRouteCrisis.test.ts: authentication, the admin client,
@@ -36,7 +38,7 @@ const FAILED_BODY = {
   code: "CHAT_MODEL_FAILED",
 };
 const ATTEMPT_LINE =
-  "[chat-model] attempt failed attempt=%d kind=%s upstream_status=%s cause=%s";
+  "[chat-model] attempt failed attempt=%d kind=%s upstream_status=%s cause=%s name=%s";
 
 const supabaseState = { adminConfigured: false };
 
@@ -82,11 +84,12 @@ vi.mock("@/lib/aiMemory", () => ({
 /**
  * A scripted throw is a fetch failure whose cause carries `causeCode`
  * (ECONNRESET unless given). `noCause` throws an error with no cause at all.
+ * `name`, when given, replaces the thrown error's name (TypeError otherwise).
  */
 type Answer =
   | { kind: "ok" }
   | { kind: "status"; status: number }
-  | { kind: "throw"; causeCode?: unknown; noCause?: true };
+  | { kind: "throw"; causeCode?: unknown; noCause?: true; name?: unknown };
 
 let answers: Answer[] = [];
 let fetchCalls = 0;
@@ -142,14 +145,18 @@ beforeEach(() => {
       fetchCalls += 1;
       const answer = answers.shift() ?? { kind: "throw" };
       if (answer.kind === "throw") {
-        if (answer.noCause) {
-          throw new TypeError(`fetch failed ${THROWN_MARKER}`);
+        const thrown = answer.noCause
+          ? new TypeError(`fetch failed ${THROWN_MARKER}`)
+          : new TypeError(`fetch failed ${THROWN_MARKER}`, {
+              cause: Object.assign(new Error(`connect failed ${THROWN_MARKER}`), {
+                code: "causeCode" in answer ? answer.causeCode : "ECONNRESET",
+              }),
+            });
+        if ("name" in answer) {
+          // An own property, so it is what the route reads.
+          Object.defineProperty(thrown, "name", { value: answer.name });
         }
-        throw new TypeError(`fetch failed ${THROWN_MARKER}`, {
-          cause: Object.assign(new Error(`connect failed ${THROWN_MARKER}`), {
-            code: "causeCode" in answer ? answer.causeCode : "ECONNRESET",
-          }),
-        });
+        throw thrown;
       }
       if (answer.kind === "status") {
         return new Response(
@@ -290,7 +297,7 @@ describe("a rejected key stops the request", () => {
   });
 });
 
-describe("the log names each failed attempt by kind, upstream status and cause code", () => {
+describe("the log names each failed attempt by kind, upstream status, cause code and name", () => {
   it.each([
     [401, "auth"],
     [403, "auth"],
@@ -299,18 +306,20 @@ describe("the log names each failed attempt by kind, upstream status and cause c
     [404, "client_error"],
     [500, "provider_error"],
     [503, "provider_error"],
-  ])("upstream %d is logged as %s, with no cause", async (status, kind) => {
+  ])("upstream %d is logged as %s, with no cause and no name", async (status, kind) => {
     answers = [{ kind: "status", status }, { kind: "ok" }];
     await post();
-    expect(attemptLines()[0]).toEqual([ATTEMPT_LINE, 1, kind, String(status), "none"]);
+    expect(attemptLines()[0]).toEqual([
+      ATTEMPT_LINE, 1, kind, String(status), "none", "none",
+    ]);
   });
 
-  it("a thrown attempt is a network error with no upstream status and its cause code", async () => {
+  it("a thrown attempt is a network error with no upstream status, its cause code and its name", async () => {
     answers = [{ kind: "status", status: 500 }, { kind: "throw" }];
     await post();
     expect(attemptLines()).toEqual([
-      [ATTEMPT_LINE, 1, "provider_error", "500", "none"],
-      [ATTEMPT_LINE, 2, "network_error", "none", "ECONNRESET"],
+      [ATTEMPT_LINE, 1, "provider_error", "500", "none", "none"],
+      [ATTEMPT_LINE, 2, "network_error", "none", "ECONNRESET", "TypeError"],
     ]);
   });
 
@@ -319,7 +328,7 @@ describe("the log names each failed attempt by kind, upstream status and cause c
     const res = await post();
     expect(res.status).toBe(200);
     expect(attemptLines()).toEqual([
-      [ATTEMPT_LINE, 1, "provider_error", "503", "none"],
+      [ATTEMPT_LINE, 1, "provider_error", "503", "none", "none"],
     ]);
   });
 
@@ -389,6 +398,55 @@ describe("the cause code is logged only in its expected form", () => {
 
   it("an error with no cause is logged as none", async () => {
     expect(await causeLogged({ kind: "throw", noCause: true })).toBe("none");
+  });
+});
+
+describe("the error's name is logged only in its expected form", () => {
+  async function nameLogged(answer: Answer): Promise<unknown> {
+    answers = [answer, { kind: "ok" }];
+    await post();
+    expect(attemptLines()).toHaveLength(1);
+    return attemptLines()[0][5];
+  }
+
+  it.each([
+    ["a timeout before a response", "TimeoutError"],
+    ["an abort", "AbortError"],
+    ["a plain error", "Error"],
+    ["a name with digits and underscores", "Undici_Error_2"],
+    ["a name of exactly 40 characters", "A".repeat(40)],
+  ])("%s is logged as it is", async (_label, name) => {
+    expect(await nameLogged({ kind: "throw", name })).toBe(name);
+  });
+
+  it.each([
+    ["a space inside", "Type Error"],
+    ["a hyphen", "Fetch-Error"],
+    ["a colon", "TypeError:"],
+    ["a sentence", `fetch failed ${THROWN_MARKER}`],
+    ["a newline at the end", "TypeError\n"],
+    ["41 characters", "A".repeat(41)],
+    ["an empty string", ""],
+    ["a non-ASCII letter", "Erreuré"],
+    ["a number", 42],
+    ["an object", { name: "TypeError" }],
+    ["null", null],
+    ["undefined", undefined],
+  ])("%s is logged as none", async (_label, name) => {
+    expect(await nameLogged({ kind: "throw", name })).toBe("none");
+    expect(consoleText()).not.toContain(THROWN_MARKER);
+  });
+
+  it("a thrown error's message reaches no console call, whatever its name", async () => {
+    answers = [
+      { kind: "throw", name: "TimeoutError" },
+      { kind: "throw", name: `named ${THROWN_MARKER}` },
+    ];
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(attemptLines()).toHaveLength(2);
+    expect(consoleText()).not.toContain(THROWN_MARKER);
+    expect(res.text).not.toContain(THROWN_MARKER);
   });
 });
 

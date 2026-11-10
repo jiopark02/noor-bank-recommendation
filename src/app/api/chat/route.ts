@@ -463,6 +463,20 @@ interface ChatLlmCallContext {
 }
 
 /**
+ * Thrown by callOpenRouter when the request body could not be built. The
+ * original error is its cause; its own message says nothing about it, and the
+ * model loop logs only its name.
+ */
+class ChatRequestBuildError extends Error {
+  constructor(cause: unknown) {
+    super("chat request body could not be built", { cause });
+    this.name = "ChatRequestBuildError";
+    // ES5 target: keep instanceof working on the subclass.
+    Object.setPrototypeOf(this, ChatRequestBuildError.prototype);
+  }
+}
+
+/**
  * One OpenRouter attempt. Every exit records one llm_calls row first.
  *
  * recordLlmCall never rejects (llmCallLog.ts), so the row write cannot replace
@@ -476,6 +490,12 @@ interface ChatLlmCallContext {
  * which would turn the cut-off body into an empty success and a stored
  * "could not generate a response" turn; it is recorded as a failed attempt and
  * thrown the same way.
+ *
+ * The request body is built before fetch is called. When building it throws
+ * — an error in our own code, before anything is sent — the attempt is
+ * recorded and counted exactly as a fetch that throws, and what is thrown is
+ * a ChatRequestBuildError carrying the original error as its cause, so the
+ * model loop's log line can tell it from a network failure.
  */
 async function callOpenRouter(
   apiKey: string,
@@ -487,6 +507,15 @@ async function callOpenRouter(
   const signal = AbortSignal.timeout(CHAT_LLM_TIMEOUT_MS);
   let res: Response;
   try {
+    let requestBody: string;
+    try {
+      requestBody = JSON.stringify(
+        buildOpenRouterRequestBody({ model, messages, maxTokens: 1024 })
+      );
+    } catch (error) {
+      // Rethrown to the catch below, which records the attempt.
+      throw new ChatRequestBuildError(error);
+    }
     res = await fetch(OPENROUTER_URL, {
       method: "POST",
       signal,
@@ -494,9 +523,7 @@ async function callOpenRouter(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(
-        buildOpenRouterRequestBody({ model, messages, maxTokens: 1024 })
-      ),
+      body: requestBody,
     });
   } catch (error) {
     await recordLlmCall(
@@ -771,7 +798,20 @@ async function persistTurnIfEnabled(params: {
     params.requestStartedAtMs + CHAT_SAVE_DEADLINE_MS;
   const insertDeadlineAtMs =
     readBackDeadlineAtMs - CHAT_SAVE_READBACK_RESERVE_MS;
+  // For the [chat-save] line. sessionClosed: the first insert found the
+  // session closed. switched: the open session was read and the second
+  // insert is about to be sent to it. A session found closed whose re-read
+  // then failed or ran out of time has the first without the second.
+  let sessionClosed = false;
   let switched = false;
+  const logSave = (outcome: string, level: "info" | "warn"): void => {
+    console[level](
+      "[chat-save] outcome=%s session_closed=%s switched=%s",
+      outcome,
+      sessionClosed,
+      switched
+    );
+  };
 
   try {
     const savedSessionId = await runUntilDeadline(
@@ -783,6 +823,7 @@ async function persistTurnIfEnabled(params: {
           return firstSessionId;
         } catch (error) {
           if (!isSessionClosedError(error)) throw error;
+          sessionClosed = true;
         }
         // The session is closed and nothing was stored. The session read
         // takes no signal, so check before and after it that this save has
@@ -795,7 +836,7 @@ async function persistTurnIfEnabled(params: {
         return session.id;
       }
     );
-    console.info("[chat-save] outcome=%s switched=%s", "inserted", switched);
+    logSave("inserted", "info");
     return savedSessionId;
   } catch (error) {
     let confirmedSessionId: string | null = null;
@@ -810,14 +851,10 @@ async function persistTurnIfEnabled(params: {
       // nothing.
     }
     if (confirmedSessionId !== null) {
-      console.info(
-        "[chat-save] outcome=%s switched=%s",
-        "confirmed_by_readback",
-        switched
-      );
+      logSave("confirmed_by_readback", "info");
       return confirmedSessionId;
     }
-    console.warn("[chat-save] outcome=%s switched=%s", "failed", switched);
+    logSave("failed", "warn");
     throw error;
   }
 }
@@ -855,18 +892,46 @@ function networkCauseCode(error: unknown): string {
   }
 }
 
+const ERROR_NAME_PATTERN = /^[A-Za-z0-9_]{1,40}$/;
+
+/**
+ * The name of a thrown error (TypeError, TimeoutError, ChatRequestBuildError
+ * and the like), or "none". Only a string made of letters, digits and
+ * underscores, at most 40 characters long, is returned: anything else is
+ * "none". The error's message is never read.
+ *
+ * Together with the cause code it tells apart failures the kind alone does
+ * not: a timeout before a response (TimeoutError), a timeout while the body
+ * was being read (Error), a request body our code could not build
+ * (ChatRequestBuildError) and a network failure (TypeError, usually with a
+ * cause code).
+ */
+function errorName(error: unknown): string {
+  try {
+    const name = (error as { name?: unknown } | null | undefined)?.name;
+    return typeof name === "string" && ERROR_NAME_PATTERN.test(name)
+      ? name
+      : "none";
+  } catch {
+    return "none";
+  }
+}
+
 /**
  * One line per failed model attempt: the attempt's number, its kind (the
- * error class llm_calls records for it), the upstream HTTP status, and the
- * network cause code of a thrown attempt. The status is "none" for an attempt
- * that threw, whether before a response arrived or while its body was being
- * read; the cause is "none" unless networkCauseCode found one. Never the
- * provider's error text and never the thrown error's message.
+ * error class llm_calls records for it), the upstream HTTP status, and, for
+ * an attempt that threw, the network cause code and the error's name. The
+ * status is "none" for an attempt that threw, whether before a response
+ * arrived or while its body was being read; the cause and the name are "none"
+ * for an attempt that did not throw, and whenever networkCauseCode or
+ * errorName found nothing in the expected form. Never the provider's error
+ * text and never the thrown error's message.
  */
 function logFailedModelAttempt(
   attemptIndex: number,
   upstreamStatus: number | null,
-  causeCode: string = "none"
+  causeCode: string = "none",
+  thrownName: string = "none"
 ): void {
   const kind = classifyLlmOutcome({
     route: "chat",
@@ -876,11 +941,12 @@ function logFailedModelAttempt(
     contentPresent: false,
   }).errorClass;
   console.warn(
-    "[chat-model] attempt failed attempt=%d kind=%s upstream_status=%s cause=%s",
+    "[chat-model] attempt failed attempt=%d kind=%s upstream_status=%s cause=%s name=%s",
     attemptIndex,
     kind ?? "unknown",
     upstreamStatus === null ? "none" : String(upstreamStatus),
-    causeCode
+    causeCode,
+    thrownName
   );
 }
 
@@ -1142,9 +1208,9 @@ export async function POST(request: NextRequest) {
 
     if (isAiMemoryEnabled()) {
       try {
-        // The memory reads take no signal, so the deadline only stops the
-        // request waiting for them. notCut keeps withRetry from starting a
-        // read again once the wait has been cut.
+        // The session read and the memory reads take no signal, so the
+        // deadline only stops the request waiting for them. notCut keeps
+        // withRetry from starting a read again once the wait has been cut.
         const session = await beforeLoop("session", (signal) =>
           withRetry(() => {
             notCut(signal, "session");
@@ -1402,9 +1468,14 @@ export async function POST(request: NextRequest) {
           );
         } catch (error) {
           // callOpenRouter has already recorded the attempt. A thrown attempt
-          // has no upstream status to report; its cause code is all that is
-          // read from the error.
-          logFailedModelAttempt(attemptIndex, null, networkCauseCode(error));
+          // has no upstream status to report; its cause code and its name are
+          // all that is read from the error, never its message.
+          logFailedModelAttempt(
+            attemptIndex,
+            null,
+            networkCauseCode(error),
+            errorName(error)
+          );
           continue;
         }
 

@@ -15,6 +15,10 @@ import type { NextRequest } from "next/server";
  * - A session found closed stored nothing. The active session is fetched
  *   again and the same pair is inserted there with the same ids, at most once
  *   per save. No other failure sends the insert a second time.
+ * - Each save logs one [chat-save] line: its outcome, whether the session was
+ *   found closed, and whether the save moved to the open session. The first
+ *   can be true without the second, when the re-read of the open session
+ *   failed or ran out of time.
  *
  * HOW
  * Authentication, the admin client, the chat usage ledger, LLM call logging
@@ -41,7 +45,7 @@ const SAVE_FAILED_BODY = {
   error: "Could not save your conversation. Please try sending your message again.",
   code: "SAVE_FAILED",
 };
-const SAVE_LINE = "[chat-save] outcome=%s switched=%s";
+const SAVE_LINE = "[chat-save] outcome=%s session_closed=%s switched=%s";
 
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 
@@ -58,6 +62,8 @@ const script = {
   lookups: [] as LookupStep[],
   /** When set, the session read made by the save never answers. */
   sessionReadHangs: false,
+  /** When set, the session read made by the save rejects. */
+  sessionReadThrows: false,
   /** When set, the model answers after this many milliseconds. */
   modelAnswersAfterMs: 0,
 };
@@ -104,6 +110,9 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => {
       seen.sessionReads += 1;
       if (seen.sessionReads === 1) return Promise.resolve({ id: SESSION_A });
       if (script.sessionReadHangs) return never();
+      if (script.sessionReadThrows) {
+        return Promise.reject(new Error("session read failed"));
+      }
       return Promise.resolve({ id: SESSION_B });
     },
     buildMemoryContext: async () => ({
@@ -178,6 +187,7 @@ beforeEach(() => {
   script.inserts = [];
   script.lookups = [];
   script.sessionReadHangs = false;
+  script.sessionReadThrows = false;
   script.modelAnswersAfterMs = 0;
   seen.inserts = [];
   seen.lookups = [];
@@ -260,7 +270,7 @@ describe("the ids of the two rows are chosen by the route", () => {
     expect(res.json.sessionId).toBe(SESSION_A);
     expect(res.json.message).toBe("assistant reply");
     expect(seen.lookups).toEqual([]);
-    expect(saveLines()).toEqual([[SAVE_LINE, "inserted", false]]);
+    expect(saveLines()).toEqual([[SAVE_LINE, "inserted", false, false]]);
   });
 });
 
@@ -273,7 +283,7 @@ describe("an insert that ended in an error", () => {
     expect(res.json.success).toBe(true);
     expect(res.json.message).toBe("assistant reply");
     expect(res.json.sessionId).toBe(SESSION_A);
-    expect(saveLines()).toEqual([[SAVE_LINE, "confirmed_by_readback", false]]);
+    expect(saveLines()).toEqual([[SAVE_LINE, "confirmed_by_readback", false, false]]);
   });
 
   it("asks once, for the ids it inserted and the caller's own user id", async () => {
@@ -292,7 +302,7 @@ describe("an insert that ended in an error", () => {
     expect(res.status).toBe(500);
     expect(res.json).toEqual(SAVE_FAILED_BODY);
     expect(seen.lookups).toHaveLength(1);
-    expect(saveLines()).toEqual([[SAVE_LINE, "failed", false]]);
+    expect(saveLines()).toEqual([[SAVE_LINE, "failed", false, false]]);
   });
 
   it("a lookup that fails confirms nothing: SAVE_FAILED", async () => {
@@ -389,7 +399,7 @@ describe("a session found closed", () => {
     const res = await post();
     expect(res.json.sessionId).toBe(SESSION_B);
     expect(res.json.message).toBe("assistant reply");
-    expect(saveLines()).toEqual([[SAVE_LINE, "inserted", true]]);
+    expect(saveLines()).toEqual([[SAVE_LINE, "inserted", true, true]]);
   });
 
   it("a second closed answer is not followed by a third insert", async () => {
@@ -401,7 +411,7 @@ describe("a session found closed", () => {
     expect(seen.inserts).toHaveLength(2);
     expect(seen.sessionReads).toBe(2);
     expect(seen.lookups).toHaveLength(1);
-    expect(saveLines()).toEqual([[SAVE_LINE, "failed", true]]);
+    expect(saveLines()).toEqual([[SAVE_LINE, "failed", true, true]]);
   });
 
   it("the second insert failing is looked up like any other", async () => {
@@ -411,7 +421,7 @@ describe("a session found closed", () => {
     expect(res.status).toBe(200);
     expect(res.json.sessionId).toBe(SESSION_B);
     expect(seen.inserts).toHaveLength(2);
-    expect(saveLines()).toEqual([[SAVE_LINE, "confirmed_by_readback", true]]);
+    expect(saveLines()).toEqual([[SAVE_LINE, "confirmed_by_readback", true, true]]);
   });
 
   it("the second insert shares the first one's deadline", async () => {
@@ -440,7 +450,38 @@ describe("a session found closed", () => {
 });
 
 describe("the [chat-save] line", () => {
-  it("carries the outcome and whether the session was switched, and no id", async () => {
+  // A session found closed is told apart from an ordinary insert failure even
+  // when the save never reached a second insert.
+  it("a session found closed whose re-read ran out of time: session_closed, not switched", async () => {
+    script.inserts = ["closed", "ok"];
+    script.lookups = ["missing"];
+    script.sessionReadHangs = true;
+    await post(INSERT_DEADLINE_MS);
+    expect(seen.inserts).toHaveLength(1);
+    expect(saveLines()).toEqual([[SAVE_LINE, "failed", true, false]]);
+  });
+
+  it("a session found closed whose re-read threw: session_closed, not switched", async () => {
+    script.inserts = ["closed", "ok"];
+    script.lookups = ["missing"];
+    script.sessionReadThrows = true;
+    const res = await post();
+    expect(res.status).toBe(500);
+    expect(res.json).toEqual(SAVE_FAILED_BODY);
+    expect(seen.inserts).toHaveLength(1);
+    expect(seen.sessionReads).toBe(2);
+    expect(seen.lookups).toHaveLength(1);
+    expect(saveLines()).toEqual([[SAVE_LINE, "failed", true, false]]);
+  });
+
+  it("an ordinary insert failure: neither", async () => {
+    script.inserts = ["error"];
+    script.lookups = ["missing"];
+    await post();
+    expect(saveLines()).toEqual([[SAVE_LINE, "failed", false, false]]);
+  });
+
+  it("carries the outcome, whether the session was found closed and whether it was switched, and no id", async () => {
     script.inserts = ["closed", "ok"];
     await post();
     const line = JSON.stringify(saveLines());
