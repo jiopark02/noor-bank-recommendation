@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CHAT_LLM_TIMEOUT_MS,
   CHAT_REQUEST_BUDGET_MS,
+  CHAT_SAVE_DEADLINE_MS,
+  CHAT_SAVE_READBACK_RESERVE_MS,
   ChatDeadlineError,
   chatHasBudgetForAnotherAttempt,
   chatPreLoopDeadlineMs,
@@ -55,6 +57,25 @@ describe("chatHasBudgetForAnotherAttempt", () => {
   it("refuses an attempt that could run past it", () => {
     expect(chatHasBudgetForAnotherAttempt(30001)).toBe(false);
     expect(chatHasBudgetForAnotherAttempt(55000)).toBe(false);
+  });
+});
+
+describe("the save deadline", () => {
+  // Agreed values; pinned so that a change is a deliberate one.
+  it("is 58 s after the request starts, with 500 ms of it kept for the read-back", () => {
+    expect(CHAT_SAVE_DEADLINE_MS).toBe(58000);
+    expect(CHAT_SAVE_READBACK_RESERVE_MS).toBe(500);
+  });
+
+  it("leaves room under the route's 60 s maxDuration for the settle cap and a margin", () => {
+    // 0.5 s for the settle and crisis-count writes, and 1.5 s of margin.
+    expect(60000 - CHAT_SAVE_DEADLINE_MS).toBe(500 + 1500);
+  });
+
+  it("comes after the last moment a model attempt can end", () => {
+    expect(CHAT_SAVE_DEADLINE_MS - CHAT_SAVE_READBACK_RESERVE_MS).toBeGreaterThan(
+      CHAT_REQUEST_BUDGET_MS
+    );
   });
 });
 

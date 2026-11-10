@@ -22,6 +22,8 @@ import {
   buildMemoryContext,
   formatMemoryForPrompt,
   saveMessages,
+  findSavedTurn,
+  isSessionClosedError,
   getSessionMessages,
   type DbChatMessage,
   type ChatSession,
@@ -82,6 +84,8 @@ import {
 } from "@/lib/openRouterRequest";
 import {
   CHAT_LLM_TIMEOUT_MS,
+  CHAT_SAVE_DEADLINE_MS,
+  CHAT_SAVE_READBACK_RESERVE_MS,
   ChatDeadlineError,
   chatHasBudgetForAnotherAttempt,
   chatPreLoopDeadlineMs,
@@ -642,8 +646,10 @@ function notCut(signal: AbortSignal, stage: string): void {
  * Runs an async operation with one retry on transient failures.
  * Adds ~250ms delay before retry.
  *
- * ⚠️ DO NOT use this around non-idempotent writes such as saveMessages.
- * The first call may have committed before timeout; retry would duplicate.
+ * ⚠️ DO NOT use this around writes that are not safe to send twice, such as
+ * saveMessages. The first call may have committed before it failed, and a
+ * second insert of the same pair then fails on its ids instead of telling the
+ * caller the turn is stored; persistTurnIfEnabled asks by id instead.
  * Use only for reads and idempotent writes (e.g., getOrCreateActiveSession).
  */
 async function withRetry<T>(
@@ -705,11 +711,31 @@ function toClientChatMessage(row: DbChatMessage): ClientChatMessage {
  * The "empty content throws" rule prevents silent "200 OK but DB has 0 turns"
  * which would break the data-consistency guarantee.
  *
- * Does NOT retry (saveMessages is non-idempotent). Callers should catch
- * and translate to an HTTP error response.
+ * HOW THE TURN IS STORED
+ * The ids of the two rows are chosen here, before anything is sent, so the
+ * route can always find out afterwards whether the pair is stored.
  *
- * @throws Error when persistence is expected but content is empty, or
- *   when the underlying saveMessages call fails.
+ * 1. Insert, no later than the save deadline less the read-back reserve
+ *    (llmTimeouts.ts). An insert still running then is cancelled.
+ * 2. If the session turns out to be closed (the summarize cron closed it
+ *    while this request was running), nothing was stored: the user's active
+ *    session is fetched again, or created, and the same pair is inserted
+ *    there with the same ids. This happens at most once per save, inside the
+ *    same deadline as step 1.
+ * 3. If the insert ended in any error or at its deadline, the route does not
+ *    know whether the statement was stored. It asks once, by the two ids, no
+ *    later than the save deadline: both rows there is a saved turn, anything
+ *    else — a row missing, a failed or unanswered lookup — is a failed save.
+ *    A cancelled insert can still be stored after that lookup has answered
+ *    "missing"; the route then reports a failed save for a turn that exists.
+ *
+ * Apart from step 2, an insert is never sent twice. Callers should catch and
+ * translate a throw to an HTTP error response.
+ *
+ * @returns The id of the session the turn was stored in, or null when
+ *   nothing was to be stored.
+ * @throws Error when persistence is expected but content is empty, or when
+ *   the turn could not be stored or confirmed stored.
  */
 async function persistTurnIfEnabled(params: {
   activeSession: ChatSession | null;
@@ -719,9 +745,10 @@ async function persistTurnIfEnabled(params: {
   assistantModel: string;
   inputTokens?: number;
   outputTokens?: number;
-}): Promise<void> {
-  if (!isAiMemoryEnabled()) return;
-  if (!params.activeSession) return;
+  requestStartedAtMs: number;
+}): Promise<string | null> {
+  if (!isAiMemoryEnabled()) return null;
+  if (!params.activeSession) return null;
 
   if (!params.userContent.trim() || !params.assistantContent.trim()) {
     throw new Error(
@@ -730,13 +757,69 @@ async function persistTurnIfEnabled(params: {
     );
   }
 
-  await saveMessages(params.activeSession.id, params.authUserId, {
+  const firstSessionId = params.activeSession.id;
+  const userId = params.authUserId;
+  const pair = {
     userContent: params.userContent,
     assistantContent: params.assistantContent,
     assistantModel: params.assistantModel,
     inputTokens: params.inputTokens,
     outputTokens: params.outputTokens,
-  });
+  };
+  const ids = { user: randomUUID(), assistant: randomUUID() };
+  const readBackDeadlineAtMs =
+    params.requestStartedAtMs + CHAT_SAVE_DEADLINE_MS;
+  const insertDeadlineAtMs =
+    readBackDeadlineAtMs - CHAT_SAVE_READBACK_RESERVE_MS;
+  let switched = false;
+
+  try {
+    const savedSessionId = await runUntilDeadline(
+      insertDeadlineAtMs,
+      "save",
+      async (signal) => {
+        try {
+          await saveMessages(firstSessionId, userId, pair, { ids, signal });
+          return firstSessionId;
+        } catch (error) {
+          if (!isSessionClosedError(error)) throw error;
+        }
+        // The session is closed and nothing was stored. The session read
+        // takes no signal, so check before and after it that this save has
+        // not been cut meanwhile.
+        notCut(signal, "save");
+        const session = await getOrCreateActiveSession(userId);
+        notCut(signal, "save");
+        switched = true;
+        await saveMessages(session.id, userId, pair, { ids, signal });
+        return session.id;
+      }
+    );
+    console.info("[chat-save] outcome=%s switched=%s", "inserted", switched);
+    return savedSessionId;
+  } catch (error) {
+    let confirmedSessionId: string | null = null;
+    try {
+      confirmedSessionId = await runUntilDeadline(
+        readBackDeadlineAtMs,
+        "save_readback",
+        (signal) => findSavedTurn(userId, ids, { signal })
+      );
+    } catch {
+      // A lookup that fails or is still running at the deadline confirms
+      // nothing.
+    }
+    if (confirmedSessionId !== null) {
+      console.info(
+        "[chat-save] outcome=%s switched=%s",
+        "confirmed_by_readback",
+        switched
+      );
+      return confirmedSessionId;
+    }
+    console.warn("[chat-save] outcome=%s switched=%s", "failed", switched);
+    throw error;
+  }
 }
 
 /**
@@ -1334,8 +1417,9 @@ export async function POST(request: NextRequest) {
               ? result.message
               : composeCrisisReply(notice, result.message, EMPTY_ASSISTANT_REPLY);
           const saveStartedAtMs = Date.now();
+          let savedSessionId: string | null = null;
           try {
-            await persistTurnIfEnabled({
+            savedSessionId = await persistTurnIfEnabled({
               activeSession,
               authUserId,
               userContent: lastUserMessageText,
@@ -1343,6 +1427,7 @@ export async function POST(request: NextRequest) {
               assistantModel: result.model,
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
+              requestStartedAtMs,
             });
           } catch (error) {
             console.error("Failed to save messages (OpenRouter branch):", error);
@@ -1363,7 +1448,9 @@ export async function POST(request: NextRequest) {
             success: true,
             message: replyMessage,
             model: result.model,
-            sessionId: activeSession?.id ?? null,
+            // The session the turn was stored in, which is not the one the
+            // request started with when that one was closed meanwhile.
+            sessionId: savedSessionId ?? activeSession?.id ?? null,
             usage: result.usage,
           });
         }

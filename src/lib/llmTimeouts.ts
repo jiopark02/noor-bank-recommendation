@@ -1,7 +1,7 @@
 /**
  * llmTimeouts — how long an OpenRouter call may take, when the chat route and
  * the memory crons stop starting new calls, and how long the chat route's
- * waits before its model loop may last.
+ * waits before its model loop and its turn save after it may last.
  *
  * The values are unvalidated defaults: when they were set, llm_calls held too
  * few rows per route to measure real latency. Revisit them against
@@ -21,9 +21,25 @@ export const CHAT_LLM_TIMEOUT_MS = 25000;
  * to its full timeout inside this budget, measured from the start of the
  * request. The waits before the model loop end at the pre-loop deadline
  * below, which is the last moment a first attempt may start. The turn save
- * after the loop has no timeout of its own, so this budget does not bound it.
+ * after the loop ends at the save deadline below.
  */
 export const CHAT_REQUEST_BUDGET_MS = 55000;
+
+/**
+ * Save (insert + read-back) must finish by 58.0 s after request start: 60 s
+ * maxDuration − 0.5 s settle cap − 1.5 s margin. The platform documents no
+ * grace period before termination; revisit the margin with stage timing logs.
+ */
+export const CHAT_SAVE_DEADLINE_MS = 58000;
+
+/**
+ * The part of the save deadline kept for the read-back that follows an insert
+ * which failed or was still running: the insert, a second one after a closed
+ * session included, stops this long before the save deadline.
+ * Read-back reserve equals the 500 ms cap this route already uses for short
+ * DB round trips.
+ */
+export const CHAT_SAVE_READBACK_RESERVE_MS = 500;
 
 /**
  * How long after the start of a chat request the waits before the model loop

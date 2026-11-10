@@ -15,9 +15,11 @@ import { describe, it, expect } from "vitest";
  * SAVE_FAILED, success body), the immediate return on a 401, and the one
  * return after the loop for a request whose attempts all failed. Each fixture
  * must appear in the route exactly once. The success branch was copied from
- * the route as it was before telemetry; the one thing added to it since is
+ * the route as it was before telemetry. Two things were added to it since:
  * the timing of the save for the [chat-stages] line, which changes nothing
- * the branch returns or stores. Since the crisis notice was added, the
+ * the branch returns or stores, and the id of the session the turn was stored
+ * in, which the success body now reports because a save can move to another
+ * session (chatRouteSave.test.ts executes it). Since the crisis notice was added, the
  * returns go through respond(), which adds a crisisNotice field only when a
  * crisis signal was detected, and the success branch stores and returns the
  * reply with the notice in front (chatRouteCrisis.test.ts executes both).
@@ -91,8 +93,9 @@ const FIXTURE_I = `        if (result.ok) {
               ? result.message
               : composeCrisisReply(notice, result.message, EMPTY_ASSISTANT_REPLY);
           const saveStartedAtMs = Date.now();
+          let savedSessionId: string | null = null;
           try {
-            await persistTurnIfEnabled({
+            savedSessionId = await persistTurnIfEnabled({
               activeSession,
               authUserId,
               userContent: lastUserMessageText,
@@ -100,6 +103,7 @@ const FIXTURE_I = `        if (result.ok) {
               assistantModel: result.model,
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
+              requestStartedAtMs,
             });
           } catch (error) {
             console.error("Failed to save messages (OpenRouter branch):", error);
@@ -120,7 +124,9 @@ const FIXTURE_I = `        if (result.ok) {
             success: true,
             message: replyMessage,
             model: result.model,
-            sessionId: activeSession?.id ?? null,
+            // The session the turn was stored in, which is not the one the
+            // request started with when that one was closed meanwhile.
+            sessionId: savedSessionId ?? activeSession?.id ?? null,
             usage: result.usage,
           });
         }

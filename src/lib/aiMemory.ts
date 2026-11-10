@@ -253,13 +253,35 @@ export async function assertSessionBelongsToUser(
   sessionId: string,
   userId: string
 ): Promise<void> {
+  await readOwnedSession(sessionId, userId);
+}
+
+/**
+ * Reads the session by id AND user id, and returns its id and ended_at. Throws
+ * exactly as assertSessionBelongsToUser does when the read fails or no such
+ * session belongs to the user.
+ *
+ * ended_at is what saveMessages needs on top of ownership: a session the
+ * summarize cron has closed must not take new messages.
+ *
+ * @param signal  Optional. Cancels the read; a cancelled read comes back as a
+ *   failed one and throws.
+ */
+async function readOwnedSession(
+  sessionId: string,
+  userId: string,
+  signal?: AbortSignal
+): Promise<{ id: string; ended_at: string | null }> {
   const supabase = getAdmin();
-  const { data, error } = await supabase
+  const query = supabase
     .from("chat_sessions")
-    .select("id")
+    .select("id, ended_at")
     .eq("id", sessionId)
-    .eq("user_id", userId)
-    .maybeSingle();
+    .eq("user_id", userId);
+  const { data, error } = await (signal
+    ? query.abortSignal(signal)
+    : query
+  ).maybeSingle();
 
   if (error) {
     throw wrapDbError(
@@ -272,6 +294,43 @@ export async function assertSessionBelongsToUser(
       `Session ${sessionId} does not belong to user ${userId} or does not exist`
     );
   }
+  return data as { id: string; ended_at: string | null };
+}
+
+/**
+ * The SQLSTATE a database may answer an insert into chat_messages with when
+ * the session has been closed. The application checks ended_at itself before
+ * inserting (saveMessages), which leaves a gap between that read and the
+ * insert; a database that refuses the insert atomically closes it. Nothing
+ * under supabase/migrations raises this code yet, so until something does the
+ * check in saveMessages is the only one.
+ */
+export const PG_CHAT_SESSION_CLOSED = "NR001";
+
+/**
+ * Thrown by saveMessages when the session is closed: either its own read saw
+ * ended_at set, in which case nothing was sent, or the database refused the
+ * insert with PG_CHAT_SESSION_CLOSED, in which case the whole statement was
+ * rolled back. Either way no row of the pair was stored, so the caller may
+ * insert the same pair, with the same ids, into another session.
+ */
+export class SessionClosedError extends Error {
+  readonly code = "SESSION_CLOSED";
+
+  constructor() {
+    super("Session is closed: the messages were not stored");
+    this.name = "SessionClosedError";
+    // Keeps instanceof working when the class is compiled to ES5.
+    Object.setPrototypeOf(this, SessionClosedError.prototype);
+  }
+}
+
+export function isSessionClosedError(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    (error as { code?: unknown }).code === "SESSION_CLOSED"
+  );
 }
 
 /**
@@ -438,12 +497,24 @@ export interface GetSessionMessagesOptions {
 
 const DEFAULT_MESSAGES_LIMIT = 50;
 
+/** The ids of the two rows of one saved turn. */
+export interface SavedTurnIds {
+  user: string;
+  assistant: string;
+}
+
+export interface SaveMessagesOptions {
+  ids?: SavedTurnIds;
+  signal?: AbortSignal;
+}
+
 /**
  * Persists a user message and the assistant reply that followed it. Always
  * called as a pair so the conversation order is preserved.
  *
  * SECURITY:
- *   - Verifies session ownership before inserting (admin client bypasses RLS).
+ *   - Verifies session ownership before inserting (admin client bypasses RLS),
+ *     and that the session is still open.
  *   - The user_id stored on both rows is the authenticated userId passed in,
  *     not anything from the request body. Never accept user_id from client.
  *
@@ -461,6 +532,17 @@ const DEFAULT_MESSAGES_LIMIT = 50;
  *                    The ids on the returned rows are useful as
  *                    source_message_id for facts.
  *
+ * @param options.ids  The ids of the two rows, chosen by the caller. With
+ *                    them a caller whose insert ended without an answer can
+ *                    ask afterwards whether the pair is stored
+ *                    (findSavedTurn), and can insert the same pair again
+ *                    after SessionClosedError without storing it twice.
+ *                    Without them the database chooses the ids.
+ * @param options.signal  Cancels the ownership read and the insert. A
+ *                    cancelled insert may or may not have been stored.
+ *
+ * @throws SessionClosedError when the session is closed (see the class): no
+ *   row of the pair was stored.
  * @throws Error when the session does not belong to the user, the user/
  *   assistant content is empty, the insert returns an unexpected shape, or
  *   the database insert fails.
@@ -468,7 +550,8 @@ const DEFAULT_MESSAGES_LIMIT = 50;
 export async function saveMessages(
   sessionId: string,
   userId: string,
-  pair: MessagePairToSave
+  pair: MessagePairToSave,
+  options: SaveMessagesOptions = {}
 ): Promise<{
   userMessage: DbChatMessage;
   assistantMessage: DbChatMessage;
@@ -481,8 +564,12 @@ export async function saveMessages(
     throw new Error("saveMessages: assistantContent must be a non-empty string");
   }
 
-  // SECURITY: verify ownership before any insert.
-  await assertSessionBelongsToUser(sessionId, userId);
+  // SECURITY: verify ownership before any insert. The same read says whether
+  // the session is still open; a closed one takes no new messages.
+  const session = await readOwnedSession(sessionId, userId, options.signal);
+  if (session.ended_at !== null) {
+    throw new SessionClosedError();
+  }
 
   const supabase = getAdmin();
 
@@ -498,10 +585,11 @@ export async function saveMessages(
   // Note: input_tokens/output_tokens/model live ONLY on the assistant row.
   // The trigger bump_chat_session_on_message will fire twice (once per row)
   // and bump message_count by 2, which is the intended per-turn behavior.
-  const { data, error } = await supabase
+  const insert = supabase
     .from("chat_messages")
     .insert([
       {
+        ...(options.ids ? { id: options.ids.user } : {}),
         session_id: sessionId,
         user_id: userId,
         role: "user",
@@ -509,6 +597,7 @@ export async function saveMessages(
         created_at: userCreatedAt,
       },
       {
+        ...(options.ids ? { id: options.ids.assistant } : {}),
         session_id: sessionId,
         user_id: userId,
         role: "assistant",
@@ -520,8 +609,16 @@ export async function saveMessages(
       },
     ])
     .select("*");
+  const { data, error } = await (options.signal
+    ? insert.abortSignal(options.signal)
+    : insert);
 
   if (error) {
+    // The session was closed between the read above and the insert, and the
+    // database refused the statement as a whole.
+    if ((error as { code?: unknown }).code === PG_CHAT_SESSION_CLOSED) {
+      throw new SessionClosedError();
+    }
     throw wrapDbError(`Failed to save messages: ${error.message}`, error);
   }
   if (!data || data.length !== 2) {
@@ -543,6 +640,46 @@ export async function saveMessages(
   }
 
   return { userMessage, assistantMessage };
+}
+
+/**
+ * Answers whether a pair saveMessages was given ids for is stored: the id of
+ * the session both rows are in, or null when either row is missing (or, which
+ * saveMessages cannot produce, the two are in different sessions).
+ *
+ * For a caller whose insert ended in an error or was cancelled, and so does
+ * not know whether the statement was stored. The pair is written by one
+ * statement, so the two rows are there together or not at all.
+ *
+ * SECURITY: Filters by user_id as well as by the ids.
+ *
+ * @throws Error when the database query fails. A cancelled query fails.
+ */
+export async function findSavedTurn(
+  userId: string,
+  ids: SavedTurnIds,
+  options: { signal?: AbortSignal } = {}
+): Promise<string | null> {
+  const supabase = getAdmin();
+  const query = supabase
+    .from("chat_messages")
+    .select("id, session_id")
+    .eq("user_id", userId)
+    .in("id", [ids.user, ids.assistant]);
+  const { data, error } = await (options.signal
+    ? query.abortSignal(options.signal)
+    : query);
+
+  if (error) {
+    throw wrapDbError(`Failed to look up saved messages: ${error.message}`, error);
+  }
+
+  const rows = (data ?? []) as Array<{ id: string; session_id: string }>;
+  const userRow = rows.find((r) => r.id === ids.user);
+  const assistantRow = rows.find((r) => r.id === ids.assistant);
+  if (!userRow || !assistantRow) return null;
+  if (userRow.session_id !== assistantRow.session_id) return null;
+  return userRow.session_id;
 }
 
 /**
