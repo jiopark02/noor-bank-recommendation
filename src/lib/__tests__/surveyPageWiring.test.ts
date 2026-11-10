@@ -24,6 +24,7 @@ import { describe, it, expect } from "vitest";
  *   P12 an en.json key the pages read removed or changed            -> PW3
  *   P13 the zero-spending notice's blur, condition or key removed   -> PW4
  *   P14 the full-field key check no longer called on key down       -> PW5
+ *   P15 a key added to or dropped from the /api/survey request body  -> PW6
  *
  * The masking matches surveyRouteWiring.test.ts: comments are blanked and,
  * in `code`, so are string contents; whitespace is collapsed. Besides
@@ -256,5 +257,21 @@ describe("survey page wiring: monthly money inputs", () => {
     );
     expect(typeof messages.survey.password.special).toBe("string");
     expect(messages.survey.password.special).not.toBe("");
+  });
+});
+
+describe("survey page wiring: the /api/survey request body", () => {
+  it("PW6 the body names exactly these keys", () => {
+    const request = between(codeWithStrings, 'fetch("/api/survey", {', "const result =");
+    const body = between(request, "body: JSON.stringify({", "}),");
+    const keys = (body.slice("body: JSON.stringify({".length).match(/[A-Za-z_$][\w$]*(?=\s*:)/g) ?? []);
+    expect(keys).toEqual([
+      "first_name",
+      "email",
+      "password",
+      "monthly_income",
+      "monthly_budget",
+      "has_us_credit_history",
+    ]);
   });
 });

@@ -22,9 +22,56 @@ function isSignupDisabled(): boolean {
   return process.env.SIGNUP_DISABLED === "true";
 }
 
+const INVALID_BODY_MESSAGE = "Request body must be a JSON object.";
+
+// The request body as a plain JSON object, or null for anything else: a body
+// that does not parse, JSON null, an array, or any other JSON value. Nothing
+// about the failure is logged — a parse error's message can quote the input.
+async function readJsonObjectBody(
+  request: NextRequest
+): Promise<Record<string, unknown> | null> {
+  let parsed: unknown;
+  try {
+    parsed = await request.json();
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+const INVALID_CREDIT_HISTORY_MESSAGE =
+  "has_us_credit_history must be true, false or null.";
+
+// The signed-in path's answers. That path never creates an account, so
+// neither says one was created; a failure carries no user id.
+const SURVEY_SAVED_MESSAGE = "Your answers were saved.";
+const SURVEY_SAVE_FAILED_MESSAGE = "We couldn't save your answers. Please try again.";
+
+function surveySaveFailed(): NextResponse {
+  return NextResponse.json(
+    { success: false, message: SURVEY_SAVE_FAILED_MESSAGE },
+    { status: 500 }
+  );
+}
+
+// A write followed by .select("id") answers with the rows it changed. Only a
+// non-empty array confirms that a row was changed: an empty array is zero
+// rows, and anything that is not an array did not answer the question.
+function isConfirmedRow(data: unknown): boolean {
+  return Array.isArray(data) && data.length > 0;
+}
+
 // Shared survey_responses row mapping. Used by BOTH the unauthenticated signup
 // path and the authenticated (OAuth profile-completion) path, so the field
 // mapping lives in exactly one place and never drifts between the two.
+//
+// Only the monthly money answers and the credit-history answer are taken from
+// the body; every other body key is ignored. Columns this object does not
+// name are not sent with the insert, so a new row gets whatever the table
+// itself supplies for them.
 function buildSurveyRow(
   userId: string,
   surveyData: Record<string, unknown>,
@@ -33,53 +80,13 @@ function buildSurveyRow(
   return {
     id: uuidv4(),
     user_id: userId,
-    country_of_origin: surveyData.country_of_origin || null,
-    destination_country: surveyData.destination_country || null,
-    institution_id: surveyData.institution_id || null,
-    institution_type: surveyData.institution_type || null,
-    university: surveyData.university || null,
-    academic_level: surveyData.academic_level || null,
-    year_in_program: surveyData.year_in_program ?? null,
-    major: surveyData.major || null,
-    gpa: surveyData.gpa ?? null,
-    student_level: surveyData.student_level || null,
-    has_ssn: surveyData.has_ssn ?? null,
-    has_itin: surveyData.has_itin ?? null,
-    has_nin: surveyData.has_nin ?? null,
-    has_sin: surveyData.has_sin ?? null,
     has_us_credit_history: surveyData.has_us_credit_history ?? null,
-    has_us_address: surveyData.has_local_address ?? null,
     monthly_income: surveyData.monthly_income ?? null,
     expected_monthly_spending:
       surveyData.expected_monthly_spending ??
       surveyData.monthly_budget ??
       null,
-    fee_sensitivity: surveyData.fee_sensitivity || null,
     monthly_budget: surveyData.monthly_budget ?? null,
-    primary_banking_needs: surveyData.banking_needs || null,
-    digital_preference: surveyData.digital_preference || null,
-    international_transfer_frequency:
-      surveyData.international_transfers || null,
-    avg_transfer_amount: surveyData.avg_transfer_amount ?? null,
-    needs_nearby_branch:
-      surveyData.branch_preference === "must"
-        ? true
-        : surveyData.branch_preference === "not-needed"
-        ? false
-        : null,
-    needs_zelle: surveyData.needs_zelle ?? null,
-    prefers_online_banking:
-      surveyData.digital_preference === "mobile-first"
-        ? true
-        : surveyData.digital_preference === "branch-first"
-        ? false
-        : null,
-    preferred_bank_type: surveyData.banking_style || null,
-    campus_proximity: surveyData.campus_proximity || null,
-    campus_side: surveyData.campus_side || null,
-    primary_goals: surveyData.goals || null,
-    credit_goals: surveyData.credit_goals || null,
-    preferred_language: surveyData.preferred_language || null,
     onboarding_completed: true,
     created_at: now,
     updated_at: now,
@@ -88,45 +95,15 @@ function buildSurveyRow(
 
 // Which request-body key(s) each survey_responses column is derived from.
 // An UPDATE must be keyed on the ORIGINATING BODY KEY rather than the column
-// name, because the two are not interchangeable: seven columns are named
-// differently from the key that feeds them, `expected_monthly_spending` is fed
-// by either of two keys (and today's client sends only the second one), and
-// `digital_preference` / `monthly_budget` each feed two columns. Testing
-// surveyData[column] instead would silently drop those.
+// name, because the two are not interchangeable: `expected_monthly_spending`
+// is fed by either of two keys (and today's client sends only the second one),
+// and `monthly_budget` feeds two columns. Testing surveyData[column] instead
+// would silently drop those. A column absent from this map is never updated.
 const UPDATABLE_COLUMN_SOURCE_KEYS: Record<string, string[]> = {
-  country_of_origin: ["country_of_origin"],
-  destination_country: ["destination_country"],
-  institution_id: ["institution_id"],
-  institution_type: ["institution_type"],
-  university: ["university"],
-  academic_level: ["academic_level"],
-  year_in_program: ["year_in_program"],
-  major: ["major"],
-  gpa: ["gpa"],
-  student_level: ["student_level"],
-  has_ssn: ["has_ssn"],
-  has_itin: ["has_itin"],
-  has_nin: ["has_nin"],
-  has_sin: ["has_sin"],
   has_us_credit_history: ["has_us_credit_history"],
-  has_us_address: ["has_local_address"],
   monthly_income: ["monthly_income"],
   expected_monthly_spending: ["expected_monthly_spending", "monthly_budget"],
-  fee_sensitivity: ["fee_sensitivity"],
   monthly_budget: ["monthly_budget"],
-  primary_banking_needs: ["banking_needs"],
-  digital_preference: ["digital_preference"],
-  international_transfer_frequency: ["international_transfers"],
-  avg_transfer_amount: ["avg_transfer_amount"],
-  needs_nearby_branch: ["branch_preference"],
-  needs_zelle: ["needs_zelle"],
-  prefers_online_banking: ["digital_preference"],
-  preferred_bank_type: ["banking_style"],
-  campus_proximity: ["campus_proximity"],
-  campus_side: ["campus_side"],
-  primary_goals: ["goals"],
-  credit_goals: ["credit_goals"],
-  preferred_language: ["preferred_language"],
 };
 
 // Written on every re-submit regardless of what the body contains: reaching
@@ -138,8 +115,7 @@ const ALWAYS_UPDATED_COLUMNS = ["onboarding_completed", "updated_at"];
 // written only when the caller actually sent something that feeds it. Presence
 // of the KEY decides, never the value: that keeps "sent null" (clear this
 // field) distinct from "omitted" (leave it alone), which a null-filter cannot
-// do. hasOwnProperty returns false rather than throwing for primitive bodies
-// (number/string/array); null/undefined throw earlier, at the first_name read.
+// do. POST refuses any body that is not a plain JSON object before this runs.
 // The immutable columns (id, created_at, user_id) are excluded by construction
 // — they appear in neither list.
 function buildSurveyUpdate(
@@ -172,7 +148,31 @@ export async function POST(request: NextRequest) {
     // Header-only read; does not consume the JSON body.
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
 
-    const surveyData = await request.json();
+    // Before every other check, on both paths: a body that is not a plain
+    // JSON object is 400, with no database read or write and nothing logged.
+    const surveyData = await readJsonObjectBody(request);
+    if (!surveyData) {
+      return NextResponse.json(
+        { success: false, message: INVALID_BODY_MESSAGE },
+        { status: 400 }
+      );
+    }
+
+    // The credit-history answer is stored in a boolean column on both paths.
+    // When the key is present it must be true, false or null (null clears the
+    // stored answer on a re-submit); anything else is 400 here, before any
+    // account is created or row written. An absent key is not an error.
+    if (
+      Object.prototype.hasOwnProperty.call(surveyData, "has_us_credit_history") &&
+      surveyData.has_us_credit_history !== true &&
+      surveyData.has_us_credit_history !== false &&
+      surveyData.has_us_credit_history !== null
+    ) {
+      return NextResponse.json(
+        { success: false, message: INVALID_CREDIT_HISTORY_MESSAGE },
+        { status: 400 }
+      );
+    }
 
     if (!isSupabaseAdminConfigured()) {
       return NextResponse.json(
@@ -199,7 +199,6 @@ export async function POST(request: NextRequest) {
           password: surveyData.password,
           firstName,
           lastName,
-          destinationCountry: surveyData.destination_country,
           surveyBody: surveyData,
         },
         {
@@ -313,14 +312,22 @@ export async function POST(request: NextRequest) {
     // Whether a survey row already exists decides how the monthly money
     // answers are checked (and, below, whether the row is updated or
     // inserted), so it is read before anything is written. A refused amount
-    // then stops the request with no write at all. The read's error is not
-    // examined (as before this check existed): an error reads as "no row",
-    // which applies the stricter insert check.
-    const { data: existingSurvey } = await supabaseAdmin
+    // then stops the request with no write at all. A failed read also stops
+    // it before any write: reading the error as "no row" would insert where
+    // an update was due.
+    const { data: existingSurvey, error: surveyLookupError } = await supabaseAdmin
       .from("survey_responses")
       .select("id")
       .eq("user_id", userId)
       .maybeSingle();
+
+    if (surveyLookupError) {
+      console.error(
+        "Survey lookup error (authenticated survey):",
+        toLogSafeError(surveyLookupError)
+      );
+      return surveySaveFailed();
+    }
 
     const money = checkSurveyMoney(
       surveyData,
@@ -361,16 +368,28 @@ export async function POST(request: NextRequest) {
       ...(decideNameUpdate(storedNames, firstName) ?? {}),
     };
 
-    const { error: profileUpdateError } = await supabaseAdmin
+    const { data: updatedProfile, error: profileUpdateError } = await supabaseAdmin
       .from("users")
       .update(profileUpdate)
-      .eq("id", userId);
+      .eq("id", userId)
+      .select("id");
 
     if (profileUpdateError) {
       console.error(
         "Profile update error (authenticated survey):",
         toLogSafeError(profileUpdateError)
       );
+      return NextResponse.json(
+        { success: false, message: "Failed to update user profile record" },
+        { status: 500 }
+      );
+    }
+
+    // An update that changed no users row (or whose answer did not say) means
+    // there is no profile row for this id to attach the survey to, so the
+    // survey row is not written.
+    if (!isConfirmedRow(updatedProfile)) {
+      console.error("Profile update not confirmed (authenticated survey)");
       return NextResponse.json(
         { success: false, message: "Failed to update user profile record" },
         { status: 500 }
@@ -389,19 +408,23 @@ export async function POST(request: NextRequest) {
     const surveyRow = buildSurveyRow(userId, surveyData, now);
 
     let surveyWriteError: { message?: string } | null = null;
+    let surveyUpdateUnconfirmed = false;
 
     // existingSurvey was read before the users update, above.
     if (existingSurvey) {
-      // Update only the columns the request actually carries. Overwriting the
-      // whole row would blank every column the caller omitted, which silently
-      // destroys answers the current form does not collect.
+      // Update only the mapped columns the request actually carries. Writing
+      // all of them would blank every answer the caller omitted.
       const surveyUpdate = buildSurveyUpdate(surveyRow, surveyData);
 
-      const { error } = await supabaseAdmin
+      const { data: updatedSurvey, error } = await supabaseAdmin
         .from("survey_responses")
         .update(surveyUpdate)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .select("id");
       surveyWriteError = error;
+      // The row was read above, but an update that changed no row saved
+      // nothing (the row went away in between, or the answer did not say).
+      surveyUpdateUnconfirmed = !error && !isConfirmedRow(updatedSurvey);
     } else {
       const { error } = await supabaseAdmin
         .from("survey_responses")
@@ -409,30 +432,25 @@ export async function POST(request: NextRequest) {
       surveyWriteError = error;
     }
 
+    // A survey write that fails after the users update leaves that update in
+    // place; re-submitting the form repeats both writes.
     if (surveyWriteError) {
       console.error("Survey write error:", toLogSafeError(surveyWriteError));
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "Account was created, but saving survey data failed. Please contact support.",
-          userId,
-        },
-        { status: 500 }
-      );
+      return surveySaveFailed();
+    }
+    if (surveyUpdateUnconfirmed) {
+      console.error("Survey update not confirmed (authenticated survey)");
+      return surveySaveFailed();
     }
 
     return NextResponse.json({
       success: true,
       userId,
+      // The first name only: no other body value is echoed back.
       profile: {
         firstName: firstNameForClient(firstName || DEFAULT_FIRST_NAME),
-        lastName,
-        institutionId: surveyData.institution_id || null,
-        university: surveyData.university || null,
-        countryOfOrigin: surveyData.country_of_origin || null,
       },
-      message: "Account created successfully",
+      message: SURVEY_SAVED_MESSAGE,
     });
   } catch (error) {
     console.error("Survey API error:", toLogSafeError(error));

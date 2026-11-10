@@ -246,7 +246,7 @@ describe("extractor", () => {
  */
 const CONSOLE_CALL_COUNTS: Record<keyof typeof FILES, number> = {
   cronRuns: 3,
-  survey: 4,
+  survey: 7,
   waitlist: 3,
   syncProfile: 2,
   email: 4,
@@ -307,6 +307,11 @@ const ANCHORS: Anchor[] = [
     file: "survey",
     leading: "\"Profile name lookup error (authenticated survey):\"",
     errorIdentifier: "lookupError",
+  },
+  {
+    file: "survey",
+    leading: "\"Survey lookup error (authenticated survey):\"",
+    errorIdentifier: "surveyLookupError",
   },
   { file: "syncProfile", leading: "\"Profile sync error:\"", errorIdentifier: "error" },
   { file: "waitlist", leading: "'Waitlist insert error:'", errorIdentifier: "error" },
