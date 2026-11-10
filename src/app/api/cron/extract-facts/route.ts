@@ -25,6 +25,7 @@ import {
 import {
   budgetExistingFacts,
   buildCronConversationText,
+  capNewFacts,
   logCronInputBudget,
   type CronConversation,
 } from "@/lib/cronInputBudget";
@@ -376,6 +377,7 @@ async function extractOneSession(
     existing.facts.length,
     session.id
   );
+  validated.newFacts = capNewFacts(validated.newFacts);
 
   // 7. 분기 실행 — 순서 고정: supersede → expire → new_facts.
   //    fact 작업 단위 try/catch. 하나 실패해도 나머지 계속.

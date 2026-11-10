@@ -106,3 +106,19 @@ describe("extract-facts existing facts budget", () => {
     );
   });
 });
+
+describe("extract-facts new facts cap", () => {
+  const body = functionBody(EXTRACT, "extractOneSession");
+
+  it("caps the validated new facts before any of them is saved", () => {
+    const capAt = body.indexOf(
+      "validated.newFacts = capNewFacts(validated.newFacts);"
+    );
+    const validateAt = body.indexOf("validateExtraction(");
+    const saveLoopAt = body.indexOf("for (const item of validated.newFacts) {");
+    expect(validateAt).toBeGreaterThan(-1);
+    expect(capAt).toBeGreaterThan(validateAt);
+    expect(saveLoopAt).toBeGreaterThan(capAt);
+    expect(occurrences(body, "validated.newFacts")).toBe(3);
+  });
+});
