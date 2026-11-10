@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateSystemPrompt, UserContext } from "@/lib/noorAIPrompt";
-import {
-  createAdminClient,
-  isSupabaseAdminConfigured,
-  isSupabaseConfigured,
-} from "@/lib/supabase";
+import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { asPlainObject } from "@/lib/requestJson";
 import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
