@@ -15,7 +15,6 @@ import {
   deleteOldCronRuns,    // ← 추가
   type ChatSession,
   type DbChatMessage,
-  type UserFact,
   type NewUserFact,
 } from "@/lib/aiMemory";
 import { asPlainObject } from "@/lib/requestJson";
@@ -24,6 +23,7 @@ import {
   type RawExtractionOutput,
 } from "@/lib/factExtractionValidation";
 import {
+  budgetExistingFacts,
   buildCronConversationText,
   logCronInputBudget,
   type CronConversation,
@@ -258,19 +258,6 @@ function buildConversationText(messages: DbChatMessage[]): CronConversation {
 }
 
 /**
- * 기존 active facts를 LLM 프롬프트용으로 번호 매겨 직렬화.
- * factsArray[0] -> [1], factsArray[1] -> [2], ...
- */
-function buildExistingFactsText(facts: UserFact[]): string {
-  if (facts.length === 0) {
-    return "(none)";
-  }
-  return facts
-    .map((f, i) => `[${i + 1}] (${f.category}) ${f.fact}`)
-    .join("\n");
-}
-
-/**
  * LLM raw 문자열에서 markdown fence를 제거하고 JSON.parse.
  * 파싱 실패 시 throw (바깥 세션 try/catch가 받음).
  */
@@ -360,10 +347,14 @@ async function extractOneSession(
 
   // 5. LLM 호출.
   const conversation = buildConversationText(messages);
-  logCronInputBudget("cron_extract_facts", conversation);
-  const existingFactsText = buildExistingFactsText(factsArray);
+  // Only the leading facts that fit the facts budget are numbered for the
+  // model. old_number is checked and resolved against existing.facts, the
+  // same array, so a fact left out here cannot be superseded or expired by
+  // this run; it stays active as it is.
+  const existing = budgetExistingFacts(factsArray);
+  logCronInputBudget("cron_extract_facts", conversation, existing.dropped);
   const userContent =
-    `[Existing facts]  (most recent first)\n${existingFactsText}\n\n` +
+    `[Existing facts]  (most recent first)\n${existing.text}\n\n` +
     `[Conversation]\n${conversation.text}`;
 
   const rawOutput = await callOpenRouterForExtraction(
@@ -382,7 +373,7 @@ async function extractOneSession(
   const parsed = parseExtractionJson(rawOutput);
   const validated = validateExtraction(
     parsed,
-    factsArray.length,
+    existing.facts.length,
     session.id
   );
 
@@ -391,7 +382,7 @@ async function extractOneSession(
 
   // 7-1) supersede
   for (const item of validated.supersede) {
-    const oldFact = factsArray[item.oldNumber - 1];
+    const oldFact = existing.facts[item.oldNumber - 1];
     const payload: NewUserFact = {
       category: item.category,
       fact: item.fact,
@@ -430,7 +421,7 @@ async function extractOneSession(
 
   // 7-2) expire
   for (const item of validated.expire) {
-    const oldFact = factsArray[item.oldNumber - 1];
+    const oldFact = existing.facts[item.oldNumber - 1];
     try {
       await expireUserFact(oldFact.id, session.user_id);
       stats.expired++;

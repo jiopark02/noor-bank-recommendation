@@ -7,7 +7,8 @@ import { describe, it, expect } from "vitest";
  *
  * ⚠️ A SOURCE PROBE, NOT AN EXECUTED TEST. The route files cannot be imported
  * without their database and network dependencies; the budget itself is
- * executed in cronInputBudget.test.ts.
+ * executed in cronInputBudget.test.ts and the old_number check in
+ * factExtractionValidation.test.ts.
  */
 
 function read(relativePath: string): string {
@@ -82,5 +83,26 @@ describe("the crisis check and the output filter read the model's answer", () =>
     "../crisisSignals.ts",
   ])("%s does not depend on the input budget", (path) => {
     expect(read(path)).not.toContain("cronInputBudget");
+  });
+});
+
+describe("extract-facts existing facts budget", () => {
+  const body = functionBody(EXTRACT, "extractOneSession");
+
+  it("numbers, checks and resolves old_number against the budgeted facts", () => {
+    expect(body).toContain("const existing = budgetExistingFacts(factsArray);");
+    expect(body).toContain("${existing.text}");
+    expect(body).toContain(
+      "validateExtraction(\n    parsed,\n    existing.facts.length,\n    session.id\n  );"
+    );
+    expect(occurrences(body, "existing.facts[item.oldNumber - 1]")).toBe(2);
+    expect(body).not.toContain("factsArray.length");
+    expect(body).not.toContain("factsArray[");
+  });
+
+  it("logs how many facts were left out", () => {
+    expect(body).toContain(
+      'logCronInputBudget("cron_extract_facts", conversation, existing.dropped);'
+    );
   });
 });
