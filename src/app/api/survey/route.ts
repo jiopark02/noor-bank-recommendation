@@ -199,7 +199,10 @@ export async function POST(request: NextRequest) {
           password: surveyData.password,
           firstName,
           lastName,
-          destinationCountry: surveyData.destination_country,
+          // Not taken from the body: the survey page does not send a
+          // destination country, so the new profile row records none,
+          // whatever a request carries under that key.
+          destinationCountry: undefined,
           surveyBody: surveyData,
         },
         {

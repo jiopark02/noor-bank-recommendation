@@ -33,6 +33,8 @@ import type { NextRequest } from "next/server";
  *                                                           -> SW13
  *   the signed-in success message saying an account was created
  *                                                           -> SW15
+ *   the signup passing the body's destination_country to the profile
+ *   row                                                     -> SW16
  */
 
 const SIGNED_IN_ID = "00000000-0000-4000-8000-000000000001";
@@ -644,4 +646,18 @@ describe("SW15 the signed-in success answer", () => {
       message: "Your answers were saved.",
     });
   });
+});
+
+describe("SW16 the signup's profile row takes no destination country from the body", () => {
+  it.each([["a country code", "US"], ["an object", { code: "US" }]])(
+    "SW16 destination_country sent as %s: the users insert records null",
+    async (_label, value) => {
+      const result = await post({ ...SIGNUP, destination_country: value });
+      expect(result.status).toBe(200);
+      const inserts = writes().filter((c) => c.table === "users" && c.op === "insert");
+      expect(inserts).toHaveLength(1);
+      const row = inserts[0].payload as { raw_user_meta_data: Record<string, unknown> };
+      expect(row.raw_user_meta_data).toHaveProperty("destination_country", null);
+    }
+  );
 });

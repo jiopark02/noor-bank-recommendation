@@ -660,10 +660,10 @@ export default function SurveyPage() {
       // who did not tick the box gets no acceptance record written at all.
       if (data.agreeToTerms) acceptTerms();
 
-      // Merge over the cached profile rather than replacing it. Settings is the
-      // only writer for the school fields now, and re-submitting this form must
-      // not erase what it stored. result.profile carries the first name only,
-      // and only that field is read from it.
+      // Merge over the cached profile rather than replacing it. The school
+      // fields in it are copied from the stored survey row at sign-in, and
+      // re-submitting this form must not erase them. result.profile carries
+      // the first name only, and only that field is read from it.
       let priorProfile: Record<string, unknown> = {};
       try {
         priorProfile = JSON.parse(
