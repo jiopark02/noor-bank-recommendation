@@ -34,9 +34,10 @@ const securityHeaders = [
     key: 'Referrer-Policy',
     value: 'strict-origin-when-cross-origin',
   },
-  // geolocation=(self): MapView uses navigator.geolocation for "you are here",
-  // so it must stay allowed for our own origin. camera/microphone are unused
-  // and fully blocked.
+  // geolocation=(self) allows our own origin only. No code calls
+  // navigator.geolocation at present (the map view that used it was removed),
+  // so no current feature depends on this allowance. camera/microphone are
+  // unused and fully blocked.
   {
     key: 'Permissions-Policy',
     value: 'geolocation=(self), camera=(), microphone=()',
