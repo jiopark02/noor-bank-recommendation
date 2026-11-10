@@ -662,9 +662,8 @@ export default function SurveyPage() {
 
       // Merge over the cached profile rather than replacing it. Settings is the
       // only writer for the school fields now, and re-submitting this form must
-      // not erase what it stored. result.profile is deliberately not spread
-      // wholesale: with the school keys gone from the request it comes back with
-      // those fields set to null, which would clobber them.
+      // not erase what it stored. result.profile carries the first name only,
+      // and only that field is read from it.
       let priorProfile: Record<string, unknown> = {};
       try {
         priorProfile = JSON.parse(
