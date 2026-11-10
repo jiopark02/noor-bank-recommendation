@@ -298,12 +298,15 @@ async function readOwnedSession(
 }
 
 /**
- * The SQLSTATE a database may answer an insert into chat_messages with when
- * the session has been closed. The application checks ended_at itself before
- * inserting (saveMessages), which leaves a gap between that read and the
- * insert; a database that refuses the insert atomically closes it. Nothing
- * under supabase/migrations raises this code yet, so until something does the
- * check in saveMessages is the only one.
+ * The SQLSTATE an insert into chat_messages is refused with when the session
+ * has been closed. The application checks ended_at itself before inserting
+ * (saveMessages), which leaves a gap between that read and the insert.
+ * Migration 20261110120000_reject_chat_messages_on_closed_session.sql closes
+ * it: it makes the trigger function that runs after every insert into
+ * chat_messages raise this code when the session is no longer open, so the
+ * statement stores nothing. Whether it is applied is a live-state question;
+ * in a database without it the check in saveMessages is the only one, and a
+ * session closed inside that gap still takes the turn.
  */
 export const PG_CHAT_SESSION_CLOSED = "NR001";
 
