@@ -22,6 +22,26 @@ function isSignupDisabled(): boolean {
   return process.env.SIGNUP_DISABLED === "true";
 }
 
+const INVALID_BODY_MESSAGE = "Request body must be a JSON object.";
+
+// The request body as a plain JSON object, or null for anything else: a body
+// that does not parse, JSON null, an array, or any other JSON value. Nothing
+// about the failure is logged — a parse error's message can quote the input.
+async function readJsonObjectBody(
+  request: NextRequest
+): Promise<Record<string, unknown> | null> {
+  let parsed: unknown;
+  try {
+    parsed = await request.json();
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
 // Shared survey_responses row mapping. Used by BOTH the unauthenticated signup
 // path and the authenticated (OAuth profile-completion) path, so the field
 // mapping lives in exactly one place and never drifts between the two.
@@ -138,8 +158,7 @@ const ALWAYS_UPDATED_COLUMNS = ["onboarding_completed", "updated_at"];
 // written only when the caller actually sent something that feeds it. Presence
 // of the KEY decides, never the value: that keeps "sent null" (clear this
 // field) distinct from "omitted" (leave it alone), which a null-filter cannot
-// do. hasOwnProperty returns false rather than throwing for primitive bodies
-// (number/string/array); null/undefined throw earlier, at the first_name read.
+// do. POST refuses any body that is not a plain JSON object before this runs.
 // The immutable columns (id, created_at, user_id) are excluded by construction
 // — they appear in neither list.
 function buildSurveyUpdate(
@@ -172,7 +191,15 @@ export async function POST(request: NextRequest) {
     // Header-only read; does not consume the JSON body.
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
 
-    const surveyData = await request.json();
+    // Before every other check, on both paths: a body that is not a plain
+    // JSON object is 400, with no database read or write and nothing logged.
+    const surveyData = await readJsonObjectBody(request);
+    if (!surveyData) {
+      return NextResponse.json(
+        { success: false, message: INVALID_BODY_MESSAGE },
+        { status: 400 }
+      );
+    }
 
     if (!isSupabaseAdminConfigured()) {
       return NextResponse.json(
