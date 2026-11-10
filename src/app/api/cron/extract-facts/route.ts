@@ -24,6 +24,11 @@ import {
   type RawExtractionOutput,
 } from "@/lib/factExtractionValidation";
 import {
+  buildCronConversationText,
+  logCronInputBudget,
+  type CronConversation,
+} from "@/lib/cronInputBudget";
+import {
   buildCronLlmCallRow,
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
@@ -240,19 +245,16 @@ EXISTING FACTS — reconcile:
 - Use each existing number at most once across supersede and expire combined.`;
 
 /**
- * 세션 메시지를 "User:" / "Noor:" 형식으로 직렬화. (PR4 패턴)
+ * Serializes the session's messages as "User:" / "Noor:" blocks under the
+ * length budget in cronInputBudget.ts: a long message loses its middle, and
+ * the oldest messages are left out first.
  */
-function buildConversationText(messages: DbChatMessage[]): string {
+function buildConversationText(messages: DbChatMessage[]): CronConversation {
   const trimmed =
     messages.length > MAX_MESSAGES_PER_EXTRACTION
       ? messages.slice(messages.length - MAX_MESSAGES_PER_EXTRACTION)
       : messages;
-  return trimmed
-    .map((m) => {
-      const speaker = m.role === "user" ? "User" : "Noor";
-      return `${speaker}: ${m.content}`;
-    })
-    .join("\n\n");
+  return buildCronConversationText(trimmed);
 }
 
 /**
@@ -357,11 +359,12 @@ async function extractOneSession(
   });
 
   // 5. LLM 호출.
-  const conversationText = buildConversationText(messages);
+  const conversation = buildConversationText(messages);
+  logCronInputBudget("cron_extract_facts", conversation);
   const existingFactsText = buildExistingFactsText(factsArray);
   const userContent =
     `[Existing facts]  (most recent first)\n${existingFactsText}\n\n` +
-    `[Conversation]\n${conversationText}`;
+    `[Conversation]\n${conversation.text}`;
 
   const rawOutput = await callOpenRouterForExtraction(
     apiKey,

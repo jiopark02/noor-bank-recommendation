@@ -31,9 +31,11 @@ function occurrences(text: string, needle: string): number {
 }
 
 const SUMMARIZE = read("../../app/api/cron/summarize/route.ts");
+const EXTRACT = read("../../app/api/cron/extract-facts/route.ts");
 
 describe.each([
   ["summarize", SUMMARIZE, "cron_summarize"],
+  ["extract-facts", EXTRACT, "cron_extract_facts"],
 ])("%s cron conversation budget", (_label, source, route) => {
   it("serializes the conversation through the budget, not on its own", () => {
     expect(source).toContain('from "@/lib/cronInputBudget";');
@@ -61,6 +63,16 @@ describe("the crisis check and the output filter read the model's answer", () =>
     expect(afterParse).toContain("await storeSummaryUnlessCrisis(");
     expect(afterParse).toContain("    summary,\n    topics,\n");
     expect(afterParse).not.toMatch(/conversation/i);
+  });
+
+  it("extract-facts: stored facts come from the parsed answer only", () => {
+    const body = functionBody(EXTRACT, "extractOneSession");
+    expect(occurrences(body, "userContent")).toBe(2);
+    const parseAt = body.indexOf("const parsed = parseExtractionJson(rawOutput);");
+    expect(parseAt).toBeGreaterThan(-1);
+    const afterParse = body.slice(parseAt);
+    expect(afterParse).not.toMatch(/conversation|userContent/i);
+    expect(afterParse).toContain("fact: item.fact,");
   });
 
   it.each([
