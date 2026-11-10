@@ -33,8 +33,8 @@ import type { NextRequest } from "next/server";
  *                                                           -> SW13
  *   the signed-in success message saying an account was created
  *                                                           -> SW15
- *   the signup passing the body's destination_country to the profile
- *   row                                                     -> SW16
+ *   the signup's profile row recording a destination country from the
+ *   body                                                    -> SW16
  */
 
 const SIGNED_IN_ID = "00000000-0000-4000-8000-000000000001";

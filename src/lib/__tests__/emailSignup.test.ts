@@ -82,7 +82,6 @@ function input(overrides: Partial<EmailSignupInput> = {}): EmailSignupInput {
     password: "correct horse battery",
     firstName: "Ann",
     lastName: "Lee",
-    destinationCountry: "US",
     surveyBody: { monthly_income: 2000, monthly_budget: 1500 },
     ...overrides,
   };
@@ -364,7 +363,7 @@ describe("success path", () => {
       email: NORMALIZED,
       first_name: "Ann",
       last_name: "Lee",
-      raw_user_meta_data: { source: "survey_signup", destination_country: "US" },
+      raw_user_meta_data: { source: "survey_signup", destination_country: null },
       created_at: NOW,
       updated_at: NOW,
     });
