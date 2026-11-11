@@ -970,9 +970,11 @@ export default function MoneyPage() {
                       </div>
                       <div>
                         <p className="font-medium text-black">{item.label}</p>
+                        {/* A date already past is not "next": the charge
+                            was expected then and has not been recorded. */}
                         {item.nextDate && (
                           <p className="text-xs text-gray-500">
-                            Next expected{" "}
+                            {item.pastDue ? "Was expected " : "Next expected "}
                             {new Date(
                               item.nextDate + "T00:00:00Z"
                             ).toLocaleDateString("en-US", { timeZone: "UTC" })}

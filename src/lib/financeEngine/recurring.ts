@@ -1,9 +1,13 @@
 import type {
   EngineInput,
+  EnginePolicy,
   EngineRecurringStream,
   IsoDate,
   RecurringResult,
 } from "./types";
+import { isCardPaymentCategory } from "./classify";
+import { indexAccounts } from "./cashFlow";
+import { DEFAULT_POLICY, reservesCardBalance } from "./policy";
 import { isCents, monthlyCentsFromCadence } from "./money";
 import {
   addCadence,
@@ -95,8 +99,17 @@ export function upcomingOccurrences(
  * streams only, and only when the connections say they are known
  * (computeCoverage); otherwise nothing is inferred from transactions, and the
  * total is null rather than 0.
+ *
+ * A credit-card payment stream is left out only when it is charged to a card
+ * whose balance safe-to-spend reserves in full (reservesCardBalance): the
+ * reserve already covers what it would pay. Any other card payment stays an
+ * obligation, so it is subtracted somewhere (safe-to-spend states the
+ * possible overlap).
  */
-export function computeRecurring(input: EngineInput): RecurringResult {
+export function computeRecurring(
+  input: EngineInput,
+  policy: Pick<EnginePolicy, "reserveCreditCardBalances"> = DEFAULT_POLICY
+): RecurringResult {
   if (!coverageOf(input).recurringAvailable) {
     return {
       source: "unavailable",
@@ -113,6 +126,8 @@ export function computeRecurring(input: EngineInput): RecurringResult {
     excluded: [],
   };
 
+  const accounts = indexAccounts(input.accounts);
+  const todayDay = dayNumber(input.today);
   const streams = uniqueStreams(input.recurring.streams);
   for (let i = 0; i < streams.length; i++) {
     const s = streams[i];
@@ -128,6 +143,13 @@ export function computeRecurring(input: EngineInput): RecurringResult {
       result.excluded.push({ streamId: s.streamId, reason: "other_currency" });
       continue;
     }
+    if (isCardPaymentCategory(s)) {
+      const account = typeof s.accountId === "string" ? accounts.get(s.accountId) : undefined;
+      if (account && reservesCardBalance(account, policy, input.currency)) {
+        result.excluded.push({ streamId: s.streamId, reason: "card_payment_in_card_balance" });
+        continue;
+      }
+    }
     if (s.frequency === "UNKNOWN") {
       result.excluded.push({ streamId: s.streamId, reason: "unknown_frequency" });
       continue;
@@ -138,6 +160,8 @@ export function computeRecurring(input: EngineInput): RecurringResult {
       continue;
     }
     const monthly = monthlyCentsFromCadence(basis.cents, s.frequency) as number;
+    const nextDate = nextDateOf(s);
+    const nextDay = nextDate === null ? null : dayNumber(nextDate);
     result.items.push({
       streamId: s.streamId,
       label: s.label,
@@ -146,7 +170,8 @@ export function computeRecurring(input: EngineInput): RecurringResult {
       basis: basis.basis,
       basisCents: basis.cents,
       monthlyCents: monthly,
-      nextDate: nextDateOf(s),
+      nextDate,
+      pastDue: nextDay !== null && todayDay !== null && nextDay < todayDay,
     });
     result.totalMonthlyCents = (result.totalMonthlyCents as number) + monthly;
   }

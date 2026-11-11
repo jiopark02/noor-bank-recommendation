@@ -872,6 +872,44 @@ describe("engine input fields", () => {
     expect(calls.accounts.length + calls.transactions.length + calls.recurring.length + calls.item.length).toBe(0);
   });
 
+  // Red if: the card-payment axis is dropped, or counts a stream under the
+  // wrong account type.
+  it("logs card-payment streams by the type of the account they name", async () => {
+    vi.mocked(console.log).mockClear();
+    const cardPayment = {
+      personal_finance_category: {
+        primary: "LOAN_PAYMENTS",
+        detailed: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+        version: PersonalFinanceCategoryVersion.V2,
+      },
+    };
+    const { plaid } = fakePlaid({
+      TOKEN_1: {
+        accounts: [
+          account(),
+          account({ account_id: "acc-card", type: AccountType.Credit, subtype: AccountSubtype.CreditCard }),
+          account({ account_id: "acc-loan", type: AccountType.Loan, subtype: AccountSubtype.Student }),
+        ],
+        streams: [
+          stream("from-cash", cardPayment),
+          stream("legacy-from-cash", { category: ["Payment", "Credit Card"] }),
+          stream("on-card", { ...cardPayment, account_id: "acc-card" }),
+          stream("on-loan", { ...cardPayment, account_id: "acc-loan" }),
+          stream("nowhere", { ...cardPayment, account_id: "acc-gone" }),
+          stream("ordinary"),
+        ],
+        inflow: [stream("into-card", { ...cardPayment, account_id: "acc-card" })],
+      },
+    });
+    await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    const line = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.startsWith("[bank-read]"))[0];
+    expect(line).toContain("card_pay_out=depository:2,credit:1,other:1,none:1");
+    expect(line).toContain("card_pay_in=depository:0,credit:1,other:0,none:0");
+    expect(line).not.toMatch(/acc-|15\.49|Netflix/);
+  });
+
   it("logs the new read axes as counts, never values", async () => {
     vi.mocked(console.log).mockClear();
     const { plaid } = fakePlaid({

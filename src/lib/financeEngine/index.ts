@@ -21,15 +21,11 @@ import { computeSafeToSpend } from "./safeToSpend";
 import { computeCreditUtilization } from "./creditUtilization";
 import { coverageOf } from "./coverage";
 import { dropDuplicateAccountCopies } from "./duplicates";
+import { DEFAULT_POLICY } from "./policy";
 
 export const ENGINE_VERSION = "v1" as const;
 
-export const DEFAULT_POLICY: EnginePolicy = {
-  spendableSubtypes: ["checking", "cash management", "prepaid", "paypal"],
-  reserveCreditCardBalances: true,
-  bufferCents: 0,
-  pastDueGraceDays: 7,
-};
+export { DEFAULT_POLICY };
 
 function collectDataIssues(input: EngineInput): DataIssue[] {
   const issues: DataIssue[] = [];
@@ -182,7 +178,7 @@ export function computeFinancialSummary(
   checkCallerInput(rawInput);
   const { input, dropped } = dropDuplicateAccountCopies(rawInput);
   const coverage = coverageOf(input);
-  const recurring = computeRecurring(input);
+  const recurring = computeRecurring(input, policy);
   const cashFlow = cashFlowDetail(input);
   const dataIssues = collectDataIssues(input);
   // Only the transactions the cash flow actually counted into the bucket, so
@@ -225,7 +221,7 @@ export {
   addCadence,
   freshnessOf,
 } from "./dates";
-export { classifyTransaction } from "./classify";
+export { classifyTransaction, isCardPaymentCategory } from "./classify";
 export type { TxnClass, ClassificationSource } from "./classify";
 export { computeCashFlow } from "./cashFlow";
 export { computeRecurring, upcomingOccurrences } from "./recurring";

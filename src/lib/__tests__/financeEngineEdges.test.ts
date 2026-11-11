@@ -262,7 +262,7 @@ describe("computeFinancialSummary — edges", () => {
     expect(s.recurring.items.map((i) => [i.streamId, i.basisCents])).toEqual([["s", 1000]]);
     expect(s.recurring.totalMonthlyCents).toBe(1000);
     expect(s.safeToSpend.inputs.upcomingRecurring).toEqual([
-      { streamId: "s", label: "S", dueDate: "2026-10-20", cents: 1000 },
+      { streamId: "s", label: "S", dueDate: "2026-10-20", cents: 1000, pastDue: false, cardPayment: false },
     ]);
     expect(s.dataIssues).toEqual([{ kind: "stream", id: "s", reason: "duplicate" }]);
   });

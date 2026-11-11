@@ -30,6 +30,27 @@ function sourceOf(t: EngineTransaction): ClassificationSource {
   return "none";
 }
 
+function nonEmpty(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * Whether a category marks a credit-card payment: the PFC detailed category
+ * LOAN_PAYMENTS_CREDIT_CARD_PAYMENT, or, only when there is no PFC at all,
+ * the legacy category Payment / Credit Card. Used for recurring streams; the
+ * transaction rule in classifyTransaction is the same.
+ */
+export function isCardPaymentCategory(c: {
+  pfcPrimary: string | null;
+  pfcDetailed: string | null;
+  legacyCategory: string[];
+}): boolean {
+  if (c.pfcDetailed === CARD_PAYMENT_DETAILED) return true;
+  if (nonEmpty(c.pfcPrimary) || nonEmpty(c.pfcDetailed)) return false;
+  const legacy = Array.isArray(c.legacyCategory) ? c.legacyCategory : [];
+  return legacy[0] === "Payment" && legacy[1] === "Credit Card";
+}
+
 function bySign(amountCents: number, inflow: TxnClass): TxnClass {
   return amountCents < 0 ? inflow : "spending";
 }

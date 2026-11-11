@@ -379,6 +379,7 @@ export const SUMMARY_RESPONSE_FIELDS = {
             label: "string",
             monthlyCents: "number",
             nextDate: "string|null",
+            pastDue: "boolean",
           },
         },
       },

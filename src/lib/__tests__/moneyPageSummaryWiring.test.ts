@@ -65,6 +65,12 @@ describe("money screen reads the finance summary", () => {
     expect(loadSummary).toContain("body: JSON.stringify({ timeZone: browserTimeZone() }),");
   });
 
+  // Red if: a charge whose date has passed is shown as "Next expected" again.
+  it("does not call a past-due date the next one", () => {
+    expect(PAGE).toContain('{item.pastDue ? "Was expected " : "Next expected "}');
+    expect(PAGE.match(/Next expected/g) ?? []).toHaveLength(1);
+  });
+
   it("keeps no arithmetic of its own over bank data", () => {
     expect(PAGE).not.toMatch(/\.reduce\(/);
     expect(PAGE).not.toContain("Net Worth");

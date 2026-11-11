@@ -134,7 +134,7 @@ describe("computeSafeToSpend", () => {
       { accountId: "chk", subtype: "checking", field: "available", cents: 180000, asOf: null, fetchedAt: FETCHED, asOfSource: "unknown" },
     ]);
     expect(r.inputs.upcomingRecurring).toEqual([
-      { streamId: "netflix", label: "Netflix", dueDate: "2026-10-20", cents: 1549 },
+      { streamId: "netflix", label: "Netflix", dueDate: "2026-10-20", cents: 1549, pastDue: false, cardPayment: false },
     ]);
     expect(r.inputs.creditCardBalances).toEqual([
       { accountId: "card", cents: 60000, asOf: null, fetchedAt: FETCHED, asOfSource: "unknown" },
@@ -324,7 +324,7 @@ describe("computeSafeToSpend", () => {
   it("a charge predicted inside the grace window and not yet recorded is an obligation", () => {
     const r = run(withStream({ predictedNextDate: "2026-10-05", lastDate: "2026-09-05" }));
     expect(r.inputs.upcomingRecurring).toEqual([
-      { streamId: "late", label: "Netflix", dueDate: "2026-10-05", cents: 1549 },
+      { streamId: "late", label: "Netflix", dueDate: "2026-10-05", cents: 1549, pastDue: true, cardPayment: false },
     ]);
     expect(r.totals.upcomingRecurringCents).toBe(1549);
     expect(r.amountCents).toBe(180000 - 1549 - 60000);

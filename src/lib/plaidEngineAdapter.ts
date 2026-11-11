@@ -51,6 +51,7 @@ import {
   computeCoverage,
   dayNumber,
   fromDayNumber,
+  isCardPaymentCategory,
   isIsoDate,
   toCents,
 } from "@/lib/financeEngine";
@@ -584,6 +585,31 @@ function hasCategory(stream: TransactionStream): boolean {
   return !!stream.personal_finance_category;
 }
 
+/** Where card-payment streams sit, by the type of the account they name. */
+type CardPaymentCounts = { depository: number; credit: number; other: number; none: number };
+
+function emptyCardPaymentCounts(): CardPaymentCounts {
+  return { depository: 0, credit: 0, other: 0, none: 0 };
+}
+
+function countCardPayment(
+  counts: CardPaymentCounts,
+  stream: EngineRecurringStream,
+  accountTypes: ReadonlyMap<string, EngineAccount["type"]>
+): void {
+  if (!isCardPaymentCategory(stream)) return;
+  const type = stream.accountId === null ? undefined : accountTypes.get(stream.accountId);
+  if (type === undefined) counts.none += 1;
+  else if (type === "depository") counts.depository += 1;
+  else if (type === "credit") counts.credit += 1;
+  else counts.other += 1;
+}
+
+/** `depository:N,credit:N,other:N,none:N` — counts only. */
+function formatCardPaymentCounts(c: CardPaymentCounts): string {
+  return `depository:${c.depository},credit:${c.credit},other:${c.other},none:${c.none}`;
+}
+
 async function readConnection(
   index: number,
   row: StoredConnectionRow,
@@ -665,7 +691,9 @@ async function readConnection(
       `[bank-read] idx=${index} status=${state} code=${code} pages=${pages} ` +
         `truncated=false pfc_v2=0 pfc_other_version=0 recurring=skipped streams=0 ` +
         `stream_ccy=${formatShapeCounts(emptyShapeCounts())} ` +
-        `${itemLogFields(item)} inflow_streams=0 stream_pfc=0 history_days=none`
+        `${itemLogFields(item)} inflow_streams=0 stream_pfc=0 history_days=none ` +
+        `card_pay_out=${formatCardPaymentCounts(emptyCardPaymentCounts())} ` +
+        `card_pay_in=${formatCardPaymentCounts(emptyCardPaymentCounts())}`
     );
     return {
       status: { itemId, institutionName, status: state },
@@ -688,14 +716,18 @@ async function readConnection(
   let streams: EngineRecurringStream[] | null = null;
   let incomeStreams: EngineRecurringStream[] = [];
   let streamsWithCategory = 0;
+  let cardPayOut = emptyCardPaymentCounts();
+  let cardPayIn = emptyCardPaymentCounts();
   let recurringCode = "none";
   const shapeCounts = emptyShapeCounts();
   if (want.recurring) {
     // Only this connection's accounts: a stream belongs to an account of its own Item.
     const accountCurrencies = new Map<string, string | null>();
+    const accountTypes = new Map<string, EngineAccount["type"]>();
     for (let i = 0; i < accounts.length; i++) {
       if (!accountCurrencies.has(accounts[i].accountId)) {
         accountCurrencies.set(accounts[i].accountId, accounts[i].currency);
+        accountTypes.set(accounts[i].accountId, accounts[i].type);
       }
     }
     try {
@@ -714,21 +746,29 @@ async function readConnection(
       const mapped: EngineRecurringStream[] = [];
       const mappedIncome: EngineRecurringStream[] = [];
       const counted = emptyShapeCounts();
+      const outCounts = emptyCardPaymentCounts();
+      const inCounts = emptyCardPaymentCounts();
       let withCategory = 0;
       for (let i = 0; i < outflow.length; i++) {
         counted[streamCurrency(outflow[i]).shape] += 1;
         if (hasCategory(outflow[i])) withCategory += 1;
-        mapped.push(mapStream(outflow[i], accountCurrencies));
+        const s = mapStream(outflow[i], accountCurrencies);
+        countCardPayment(outCounts, s, accountTypes);
+        mapped.push(s);
       }
       for (let i = 0; i < inflow.length; i++) {
         if (hasCategory(inflow[i])) withCategory += 1;
-        mappedIncome.push(mapStream(inflow[i], accountCurrencies));
+        const s = mapStream(inflow[i], accountCurrencies);
+        countCardPayment(inCounts, s, accountTypes);
+        mappedIncome.push(s);
       }
       // Committed only once every stream mapped, so a failure part-way through
       // reports no streams and no counts rather than some of each.
       streams = mapped;
       incomeStreams = mappedIncome;
       streamsWithCategory = withCategory;
+      cardPayOut = outCounts;
+      cardPayIn = inCounts;
       for (let i = 0; i < STREAM_CURRENCY_SHAPES.length; i++) {
         shapeCounts[STREAM_CURRENCY_SHAPES[i]] = counted[STREAM_CURRENCY_SHAPES[i]];
       }
@@ -737,6 +777,8 @@ async function readConnection(
       streams = null;
       incomeStreams = [];
       streamsWithCategory = 0;
+      cardPayOut = emptyCardPaymentCounts();
+      cardPayIn = emptyCardPaymentCounts();
     }
   }
 
@@ -756,7 +798,9 @@ async function readConnection(
       `recurring=${recurringLabel} streams=${streams === null ? 0 : streams.length} ` +
       `stream_ccy=${formatShapeCounts(shapeCounts)} ` +
       `${itemLogFields(item)} inflow_streams=${incomeStreams.length} ` +
-      `stream_pfc=${streamsWithCategory} history_days=${historyDays(earliest, range)}`
+      `stream_pfc=${streamsWithCategory} history_days=${historyDays(earliest, range)} ` +
+      `card_pay_out=${formatCardPaymentCounts(cardPayOut)} ` +
+      `card_pay_in=${formatCardPaymentCounts(cardPayIn)}`
   );
 
   return {

@@ -216,7 +216,19 @@ export type AssumptionCode =
   | "other_currency_accounts_excluded"
   | "semi_monthly_spacing_approximated"
   | "recurring_due_today_may_already_be_pending"
-  | "recurring_past_due_assumed_unposted";
+  | "recurring_past_due_assumed_unposted"
+  /**
+   * A past-due charge on a card whose balance is reserved in full is still
+   * subtracted, but it may already sit in that balance, and so count twice.
+   */
+  | "recurring_past_due_on_card_may_be_in_balance"
+  /**
+   * A recurring card payment is subtracted while card balances are reserved
+   * in full, so the same money may count twice. It comes from a cash
+   * account, an account not found, or a card whose balance is not reserved.
+   * The charges are marked `cardPayment` in `inputs.upcomingRecurring`.
+   */
+  | "card_payment_recurring_counted";
 
 /** An account a metric left out, and why. */
 export interface ExcludedAccount {
@@ -274,7 +286,12 @@ export type RecurringExclusionReason =
   | "no_amount"
   | "inactive"
   | "tombstoned"
-  | "other_currency";
+  | "other_currency"
+  /**
+   * A card payment charged to a card whose balance safe-to-spend reserves in
+   * full: the reserve already covers it.
+   */
+  | "card_payment_in_card_balance";
 
 export interface RecurringResult {
   source: "plaid_streams" | "unavailable";
@@ -287,6 +304,8 @@ export interface RecurringResult {
     basisCents: Cents;
     monthlyCents: Cents;
     nextDate: IsoDate | null;
+    /** nextDate is before today: the expected charge has not been recorded yet. */
+    pastDue: boolean;
   }>;
   /** null when no recurring data was available at all. */
   totalMonthlyCents: Cents | null;
@@ -317,6 +336,10 @@ export interface SafeToSpendResult {
       label: string;
       dueDate: IsoDate;
       cents: Cents;
+      /** dueDate is before today: counted inside the grace window, not yet recorded. */
+      pastDue: boolean;
+      /** The stream is a credit-card payment (see the card-payment assumption). */
+      cardPayment: boolean;
     }>;
     creditCardBalances: Array<{ accountId: string; cents: Cents } & Freshness>;
     excludedRecurring: Array<{
