@@ -20,6 +20,7 @@ import { computeRecurring } from "./recurring";
 import { computeSafeToSpend } from "./safeToSpend";
 import { computeCreditUtilization } from "./creditUtilization";
 import { coverageOf } from "./coverage";
+import { dropDuplicateAccountCopies } from "./duplicates";
 
 export const ENGINE_VERSION = "v1" as const;
 
@@ -170,13 +171,16 @@ function checkCallerInput(input: EngineInput): void {
 /**
  * Computes every v1 metric from one input. Throws only on a caller bug (see
  * checkCallerInput) or an invalid policy; bad data is skipped and reported in
- * `dataIssues` and in each metric's exclusion counts.
+ * `dataIssues` and in each metric's exclusion counts. Copies of one bank
+ * account reached through two connections are left out first, so every
+ * metric sees each account once.
  */
 export function computeFinancialSummary(
-  input: EngineInput,
+  rawInput: EngineInput,
   policy: EnginePolicy = DEFAULT_POLICY
 ): FinancialSummary {
-  checkCallerInput(input);
+  checkCallerInput(rawInput);
+  const { input, dropped } = dropDuplicateAccountCopies(rawInput);
   const coverage = coverageOf(input);
   const recurring = computeRecurring(input);
   const cashFlow = cashFlowDetail(input);
@@ -200,6 +204,7 @@ export function computeFinancialSummary(
       allConnectionsRead: coverage.allConnectionsRead,
       safeToSpendShowable:
         coverage.allConnectionsRead && safeToSpend.status === "computed",
+      duplicateCopiesDropped: dropped,
     },
     cashFlow: cashFlow.result,
     recurring,
@@ -227,5 +232,7 @@ export { computeRecurring, upcomingOccurrences } from "./recurring";
 export { computeSafeToSpend } from "./safeToSpend";
 export { computeCreditUtilization } from "./creditUtilization";
 export { computeCoverage, coverageOf } from "./coverage";
+export { dropDuplicateAccountCopies } from "./duplicates";
+export type { DuplicateCopiesDropped } from "./duplicates";
 export type { CoverageDecision } from "./coverage";
 export type * from "./types";

@@ -21,6 +21,8 @@ import type {
  *   - a readWindow / period / today check removed          -> the caller-input case named for it
  */
 
+const NONE_DROPPED = { accounts: 0, transactions: 0, streams: 0 };
+
 function conn(over: Partial<EngineConnection> = {}): EngineConnection {
   return {
     connectionKey: "c0",
@@ -89,6 +91,7 @@ describe("coverage from the connections", () => {
       completeness: "complete",
       allConnectionsRead: true,
       safeToSpendShowable: true,
+      duplicateCopiesDropped: NONE_DROPPED,
     });
     expect(s.cashFlow.period.completeness).toBe("complete");
     expect(s.recurring.source).toBe("plaid_streams");
@@ -103,6 +106,7 @@ describe("coverage from the connections", () => {
         completeness: "unknown",
         allConnectionsRead: false,
         safeToSpendShowable: false,
+        duplicateCopiesDropped: NONE_DROPPED,
       });
       expect(s.cashFlow.period.completeness, state).toBe("unknown");
       expect(s.recurring.source, state).toBe("unavailable");
@@ -154,6 +158,7 @@ describe("coverage from the connections", () => {
       completeness: "unknown",
       allConnectionsRead: false,
       safeToSpendShowable: false,
+      duplicateCopiesDropped: NONE_DROPPED,
     });
 
     const noCash = input([conn()], [stream("a")]);

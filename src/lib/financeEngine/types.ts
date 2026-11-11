@@ -396,6 +396,12 @@ export interface CoverageResult {
    * not may hold a card balance the figure would miss) and it was computed.
    */
   safeToSpendShowable: boolean;
+  /**
+   * Copies of the same bank account reached through more than one
+   * connection, left out of every figure, with their transactions and
+   * recurring streams (outflow and income).
+   */
+  duplicateCopiesDropped: { accounts: number; transactions: number; streams: number };
 }
 
 export interface FinancialSummary {

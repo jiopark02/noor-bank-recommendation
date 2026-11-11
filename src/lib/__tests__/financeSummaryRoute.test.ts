@@ -269,6 +269,7 @@ describe("POST /api/finance/summary — response", () => {
       completeness: "complete",
       allConnectionsRead: true,
       safeToSpendShowable: true,
+      duplicateCopiesDropped: { accounts: 0, transactions: 0, streams: 0 },
     });
     expect(res.json.connections).toEqual([
       { itemId: "item-1", institutionName: "Bank 1", status: "ok" },
