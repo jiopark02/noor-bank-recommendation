@@ -31,9 +31,10 @@ import {
   formatSpending,
   missingBanksNote,
   parseFinanceSummaryResponse,
+  summaryPeriodNote,
   type MoneyDisplayState,
+  type ScreenSummaryResponse,
 } from "@/lib/bankSummaryView";
-import type { FinanceSummaryResponse } from "@/lib/plaidEngineAdapter";
 
 const CONNECTIONS_LOAD_FAILED = "Failed to load bank connections";
 const BANK_DATA_LOAD_FAILED =
@@ -128,8 +129,9 @@ export default function HomePage() {
   const [userName, setUserName] = useState("there");
   const [promptDraft, setPromptDraft] = useState("");
   // The summary route's answer for this visit. Every amount on this screen
-  // comes from it; the screen only formats.
-  const [bank, setBank] = useState<FinanceSummaryResponse | null>(null);
+  // comes from it; the screen only formats. Typed by the fields bankSummaryView
+  // checks, so a field read here that is not checked there is a type error.
+  const [bank, setBank] = useState<ScreenSummaryResponse | null>(null);
 
   useEffect(() => {
     // Bank data is never kept in browser storage; every figure comes from the
@@ -336,6 +338,7 @@ export default function HomePage() {
   const moneyDisplay: MoneyDisplayState = view.figures;
   const summary = view.figures === "ready" && bank ? bank.summary : null;
   const missingNote = missingBanksNote(view.missingFrom);
+  const periodNote = summaryPeriodNote(view, bank);
 
   // Engine figures as they arrived. With no connection the zeros are true.
   const figures = {
@@ -699,6 +702,9 @@ export default function HomePage() {
             </div>
 
             <p className="text-gray-500 text-xs mb-2">Last 90 days</p>
+            {periodNote && (
+              <p className="text-xs text-amber-800 mb-2">{periodNote}</p>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Income</p>

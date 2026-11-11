@@ -32,18 +32,21 @@ import {
   formatCentsOrDash,
   formatMonthlyOrUnknown,
   formatSpending,
+  incompletePeriodNote,
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
   parseTransactionsListResponse,
   summaryLoadInputs,
+  summaryPeriodNote,
   utilizationPercent,
   type MoneyDisplayState,
+  type ScreenSummaryResponse,
+  type ScreenTransaction,
 } from "@/lib/bankSummaryView";
 import type {
+  BankCompleteness,
   BankConnectionStatus,
-  DisplayTransaction,
-  FinanceSummaryResponse,
 } from "@/lib/plaidEngineAdapter";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
@@ -90,11 +93,16 @@ export default function MoneyPage() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   // The summary route's answer for this load. Every amount and account on this
   // screen comes from it; the screen only formats.
-  const [bank, setBank] = useState<FinanceSummaryResponse | null>(null);
+  // Typed by the fields bankSummaryView checks, so a field read here that is
+  // not checked there is a type error.
+  const [bank, setBank] = useState<ScreenSummaryResponse | null>(null);
   // True only once the summary route has answered successfully in this load.
   const [hasMoneyData, setHasMoneyData] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<DisplayTransaction[]>([]);
+  const [transactions, setTransactions] = useState<ScreenTransaction[]>([]);
+  // The list's period as the list route reported it; null until it answers.
+  const [transactionsCompleteness, setTransactionsCompleteness] =
+    useState<BankCompleteness | null>(null);
   // The list route's own connection statuses: a bank it could not read is
   // missing from the list, which says so.
   const [transactionConnections, setTransactionConnections] = useState<
@@ -229,6 +237,7 @@ export default function MoneyPage() {
       }
       setTransactions(parsed.transactions);
       setTransactionConnections(parsed.connections);
+      setTransactionsCompleteness(parsed.period.completeness);
     } catch (err) {
       setTransactionsError(
         err instanceof Error ? err.message : "Failed to fetch transactions"
@@ -242,6 +251,7 @@ export default function MoneyPage() {
       setBank(null);
       setTransactions([]);
       setTransactionConnections([]);
+      setTransactionsCompleteness(null);
       return;
     }
 
@@ -252,6 +262,7 @@ export default function MoneyPage() {
     setBank(null);
     setTransactions([]);
     setTransactionConnections([]);
+    setTransactionsCompleteness(null);
     setTransactionsError(null);
     setRelinkFailedItemId(null);
     setIsLoadingData(true);
@@ -428,9 +439,11 @@ export default function MoneyPage() {
   const summary = view.figures === "ready" && bank ? bank.summary : null;
   const accounts = summary && bank ? bank.accounts : [];
   const missingNote = missingBanksNote(view.missingFrom);
+  const periodNote = summaryPeriodNote(view, bank);
   const transactionsMissingNote = missingBanksNote(
     banksNotRead(transactionConnections)
   );
+  const transactionsPeriodNote = incompletePeriodNote(transactionsCompleteness);
   const loadFailedMessage =
     moneyDisplay === "unavailable" && !isNoActiveConnectionMessage(error)
       ? error ?? "We couldn't read any of your banks just now."
@@ -621,6 +634,9 @@ export default function MoneyPage() {
 
             {/* Last 90 days */}
             <p className="text-gray-500 text-xs mb-2">Last 90 days</p>
+            {periodNote && (
+              <p className="text-xs text-amber-800 mb-2">{periodNote}</p>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Income</p>
@@ -861,6 +877,11 @@ export default function MoneyPage() {
             {transactionsMissingNote && (
               <p className="text-xs text-amber-800 mb-3">
                 {transactionsMissingNote}
+              </p>
+            )}
+            {transactionsPeriodNote && (
+              <p className="text-xs text-amber-800 mb-3">
+                {transactionsPeriodNote}
               </p>
             )}
             <div className="space-y-2">

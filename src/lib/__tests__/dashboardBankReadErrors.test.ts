@@ -202,3 +202,79 @@ describe("dashboard money figures come only from the summary route", () => {
     expect(PAGE.indexOf("uncoveredObligationsCents")).toBeGreaterThan(gateAt);
   });
 });
+
+/*
+ * Dollar amounts on the screen. Every amount drawn in the page's markup is
+ * inside MoneyFigure (no amount while loading or after a failed load) or a
+ * recurring item's row value, from a list that is emptied when a load starts
+ * and filled only from a ready answer. The assistant text above the markup
+ * builds its amounts only past the safe-to-spend gate (checked above).
+ *
+ * Mutations that turn this block red:
+ *   - any figure moved out of MoneyFigure
+ *   - the recurring list filled without the ready gate, or not emptied when a
+ *     load starts
+ */
+const FORMAT_CALL = /\bformat(?:Cents|CentsOrDash|MonthlyOrUnknown|Spending)\(([^)]*)\)/g;
+
+describe("dashboard: no amount drawn while loading or after a failure", () => {
+  const JSX = slice(PAGE, "<PageLayout>", "</PageLayout>");
+
+  it("every amount is inside MoneyFigure or is a recurring item's row value", () => {
+    const ranges: Array<[number, number]> = [];
+    const open = /<MoneyFigure state=\{moneyDisplay\}>/g;
+    for (let m = open.exec(JSX); m; m = open.exec(JSX)) {
+      const close = JSX.indexOf("</MoneyFigure>", m.index);
+      ranges.push([m.index, close < 0 ? JSX.length : close]);
+    }
+    let guarded = 0;
+    let rows = 0;
+    const bare: string[] = [];
+    FORMAT_CALL.lastIndex = 0;
+    for (let m = FORMAT_CALL.exec(JSX); m; m = FORMAT_CALL.exec(JSX)) {
+      const at = m.index;
+      if (ranges.some(([s, e]) => at > s && at < e)) guarded++;
+      else if (/^\s*item\./.test(m[1])) rows++;
+      else bare.push(m[0]);
+    }
+    expect(bare).toEqual([]);
+    expect(guarded).toBeGreaterThanOrEqual(5);
+    expect(rows).toBeGreaterThan(0);
+    expect(JSX).not.toMatch(/toFixed\(/);
+  });
+
+  it("the recurring rows come only from a ready answer, emptied when a load starts", () => {
+    const bindings = JSX.match(/\.map\(\(\s*item\b/g) ?? [];
+    const fromList = JSX.match(/figures\.recurringItems(?:\.slice\([^)]*\))?\.map\(\(\s*item\b/g) ?? [];
+    expect(bindings.length).toBeGreaterThan(0);
+    expect(fromList.length).toBe(bindings.length);
+    expect(PAGE).toContain('const summary = view.figures === "ready" && bank ? bank.summary : null;');
+    expect(PAGE).toContain("recurringItems: summary ? summary.recurring.items : [],");
+
+    const reset = FETCH_LIVE.slice(0, FETCH_LIVE.indexOf("await "));
+    expect(reset).toContain("setBank(null);");
+    const elsewhere = PAGE.replace(FETCH_LIVE, "");
+    expect(FETCH_LIVE.match(/setBank\((?!null\))/g) ?? []).toEqual(["setBank("]);
+    expect(FETCH_LIVE).toContain("setBank(parsed);");
+    expect(elsewhere.match(/setBank\((?!null\))/g) ?? []).toEqual([]);
+  });
+});
+
+/*
+ * Mutations that turn this block red:
+ *   - the summary state typed with the route's full body type again
+ *   - the period line dropped, or moved away from the 90-day figures
+ */
+describe("dashboard: checked fields and the incomplete-period line", () => {
+  it("holds the summary in the checked type only", () => {
+    expect(PAGE).toContain("useState<ScreenSummaryResponse | null>(null)");
+    expect(PAGE).not.toMatch(/\bFinanceSummaryResponse\b/);
+    expect(PAGE).not.toMatch(/\bFinancialSummary\b/);
+    expect(PAGE).not.toMatch(/\bas any\b|as unknown as/);
+  });
+
+  it("puts the period line next to the 90-day figures", () => {
+    expect(PAGE).toContain("const periodNote = summaryPeriodNote(view, bank);");
+    expect(slice(PAGE, "Last 90 days</p>", "Income</p>")).toContain("{periodNote}");
+  });
+});

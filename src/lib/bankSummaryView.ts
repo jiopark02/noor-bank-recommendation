@@ -11,18 +11,20 @@
 //   - Each connection that was not read gets one action: re-link for a login
 //     problem, wait while Plaid is still importing, retry otherwise.
 //   - Unknown recurring charges render as "Unknown", never as $0.00.
+//   - Figures or a transaction list over a period that may be incomplete
+//     carry one line saying so.
+//   - A response body missing a field the screens read is a failed read.
 // Data issues in the summary (for example, transactions in Plaid's catch-all
 // category) are information about the figures, not a connection problem: they
 // create no action and do not hide safe-to-spend.
 // =============================================================================
 
 import type {
+  BankCompleteness,
   BankConnectionStatus,
-  DisplayTransaction,
   FinanceSummaryResponse,
   TransactionsListResponse,
 } from "./plaidEngineAdapter";
-import type { FinancialSummary } from "./financeEngine";
 
 /**
  *   ready       - a summary for a connected bank arrived; show its numbers.
@@ -122,7 +124,7 @@ export function banksNotRead(connections: BankConnectionStatus[]): string[] {
 export function decideBankView(input: {
   hasActiveConnection: boolean;
   fetchState: SummaryFetchState;
-  response: FinanceSummaryResponse | null;
+  response: ScreenSummaryResponse | null;
 }): BankView {
   const nothing: BankView = {
     figures: "loading",
@@ -167,7 +169,7 @@ export function decideBankView(input: {
  * own aggregate. null when any such account reported no balance: an unknown
  * card balance is not read as 0.
  */
-export function creditUsedCents(summary: FinancialSummary): number | null {
+export function creditUsedCents(summary: ScreenSummary): number | null {
   const entries = summary.creditUtilization.accounts;
   let total = 0;
   for (let i = 0; i < entries.length; i++) {
@@ -183,7 +185,7 @@ export function creditUsedCents(summary: FinancialSummary): number | null {
  * ratio. null when the engine could not measure it (no limit, no balance,
  * another currency) — the screen draws no bar then.
  */
-export function utilizationPercent(summary: FinancialSummary, accountId: string): number | null {
+export function utilizationPercent(summary: ScreenSummary, accountId: string): number | null {
   const entries = summary.creditUtilization.accounts;
   for (let i = 0; i < entries.length; i++) {
     if (entries[i].accountId !== accountId) continue;
@@ -199,6 +201,26 @@ export function missingBanksNote(missingFrom: string[]): string | null {
   if (missingFrom.length === 1) return `Doesn't include ${missingFrom[0]}`;
   const head = missingFrom.slice(0, -1).join(", ");
   return `Doesn't include ${head} or ${missingFrom[missingFrom.length - 1]}`;
+}
+
+/**
+ * One line for transactions over a period that may be incomplete: a bank
+ * whose transactions were cut off at the page limit, or a bank that was not
+ * read. It does not say which, because the period alone does not tell. null
+ * for a complete period, and for no period at all.
+ */
+export function incompletePeriodNote(completeness: BankCompleteness | null): string | null {
+  if (completeness === null || completeness === "complete") return null;
+  return "May not include every transaction from this period.";
+}
+
+/** The incomplete-period line for the shown figures; null unless they are ready. */
+export function summaryPeriodNote(
+  view: BankView,
+  response: ScreenSummaryResponse | null
+): string | null {
+  if (view.figures !== "ready" || response === null || response.summary === null) return null;
+  return incompletePeriodNote(response.summary.cashFlow.period.completeness);
 }
 
 /** What to tell the user about one connection that was not read. */
@@ -241,65 +263,214 @@ export function bankActionLines(
 
 // ---- response shape -----------------------------------------------------------
 
-const CONNECTION_STATES = ["ok", "login_required", "syncing", "failed"];
+//
+// The fields the two screens and this module read from each response body are
+// listed once, below. The same list gives both the check a 2xx body must pass
+// and the type the screens receive, so:
+//   - a body missing a listed field, or carrying it with the wrong type, is a
+//     failed read (null), never something drawn as $NaN or a crash;
+//   - a field the screens read that is not listed is a type error, because
+//     the screens only ever see the listed type;
+//   - fields that are not listed may be present and are ignored.
+// RouteBodiesSatisfyScreenFields fails to compile when a listed field
+// disagrees with what the routes declare they send.
+
+type FieldLeaf = "string" | "number" | "boolean" | "string|null" | "number|null";
+
+/**
+ * A field list. `oneOf`, `listOf` and `orNull` are reserved words of this
+ * notation, so no response field may be listed under one of those names.
+ */
+export type FieldSpec =
+  | FieldLeaf
+  | { readonly oneOf: readonly string[] }
+  | { readonly listOf: FieldSpec }
+  | { readonly orNull: FieldSpec }
+  | { readonly [field: string]: FieldSpec };
+
+/** The type a field list describes. */
+export type FieldsOf<S> = S extends "string"
+  ? string
+  : S extends "number"
+    ? number
+    : S extends "boolean"
+      ? boolean
+      : S extends "string|null"
+        ? string | null
+        : S extends "number|null"
+          ? number | null
+          : S extends { readonly oneOf: readonly (infer U)[] }
+            ? U
+            : S extends { readonly listOf: infer E }
+              ? FieldsOf<E>[]
+              : S extends { readonly orNull: infer E }
+                ? FieldsOf<E> | null
+                : { -readonly [K in keyof S]: FieldsOf<S[K]> };
+
+const CONNECTION_FIELDS = {
+  itemId: "string",
+  institutionName: "string|null",
+  status: { oneOf: ["ok", "login_required", "syncing", "failed"] },
+} as const;
+
+const COMPLETENESS = { oneOf: ["complete", "possibly_truncated", "unknown"] } as const;
+
+/** What the dashboard, the money screen and this module read from a summary body. */
+export const SUMMARY_RESPONSE_FIELDS = {
+  connections: { listOf: CONNECTION_FIELDS },
+  accounts: {
+    listOf: {
+      accountId: "string",
+      type: "string",
+      name: "string",
+      institutionName: "string|null",
+      mask: "string|null",
+      currentCents: "number|null",
+      availableCents: "number|null",
+      limitCents: "number|null",
+    },
+  },
+  summary: {
+    orNull: {
+      cashFlow: {
+        incomeCents: "number",
+        spendingNetCents: "number",
+        period: { completeness: COMPLETENESS },
+      },
+      safeToSpend: {
+        status: { oneOf: ["computed", "unavailable"] },
+        amountCents: "number|null",
+        uncoveredObligationsCents: "number|null",
+        horizon: { to: "string" },
+        totals: {
+          spendableCashCents: "number",
+          upcomingRecurringCents: "number",
+          reservedCreditCents: "number",
+          bufferCents: "number",
+        },
+        assumptions: { listOf: "string" },
+      },
+      recurring: {
+        totalMonthlyCents: "number|null",
+        items: {
+          listOf: {
+            streamId: "string",
+            label: "string",
+            monthlyCents: "number",
+            nextDate: "string|null",
+          },
+        },
+      },
+      creditUtilization: {
+        accounts: {
+          listOf: {
+            accountId: "string",
+            balanceCents: "number|null",
+            ratioBasisPoints: "number|null",
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+/** What the money screen reads from a transaction list body. */
+export const TRANSACTIONS_RESPONSE_FIELDS = {
+  transactions: {
+    listOf: {
+      transactionId: "string",
+      accountId: "string",
+      amountCents: "number",
+      date: "string",
+      pending: "boolean",
+      name: "string",
+      merchantName: "string|null",
+      category: { listOf: "string" },
+    },
+  },
+  connections: { listOf: CONNECTION_FIELDS },
+  period: { completeness: COMPLETENESS },
+} as const;
+
+export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
+export type ScreenSummary = NonNullable<ScreenSummaryResponse["summary"]>;
+export type ScreenTransactionsList = FieldsOf<typeof TRANSACTIONS_RESPONSE_FIELDS>;
+export type ScreenTransaction = ScreenTransactionsList["transactions"][number];
+
+type Holds<T extends true> = T;
+/** Compile-time only: what the routes declare they send has every listed field. */
+export type RouteBodiesSatisfyScreenFields = Holds<
+  [FinanceSummaryResponse] extends [ScreenSummaryResponse]
+    ? [TransactionsListResponse] extends [ScreenTransactionsList]
+      ? true
+      : false
+    : false
+>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isConnection(value: unknown): value is BankConnectionStatus {
-  return (
-    isRecord(value) &&
-    typeof value.itemId === "string" &&
-    (value.institutionName === null || typeof value.institutionName === "string") &&
-    CONNECTION_STATES.indexOf(value.status as string) >= 0
-  );
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && isFinite(value);
 }
 
-function isSummary(value: unknown): boolean {
+/** Whether a value has every field a list names, each with its listed type. */
+export function fitsFields(spec: FieldSpec, value: unknown): boolean {
+  if (typeof spec === "string") {
+    switch (spec) {
+      case "string":
+        return typeof value === "string";
+      case "number":
+        return isFiniteNumber(value);
+      case "boolean":
+        return typeof value === "boolean";
+      case "string|null":
+        return value === null || typeof value === "string";
+      case "number|null":
+        return value === null || isFiniteNumber(value);
+    }
+    return false;
+  }
+  const node = spec as {
+    oneOf?: readonly string[];
+    listOf?: FieldSpec;
+    orNull?: FieldSpec;
+  };
+  if (node.oneOf !== undefined) {
+    return typeof value === "string" && node.oneOf.indexOf(value) >= 0;
+  }
+  if (node.listOf !== undefined) {
+    const element = node.listOf;
+    return Array.isArray(value) && value.every((v) => fitsFields(element, v));
+  }
+  if (node.orNull !== undefined) {
+    return value === null || fitsFields(node.orNull, value);
+  }
   if (!isRecord(value)) return false;
-  return (
-    isRecord(value.cashFlow) &&
-    isRecord(value.safeToSpend) &&
-    isRecord(value.recurring) &&
-    isRecord(value.creditUtilization) &&
-    Array.isArray(value.dataIssues)
-  );
+  const fields = spec as { readonly [field: string]: FieldSpec };
+  return Object.keys(fields).every((key) => fitsFields(fields[key], value[key]));
 }
 
 /**
- * A summary response body, or null when it does not have the shape the route
- * sends. A wrong-shaped 2xx is a failed read, never an empty one: read as
- * empty it would show $0.00 as if it were the user's real figure.
+ * A summary response body, or null when it lacks a field the screens read or
+ * carries one with the wrong type. A wrong-shaped 2xx is a failed read, never
+ * an empty one: read as empty it would show $0.00 as if it were the user's
+ * real figure.
  */
-export function parseFinanceSummaryResponse(value: unknown): FinanceSummaryResponse | null {
-  if (!isRecord(value)) return null;
-  if (!Array.isArray(value.connections) || !value.connections.every(isConnection)) return null;
-  if (!Array.isArray(value.accounts) || !value.accounts.every(isRecord)) return null;
-  if (value.summary !== null && !isSummary(value.summary)) return null;
-  return value as unknown as FinanceSummaryResponse;
-}
-
-function isTransaction(value: unknown): value is DisplayTransaction {
-  return (
-    isRecord(value) &&
-    typeof value.transactionId === "string" &&
-    typeof value.amountCents === "number" &&
-    typeof value.date === "string" &&
-    typeof value.name === "string" &&
-    Array.isArray(value.category)
-  );
+export function parseFinanceSummaryResponse(value: unknown): ScreenSummaryResponse | null {
+  return fitsFields(SUMMARY_RESPONSE_FIELDS, value) ? (value as ScreenSummaryResponse) : null;
 }
 
 /**
- * A transaction list response body, or null when it does not have the shape
- * the route sends. A wrong-shaped 2xx is a failed read, never an empty list.
+ * A transaction list response body, or null when it lacks a field the money
+ * screen reads or carries one with the wrong type. A wrong-shaped 2xx is a
+ * failed read, never an empty list.
  */
-export function parseTransactionsListResponse(value: unknown): TransactionsListResponse | null {
-  if (!isRecord(value)) return null;
-  if (!Array.isArray(value.transactions) || !value.transactions.every(isTransaction)) return null;
-  if (!Array.isArray(value.connections) || !value.connections.every(isConnection)) return null;
-  return value as unknown as TransactionsListResponse;
+export function parseTransactionsListResponse(value: unknown): ScreenTransactionsList | null {
+  return fitsFields(TRANSACTIONS_RESPONSE_FIELDS, value)
+    ? (value as ScreenTransactionsList)
+    : null;
 }
 
 const USD = new Intl.NumberFormat("en-US", {
