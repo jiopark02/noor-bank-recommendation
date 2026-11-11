@@ -82,14 +82,12 @@ import { describe, it, expect } from "vitest";
  * suite; that stopped being true the moment that file existed, and saying it here
  * would now be a description of the suite that the suite contradicts.
  *
- * What has NOT changed is the auth seam. apiAuth.test.ts fakes the server-client
- * factory to test token verification itself; no route's auth is faked, and the
- * existence of one mock elsewhere is
- * not an argument for adding that one — the reason it was left alone is that
- * faking an auth boundary in order to test a route is a much larger decision than
- * faking a client factory in order to test a database read. That remains a
- * separate track. Until it is taken, this file is the available check and the
- * limits above are the honest statement of what stays uncovered.
+ * The auth seam has since been crossed too. Route tests now fake the token
+ * verification under authenticate() and call the handler: the chat route's
+ * tests do, and financeSummaryRoute.test.ts does for /api/finance/summary,
+ * including a failed connection read answered as a 500. For a route that has
+ * such a test, this file is a second, textual line; for a route that does not,
+ * it is still the available check and the limits above still apply.
  */
 
 type RouteProbe = {
@@ -105,6 +103,10 @@ const ROUTES: RouteProbe[] = [
   {
     label: "/api/plaid/transactions",
     relativePath: "../../app/api/plaid/transactions/route.ts",
+  },
+  {
+    label: "/api/finance/summary",
+    relativePath: "../../app/api/finance/summary/route.ts",
   },
 ];
 

@@ -15,7 +15,7 @@ import type {
 } from "./types";
 import { isCents } from "./money";
 import { dayNumber, isIsoDate, parseTimestampMs, utcDateOf } from "./dates";
-import { computeCashFlow, transactionKey, uniqueAccounts } from "./cashFlow";
+import { cashFlowDetail, transactionKey, uniqueAccounts } from "./cashFlow";
 import { computeRecurring } from "./recurring";
 import { computeSafeToSpend } from "./safeToSpend";
 import { computeCreditUtilization } from "./creditUtilization";
@@ -143,15 +143,26 @@ export function computeFinancialSummary(
     throw new Error("computeFinancialSummary: invalid now");
   }
   const recurring = computeRecurring(input);
+  const cashFlow = cashFlowDetail(input);
+  const dataIssues = collectDataIssues(input);
+  // Only the transactions the cash flow actually counted into the bucket, so
+  // the bucket count and these issues always match.
+  for (let i = 0; i < cashFlow.unclassifiedCategoryIds.length; i++) {
+    dataIssues.push({
+      kind: "transaction",
+      id: cashFlow.unclassifiedCategoryIds[i],
+      reason: "unclassified_category",
+    });
+  }
   return {
     engineVersion: ENGINE_VERSION,
     currency: input.currency,
     computedAt: input.now,
-    cashFlow: computeCashFlow(input),
+    cashFlow: cashFlow.result,
     recurring,
     safeToSpend: computeSafeToSpend(input, policy, recurring),
     creditUtilization: computeCreditUtilization(input),
-    dataIssues: collectDataIssues(input),
+    dataIssues,
   };
 }
 

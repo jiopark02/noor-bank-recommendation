@@ -66,7 +66,6 @@ const IDENTIFIER = ["access", "token"].join("_");
  */
 const CONSUMING_SITES = [
   "app/api/plaid/accounts/route.ts",
-  "app/api/plaid/transactions/route.ts",
   "app/api/plaid/relink/route.ts",
   "lib/plaidChatState.ts",
   // liveRevocationDeps() decrypts a stored token and hands the plaintext
@@ -75,6 +74,9 @@ const CONSUMING_SITES = [
   // ordering can be tested by executing it), but the production wiring lives
   // here, which is what makes this a consuming site.
   "lib/plaidRevocation.ts",
+  // liveAdapterDeps() decrypts each stored token before the adapter calls
+  // Plaid with it; readBankData takes that decrypt as an injected dependency.
+  "lib/plaidEngineAdapter.ts",
 ];
 
 /**
