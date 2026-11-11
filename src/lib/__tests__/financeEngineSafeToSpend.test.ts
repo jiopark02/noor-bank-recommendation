@@ -25,6 +25,7 @@ import type {
  *   - grace window bound off by one                 -> "the grace window edges"
  *   - lastDate check on past-due dates removed      -> "a past-due date already recorded …"
  *   - pastDueGraceDays check removed                -> "an invalid grace is a caller bug"
+ *   - spendableSubtypes array check removed         -> "a spendable-subtype list that is not an array …"
  *   - SEMI_MONTHLY assumption push removed          -> "states the SEMI_MONTHLY spacing approximation"
  *   - due-today assumption push removed             -> "a charge due today is flagged"
  */
@@ -251,6 +252,13 @@ describe("computeSafeToSpend", () => {
   it("a negative buffer is a caller bug", () => {
     // Subtracting a negative buffer would raise the result.
     expect(() => run(scenario(), { ...DEFAULT_POLICY, bufferCents: -1 })).toThrow(/invalid bufferCents/);
+  });
+
+  it("a spendable-subtype list that is not an array is a caller bug", () => {
+    for (const spendableSubtypes of [null, undefined, "checking", { 0: "checking" }]) {
+      const policy = { ...DEFAULT_POLICY, spendableSubtypes } as unknown as EnginePolicy;
+      expect(() => run(scenario(), policy)).toThrow(/invalid spendableSubtypes/);
+    }
   });
 
   it("states the SEMI_MONTHLY spacing approximation when such a stream is used", () => {

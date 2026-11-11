@@ -17,8 +17,13 @@ export function toCents(dollars: number): number {
   return roundHalfAwayFromZero(dollars * 100);
 }
 
+/**
+ * An integer amount of cents that is exactly representable: above
+ * Number.MAX_SAFE_INTEGER, neighbouring integers collapse and sums stop
+ * being exact, so such a value is not a usable amount.
+ */
 export function isCents(x: unknown): x is number {
-  return typeof x === "number" && isFinite(x) && Math.floor(x) === x;
+  return typeof x === "number" && Number.isSafeInteger(x);
 }
 
 export function sumCents(xs: number[]): number {

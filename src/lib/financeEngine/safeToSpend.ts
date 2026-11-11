@@ -57,6 +57,9 @@ export function computeSafeToSpend(
   if (!isCents(policy.pastDueGraceDays) || policy.pastDueGraceDays < 0) {
     throw new Error("computeSafeToSpend: invalid pastDueGraceDays");
   }
+  if (!Array.isArray(policy.spendableSubtypes)) {
+    throw new Error("computeSafeToSpend: invalid spendableSubtypes");
+  }
   const horizonEnd = endOfMonthUtc(today);
   const fromDay = dayNumber(today) as number;
   const toDay = dayNumber(horizonEnd) as number;

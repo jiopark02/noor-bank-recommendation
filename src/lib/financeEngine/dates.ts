@@ -15,6 +15,9 @@ const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 // 1900-1999, and nothing the engine is given legitimately predates it.
 const MIN_YEAR = 2000;
 const MIN_TIMESTAMP_MS = Date.UTC(MIN_YEAR, 0, 1);
+// Dates after this year are rejected too. A four-digit year must survive one
+// annual cadence step and still format as four digits.
+const MAX_YEAR = 9998;
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function isLeapYear(year: number): boolean {
@@ -44,7 +47,7 @@ function parseYmd(
   const year = Number(m[1]);
   const month = Number(m[2]);
   const day = Number(m[3]);
-  if (year < MIN_YEAR) return null;
+  if (year < MIN_YEAR || year > MAX_YEAR) return null;
   if (month < 1 || month > 12) return null;
   if (day < 1 || day > daysInMonth(year, month)) return null;
   return { year, month, day };
