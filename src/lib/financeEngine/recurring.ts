@@ -11,6 +11,7 @@ import {
   firstCadenceStepOnOrAfter,
   isIsoDate,
 } from "./dates";
+import { coverageOf } from "./coverage";
 
 /**
  * The one stream dedupe every metric uses: the first stream with a given id
@@ -91,11 +92,12 @@ export function upcomingOccurrences(
 
 /**
  * Recurring charges normalized to a monthly amount. Source is Plaid's outflow
- * streams only; when they are unavailable nothing is inferred from
- * transactions, and the total is null rather than 0.
+ * streams only, and only when the connections say they are known
+ * (computeCoverage); otherwise nothing is inferred from transactions, and the
+ * total is null rather than 0.
  */
 export function computeRecurring(input: EngineInput): RecurringResult {
-  if (input.recurring.source !== "plaid_streams") {
+  if (!coverageOf(input).recurringAvailable) {
     return {
       source: "unavailable",
       items: [],

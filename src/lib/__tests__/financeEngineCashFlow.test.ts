@@ -28,6 +28,8 @@ function account(over: Partial<EngineAccount>): EngineAccount {
     currency: "USD",
     balanceAsOf: null,
     fetchedAt: FETCHED,
+    duplicateKey: null,
+    connectionKey: "c0",
     ...over,
   };
 }
@@ -43,6 +45,7 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
     pfcPrimary: null,
     pfcDetailed: null,
     legacyCategory: [],
+    merchantEntityId: null,
     ...over,
   };
 }
@@ -70,8 +73,18 @@ function scenario(): EngineInput {
       txn("refund", { accountId: "card", amountCents: -5000, date: "2026-10-07", pfcPrimary: "GENERAL_MERCHANDISE", pfcDetailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE" }),
       txn("coffee", { amountCents: 500, date: "2026-10-09", pending: true, pfcPrimary: "FOOD_AND_DRINK", pfcDetailed: "FOOD_AND_DRINK_COFFEE" }),
     ],
-    period: { start: "2026-09-11", end: "2026-10-10", completeness: "complete" },
-    recurring: { source: "unavailable" },
+    period: { start: "2026-09-11", end: "2026-10-10" },
+    connections: [
+      {
+        connectionKey: "c0",
+        state: "ok",
+        lastSuccessfulUpdate: null,
+        recurringRead: "empty",
+        transactionsTruncated: false,
+        earliestTransactionDate: null,
+      },
+    ],
+    recurring: { streams: [], incomeStreams: [] },
   };
 }
 
@@ -161,7 +174,7 @@ describe("computeCashFlow", () => {
 
   it("an invalid period counts everything as outside it", () => {
     const input = scenario();
-    input.period = { start: "2026-10-10", end: "2026-09-01", completeness: "unknown" };
+    input.period = { start: "2026-10-10", end: "2026-09-01" };
     const r = computeCashFlow(input);
     expect(r.period.days).toBe(0);
     expect(r.excluded.outsidePeriod.count).toBe(9);

@@ -23,13 +23,19 @@
 //     the accounts read on the same connection (see mapStream).
 //   - Logs carry status, error code and counts only: no item id, token,
 //     amount or name.
+//   - The keys handed to the engine (connection key, duplicate key) are
+//     opaque: the duplicate key is a hash, so no name or mask reaches the
+//     engine input. Neither key is part of any response.
 // =============================================================================
 
+import { createHash } from "crypto";
 import {
   PersonalFinanceCategoryVersion,
   type AccountBase,
   type AccountsGetRequest,
   type AccountsGetResponse,
+  type ItemGetRequest,
+  type ItemGetResponse,
   type Transaction,
   type TransactionStream,
   type TransactionStreamAmount,
@@ -41,10 +47,18 @@ import {
 import { plaidClient } from "@/lib/plaid";
 import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
-import { dayNumber, fromDayNumber, isIsoDate, toCents } from "@/lib/financeEngine";
+import {
+  computeCoverage,
+  dayNumber,
+  fromDayNumber,
+  isIsoDate,
+  toCents,
+} from "@/lib/financeEngine";
 import type {
+  Completeness,
   DateBasis,
   EngineAccount,
+  EngineConnection,
   EngineInput,
   EngineRecurringStream,
   EngineTransaction,
@@ -115,7 +129,7 @@ export interface BankWindow {
   end: string;
 }
 
-export type BankCompleteness = EngineInput["period"]["completeness"];
+export type BankCompleteness = Completeness;
 
 /** Body of a successful POST /api/finance/summary. */
 export interface FinanceSummaryResponse {
@@ -138,8 +152,9 @@ export interface TransactionsListResponse {
 
 type CallOptions = { timeout: number };
 
-/** The three Plaid calls, shaped like the SDK client so it can be passed as is. */
+/** The Plaid calls the adapter makes, shaped like the SDK client so it can be passed as is. */
 export interface PlaidReadCalls {
+  itemGet(request: ItemGetRequest, options?: CallOptions): Promise<{ data: ItemGetResponse }>;
   accountsGet(
     request: AccountsGetRequest,
     options?: CallOptions
@@ -175,6 +190,11 @@ export interface StoredConnectionRow {
   institution_name: string | null;
 }
 
+/**
+ * Which reads to make. `recurring` needs `accounts`: a stream that names no
+ * currency takes its account's, from the accounts read on the same
+ * connection, so readBankData refuses recurring without accounts.
+ */
 export interface BankReadRequest {
   accounts: boolean;
   transactions: boolean;
@@ -281,11 +301,41 @@ function accountType(raw: unknown): EngineAccount["type"] {
 export interface ReadAccount extends DisplayAccount {
   balanceAsOf: string | null;
   fetchedAt: string;
+  duplicateKey: string | null;
+  connectionKey: string;
+}
+
+function nonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * An opaque key two connections share for what looks like the same bank
+ * account: a hash of the institution's name, the account type, the last four
+ * digits and the account name. null when any of the four is missing, so an
+ * account is never matched on part of its description.
+ */
+export function duplicateKeyOf(
+  account: AccountBase,
+  institutionName: string | null
+): string | null {
+  const parts: unknown[] = [institutionName, account.type, account.mask, account.name];
+  for (let i = 0; i < parts.length; i++) {
+    if (!nonEmpty(parts[i])) return null;
+  }
+  return createHash("sha256")
+    .update(JSON.stringify(["v1"].concat(parts as string[])))
+    .digest("hex");
+}
+
+/** The connection key handed to the engine: its position in this request only. */
+export function connectionKeyOf(index: number): string {
+  return "c" + index;
 }
 
 export function mapAccount(
   account: AccountBase,
-  connection: { itemId: string; institutionName: string | null },
+  connection: { itemId: string; institutionName: string | null; connectionKey: string },
   fetchedAt: string
 ): ReadAccount {
   const b = account.balances;
@@ -304,10 +354,17 @@ export function mapAccount(
     currency: b.iso_currency_code ?? null,
     balanceAsOf: b.last_updated_datetime ?? null,
     fetchedAt,
+    duplicateKey: duplicateKeyOf(account, connection.institutionName),
+    connectionKey: connection.connectionKey,
   };
 }
 
-export function mapTransaction(txn: Transaction): DisplayTransaction {
+/** A transaction as read: what the screens show plus what only the engine needs. */
+export interface ReadTransaction extends DisplayTransaction {
+  merchantEntityId: string | null;
+}
+
+export function mapTransaction(txn: Transaction): ReadTransaction {
   const pfc = txn.personal_finance_category ?? null;
   return {
     transactionId: txn.transaction_id,
@@ -322,6 +379,7 @@ export function mapTransaction(txn: Transaction): DisplayTransaction {
     category: Array.isArray(txn.category) ? txn.category : [],
     pfcPrimary: pfc && pfc.primary ? pfc.primary : null,
     pfcDetailed: pfc && pfc.detailed ? pfc.detailed : null,
+    merchantEntityId: nonEmpty(txn.merchant_entity_id) ? txn.merchant_entity_id : null,
   };
 }
 
@@ -406,8 +464,17 @@ function formatShapeCounts(counts: ShapeCounts): string {
   return parts.join(",");
 }
 
+function stringsOnly(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] === "string") out.push(value[i]);
+  }
+  return out;
+}
+
 /**
- * An outflow stream as Plaid reported it. One gap is filled: when neither
+ * A stream (outflow or inflow) as Plaid reported it. One gap is filled: when neither
  * amount names a currency of any kind, the stream takes the currency of its
  * own account (`account_id`) from `accountCurrencies`, the accounts read on
  * the same connection; with no such account, or an account without an ISO
@@ -421,6 +488,7 @@ export function mapStream(
   const avg = stream.average_amount ?? {};
   const last = stream.last_amount ?? {};
   const { shape, iso } = streamCurrency(stream);
+  const pfc = stream.personal_finance_category ?? null;
   return {
     streamId: stream.stream_id,
     label: stream.merchant_name || stream.description || "Recurring charge",
@@ -432,6 +500,11 @@ export function mapStream(
     predictedNextDate: stream.predicted_next_date ?? null,
     isActive: stream.is_active === true,
     status: oneOf(stream.status, STATUSES) ?? "UNKNOWN",
+    accountId: nonEmpty(stream.account_id) ? stream.account_id : null,
+    pfcPrimary: pfc && pfc.primary ? pfc.primary : null,
+    pfcDetailed: pfc && pfc.detailed ? pfc.detailed : null,
+    legacyCategory: stringsOnly(stream.category),
+    transactionIds: stringsOnly(stream.transaction_ids),
   };
 }
 
@@ -448,11 +521,67 @@ function stateForError(error: unknown): { state: BankConnectionState; code: stri
 
 interface ConnectionRead {
   status: BankConnectionStatus;
+  engine: EngineConnection;
   accounts: ReadAccount[];
-  transactions: DisplayTransaction[];
-  /** null when the recurring call was not made or failed. */
-  streams: EngineRecurringStream[] | null;
-  truncated: boolean;
+  transactions: ReadTransaction[];
+  streams: EngineRecurringStream[];
+  incomeStreams: EngineRecurringStream[];
+}
+
+type ItemStatusRead =
+  | { state: "skipped" }
+  | { state: "ok"; lastSuccessfulUpdate: string | null }
+  | { state: "failed"; code: string };
+
+/**
+ * The Item's last successful transactions update, from /item/get. Started
+ * alongside the other reads and never rejects: a failure, including one
+ * thrown before the call is made, is an answer of its own and does not
+ * change the connection's status.
+ */
+function readItemStatus(
+  plaid: PlaidReadCalls,
+  accessToken: string,
+  options: CallOptions
+): Promise<ItemStatusRead> {
+  return Promise.resolve()
+    .then(() => plaid.itemGet({ access_token: accessToken }, options))
+    .then((response): ItemStatusRead => {
+      const last = response.data.status?.transactions?.last_successful_update;
+      return { state: "ok", lastSuccessfulUpdate: nonEmpty(last) ? last : null };
+    })
+    .catch((error: unknown): ItemStatusRead => ({
+      state: "failed",
+      code: getPlaidErrorCode(error) ?? "none",
+    }));
+}
+
+function itemLogFields(item: ItemStatusRead): string {
+  const lastUpdate =
+    item.state === "ok" && item.lastSuccessfulUpdate !== null ? "present" : "absent";
+  const code = item.state === "failed" ? ` item_code=${item.code}` : "";
+  return `item=${item.state}${code} last_update=${lastUpdate}`;
+}
+
+/** The earliest valid date among the transactions, or null. */
+function earliestDate(transactions: ReadTransaction[]): string | null {
+  let earliest: string | null = null;
+  for (let i = 0; i < transactions.length; i++) {
+    const d = transactions[i].date;
+    if (isIsoDate(d) && (earliest === null || d < earliest)) earliest = d;
+  }
+  return earliest;
+}
+
+/** Days from the window's start to the earliest transaction, or "none". */
+function historyDays(earliest: string | null, range: BankWindow): string {
+  const from = dayNumber(range.start);
+  const to = earliest === null ? null : dayNumber(earliest);
+  return from === null || to === null ? "none" : String(to - from);
+}
+
+function hasCategory(stream: TransactionStream): boolean {
+  return !!stream.personal_finance_category;
 }
 
 async function readConnection(
@@ -465,13 +594,19 @@ async function readConnection(
 ): Promise<ConnectionRead> {
   const itemId = row.item_id;
   const institutionName = row.institution_name ?? null;
+  const connectionKey = connectionKeyOf(index);
   const options: CallOptions = { timeout: PLAID_CALL_TIMEOUT_MS };
   const accounts: ReadAccount[] = [];
-  const transactions: DisplayTransaction[] = [];
+  const transactions: ReadTransaction[] = [];
   let pages = 0;
   let truncated = false;
   let pfcV2 = 0;
   let pfcOtherVersion = 0;
+  // Read with the accounts: the Item's status belongs to the connection, and
+  // a read that skips accounts (the transaction list) has no use for it.
+  const itemStatus: Promise<ItemStatusRead> = want.accounts
+    ? readItemStatus(plaid, accessToken, options)
+    : Promise.resolve({ state: "skipped" });
 
   try {
     if (want.accounts) {
@@ -479,7 +614,9 @@ async function readConnection(
       const fetchedAt = new Date().toISOString();
       const list = response.data.accounts;
       for (let i = 0; i < list.length; i++) {
-        accounts.push(mapAccount(list[i], { itemId, institutionName }, fetchedAt));
+        accounts.push(
+          mapAccount(list[i], { itemId, institutionName, connectionKey }, fetchedAt)
+        );
       }
     }
 
@@ -523,21 +660,34 @@ async function readConnection(
     }
   } catch (error: unknown) {
     const { state, code } = stateForError(error);
+    const item = await itemStatus;
     console.warn(
       `[bank-read] idx=${index} status=${state} code=${code} pages=${pages} ` +
         `truncated=false pfc_v2=0 pfc_other_version=0 recurring=skipped streams=0 ` +
-        `stream_ccy=${formatShapeCounts(emptyShapeCounts())}`
+        `stream_ccy=${formatShapeCounts(emptyShapeCounts())} ` +
+        `${itemLogFields(item)} inflow_streams=0 stream_pfc=0 history_days=none`
     );
     return {
       status: { itemId, institutionName, status: state },
+      engine: {
+        connectionKey,
+        state,
+        lastSuccessfulUpdate: item.state === "ok" ? item.lastSuccessfulUpdate : null,
+        recurringRead: null,
+        transactionsTruncated: false,
+        earliestTransactionDate: null,
+      },
       accounts: [],
       transactions: [],
-      streams: null,
-      truncated: false,
+      streams: [],
+      incomeStreams: [],
     };
   }
 
+  // null when the recurring call was not made or failed.
   let streams: EngineRecurringStream[] | null = null;
+  let incomeStreams: EngineRecurringStream[] = [];
+  let streamsWithCategory = 0;
   let recurringCode = "none";
   const shapeCounts = emptyShapeCounts();
   if (want.recurring) {
@@ -560,47 +710,86 @@ async function readConnection(
         options
       );
       const outflow = response.data.outflow_streams ?? [];
+      const inflow = response.data.inflow_streams ?? [];
       const mapped: EngineRecurringStream[] = [];
+      const mappedIncome: EngineRecurringStream[] = [];
       const counted = emptyShapeCounts();
+      let withCategory = 0;
       for (let i = 0; i < outflow.length; i++) {
         counted[streamCurrency(outflow[i]).shape] += 1;
+        if (hasCategory(outflow[i])) withCategory += 1;
         mapped.push(mapStream(outflow[i], accountCurrencies));
+      }
+      for (let i = 0; i < inflow.length; i++) {
+        if (hasCategory(inflow[i])) withCategory += 1;
+        mappedIncome.push(mapStream(inflow[i], accountCurrencies));
       }
       // Committed only once every stream mapped, so a failure part-way through
       // reports no streams and no counts rather than some of each.
       streams = mapped;
+      incomeStreams = mappedIncome;
+      streamsWithCategory = withCategory;
       for (let i = 0; i < STREAM_CURRENCY_SHAPES.length; i++) {
         shapeCounts[STREAM_CURRENCY_SHAPES[i]] = counted[STREAM_CURRENCY_SHAPES[i]];
       }
     } catch (error: unknown) {
       recurringCode = getPlaidErrorCode(error) ?? "none";
       streams = null;
+      incomeStreams = [];
+      streamsWithCategory = 0;
     }
   }
 
+  const recurringRead: EngineConnection["recurringRead"] = !want.recurring
+    ? null
+    : streams === null
+      ? "failed"
+      : streams.length === 0
+        ? "empty"
+        : "ok";
+  const earliest = earliestDate(transactions);
+  const item = await itemStatus;
   const recurringLabel = !want.recurring ? "skipped" : streams === null ? "failed" : "ok";
   console.log(
     `[bank-read] idx=${index} status=ok code=${recurringCode} pages=${pages} ` +
       `truncated=${truncated} pfc_v2=${pfcV2} pfc_other_version=${pfcOtherVersion} ` +
       `recurring=${recurringLabel} streams=${streams === null ? 0 : streams.length} ` +
-      `stream_ccy=${formatShapeCounts(shapeCounts)}`
+      `stream_ccy=${formatShapeCounts(shapeCounts)} ` +
+      `${itemLogFields(item)} inflow_streams=${incomeStreams.length} ` +
+      `stream_pfc=${streamsWithCategory} history_days=${historyDays(earliest, range)}`
   );
 
   return {
     status: { itemId, institutionName, status: "ok" },
+    engine: {
+      connectionKey,
+      state: "ok",
+      lastSuccessfulUpdate: item.state === "ok" ? item.lastSuccessfulUpdate : null,
+      recurringRead,
+      transactionsTruncated: truncated,
+      earliestTransactionDate: earliest,
+    },
     accounts,
     transactions,
-    streams,
-    truncated,
+    streams: streams === null ? [] : streams,
+    incomeStreams,
   };
 }
 
+/**
+ * Every connection's answer, merged. Whether the figures are complete, and
+ * whether recurring charges are known, is not decided here: the engine
+ * decides both from `engineConnections`.
+ */
 export interface BankRead {
+  /** Per connection, for the screens: which bank, and whether it was read. */
   connections: BankConnectionStatus[];
+  /** Per connection, for the engine, in the same order. */
+  engineConnections: EngineConnection[];
   accounts: ReadAccount[];
-  transactions: DisplayTransaction[];
-  recurring: EngineInput["recurring"];
-  completeness: BankCompleteness;
+  transactions: ReadTransaction[];
+  streams: EngineRecurringStream[];
+  incomeStreams: EngineRecurringStream[];
 }
 
 /**
@@ -618,6 +807,11 @@ export async function readBankData(
   range: BankWindow,
   deps: BankAdapterDeps
 ): Promise<BankRead> {
+  // Checked before any token is decrypted or any call made.
+  if (want.recurring && !want.accounts) {
+    throw new Error("readBankData: recurring needs accounts");
+  }
+
   const tokens: string[] = [];
   for (let i = 0; i < rows.length; i++) {
     tokens.push(deps.decrypt(rows[i].access_token, userId));
@@ -628,19 +822,17 @@ export async function readBankData(
   );
 
   const connections: BankConnectionStatus[] = [];
+  const engineConnections: EngineConnection[] = [];
   const accounts: ReadAccount[] = [];
-  const transactions: DisplayTransaction[] = [];
+  const transactions: ReadTransaction[] = [];
   const streams: EngineRecurringStream[] = [];
+  const incomeStreams: EngineRecurringStream[] = [];
   const seenAccounts = new Set<string>();
-  let allOk = true;
-  let allRecurringOk = true;
-  let anyTruncated = false;
 
   for (let i = 0; i < reads.length; i++) {
     const r = reads[i];
     connections.push(r.status);
-    if (r.status.status !== "ok") allOk = false;
-    if (r.truncated) anyTruncated = true;
+    engineConnections.push(r.engine);
     for (let j = 0; j < r.accounts.length; j++) {
       // Distinct Items normally yield distinct account ids; never emit one twice.
       if (seenAccounts.has(r.accounts[j].accountId)) continue;
@@ -648,25 +840,16 @@ export async function readBankData(
       accounts.push(r.accounts[j]);
     }
     for (let j = 0; j < r.transactions.length; j++) transactions.push(r.transactions[j]);
-    if (r.streams === null) allRecurringOk = false;
-    else for (let j = 0; j < r.streams.length; j++) streams.push(r.streams[j]);
+    for (let j = 0; j < r.streams.length; j++) streams.push(r.streams[j]);
+    for (let j = 0; j < r.incomeStreams.length; j++) incomeStreams.push(r.incomeStreams[j]);
   }
 
-  // Recurring charges are known only when every bank answered and at least one
-  // stream came back. An empty answer is treated as unknown, not as "none":
-  // Plaid needs enough history to detect a stream, so empty does not prove absence.
-  const recurring: EngineInput["recurring"] =
-    want.recurring && allOk && allRecurringOk && streams.length > 0
-      ? { source: "plaid_streams", streams }
-      : { source: "unavailable" };
+  return { connections, engineConnections, accounts, transactions, streams, incomeStreams };
+}
 
-  const completeness: BankCompleteness = !allOk
-    ? "unknown"
-    : anyTruncated
-      ? "possibly_truncated"
-      : "complete";
-
-  return { connections, accounts, transactions, recurring, completeness };
+/** How complete the read was, decided by the engine from the connections. */
+export function readCompleteness(read: BankRead): BankCompleteness {
+  return computeCoverage(read.engineConnections, read.streams.length).completeness;
 }
 
 // ---- engine input and display -------------------------------------------------
@@ -688,7 +871,25 @@ export function toDisplayAccount(a: ReadAccount): DisplayAccount {
   };
 }
 
-function toEngineTransaction(t: DisplayTransaction): EngineTransaction {
+/** A transaction as the screens receive it: no field only the engine reads. */
+export function toDisplayTransaction(t: ReadTransaction): DisplayTransaction {
+  return {
+    transactionId: t.transactionId,
+    accountId: t.accountId,
+    amountCents: t.amountCents,
+    currency: t.currency,
+    date: t.date,
+    pending: t.pending,
+    name: t.name,
+    merchantName: t.merchantName,
+    logoUrl: t.logoUrl,
+    category: t.category,
+    pfcPrimary: t.pfcPrimary,
+    pfcDetailed: t.pfcDetailed,
+  };
+}
+
+function toEngineTransaction(t: ReadTransaction): EngineTransaction {
   return {
     transactionId: t.transactionId,
     accountId: t.accountId,
@@ -699,6 +900,7 @@ function toEngineTransaction(t: DisplayTransaction): EngineTransaction {
     pfcPrimary: t.pfcPrimary,
     pfcDetailed: t.pfcDetailed,
     legacyCategory: t.category,
+    merchantEntityId: t.merchantEntityId,
   };
 }
 
@@ -730,14 +932,13 @@ export function toEngineInput(read: BankRead, dates: EngineInputDates): EngineIn
       currency: a.currency,
       balanceAsOf: a.balanceAsOf,
       fetchedAt: a.fetchedAt,
+      duplicateKey: a.duplicateKey,
+      connectionKey: a.connectionKey,
     })),
     transactions: read.transactions.map(toEngineTransaction),
     readWindow: { start: dates.readWindow.start, end: dates.readWindow.end },
-    period: {
-      start: dates.period.start,
-      end: dates.period.end,
-      completeness: read.completeness,
-    },
-    recurring: read.recurring,
+    period: { start: dates.period.start, end: dates.period.end },
+    connections: read.engineConnections.map((c) => ({ ...c })),
+    recurring: { streams: read.streams, incomeStreams: read.incomeStreams },
   };
 }

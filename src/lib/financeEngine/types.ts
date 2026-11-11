@@ -45,6 +45,14 @@ export interface EngineAccount {
   balanceAsOf: IsoDateTime | null;
   /** When our server received the balance. Not a substitute for balanceAsOf. */
   fetchedAt: IsoDateTime;
+  /**
+   * Opaque key shared by two accounts that look like the same bank account
+   * reached through two connections; null when the source lacked any part
+   * of it. Never in the output.
+   */
+  duplicateKey: string | null;
+  /** Opaque key of the connection the account was read through. Never in the output. */
+  connectionKey: string;
 }
 
 export interface EngineTransaction {
@@ -60,6 +68,8 @@ export interface EngineTransaction {
   pfcDetailed: string | null;
   /** Plaid legacy category hierarchy. May be empty. */
   legacyCategory: string[];
+  /** Plaid's merchant identifier, when it has one. */
+  merchantEntityId: string | null;
 }
 
 export type RecurringFrequency =
@@ -80,7 +90,10 @@ export interface EngineRecurringStream {
   streamId: string;
   label: string;
   frequency: RecurringFrequency;
-  /** Positive cents per occurrence (Plaid outflow streams report positive amounts). */
+  /**
+   * Cents per occurrence, with Plaid's sign: outflow streams report positive
+   * amounts, inflow (income) streams negative ones.
+   */
   averageAmountCents: Cents | null;
   lastAmountCents: Cents | null;
   currency: string | null;
@@ -88,6 +101,42 @@ export interface EngineRecurringStream {
   predictedNextDate: IsoDate | null;
   isActive: boolean;
   status: RecurringStatus;
+  /** The account the stream charges or pays into, when the source names one. */
+  accountId: string | null;
+  /** Plaid personal_finance_category of the stream, treated as opaque. */
+  pfcPrimary: string | null;
+  pfcDetailed: string | null;
+  /** Plaid legacy category hierarchy. May be empty. */
+  legacyCategory: string[];
+  /** The transactions Plaid grouped into the stream. May be empty. */
+  transactionIds: string[];
+}
+
+export type ConnectionState = "ok" | "login_required" | "syncing" | "failed";
+
+/** One bank connection as the caller read it. */
+export interface EngineConnection {
+  /** Opaque key, matching EngineAccount.connectionKey. Never in the output. */
+  connectionKey: string;
+  /** "ok" means every account and transaction call succeeded. */
+  state: ConnectionState;
+  /** The institution's last successful transactions update, when known. */
+  lastSuccessfulUpdate: IsoDateTime | null;
+  /**
+   * The recurring-charges read, apart from the state:
+   *   ok     - outflow streams came back
+   *   empty  - the call answered with no outflow streams
+   *   failed - the call failed
+   *   null   - not attempted, because the connection was not read
+   */
+  recurringRead: "ok" | "empty" | "failed" | null;
+  /** The transaction pages stopped before the reported total. */
+  transactionsTruncated: boolean;
+  /**
+   * The earliest transaction date received on this connection, as a measure
+   * of how much history the institution has sent; null when none arrived.
+   */
+  earliestTransactionDate: IsoDate | null;
 }
 
 /**
@@ -111,18 +160,28 @@ export interface EngineInput {
   accounts: EngineAccount[];
   /** Transactions over `readWindow`; the cash flow counts only `period`. */
   transactions: EngineTransaction[];
-  /** The window the caller fetched transactions for, inclusive on both ends. */
+  /**
+   * The window the caller fetched transactions for, inclusive on both ends.
+   * It ends on `today`.
+   */
   readWindow: { start: IsoDate; end: IsoDate };
   /** The cash-flow period, inclusive on both ends, inside `readWindow`. */
-  period: {
-    start: IsoDate;
-    end: IsoDate;
-    completeness: "complete" | "possibly_truncated" | "unknown";
+  period: { start: IsoDate; end: IsoDate };
+  /**
+   * Every connection the caller tried to read. Completeness, whether
+   * recurring charges are known, and whether safe-to-spend may be shown are
+   * decided from these.
+   */
+  connections: EngineConnection[];
+  recurring: {
+    /** Outflow streams of every connection that answered. */
+    streams: EngineRecurringStream[];
+    /** Inflow (income) streams of every connection that answered. */
+    incomeStreams: EngineRecurringStream[];
   };
-  recurring:
-    | { source: "plaid_streams"; streams: EngineRecurringStream[] }
-    | { source: "unavailable" };
 }
+
+export type Completeness = "complete" | "possibly_truncated" | "unknown";
 
 /** The adjustable parts of the safe-to-spend definition. Echoed in the output. */
 export interface EnginePolicy {
@@ -183,7 +242,8 @@ export interface CashFlowResult {
     end: IsoDate;
     /** Inclusive day count; 0 when the period is not a valid date range. */
     days: number;
-    completeness: EngineInput["period"]["completeness"];
+    /** Same as FinancialSummary.coverage.completeness. */
+    completeness: Completeness;
   };
   incomeCents: Cents;
   spendingGrossCents: Cents;
@@ -321,10 +381,28 @@ export interface DataIssue {
     | "unclassified_category";
 }
 
+/** What the connections let the figures claim. */
+export interface CoverageResult {
+  /**
+   *   complete           - every connection was read and no page limit was hit
+   *   possibly_truncated - every connection was read, but one hit the page limit
+   *   unknown            - a connection was not read
+   */
+  completeness: Completeness;
+  /** At least one connection, and every one was read. */
+  allConnectionsRead: boolean;
+  /**
+   * Safe-to-spend may be shown: every connection was read (a bank that was
+   * not may hold a card balance the figure would miss) and it was computed.
+   */
+  safeToSpendShowable: boolean;
+}
+
 export interface FinancialSummary {
   engineVersion: "v1";
   currency: string;
   computedAt: IsoDateTime;
+  coverage: CoverageResult;
   cashFlow: CashFlowResult;
   recurring: RecurringResult;
   safeToSpend: SafeToSpendResult;

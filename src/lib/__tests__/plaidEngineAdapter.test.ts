@@ -11,6 +11,7 @@ import {
   type AccountBase,
   type AccountsGetResponse,
   type Item,
+  type ItemGetResponse,
   type Transaction,
   type TransactionStream,
   type TransactionsGetResponse,
@@ -22,7 +23,9 @@ import {
   TRANSACTIONS_PAGE_SIZE,
   bankWindow,
   readBankData,
+  readCompleteness,
   resolveToday,
+  toDisplayTransaction,
   toEngineInput,
   type EngineInputDates,
   type BankAdapterDeps,
@@ -67,6 +70,11 @@ const DATES: EngineInputDates = {
 };
 const ALL ={ accounts: true, transactions: true, recurring: true };
 const USER = "user-1";
+
+/** The engine's recurring answer for a read, with DATES. */
+function engineRecurringOf(read: Awaited<ReturnType<typeof readBankData>>) {
+  return computeFinancialSummary(toEngineInput(read, DATES)).recurring;
+}
 
 function row(n: number): StoredConnectionRow {
   return { access_token: `CIPHER_${n}`, item_id: `item-${n}`, institution_name: `Bank ${n}` };
@@ -188,12 +196,33 @@ type Script = {
   /** One entry per page call, in order; the last repeats. */
   pages?: Array<{ transactions: Transaction[]; total: number } | Error>;
   streams?: TransactionStream[] | Error;
+  inflow?: TransactionStream[];
+  /** /item/get: the last successful update, an error, or "throw" to fail before the call. */
+  item?: { lastSuccessfulUpdate: string | null } | Error | "throw";
 };
 
 function fakePlaid(scripts: Record<string, Script>) {
-  const calls = { accounts: [] as unknown[], transactions: [] as any[], recurring: [] as any[] };
+  const calls = {
+    accounts: [] as unknown[],
+    transactions: [] as any[],
+    recurring: [] as any[],
+    item: [] as any[],
+  };
   const pageIndex: Record<string, number> = {};
   const plaid: PlaidReadCalls = {
+    itemGet(req) {
+      calls.item.push(req);
+      const s = scripts[req.access_token] ?? {};
+      if (s.item === "throw") throw new Error("thrown before the call");
+      if (s.item instanceof Error) return Promise.reject(s.item);
+      const last = s.item ? s.item.lastSuccessfulUpdate : null;
+      const data: ItemGetResponse = {
+        item: { ...ITEM, available_products: [], billed_products: [] },
+        status: { transactions: { last_successful_update: last, last_failed_update: null } },
+        request_id: "req",
+      };
+      return Promise.resolve({ data });
+    },
     async accountsGet(req) {
       calls.accounts.push(req);
       const s = scripts[req.access_token] ?? {};
@@ -227,7 +256,7 @@ function fakePlaid(scripts: Record<string, Script>) {
       const s = scripts[req.access_token] ?? {};
       if (s.streams instanceof Error) throw s.streams;
       const data: TransactionsRecurringGetResponse = {
-        inflow_streams: [],
+        inflow_streams: s.inflow ?? [],
         outflow_streams: s.streams ?? [stream("s1")],
         updated_datetime: "2026-11-11T00:00:00Z",
         request_id: "req",
@@ -392,7 +421,8 @@ describe("transaction paging", () => {
     expect(calls.transactions.map((c) => c.req.options.offset)).toEqual([0, 500, 1000]);
     expect(calls.transactions.every((c) => c.req.options.count === TRANSACTIONS_PAGE_SIZE)).toBe(true);
     expect(read.transactions).toHaveLength(1200);
-    expect(read.completeness).toBe("complete");
+    expect(read.engineConnections[0].transactionsTruncated).toBe(false);
+    expect(readCompleteness(read)).toBe("complete");
   });
 
   it("stops at the page cap and reports the window as possibly truncated", async () => {
@@ -402,7 +432,8 @@ describe("transaction paging", () => {
     });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(calls.transactions).toHaveLength(MAX_TRANSACTION_PAGES);
-    expect(read.completeness).toBe("possibly_truncated");
+    expect(read.engineConnections[0].transactionsTruncated).toBe(true);
+    expect(readCompleteness(read)).toBe("possibly_truncated");
   });
 
   it("stops on an empty page that should not be empty, and reports truncation", async () => {
@@ -416,7 +447,8 @@ describe("transaction paging", () => {
     });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(calls.transactions).toHaveLength(2);
-    expect(read.completeness).toBe("possibly_truncated");
+    expect(read.engineConnections[0].transactionsTruncated).toBe(true);
+    expect(readCompleteness(read)).toBe("possibly_truncated");
   });
 
   it("asks both Plaid calls for PFC v2 and carries PFC on each transaction", async () => {
@@ -452,8 +484,9 @@ describe("recurring streams", () => {
       },
     });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
-    expect(read.recurring.source).toBe("plaid_streams");
-    const streams = read.recurring.source === "plaid_streams" ? read.recurring.streams : [];
+    expect(read.engineConnections[0].recurringRead).toBe("ok");
+    expect(engineRecurringOf(read).source).toBe("plaid_streams");
+    const streams = read.streams;
     expect(streams.map((s) => s.frequency)).toEqual(["BIWEEKLY", "SEMI_MONTHLY", "MONTHLY"]);
     expect(streams[2]).toMatchObject({ isActive: false, status: "TOMBSTONED", lastAmountCents: 999, averageAmountCents: 1549 });
   });
@@ -462,13 +495,16 @@ describe("recurring streams", () => {
     const { plaid } = fakePlaid({ TOKEN_1: { streams: plaidError("INTERNAL_SERVER_ERROR") } });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(read.connections[0].status).toBe("ok");
-    expect(read.recurring).toEqual({ source: "unavailable" });
+    expect(read.engineConnections[0]).toMatchObject({ state: "ok", recurringRead: "failed" });
+    expect(read.streams).toEqual([]);
+    expect(engineRecurringOf(read)).toMatchObject({ source: "unavailable", totalMonthlyCents: null });
   });
 
   it("an empty stream list is unknown, not zero", async () => {
     const { plaid } = fakePlaid({ TOKEN_1: { streams: [] } });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
-    expect(read.recurring).toEqual({ source: "unavailable" });
+    expect(read.engineConnections[0].recurringRead).toBe("empty");
+    expect(engineRecurringOf(read)).toMatchObject({ source: "unavailable", totalMonthlyCents: null });
   });
 
   it("is not called when not requested", async () => {
@@ -496,8 +532,7 @@ describe("stream currency", () => {
     iso_currency_code: null,
     unofficial_currency_code: code,
   });
-  const streamsOf = (read: Awaited<ReturnType<typeof readBankData>>) =>
-    read.recurring.source === "plaid_streams" ? read.recurring.streams : [];
+  const streamsOf = (read: Awaited<ReturnType<typeof readBankData>>) => read.streams;
   const engineRecurring = (read: Awaited<ReturnType<typeof readBankData>>) =>
     computeFinancialSummary(toEngineInput(read, DATES)).recurring;
   const bankReadLine = (spy: unknown) =>
@@ -623,8 +658,12 @@ describe("connection status", () => {
       { itemId: "item-2", institutionName: "Bank 2", status: "ok" },
     ]);
     expect(read.accounts.map((a) => a.accountId)).toEqual(["acc-2"]);
-    expect(read.completeness).toBe("unknown");
-    expect(read.recurring).toEqual({ source: "unavailable" });
+    expect(read.engineConnections.map((c) => [c.state, c.recurringRead])).toEqual([
+      ["login_required", null],
+      ["ok", "ok"],
+    ]);
+    expect(readCompleteness(read)).toBe("unknown");
+    expect(engineRecurringOf(read).source).toBe("unavailable");
   });
 
   it("INVALID_ACCESS_TOKEN is a login problem too", async () => {
@@ -641,7 +680,8 @@ describe("connection status", () => {
     expect(read.connections[0].status).toBe("failed");
     expect(read.accounts).toEqual([]);
     expect(read.transactions).toEqual([]);
-    expect(read.completeness).toBe("unknown");
+    expect(read.streams).toEqual([]);
+    expect(readCompleteness(read)).toBe("unknown");
   });
 
   it("an error with no Plaid code (a timeout) is failed", async () => {
@@ -654,7 +694,8 @@ describe("connection status", () => {
     const { plaid } = fakePlaid({ TOKEN_1: { pages: [plaidError("PRODUCT_NOT_READY")] } });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(read.connections[0].status).toBe("syncing");
-    expect(read.completeness).toBe("unknown");
+    expect(read.engineConnections[0].state).toBe("syncing");
+    expect(readCompleteness(read)).toBe("unknown");
   });
 
   it("a decrypt failure throws before any Plaid call", async () => {
@@ -681,6 +722,175 @@ describe("connection status", () => {
   });
 });
 
+/*
+ * What the engine now receives beyond balances and transactions.
+ *
+ * Mutations that turn this block red:
+ *   - inflow streams dropped or mixed into the outflow list  -> "inflow streams …"
+ *   - a stream's category, account or transaction ids dropped -> "a stream carries …"
+ *   - merchant_entity_id dropped                             -> "a transaction carries …"
+ *   - an /item/get failure turned into a connection status   -> "the Item's last update …"
+ *   - a duplicate key built from part of the description     -> "the duplicate key …"
+ *   - the duplicate key built from readable text             -> "the duplicate key …"
+ *   - the recurring-without-accounts guard removed           -> "refuses recurring without accounts …"
+ */
+describe("engine input fields", () => {
+  const withCategory = {
+    personal_finance_category: {
+      primary: "ENTERTAINMENT",
+      detailed: "ENTERTAINMENT_TV_AND_MOVIES",
+      version: PersonalFinanceCategoryVersion.V2,
+    },
+  };
+
+  it("inflow streams arrive as a separate income list", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: {
+        streams: [stream("out")],
+        inflow: [
+          stream("pay", {
+            merchant_name: null,
+            description: "PAYROLL",
+            average_amount: { amount: -2500, iso_currency_code: "USD", unofficial_currency_code: null },
+            last_amount: { amount: -2500, iso_currency_code: "USD", unofficial_currency_code: null },
+          }),
+        ],
+      },
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(read.streams.map((s) => s.streamId)).toEqual(["out"]);
+    expect(read.incomeStreams.map((s) => [s.streamId, s.averageAmountCents])).toEqual([["pay", -250000]]);
+    const input = toEngineInput(read, DATES);
+    expect(input.recurring.incomeStreams.map((s) => s.streamId)).toEqual(["pay"]);
+    // Income streams are not charges.
+    expect(computeFinancialSummary(input).recurring.items.map((i) => i.streamId)).toEqual(["out"]);
+  });
+
+  it("a stream carries its category, account and transaction ids", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: {
+        streams: [
+          stream("s", { ...withCategory, category: ["Service", "Subscription"], transaction_ids: ["t-a", "t-b"] }),
+          stream("bare"),
+        ],
+      },
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(read.streams[0]).toMatchObject({
+      accountId: "acc-1",
+      pfcPrimary: "ENTERTAINMENT",
+      pfcDetailed: "ENTERTAINMENT_TV_AND_MOVIES",
+      legacyCategory: ["Service", "Subscription"],
+      transactionIds: ["t-a", "t-b"],
+    });
+    expect(read.streams[1]).toMatchObject({
+      pfcPrimary: null,
+      pfcDetailed: null,
+      legacyCategory: [],
+      transactionIds: [],
+    });
+  });
+
+  it("a transaction carries Plaid's merchant id to the engine, not to the screens", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: { pages: [{ transactions: [txn("t1", { merchant_entity_id: "m-1" }), txn("t2")], total: 2 }] },
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(toEngineInput(read, DATES).transactions.map((t) => t.merchantEntityId)).toEqual(["m-1", null]);
+    expect(toDisplayTransaction(read.transactions[0])).not.toHaveProperty("merchantEntityId");
+  });
+
+  it("the Item's last update is carried, and its failure changes no status", async () => {
+    const ok = fakePlaid({ TOKEN_1: { item: { lastSuccessfulUpdate: "2026-11-11T03:00:00Z" } } });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(ok.plaid));
+    expect(ok.calls.item).toEqual([{ access_token: "TOKEN_1" }]);
+    expect(read.engineConnections[0]).toMatchObject({
+      state: "ok",
+      lastSuccessfulUpdate: "2026-11-11T03:00:00Z",
+    });
+
+    for (const item of [plaidError("INTERNAL_SERVER_ERROR"), "throw" as const]) {
+      const failing = fakePlaid({ TOKEN_1: { item } });
+      const r = await readBankData(USER, [row(1)], ALL, RANGE, deps(failing.plaid));
+      expect(r.connections[0].status).toBe("ok");
+      expect(r.engineConnections[0]).toMatchObject({ state: "ok", lastSuccessfulUpdate: null });
+      expect(r.transactions).toHaveLength(1);
+    }
+  });
+
+  it("the Item is not read when accounts are not", async () => {
+    const { plaid, calls } = fakePlaid({});
+    await readBankData(USER, [row(1)], { accounts: false, transactions: true, recurring: false }, RANGE, deps(plaid));
+    expect(calls.item).toHaveLength(0);
+  });
+
+  it("records the earliest transaction date received, per connection", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: {
+        pages: [{ transactions: [txn("a", { date: "2026-10-02" }), txn("b", { date: "2026-09-15" })], total: 2 }],
+      },
+      TOKEN_2: { pages: [{ transactions: [], total: 0 }] },
+    });
+    const read = await readBankData(USER, [row(1), row(2)], ALL, RANGE, deps(plaid));
+    expect(read.engineConnections.map((c) => c.earliestTransactionDate)).toEqual(["2026-09-15", null]);
+  });
+
+  it("the duplicate key matches the same account across connections and nothing less", async () => {
+    const same = account({ account_id: "a" });
+    const { plaid } = fakePlaid({
+      TOKEN_1: { accounts: [same, account({ account_id: "nomask", mask: null })] },
+      TOKEN_2: { accounts: [{ ...same, account_id: "b" }, account({ account_id: "other", name: "Savings" })] },
+    });
+    const rows = [row(1), { ...row(2), institution_name: "Bank 1" }];
+    const read = await readBankData(USER, rows, ALL, RANGE, deps(plaid));
+    const key = (id: string) => read.accounts.find((a) => a.accountId === id)?.duplicateKey;
+    expect(key("a")).toMatch(/^[0-9a-f]{64}$/);
+    expect(key("b")).toBe(key("a"));
+    expect(key("other")).not.toBe(key("a"));
+    expect(key("nomask")).toBeNull();
+    // A connection without an institution name gives no key at all.
+    const unnamed = await readBankData(USER, [{ ...row(1), institution_name: null }], ALL, RANGE, deps(plaid));
+    expect(unnamed.accounts.every((a) => a.duplicateKey === null)).toBe(true);
+    // Opaque: no part of the description is readable in it.
+    expect(key("a")).not.toMatch(/Bank|Checking|0000|depository/);
+    expect(read.accounts.map((a) => a.connectionKey)).toEqual(["c0", "c0", "c1", "c1"]);
+  });
+
+  it("refuses recurring without accounts before decrypting or calling Plaid", async () => {
+    const { plaid, calls } = fakePlaid({});
+    let decrypted = 0;
+    await expect(
+      readBankData(USER, [row(1)], { accounts: false, transactions: true, recurring: true }, RANGE, {
+        plaid,
+        decrypt: (stored) => {
+          decrypted += 1;
+          return stored;
+        },
+      })
+    ).rejects.toThrow(/recurring needs accounts/);
+    expect(decrypted).toBe(0);
+    expect(calls.accounts.length + calls.transactions.length + calls.recurring.length + calls.item.length).toBe(0);
+  });
+
+  it("logs the new read axes as counts, never values", async () => {
+    vi.mocked(console.log).mockClear();
+    const { plaid } = fakePlaid({
+      TOKEN_1: {
+        item: { lastSuccessfulUpdate: "2026-11-11T03:00:00Z" },
+        streams: [stream("a", withCategory), stream("b")],
+        inflow: [stream("pay", withCategory)],
+        pages: [{ transactions: [txn("t", { date: "2026-08-20" })], total: 1 }],
+      },
+    });
+    await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    const line = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.startsWith("[bank-read]"))[0];
+    expect(line).toContain("item=ok last_update=present inflow_streams=1 stream_pfc=2 history_days=6");
+    expect(line).not.toMatch(/2026-|ENTERTAINMENT|Netflix|TOKEN|item-1|acc-1/);
+  });
+});
+
 describe("engine input", () => {
   it("carries no display fields into the engine", async () => {
     const { plaid } = fakePlaid({});
@@ -690,7 +900,10 @@ describe("engine input", () => {
     expect(text).not.toContain("Bank 1");
     expect(text).not.toContain("item-1");
     expect(text).not.toContain("Checking");
-    expect(input.period).toEqual({ ...RANGE, completeness: "complete" });
+    expect(text).not.toContain("0000");
+    expect(input.period).toEqual(RANGE);
+    expect(input.readWindow).toEqual(RANGE);
+    expect(input.connections).toEqual(read.engineConnections);
     expect(input.currency).toBe("USD");
   });
 });

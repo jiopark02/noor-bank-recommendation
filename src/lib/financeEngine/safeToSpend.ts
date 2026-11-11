@@ -193,7 +193,7 @@ export function computeSafeToSpend(
   }
 
   // ---- recurring charges due before the horizon ends
-  if (input.recurring.source !== "plaid_streams") {
+  if (recurring.source !== "plaid_streams") {
     addAssumption("recurring_unavailable");
   } else {
     for (let i = 0; i < recurring.excluded.length; i++) {

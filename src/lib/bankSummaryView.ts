@@ -6,8 +6,9 @@
 // source:
 //   - A figure is shown only for a summary that arrived in this load; while
 //     loading, or after a failed load, no dollar amount is drawn.
-//   - Safe-to-spend is shown only when every bank connection was read. A bank
-//     that could not be read may hold a card balance the number would miss.
+//   - Safe-to-spend is shown only when the engine says it may be: every bank
+//     connection was read (a bank that could not be read may hold a card
+//     balance the number would miss) and the figure was computed.
 //   - Each connection that was not read gets one action: re-link for a login
 //     problem, wait while Plaid is still importing, retry otherwise.
 //   - Unknown recurring charges render as "Unknown", never as $0.00.
@@ -170,15 +171,13 @@ export function decideBankView(input: {
     return { figures: "unavailable", showSafeToSpend: false, actions, missingFrom: [] };
   }
 
-  const missingFrom = banksNotRead(connections);
-
-  const everyConnectionRead =
-    connections.length > 0 && connections.every((c) => c.status === "ok");
+  // Whether safe-to-spend may be shown is the engine's decision, made from
+  // the same connections; the screen only follows it.
   return {
     figures: "ready",
-    showSafeToSpend: everyConnectionRead && summary.safeToSpend.status === "computed",
+    showSafeToSpend: summary.coverage.safeToSpendShowable,
     actions,
-    missingFrom,
+    missingFrom: banksNotRead(connections),
   };
 }
 
@@ -353,6 +352,7 @@ export const SUMMARY_RESPONSE_FIELDS = {
   },
   summary: {
     orNull: {
+      coverage: { safeToSpendShowable: "boolean" },
       cashFlow: {
         incomeCents: "number",
         spendingNetCents: "number",

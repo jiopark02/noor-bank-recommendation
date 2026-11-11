@@ -11,7 +11,9 @@ import {
   bankWindow,
   liveAdapterDeps,
   readBankData,
+  readCompleteness,
   resolveToday,
+  toDisplayTransaction,
   type TransactionsListResponse,
 } from "@/lib/plaidEngineAdapter";
 
@@ -96,9 +98,9 @@ export async function POST(request: NextRequest) {
 
     const body: TransactionsListResponse = {
       success: true,
-      transactions: read.transactions,
+      transactions: read.transactions.map(toDisplayTransaction),
       connections: read.connections,
-      period: { ...range, completeness: read.completeness },
+      period: { ...range, completeness: readCompleteness(read) },
     };
     return NextResponse.json(body);
   } catch (error: unknown) {

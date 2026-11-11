@@ -23,7 +23,7 @@ import {
   type FieldSpec,
 } from "../bankSummaryView";
 import { computeFinancialSummary, DEFAULT_POLICY } from "../financeEngine";
-import type { EngineInput, FinancialSummary } from "../financeEngine";
+import type { EngineConnection, EngineInput, FinancialSummary } from "../financeEngine";
 import type {
   BankConnectionStatus,
   FinanceSummaryResponse,
@@ -34,6 +34,8 @@ import type {
  *
  * Mutations that turn this file red:
  *   - safe-to-spend shown whenever a summary exists               -> incomplete banks
+ *   - safe-to-spend decided from the response's connections
+ *     instead of the engine's coverage                            -> incomplete banks
  *   - the re-link target taken from the first connection          -> action per bank
  *   - an earlier response drawn after a failed load               -> failed load
  *   - an unknown recurring total formatted as 0 (`?? 0`)          -> formatting
@@ -59,13 +61,33 @@ function summary(over: Partial<EngineInput> = {}): FinancialSummary {
         currency: "USD",
         balanceAsOf: null,
         fetchedAt: "2026-11-11T11:59:00Z",
+        duplicateKey: null,
+        connectionKey: "c0",
       },
     ],
     transactions: [],
-    period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
-    recurring: { source: "unavailable" },
+    period: { start: "2026-08-14", end: "2026-11-11" },
+    connections: [engineConnection("c0", "ok")],
+    recurring: { streams: [], incomeStreams: [] },
     ...over,
   });
+}
+
+/** The engine's view of one connection, read in full unless `state` says otherwise. */
+function engineConnection(
+  connectionKey: string,
+  state: EngineConnection["state"],
+  over: Partial<EngineConnection> = {}
+): EngineConnection {
+  return {
+    connectionKey,
+    state,
+    lastSuccessfulUpdate: null,
+    recurringRead: state === "ok" ? "empty" : null,
+    transactionsTruncated: false,
+    earliestTransactionDate: null,
+    ...over,
+  };
 }
 
 const ok = (n: number): BankConnectionStatus => ({
@@ -74,11 +96,19 @@ const ok = (n: number): BankConnectionStatus => ({
   status: "ok",
 });
 
+/**
+ * A summary response. Unless a summary is given, it is computed from the
+ * same connections the response lists, as the route does.
+ */
 function response(
   connections: BankConnectionStatus[],
-  s: FinancialSummary | null = summary()
+  s?: FinancialSummary | null
 ): FinanceSummaryResponse {
-  return { success: true, connections, accounts: [], summary: s };
+  const computed =
+    s !== undefined
+      ? s
+      : summary({ connections: connections.map((c, i) => engineConnection("c" + i, c.status)) });
+  return { success: true, connections, accounts: [], summary: computed };
 }
 
 describe("decideBankView — figures", () => {
@@ -148,6 +178,21 @@ describe("decideBankView — banks that could not be read", () => {
     ]);
   });
 
+  // Red if: the screen decides from the response's connection list again
+  // instead of following the engine's decision.
+  it("follows the engine's decision, not its own reading of the connections", () => {
+    const engineSaysNo = summary({
+      connections: [engineConnection("c0", "ok"), engineConnection("c1", "failed")],
+    });
+    expect(engineSaysNo.coverage.safeToSpendShowable).toBe(false);
+    const view = decideBankView({
+      hasActiveConnection: true,
+      fetchState: "loaded",
+      response: response([ok(1), ok(2)], engineSaysNo),
+    });
+    expect(view.showSafeToSpend).toBe(false);
+  });
+
   it("safe-to-spend the engine could not compute is not shown", () => {
     const view = decideBankView({
       hasActiveConnection: true,
@@ -172,6 +217,7 @@ describe("decideBankView — data issues are information, not a task", () => {
           pfcPrimary: "OTHER",
           pfcDetailed: "OTHER_OTHER",
           legacyCategory: [],
+          merchantEntityId: null,
         },
       ],
     });
@@ -305,6 +351,7 @@ describe("decideBankView — banks the figures leave out", () => {
           pfcPrimary: "OTHER",
           pfcDetailed: "OTHER_OTHER",
           legacyCategory: [],
+          merchantEntityId: null,
         },
       ],
     });
@@ -348,6 +395,8 @@ describe("creditUsedCents", () => {
     currency,
     balanceAsOf: null,
     fetchedAt: "2026-11-11T11:59:00Z",
+    duplicateKey: null,
+    connectionKey: "c0",
   });
   const withCards = (cards: Array<ReturnType<typeof card>>, policy = DEFAULT_POLICY) =>
     computeFinancialSummary(
@@ -368,12 +417,15 @@ describe("creditUsedCents", () => {
             currency: "USD",
             balanceAsOf: null,
             fetchedAt: "2026-11-11T11:59:00Z",
+            duplicateKey: null,
+            connectionKey: "c0",
           },
           ...cards,
         ],
         transactions: [],
-        period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
-        recurring: { source: "unavailable" },
+        period: { start: "2026-08-14", end: "2026-11-11" },
+        connections: [engineConnection("c0", "ok")],
+        recurring: { streams: [], incomeStreams: [] },
       },
       policy
     );
@@ -522,6 +574,8 @@ describe("utilizationPercent", () => {
           currency: "USD",
           balanceAsOf: null,
           fetchedAt: "2026-11-11T11:59:00Z",
+          duplicateKey: null,
+          connectionKey: "c0",
         },
       ],
     });
@@ -765,6 +819,8 @@ describe("response bodies — every field the screens read is checked", () => {
           currency: "USD",
           balanceAsOf: null,
           fetchedAt: "2026-11-11T11:59:00Z",
+          duplicateKey: null,
+          connectionKey: "c0",
         },
         {
           accountId: "card",
@@ -776,10 +832,12 @@ describe("response bodies — every field the screens read is checked", () => {
           currency: "USD",
           balanceAsOf: null,
           fetchedAt: "2026-11-11T11:59:00Z",
+          duplicateKey: null,
+          connectionKey: "c0",
         },
       ],
+      connections: [engineConnection("c0", "ok", { recurringRead: "ok" })],
       recurring: {
-        source: "plaid_streams",
         streams: [
           {
             streamId: "s1",
@@ -792,8 +850,14 @@ describe("response bodies — every field the screens read is checked", () => {
             predictedNextDate: "2026-11-20",
             isActive: true,
             status: "MATURE",
+            accountId: "chk",
+            pfcPrimary: null,
+            pfcDetailed: null,
+            legacyCategory: [],
+            transactionIds: [],
           },
         ],
+        incomeStreams: [],
       },
     });
 
@@ -879,8 +943,18 @@ describe("response bodies — every field the screens read is checked", () => {
  */
 describe("incomplete period line", () => {
   const LINE = "May not include every transaction from this period.";
-  const withPeriod = (completeness: "complete" | "possibly_truncated" | "unknown") =>
-    response([ok(1)], summary({ period: { start: "2026-08-14", end: "2026-11-11", completeness } }));
+  // The engine decides completeness from the connections: one cut off at the
+  // page limit gives "possibly_truncated", one not read gives "unknown".
+  const ENGINE_CONNECTIONS = {
+    complete: [engineConnection("c0", "ok")],
+    possibly_truncated: [engineConnection("c0", "ok", { transactionsTruncated: true })],
+    unknown: [engineConnection("c0", "ok"), engineConnection("c1", "failed")],
+  };
+  const withPeriod = (completeness: "complete" | "possibly_truncated" | "unknown") => {
+    const s = summary({ connections: ENGINE_CONNECTIONS[completeness] });
+    expect(s.cashFlow.period.completeness).toBe(completeness);
+    return response([ok(1)], s);
+  };
   const readyView = (resp: FinanceSummaryResponse) =>
     decideBankView({ hasActiveConnection: true, fetchState: "loaded", response: resp });
 

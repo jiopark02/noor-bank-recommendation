@@ -41,6 +41,8 @@ const FORBIDDEN_KEY =
 
 const FETCHED = "2026-10-10T11:59:00Z";
 const SENTINEL = "SENTINEL_INSTITUTION_7c1e";
+const DUPLICATE_KEY_SENTINEL = "DUPLICATE_KEY_SENTINEL_9a3e";
+const CONNECTION_KEY_SENTINEL = "CONNECTION_KEY_SENTINEL_51ae";
 
 function account(over: Partial<EngineAccount>): EngineAccount {
   return {
@@ -53,6 +55,8 @@ function account(over: Partial<EngineAccount>): EngineAccount {
     currency: "USD",
     balanceAsOf: null,
     fetchedAt: FETCHED,
+    duplicateKey: DUPLICATE_KEY_SENTINEL,
+    connectionKey: CONNECTION_KEY_SENTINEL,
     ...over,
   };
 }
@@ -68,6 +72,7 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
     pfcPrimary: "FOOD_AND_DRINK",
     pfcDetailed: null,
     legacyCategory: [],
+    merchantEntityId: "MERCHANT_ENTITY_SENTINEL_0d42",
     ...over,
   };
 }
@@ -83,6 +88,11 @@ const netflix: EngineRecurringStream = {
   predictedNextDate: "2026-10-20",
   isActive: true,
   status: "MATURE",
+  accountId: "chk",
+  pfcPrimary: "ENTERTAINMENT",
+  pfcDetailed: "ENTERTAINMENT_TV_AND_MOVIES",
+  legacyCategory: ["Service"],
+  transactionIds: ["STREAM_TXN_SENTINEL_77c2"],
 };
 
 /** Exercises every output branch that can carry a number or a key. */
@@ -108,10 +118,22 @@ function maximalInput(): EngineInput {
       txn("t2", { amountCents: 10.5 }),
       { ...txn("t3", { amountCents: -500 }), merchant_name: SENTINEL } as EngineTransaction,
     ],
-    period: { start: "2026-09-11", end: "2026-10-10", completeness: "complete" },
+    period: { start: "2026-09-11", end: "2026-10-10" },
+    connections: [
+      {
+        connectionKey: CONNECTION_KEY_SENTINEL,
+        state: "ok",
+        lastSuccessfulUpdate: "2026-10-10T06:00:00Z",
+        recurringRead: "ok",
+        transactionsTruncated: false,
+        earliestTransactionDate: "2026-09-11",
+      },
+    ],
     recurring: {
-      source: "plaid_streams",
       streams: [netflix, { ...netflix, streamId: "unk", frequency: "UNKNOWN" }],
+      incomeStreams: [
+        { ...netflix, streamId: "INCOME_STREAM_SENTINEL_2f81", averageAmountCents: -250000 },
+      ],
     },
   };
 }
@@ -192,17 +214,17 @@ const EXPECTED_NUMERIC_PATHS = [
 ].sort();
 
 const EXPECTED_KEYS = [
-  "accountId", "accounts", "accountsExcluded", "accountsIncluded", "aggregate", "amountCents",
+  "accountId", "accounts", "accountsExcluded", "accountsIncluded", "aggregate", "allConnectionsRead", "amountCents",
   "anyAsOfUnknown", "asOf", "asOfSource", "assumptions", "balanceCents", "balances", "basis",
   "basisCents", "betweenAccounts", "bufferCents", "cardPayments", "cashFlow", "cents",
-  "classificationSource", "completeness", "computedAt", "count", "creditCardBalances",
+  "classificationSource", "completeness", "computedAt", "count", "coverage", "creditCardBalances",
   "creditUtilization", "currency", "dataIssues", "dateBasis", "days", "dueDate", "end", "engineVersion",
   "excluded", "excludedAccounts", "excludedRecurring", "fetchedAt", "field", "frequency", "freshness", "from",
   "horizon", "id", "incomeCents", "inputs", "invalid", "items", "kind", "label", "legacy",
   "limitCents", "loanDisbursements", "monthlyCents", "netCents", "nextDate", "nonCashAccounts", "none",
   "obligationsExceedCash", "oldestAsOf", "oldestFetchedAt", "otherCurrency", "outsidePeriod",
   "pastDueGraceDays", "pending", "period", "pfc", "policy", "ratioBasisPoints", "reason", "recurring", "refundsCents",
-  "reserveCreditCardBalances", "reservedCreditCents", "rule", "safeToSpend", "source",
+  "reserveCreditCardBalances", "reservedCreditCents", "rule", "safeToSpend", "safeToSpendShowable", "source",
   "spendableCashCents", "spendableSubtypes", "spendingGrossCents", "spendingNetCents", "start",
   "state", "status", "streamId", "subtype", "to", "totalMonthlyCents", "totals",
   "unclassifiedCategory", "unclassifiedInflowCents", "uncoveredObligationsCents", "unknownAccount", "upcomingRecurring",
@@ -246,6 +268,24 @@ describe("finance engine output boundary", () => {
 
   it("(4) an institution name on an input never reaches the output", () => {
     expect(JSON.stringify(summary)).not.toContain(SENTINEL);
+  });
+
+  // Red if: an opaque key, or an input field the engine only carries for
+  // later use, is copied into the output.
+  it("(4) the opaque keys and carried-only inputs never reach the output", () => {
+    const text = JSON.stringify(summary);
+    for (const value of [
+      DUPLICATE_KEY_SENTINEL,
+      CONNECTION_KEY_SENTINEL,
+      "MERCHANT_ENTITY_SENTINEL_0d42",
+      "STREAM_TXN_SENTINEL_77c2",
+      "INCOME_STREAM_SENTINEL_2f81",
+    ]) {
+      expect(text, value).not.toContain(value);
+    }
+    for (const key of ["duplicateKey", "connectionKey", "connections"]) {
+      expect(keys, key).not.toContain(key);
+    }
   });
 
   it("(2) the maximal fixture reaches the excluded-account lists", () => {

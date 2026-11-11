@@ -36,10 +36,35 @@ function empty(): EngineInput {
     currency: "USD",
     accounts: [],
     transactions: [],
-    period: { start: "2026-09-11", end: "2026-10-10", completeness: "unknown" },
-    recurring: { source: "unavailable" },
+    period: { start: "2026-09-11", end: "2026-10-10" },
+    // One connection read in full, so streams a test adds are used.
+    connections: [
+      {
+        connectionKey: "c0",
+        state: "ok",
+        lastSuccessfulUpdate: null,
+        recurringRead: "ok",
+        transactionsTruncated: false,
+        earliestTransactionDate: null,
+      },
+    ],
+    recurring: { streams: [], incomeStreams: [] },
   };
 }
+
+/** Recurring input carrying these outflow streams only. */
+function streamsOnly(streams: EngineRecurringStream[]): EngineInput["recurring"] {
+  return { streams, incomeStreams: [] };
+}
+
+const KEYS = { duplicateKey: null, connectionKey: "c0" } as const;
+const STREAM_EXTRAS = {
+  accountId: null,
+  pfcPrimary: null,
+  pfcDetailed: null,
+  legacyCategory: [] as string[],
+  transactionIds: [] as string[],
+};
 
 function acct(over: Partial<EngineAccount>): EngineAccount {
   return {
@@ -52,6 +77,7 @@ function acct(over: Partial<EngineAccount>): EngineAccount {
     currency: "USD",
     balanceAsOf: null,
     fetchedAt: "2026-10-10T11:59:00Z",
+    ...KEYS,
     ...over,
   };
 }
@@ -68,6 +94,7 @@ function strm(over: Partial<EngineRecurringStream>): EngineRecurringStream {
     predictedNextDate: "2026-10-20",
     isActive: true,
     status: "MATURE",
+    ...STREAM_EXTRAS,
     ...over,
   };
 }
@@ -83,6 +110,7 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
     pfcPrimary: "FOOD_AND_DRINK",
     pfcDetailed: null,
     legacyCategory: [],
+    merchantEntityId: null,
     ...over,
   };
 }
@@ -105,7 +133,7 @@ describe("computeFinancialSummary — edges", () => {
     input.accounts = [
       {
         accountId: "chk", type: "depository", subtype: "checking", currentCents: 100, availableCents: 100,
-        limitCents: null, currency: "USD", balanceAsOf: null, fetchedAt: "2026-10-10T11:59:00Z",
+        limitCents: null, currency: "USD", balanceAsOf: null, fetchedAt: "2026-10-10T11:59:00Z", ...KEYS,
       },
     ];
     input.transactions = [
@@ -128,7 +156,7 @@ describe("computeFinancialSummary — edges", () => {
 
   it("an invalid period is reported", () => {
     const input = empty();
-    input.period = { start: "2026-02-30", end: "2026-10-10", completeness: "unknown" };
+    input.period = { start: "2026-02-30", end: "2026-10-10" };
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "period", id: "period", reason: "invalid_period" },
     ]);
@@ -139,18 +167,16 @@ describe("computeFinancialSummary — edges", () => {
     input.accounts = [
       {
         accountId: "chk", type: "depository", subtype: "checking", currentCents: 1.5, availableCents: null,
-        limitCents: null, currency: "USD", balanceAsOf: null, fetchedAt: "2026-10-10T11:59:00Z",
+        limitCents: null, currency: "USD", balanceAsOf: null, fetchedAt: "2026-10-10T11:59:00Z", ...KEYS,
       },
     ];
-    input.recurring = {
-      source: "plaid_streams",
-      streams: [
-        {
-          streamId: "s", label: "S", frequency: "MONTHLY", averageAmountCents: 2.5, lastAmountCents: null,
-          currency: "USD", lastDate: null, predictedNextDate: null, isActive: true, status: "MATURE",
-        },
-      ],
-    };
+    input.recurring = streamsOnly([
+      {
+        streamId: "s", label: "S", frequency: "MONTHLY", averageAmountCents: 2.5, lastAmountCents: null,
+        currency: "USD", lastDate: null, predictedNextDate: null, isActive: true, status: "MATURE",
+        ...STREAM_EXTRAS,
+      },
+    ]);
     const s = computeFinancialSummary(input);
     expect(s.dataIssues).toEqual([
       { kind: "account", id: "chk", reason: "invalid_amount" },
@@ -219,7 +245,7 @@ describe("computeFinancialSummary — edges", () => {
 
   it("a duplicate streamId is reported", () => {
     const input = empty();
-    input.recurring = { source: "plaid_streams", streams: [strm({}), strm({})] };
+    input.recurring = streamsOnly([strm({}), strm({})]);
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "stream", id: "s", reason: "duplicate" },
     ]);
@@ -228,13 +254,10 @@ describe("computeFinancialSummary — edges", () => {
   it("a duplicate streamId: first copy wins in every metric", () => {
     const input = empty();
     input.accounts = [acct({})];
-    input.recurring = {
-      source: "plaid_streams",
-      streams: [
-        strm({ averageAmountCents: 1000, predictedNextDate: "2026-10-20" }),
-        strm({ averageAmountCents: 5000, predictedNextDate: "2026-10-15" }),
-      ],
-    };
+    input.recurring = streamsOnly([
+      strm({ averageAmountCents: 1000, predictedNextDate: "2026-10-20" }),
+      strm({ averageAmountCents: 5000, predictedNextDate: "2026-10-15" }),
+    ]);
     const s = computeFinancialSummary(input);
     expect(s.recurring.items.map((i) => [i.streamId, i.basisCents])).toEqual([["s", 1000]]);
     expect(s.recurring.totalMonthlyCents).toBe(1000);
@@ -246,10 +269,7 @@ describe("computeFinancialSummary — edges", () => {
 
   it("a duplicate whose first copy is inactive excludes the stream", () => {
     const input = empty();
-    input.recurring = {
-      source: "plaid_streams",
-      streams: [strm({ isActive: false }), strm({})],
-    };
+    input.recurring = streamsOnly([strm({ isActive: false }), strm({})]);
     const s = computeFinancialSummary(input);
     expect(s.recurring.items).toEqual([]);
     expect(s.recurring.excluded).toEqual([{ streamId: "s", reason: "inactive" }]);
@@ -260,7 +280,7 @@ describe("computeFinancialSummary — edges", () => {
     for (const id of ["constructor", "hasOwnProperty", "__proto__"]) {
       const input = empty();
       input.accounts = [acct({})];
-      input.recurring = { source: "plaid_streams", streams: [strm({ streamId: id })] };
+      input.recurring = streamsOnly([strm({ streamId: id })]);
       const s = computeFinancialSummary(input);
       expect(s.recurring.items.map((i) => i.streamId), id).toEqual([id]);
       expect(s.safeToSpend.inputs.upcomingRecurring.map((u) => u.streamId), id).toEqual([id]);
@@ -294,10 +314,7 @@ describe("computeFinancialSummary — edges", () => {
 
   it("a null stream entry is skipped, not thrown on", () => {
     const input = empty();
-    input.recurring = {
-      source: "plaid_streams",
-      streams: [null as unknown as EngineRecurringStream, strm({})],
-    };
+    input.recurring = streamsOnly([null as unknown as EngineRecurringStream, strm({})]);
     const s = computeFinancialSummary(input);
     expect(s.recurring.items.map((i) => i.streamId)).toEqual(["s"]);
     expect(s.dataIssues).toEqual([{ kind: "stream", id: "", reason: "missing_id" }]);
@@ -305,7 +322,7 @@ describe("computeFinancialSummary — edges", () => {
 
   it("a missing streamId is reported", () => {
     const input = empty();
-    input.recurring = { source: "plaid_streams", streams: [strm({ streamId: "" })] };
+    input.recurring = streamsOnly([strm({ streamId: "" })]);
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "stream", id: "", reason: "missing_id" },
     ]);
@@ -315,7 +332,7 @@ describe("computeFinancialSummary — edges", () => {
   it("an active stream with no id is left out of every metric and reported", () => {
     const input = empty();
     input.accounts = [acct({})];
-    input.recurring = { source: "plaid_streams", streams: [strm({ streamId: "" })] };
+    input.recurring = streamsOnly([strm({ streamId: "" })]);
     const s = computeFinancialSummary(input);
     expect(s.recurring.items).toEqual([]);
     expect(s.safeToSpend.inputs.upcomingRecurring).toEqual([]);
@@ -325,7 +342,7 @@ describe("computeFinancialSummary — edges", () => {
 
   it("an invalid predictedNextDate is reported", () => {
     const input = empty();
-    input.recurring = { source: "plaid_streams", streams: [strm({ predictedNextDate: "2026-13-01" })] };
+    input.recurring = streamsOnly([strm({ predictedNextDate: "2026-13-01" })]);
     expect(computeFinancialSummary(input).dataIssues).toEqual([
       { kind: "stream", id: "s", reason: "invalid_predicted_next_date" },
     ]);
@@ -340,7 +357,7 @@ describe("computeFinancialSummary — edges", () => {
     expect(s.cashFlow.excluded.invalid.count).toBe(1);
 
     const period = empty();
-    period.period = { start: "0026-09-11", end: "2026-10-10", completeness: "unknown" };
+    period.period = { start: "0026-09-11", end: "2026-10-10" };
     expect(computeFinancialSummary(period).dataIssues).toEqual([
       { kind: "period", id: "period", reason: "invalid_period" },
     ]);

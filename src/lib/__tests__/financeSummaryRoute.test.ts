@@ -88,6 +88,12 @@ function itemOf(token: string): string {
 vi.mock("@/lib/plaid", () => ({
   isPlaidConfigured: () => state.plaidConfigured,
   plaidClient: {
+    async itemGet() {
+      state.plaidCalls += 1;
+      return {
+        data: { status: { transactions: { last_successful_update: "2026-11-11T03:00:00Z" } } },
+      };
+    },
     async accountsGet(req: { access_token: string }) {
       state.plaidCalls += 1;
       const failure = state.failItems[itemOf(req.access_token)];
@@ -257,6 +263,13 @@ describe("POST /api/finance/summary — response", () => {
     expect(res.text).not.toContain(PLAINTEXT);
     expect(res.text).not.toContain(CIPHERTEXT);
     expect(res.text).not.toContain("access_token");
+    // The engine's opaque keys stay on the server.
+    expect(res.text).not.toMatch(/duplicateKey|connectionKey|[0-9a-f]{64}/);
+    expect(res.json.summary.coverage).toEqual({
+      completeness: "complete",
+      allConnectionsRead: true,
+      safeToSpendShowable: true,
+    });
     expect(res.json.connections).toEqual([
       { itemId: "item-1", institutionName: "Bank 1", status: "ok" },
     ]);
