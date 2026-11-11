@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  bankActionLines,
   banksNotRead,
   creditUsedCents,
   decideBankView,
@@ -558,6 +559,58 @@ describe("banksNotRead and the list body", () => {
     ];
     for (const bad of bodies) {
       expect(parseTransactionsListResponse(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+});
+
+/*
+ * A failed re-link request is about one bank. The figures, every other bank's
+ * line and that bank's own re-link line all stay.
+ *
+ * Mutations that turn this block red:
+ *   - the error attached to every line, or to a line of another kind
+ *     -> "only that bank's re-link line carries it"
+ *   - the failed bank's line dropped -> "every line stays"
+ */
+describe("bankActionLines — a failed re-link request", () => {
+  const view = decideBankView({
+    ...summaryLoadInputs({
+      connectionsLoading: false,
+      connectionsFailed: false,
+      hasActiveConnection: true,
+      loadError: null,
+      hasData: true,
+    }),
+    response: response([
+      ok(1),
+      { itemId: "item-2", institutionName: "Bank 2", status: "login_required" },
+      { itemId: "item-3", institutionName: "Bank 3", status: "login_required" },
+      { itemId: "item-4", institutionName: "Bank 4", status: "failed" },
+    ]),
+  });
+
+  it("every line stays, and the figures are still ready", () => {
+    expect(view.figures).toBe("ready");
+    const lines = bankActionLines(view.actions, "item-2");
+    expect(lines.map((l) => l.action)).toEqual(view.actions);
+  });
+
+  it("only that bank's re-link line carries it", () => {
+    const lines = bankActionLines(view.actions, "item-2");
+    expect(lines.map((l) => [l.action.itemId, l.action.kind, l.relinkError])).toEqual([
+      [
+        "item-2",
+        "relink",
+        "We couldn't start re-linking Bank 2. Please try again in a moment.",
+      ],
+      ["item-3", "relink", null],
+      ["item-4", "retry", null],
+    ]);
+  });
+
+  it("an id with no re-link line, or none, attaches nothing", () => {
+    for (const id of ["item-4", "item-1", null]) {
+      expect(bankActionLines(view.actions, id).every((l) => l.relinkError === null)).toBe(true);
     }
   });
 });

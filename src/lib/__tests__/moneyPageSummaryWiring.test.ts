@@ -18,6 +18,8 @@ import { describe, it, expect } from "vitest";
  *   - the accounts route fetched again, or a total computed in the page
  *   - the summary reset moved after the first await
  *   - the figures decided without summaryLoadInputs / decideBankView
+ *   - a re-link failure written into the hook's shared `error`, or fed into
+ *     the figures' inputs by the page
  */
 
 function code(source: string): string {
@@ -84,6 +86,32 @@ describe("money screen reads the finance summary", () => {
     expect(PAGE).toContain("parseFinanceSummaryResponse(");
     expect(PAGE).toContain("{formatSpending(figures.spending)}");
     expect(PAGE).toContain("formatMonthlyOrUnknown(figures.recurringMonthly)");
+  });
+
+  // Red if: the hook writes a re-link failure into its shared `error` again,
+  // or the page feeds its own re-link failure into the figures' inputs.
+  it("a failed re-link request stays on its bank's line", () => {
+    const hook = code(
+      readFileSync(
+        fileURLToPath(new URL("../../hooks/usePlaidConnections.ts", import.meta.url)),
+        "utf8"
+      )
+    );
+    const fetchStart = hook.indexOf("const fetchConnections =");
+    const fetchEnd = hook.indexOf("const disconnect =", fetchStart);
+    expect(fetchStart).toBeGreaterThan(-1);
+    expect(fetchEnd).toBeGreaterThan(fetchStart);
+    const outsideListRead = hook.slice(0, fetchStart) + hook.slice(fetchEnd);
+    expect(hook.slice(fetchStart, fetchEnd)).toContain("setError(");
+    expect(outsideListRead).not.toContain("setError(");
+
+    const inputs = slice("...summaryLoadInputs({", "}),");
+    expect(inputs).toContain("connectionsFailed: !!plaidConnections.error,");
+    expect(inputs).not.toContain("relink");
+
+    const handleRelink = slice("const handleRelink = useCallback(", "const handleRelinkSuccess");
+    expect(handleRelink).toMatch(/catch \(err\) \{[^}]*setRelinkFailedItemId\(itemId\);/);
+    expect(PAGE).toContain("bankActionLines(view.actions, relinkFailedItemId)");
   });
 
   it("every figure in the balance and 90-day cards is guarded", () => {

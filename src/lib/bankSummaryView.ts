@@ -213,6 +213,32 @@ export function describeBankAction(action: BankAction): string {
   }
 }
 
+export interface BankActionLine {
+  action: BankAction;
+  /** Shown under this line only: the re-link request for this bank failed. */
+  relinkError: string | null;
+}
+
+/**
+ * The action lines to draw, with a failed re-link request attached to the
+ * line of the bank it was for. A failed re-link request is about that bank
+ * only: every line stays, including that bank's re-link line (so it can be
+ * tried again), and it does not touch the figures — it is never an input to
+ * summaryLoadInputs or decideBankView.
+ */
+export function bankActionLines(
+  actions: BankAction[],
+  relinkFailedItemId: string | null
+): BankActionLine[] {
+  return actions.map((action) => ({
+    action,
+    relinkError:
+      action.kind === "relink" && action.itemId === relinkFailedItemId
+        ? `We couldn't start re-linking ${action.institutionName}. Please try again in a moment.`
+        : null,
+  }));
+}
+
 // ---- response shape -----------------------------------------------------------
 
 const CONNECTION_STATES = ["ok", "login_required", "syncing", "failed"];

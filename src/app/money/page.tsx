@@ -23,6 +23,7 @@ import {
   readString,
 } from "@/lib/requestJson";
 import {
+  bankActionLines,
   banksNotRead,
   creditUsedCents,
   decideBankView,
@@ -106,6 +107,11 @@ export default function MoneyPage() {
   const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
   const [relinkToken, setRelinkToken] = useState<string | null>(null);
   const [isPreparingRelink, setIsPreparingRelink] = useState(false);
+  // The bank whose re-link request failed. Shown next to that bank only; it is
+  // not a failed load, and the figures and other banks' lines stay.
+  const [relinkFailedItemId, setRelinkFailedItemId] = useState<string | null>(
+    null
+  );
   // Connection management (accounts tab): inline-confirm remove + add-bank notice.
   const [confirmingRemoveItemId, setConfirmingRemoveItemId] = useState<
     string | null
@@ -247,6 +253,7 @@ export default function MoneyPage() {
     setTransactions([]);
     setTransactionConnections([]);
     setTransactionsError(null);
+    setRelinkFailedItemId(null);
     setIsLoadingData(true);
 
     try {
@@ -281,19 +288,19 @@ export default function MoneyPage() {
   }, [plaidConnections]);
 
   // Re-link one bank: the item id comes from the connection the summary
-  // reported as needing a new login, never from a position in a list.
+  // reported as needing a new login, never from a position in a list. A failed
+  // request is recorded against that bank only.
   const handleRelink = useCallback(
     async (itemId: string) => {
       try {
         setRelinkItemId(itemId);
         setRelinkToken(null);
+        setRelinkFailedItemId(null);
         setIsPreparingRelink(true);
-        const linkToken = await plaidConnections.relink(itemId);
-        if (linkToken) {
-          setRelinkToken(linkToken);
-        }
+        setRelinkToken(await plaidConnections.relink(itemId));
       } catch (err) {
         console.error("Relink failed:", err);
+        setRelinkFailedItemId(itemId);
       } finally {
         setIsPreparingRelink(false);
       }
@@ -527,11 +534,15 @@ export default function MoneyPage() {
 
       {view.actions.length > 0 && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
-          {view.actions.map((action) => (
+          {bankActionLines(view.actions, relinkFailedItemId).map(
+            ({ action, relinkError }) => (
             <div key={action.itemId}>
               <p className="text-sm text-amber-900">
                 {describeBankAction(action)}
               </p>
+              {relinkError && (
+                <p className="mt-1 text-xs text-red-700">{relinkError}</p>
+              )}
               {action.kind === "relink" &&
                 !(relinkToken && relinkItemId === action.itemId) && (
                   <button
@@ -569,7 +580,8 @@ export default function MoneyPage() {
                 </button>
               )}
             </div>
-          ))}
+            )
+          )}
         </div>
       )}
 

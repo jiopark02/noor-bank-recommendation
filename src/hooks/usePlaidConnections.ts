@@ -36,6 +36,8 @@ export function usePlaidConnections(userId: string | null) {
   // Starts true so consumers don't flash a "not connected" state (and prompt a
   // re-link) before the first fetch resolves.
   const [isLoading, setIsLoading] = useState(true);
+  // Set only by fetchConnections: non-null means the connection list could
+  // not be read. A failed disconnect or re-link is reported to its caller.
   const [error, setError] = useState<string | null>(null);
 
   // Fetch existing connections from the DB (authoritative source), not
@@ -151,42 +153,40 @@ export function usePlaidConnections(userId: string | null) {
     [userId, fetchConnections]
   );
 
-  // Relink a broken connection
+  // Ask for a link token to repair one connection's login.
+  //
+  // A failure is THROWN TO THE CALLER, never written into the shared `error`,
+  // for the same reason as disconnect: `error` means "loading the connection
+  // list failed", and the money screen reads it to mark every figure as
+  // unknown. A failed re-link request concerns one bank, and the caller shows
+  // it next to that bank.
   const relink = useCallback(
-    async (itemId: string) => {
+    async (itemId: string): Promise<string> => {
       if (!userId) {
-        setError("Please log in first");
-        return;
+        throw new Error("Please log in first");
       }
 
-      try {
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
+      const plaidHeaders = buildJsonAuthorizedHeaders(
+        await getSupabaseBearerHeaders()
+      );
+      const response = await fetch("/api/plaid/relink", {
+        method: "POST",
+        headers: plaidHeaders,
+        body: JSON.stringify({ itemId }),
+      });
+
+      const payload = asPlainObject(await response.json());
+      if (!response.ok) {
+        throw new Error(
+          readErrorMessage(payload) || "Failed to create relink token"
         );
-        const response = await fetch("/api/plaid/relink", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({ itemId }),
-        });
-
-        const payload = asPlainObject(await response.json());
-        if (!response.ok) {
-          throw new Error(
-            readErrorMessage(payload) || "Failed to create relink token"
-          );
-        }
-
-        const linkToken = readString(payload, "linkToken");
-        if (!linkToken) {
-          throw new Error("Failed to create relink token");
-        }
-        return linkToken;
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to relink bank";
-        setError(message);
-        throw err;
       }
+
+      const linkToken = readString(payload, "linkToken");
+      if (!linkToken) {
+        throw new Error("Failed to create relink token");
+      }
+      return linkToken;
     },
     [userId]
   );
