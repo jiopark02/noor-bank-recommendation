@@ -15,12 +15,20 @@ import {
   deleteOldCronRuns,    // ← 추가
   type ChatSession,
   type DbChatMessage,
-  type UserFact,
-  type UserFactCategory,
   type NewUserFact,
 } from "@/lib/aiMemory";
 import { asPlainObject } from "@/lib/requestJson";
-import { isUserFactCategory } from "@/lib/userFactCategories";
+import {
+  validateExtraction,
+  type RawExtractionOutput,
+} from "@/lib/factExtractionValidation";
+import {
+  budgetExistingFacts,
+  buildCronConversationText,
+  capNewFacts,
+  logCronInputBudget,
+  type CronConversation,
+} from "@/lib/cronInputBudget";
 import {
   buildCronLlmCallRow,
   type ObservedLlmCall,
@@ -67,10 +75,6 @@ const EXTRACTION_MAX_TOKENS = 3072;
 const EXTRACT_BATCH_LIMIT = 8;
 // LLM에 참고로 넘기는 기존 active facts 최대 개수.
 const EXISTING_FACTS_LIMIT = 200;
-// fact 텍스트 최대 길이 (검증). 초과 시 해당 항목 drop.
-const MAX_FACT_LENGTH = 500;
-// 한 세션에서 supersede + expire 합계 상한. 초과 시 폭주로 간주.
-const MAX_SUPERSEDE_EXPIRE = 30;
 // cron_runs 보존 기간(일). 이 cron 끝에서 best-effort 정리.
 const CRON_RUNS_RETENTION_DAYS = 180;
 
@@ -242,76 +246,16 @@ EXISTING FACTS — reconcile:
 - Use each existing number at most once across supersede and expire combined.`;
 
 /**
- * 세션 메시지를 "User:" / "Noor:" 형식으로 직렬화. (PR4 패턴)
+ * Serializes the session's messages as "User:" / "Noor:" blocks under the
+ * length budget in cronInputBudget.ts: a long message loses its middle, and
+ * the oldest messages are left out first.
  */
-function buildConversationText(messages: DbChatMessage[]): string {
+function buildConversationText(messages: DbChatMessage[]): CronConversation {
   const trimmed =
     messages.length > MAX_MESSAGES_PER_EXTRACTION
       ? messages.slice(messages.length - MAX_MESSAGES_PER_EXTRACTION)
       : messages;
-  return trimmed
-    .map((m) => {
-      const speaker = m.role === "user" ? "User" : "Noor";
-      return `${speaker}: ${m.content}`;
-    })
-    .join("\n\n");
-}
-
-/**
- * 기존 active facts를 LLM 프롬프트용으로 번호 매겨 직렬화.
- * factsArray[0] -> [1], factsArray[1] -> [2], ...
- */
-function buildExistingFactsText(facts: UserFact[]): string {
-  if (facts.length === 0) {
-    return "(none)";
-  }
-  return facts
-    .map((f, i) => `[${i + 1}] (${f.category}) ${f.fact}`)
-    .join("\n");
-}
-
-// --- LLM 출력 타입 (파싱 후 검증 전) ---
-
-interface RawNewFact {
-  category?: unknown;
-  fact?: unknown;
-  confidence?: unknown;
-}
-interface RawSupersede {
-  old_number?: unknown;
-  category?: unknown;
-  fact?: unknown;
-  confidence?: unknown;
-}
-interface RawExpire {
-  old_number?: unknown;
-}
-interface RawExtractionOutput {
-  new_facts?: unknown;
-  supersede?: unknown;
-  expire?: unknown;
-}
-
-// --- 검증 통과 후 타입 ---
-
-interface ValidNewFact {
-  category: UserFactCategory;
-  fact: string;
-  confidence: number;
-}
-interface ValidSupersede {
-  oldNumber: number;
-  category: UserFactCategory;
-  fact: string;
-  confidence: number;
-}
-interface ValidExpire {
-  oldNumber: number;
-}
-interface ValidatedExtraction {
-  newFacts: ValidNewFact[];
-  supersede: ValidSupersede[];
-  expire: ValidExpire[];
+  return buildCronConversationText(trimmed);
 }
 
 /**
@@ -346,180 +290,6 @@ function parseExtractionJson(raw: string): RawExtractionOutput {
   return parsed as RawExtractionOutput;
 }
 
-/**
- * confidence를 0~1로 정규화. 숫자 아니거나 누락 → 1.0, 범위 밖 → clamp.
- */
-function normalizeConfidence(value: unknown): number {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return 1.0;
-  }
-  if (value < 0) return 0;
-  if (value > 1) return 1;
-  return value;
-}
-
-/**
- * Whether the category is one of USER_FACT_CATEGORIES (userFactCategories.ts).
- */
-function isValidCategory(value: unknown): value is UserFactCategory {
-  return isUserFactCategory(value);
-}
-
-/**
- * fact 텍스트가 비어있지 않은 string이고 길이 제한 내인지.
- * 통과 시 trim된 문자열 반환, 실패 시 null.
- */
-function validateFactText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return null;
-  if (trimmed.length > MAX_FACT_LENGTH) return null;
-  return trimmed;
-}
-
-/**
- * old_number가 1 ~ factsCount 범위의 정수인지.
- */
-function isValidOldNumber(value: unknown, factsCount: number): boolean {
-  return (
-    typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= 1 &&
-    value <= factsCount
-  );
-}
-
-/**
- * 파싱된 LLM 출력을 검증해 ValidatedExtraction을 만든다.
- * 개별 항목이 잘못되면 그 항목만 drop하고 로그. 세션 전체는 계속.
- *
- * @param raw          parseExtractionJson 결과
- * @param factsCount   기존 facts 개수 (old_number 범위 검증용)
- * @param sessionId    로그용
- */
-function validateExtraction(
-  raw: RawExtractionOutput,
-  factsCount: number,
-  sessionId: string
-): ValidatedExtraction {
-  const result: ValidatedExtraction = {
-    newFacts: [],
-    supersede: [],
-    expire: [],
-  };
-
-  // 배열이 아니면 빈 배열로 간주.
-  const rawNew: unknown[] = Array.isArray(raw.new_facts) ? raw.new_facts : [];
-  const rawSup: unknown[] = Array.isArray(raw.supersede) ? raw.supersede : [];
-  const rawExp: unknown[] = Array.isArray(raw.expire) ? raw.expire : [];
-
-  // --- new_facts ---
-  for (const item of rawNew) {
-    const nf = (item ?? {}) as RawNewFact;
-    const factText = validateFactText(nf.fact);
-    if (factText === null) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped new_fact ` +
-          `(invalid/empty/too-long text).`
-      );
-      continue;
-    }
-    if (!isValidCategory(nf.category)) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped new_fact ` +
-          `(invalid category: ${String(nf.category)}).`
-      );
-      continue;
-    }
-    result.newFacts.push({
-      category: nf.category,
-      fact: factText,
-      confidence: normalizeConfidence(nf.confidence),
-    });
-  }
-
-  // 중복 old_number 추적 (supersede + expire 공유).
-  const usedNumbers = new Set<number>();
-
-  // --- supersede ---
-  for (const item of rawSup) {
-    const sp = (item ?? {}) as RawSupersede;
-    if (!isValidOldNumber(sp.old_number, factsCount)) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped supersede ` +
-          `(old_number out of range: ${String(sp.old_number)}).`
-      );
-      continue;
-    }
-    const oldNumber = sp.old_number as number;
-    if (usedNumbers.has(oldNumber)) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped supersede ` +
-          `(duplicate old_number: ${oldNumber}).`
-      );
-      continue;
-    }
-    const factText = validateFactText(sp.fact);
-    if (factText === null) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped supersede ` +
-          `(invalid/empty/too-long text).`
-      );
-      continue;
-    }
-    if (!isValidCategory(sp.category)) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped supersede ` +
-          `(invalid category: ${String(sp.category)}).`
-      );
-      continue;
-    }
-    usedNumbers.add(oldNumber);
-    result.supersede.push({
-      oldNumber,
-      category: sp.category,
-      fact: factText,
-      confidence: normalizeConfidence(sp.confidence),
-    });
-  }
-
-  // --- expire ---
-  for (const item of rawExp) {
-    const ep = (item ?? {}) as RawExpire;
-    if (!isValidOldNumber(ep.old_number, factsCount)) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped expire ` +
-          `(old_number out of range: ${String(ep.old_number)}).`
-      );
-      continue;
-    }
-    const oldNumber = ep.old_number as number;
-    if (usedNumbers.has(oldNumber)) {
-      console.warn(
-        `Extract cron: session ${sessionId} dropped expire ` +
-          `(duplicate old_number: ${oldNumber}).`
-      );
-      continue;
-    }
-    usedNumbers.add(oldNumber);
-    result.expire.push({ oldNumber });
-  }
-
-  // --- 상한 검증: supersede + expire 합계 ---
-  if (result.supersede.length + result.expire.length > MAX_SUPERSEDE_EXPIRE) {
-    console.warn(
-      `Extract cron: session ${sessionId} exceeded supersede+expire cap ` +
-        `(${result.supersede.length + result.expire.length} > ` +
-        `${MAX_SUPERSEDE_EXPIRE}). Dropping all supersede/expire; ` +
-        `keeping new_facts. Manual/follow-up review may be needed.`
-    );
-    result.supersede = [];
-    result.expire = [];
-  }
-
-  return result;
-}
-
 // 세션 1개 처리 결과 카운트.
 interface SessionFactStats {
   saved: number;
@@ -535,8 +305,9 @@ interface SessionFactStats {
 /**
  * 세션 1개의 facts를 추출·반영한다.
  *
- * 흐름: 빈 세션 처리 → 메시지 조회 → 기존 facts 조회(번호 매김) →
- *       LLM 호출 → 파싱·검증 → supersede→expire→new_facts 실행 →
+ * Flow: empty session → read messages → read existing facts and number the
+ *       leading ones that fit the facts budget (existing.facts) → LLM call →
+ *       parse and validate → supersede → expire → new_facts →
  *       markFactsExtracted.
  *
  * LLM/파싱 실패는 throw → 바깥 세션 try/catch가 받음 (세션 미완료, 재시도).
@@ -570,18 +341,25 @@ async function extractOneSession(
     return;
   }
 
-  // 4. 기존 active facts 조회 + 번호 매김 스냅샷.
-  //    factsArray는 이후 LLM 응답 해석·실행이 끝날 때까지 변형 금지.
+  // 4. Read the user's active facts. Only the leading ones that fit the
+  //    facts budget become existing.facts and are numbered for the model
+  //    (step 5). Neither array may change until execution ends: old_number
+  //    is resolved by index into existing.facts.
   const factsArray = await getUserFacts(session.user_id, {
     limit: EXISTING_FACTS_LIMIT,
   });
 
   // 5. LLM 호출.
-  const conversationText = buildConversationText(messages);
-  const existingFactsText = buildExistingFactsText(factsArray);
+  const conversation = buildConversationText(messages);
+  // Only the leading facts that fit the facts budget are numbered for the
+  // model. old_number is checked and resolved against existing.facts, the
+  // same array, so a fact left out here cannot be superseded or expired by
+  // this run; it stays active as it is.
+  const existing = budgetExistingFacts(factsArray);
+  logCronInputBudget("cron_extract_facts", conversation, existing.dropped);
   const userContent =
-    `[Existing facts]  (most recent first)\n${existingFactsText}\n\n` +
-    `[Conversation]\n${conversationText}`;
+    `[Existing facts]  (most recent first)\n${existing.text}\n\n` +
+    `[Conversation]\n${conversation.text}`;
 
   const rawOutput = await callOpenRouterForExtraction(
     apiKey,
@@ -599,16 +377,17 @@ async function extractOneSession(
   const parsed = parseExtractionJson(rawOutput);
   const validated = validateExtraction(
     parsed,
-    factsArray.length,
+    existing.facts.length,
     session.id
   );
+  validated.newFacts = capNewFacts(validated.newFacts);
 
   // 7. 분기 실행 — 순서 고정: supersede → expire → new_facts.
   //    fact 작업 단위 try/catch. 하나 실패해도 나머지 계속.
 
   // 7-1) supersede
   for (const item of validated.supersede) {
-    const oldFact = factsArray[item.oldNumber - 1];
+    const oldFact = existing.facts[item.oldNumber - 1];
     const payload: NewUserFact = {
       category: item.category,
       fact: item.fact,
@@ -647,7 +426,7 @@ async function extractOneSession(
 
   // 7-2) expire
   for (const item of validated.expire) {
-    const oldFact = factsArray[item.oldNumber - 1];
+    const oldFact = existing.facts[item.oldNumber - 1];
     try {
       await expireUserFact(oldFact.id, session.user_id);
       stats.expired++;
