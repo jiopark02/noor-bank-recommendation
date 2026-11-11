@@ -9,7 +9,9 @@ export type TxnClass =
   | "excluded_between_accounts"
   | "excluded_card_payment"
   | "excluded_non_cash_account"
-  | "excluded_unknown_account";
+  | "excluded_unknown_account"
+  | "excluded_loan_disbursement"
+  | "excluded_unclassified_category";
 
 export type ClassificationSource = "pfc" | "legacy" | "none";
 
@@ -43,6 +45,14 @@ function bySign(amountCents: number, inflow: TxnClass): TxnClass {
  * descriptions do not say whether the other account belongs to the same user,
  * so this bucket can also hold payments to and from other people. The cash
  * flow result carries that as an assumption code instead of hiding it.
+ *
+ * Two PFC v2 primaries are excluded in either direction:
+ *   - LOAN_DISBURSEMENTS: borrowed money arriving (loans, cash advances). It is
+ *     neither income nor a refund against spending.
+ *   - OTHER: Plaid's catch-all. Its transactions were filed as miscellaneous
+ *     transfers under v1, so counting them by sign would turn transfers into
+ *     spending and refunds. They are kept out of every total, counted in their
+ *     own bucket, and reported as data issues so the gap stays visible.
  */
 export function classifyTransaction(
   t: EngineTransaction,
@@ -62,6 +72,12 @@ export function classifyTransaction(
       return { cls: "excluded_card_payment", source };
     }
     const primary = t.pfcPrimary as string;
+    if (primary === "LOAN_DISBURSEMENTS") {
+      return { cls: "excluded_loan_disbursement", source };
+    }
+    if (primary === "OTHER") {
+      return { cls: "excluded_unclassified_category", source };
+    }
     if (primary === "TRANSFER_IN" || primary === "TRANSFER_OUT") {
       return { cls: "excluded_between_accounts", source };
     }

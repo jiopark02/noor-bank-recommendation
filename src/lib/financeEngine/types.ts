@@ -179,6 +179,10 @@ export interface CashFlowResult {
     pending: Bucket;
     betweenAccounts: Bucket;
     cardPayments: Bucket;
+    /** Borrowed money arriving (PFC LOAN_DISBURSEMENTS), either sign. */
+    loanDisbursements: Bucket;
+    /** PFC OTHER, either sign; each one is also listed in dataIssues. */
+    unclassifiedCategory: Bucket;
     nonCashAccounts: Bucket;
     unknownAccount: { count: number };
     otherCurrency: { count: number };
@@ -295,7 +299,9 @@ export interface DataIssue {
     | "invalid_fetched_at"
     | "invalid_balance_as_of"
     | "invalid_predicted_next_date"
-    | "no_balance";
+    | "no_balance"
+    /** A counted transaction whose category is Plaid's catch-all; left out of every total. */
+    | "unclassified_category";
 }
 
 export interface FinancialSummary {

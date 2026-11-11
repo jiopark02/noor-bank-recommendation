@@ -67,6 +67,19 @@ export function indexAccounts(
  * in an `excluded` bucket with its reason.
  */
 export function computeCashFlow(input: EngineInput): CashFlowResult {
+  return cashFlowDetail(input).result;
+}
+
+/**
+ * computeCashFlow plus the ids of the transactions counted in the
+ * `unclassifiedCategory` bucket, in input order, so the entry point can list
+ * exactly those in `dataIssues` and the two always agree.
+ */
+export function cashFlowDetail(input: EngineInput): {
+  result: CashFlowResult;
+  unclassifiedCategoryIds: string[];
+} {
+  const unclassifiedCategoryIds: string[] = [];
   const startDay = dayNumber(input.period.start);
   const endDay = dayNumber(input.period.end);
   const periodValid = startDay !== null && endDay !== null && endDay >= startDay;
@@ -88,6 +101,8 @@ export function computeCashFlow(input: EngineInput): CashFlowResult {
       pending: { count: 0, cents: 0 },
       betweenAccounts: { count: 0, cents: 0 },
       cardPayments: { count: 0, cents: 0 },
+      loanDisbursements: { count: 0, cents: 0 },
+      unclassifiedCategory: { count: 0, cents: 0 },
       nonCashAccounts: { count: 0, cents: 0 },
       unknownAccount: { count: 0 },
       otherCurrency: { count: 0 },
@@ -154,6 +169,15 @@ export function computeCashFlow(input: EngineInput): CashFlowResult {
         ex.cardPayments.count += 1;
         ex.cardPayments.cents += magnitude;
         break;
+      case "excluded_loan_disbursement":
+        ex.loanDisbursements.count += 1;
+        ex.loanDisbursements.cents += magnitude;
+        break;
+      case "excluded_unclassified_category":
+        ex.unclassifiedCategory.count += 1;
+        ex.unclassifiedCategory.cents += magnitude;
+        unclassifiedCategoryIds.push(t.transactionId);
+        break;
       case "excluded_non_cash_account":
         ex.nonCashAccounts.count += 1;
         ex.nonCashAccounts.cents += magnitude;
@@ -179,5 +203,5 @@ export function computeCashFlow(input: EngineInput): CashFlowResult {
   }
   result.assumptions = assumptions;
 
-  return result;
+  return { result, unclassifiedCategoryIds };
 }
