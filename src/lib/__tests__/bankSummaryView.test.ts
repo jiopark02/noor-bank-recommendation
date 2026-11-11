@@ -630,6 +630,9 @@ describe("bankActionLines — a failed re-link request", () => {
  *     any value, a list's elements not checked) -> "each listed field, missing
  *     or mistyped"
  *   - unknown fields refused -> "fields that are not listed are ignored"
+ *   - a field that may not be null accepting null (e.g. "string" checked as
+ *     `value === null || typeof value === "string"`) -> "each listed field,
+ *     missing or mistyped"
  */
 type Path = Array<string | number>;
 
@@ -706,6 +709,13 @@ function checksEveryField(spec: FieldSpec, good: unknown, parse: (v: unknown) =>
         p[k] = null;
       });
       expect(parse(asNull), `null at ${label}`).not.toBeNull();
+    } else if ((fieldSpec as { orNull?: unknown }).orNull === undefined) {
+      // A field the list does not allow to be null: an explicit null is a
+      // failed read, the same as a missing field.
+      const asNull = edited(good, path, (p, k) => {
+        p[k] = null;
+      });
+      expect(parse(asNull), `null at non-null ${label}`).toBeNull();
     }
   }
 }
