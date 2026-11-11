@@ -8,7 +8,7 @@ import {
 import {
   addCadence,
   dayNumber,
-  endOfMonthUtc,
+  endOfMonth,
   fromDayNumber,
   isIsoDate,
   parseTimestampMs,
@@ -88,10 +88,10 @@ describe("monthlyCentsFromCadence", () => {
 
 describe("dates", () => {
   it("February in a common year", () => {
-    expect(endOfMonthUtc("2026-02-10")).toBe("2026-02-28");
+    expect(endOfMonth("2026-02-10")).toBe("2026-02-28");
   });
   it("February in a leap year", () => {
-    expect(endOfMonthUtc("2028-02-10")).toBe("2028-02-29");
+    expect(endOfMonth("2028-02-10")).toBe("2028-02-29");
     expect(isIsoDate("2028-02-29")).toBe(true);
     expect(isIsoDate("2026-02-29")).toBe(false);
   });

@@ -29,6 +29,9 @@ function card(over: Partial<EngineAccount>): EngineAccount {
 function input(accounts: EngineAccount[]): EngineInput {
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts,
     transactions: [],

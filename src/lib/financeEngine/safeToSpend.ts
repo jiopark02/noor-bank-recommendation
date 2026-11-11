@@ -9,8 +9,9 @@ import type {
 import { isCents } from "./money";
 import {
   dayNumber,
-  endOfMonthUtc,
+  endOfMonth,
   freshnessOf,
+  isIsoDate,
   parseTimestampMs,
   utcDateOf,
 } from "./dates";
@@ -30,8 +31,9 @@ function olderOf(a: string | null, b: string): string {
  *
  *   spendable cash
  *   − recurring charges expected between today and the end of this calendar
- *     month (UTC), plus those expected in the last `pastDueGraceDays` days
- *     that the stream has not recorded yet (policy)
+ *     month (both in the caller's `today` calendar), plus those expected in
+ *     the last `pastDueGraceDays` days that the stream has not recorded yet
+ *     (policy)
  *   − positive credit-card balances, in full (policy)
  *   − buffer (policy)
  *
@@ -45,8 +47,11 @@ export function computeSafeToSpend(
   policy: EnginePolicy,
   recurring: RecurringResult
 ): SafeToSpendResult {
-  const today = utcDateOf(input.now);
-  if (today === null) throw new Error("computeSafeToSpend: invalid now");
+  // `now` is not used for any date here, but an input whose clock does not
+  // parse is a caller bug all the same.
+  if (utcDateOf(input.now) === null) throw new Error("computeSafeToSpend: invalid now");
+  const today = input.today;
+  if (!isIsoDate(today)) throw new Error("computeSafeToSpend: invalid today");
   // A policy is a caller-supplied constant; a broken one is a caller bug, not
   // data. NaN would otherwise make every comparison below false and report a
   // computed figure with no shortfall, and a negative buffer would raise the
@@ -60,12 +65,12 @@ export function computeSafeToSpend(
   if (!Array.isArray(policy.spendableSubtypes)) {
     throw new Error("computeSafeToSpend: invalid spendableSubtypes");
   }
-  const horizonEnd = endOfMonthUtc(today);
+  const horizonEnd = endOfMonth(today);
   const fromDay = dayNumber(today) as number;
   const toDay = dayNumber(horizonEnd) as number;
   const graceFromDay = fromDay - policy.pastDueGraceDays;
 
-  const assumptions: AssumptionCode[] = ["dates_utc"];
+  const assumptions: AssumptionCode[] = input.dateBasis === "utc" ? ["dates_utc"] : [];
   const addAssumption = (code: AssumptionCode) => {
     if (assumptions.indexOf(code) === -1) assumptions.push(code);
   };
@@ -76,7 +81,12 @@ export function computeSafeToSpend(
     amountCents: null,
     uncoveredObligationsCents: null,
     obligationsExceedCash: false,
-    horizon: { from: today, to: horizonEnd, rule: "end_of_calendar_month_utc" },
+    horizon: {
+      from: today,
+      to: horizonEnd,
+      rule: "end_of_calendar_month",
+      dateBasis: input.dateBasis,
+    },
     inputs: {
       balances: [],
       upcomingRecurring: [],

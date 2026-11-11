@@ -7,10 +7,13 @@ import {
 } from "@/lib/plaidApiUtils";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import { computeFinancialSummary } from "@/lib/financeEngine";
+import { DISPLAY_WINDOW_DAYS } from "@/lib/bankSummaryView";
 import {
+  READ_WINDOW_DAYS,
   bankWindow,
   liveAdapterDeps,
   readBankData,
+  resolveToday,
   toDisplayAccount,
   toEngineInput,
   type FinanceSummaryResponse,
@@ -24,8 +27,11 @@ import {
  * connection's status. Every amount on those screens comes from here; the
  * screens only format it.
  *
- * Takes no input. The user is the verified token's user, and the request body
- * is ignored.
+ * The user is the verified token's user. The only body field read is
+ * `timeZone`, the browser's IANA zone: it decides which calendar date is
+ * "today" for every date in the answer, and only for this user's own answer.
+ * A missing or unusable value falls back to the UTC date. The value is not
+ * logged or stored; the log line says only which basis was used.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -65,13 +71,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Read the clock and decide "today" once: the read window, the cash-flow
+    // period and every date the engine works out come from this one date.
     const now = new Date();
-    const range = bankWindow(now);
+    const { today, dateBasis } = resolveToday(auth.body.timeZone, now);
+    console.log(
+      `[finance-summary] date_basis=${dateBasis === "user_time_zone" ? "user" : "utc_fallback"}`
+    );
+    const readWindow = bankWindow(today, READ_WINDOW_DAYS);
+    const period = bankWindow(today, DISPLAY_WINDOW_DAYS);
     const read = await readBankData(
       userId,
       activeConnections,
       { accounts: true, transactions: true, recurring: true },
-      range,
+      readWindow,
       liveAdapterDeps()
     );
 
@@ -84,7 +97,15 @@ export async function POST(request: NextRequest) {
       connections: read.connections,
       accounts: anyRead ? read.accounts.map(toDisplayAccount) : [],
       summary: anyRead
-        ? computeFinancialSummary(toEngineInput(read, now.toISOString(), range))
+        ? computeFinancialSummary(
+            toEngineInput(read, {
+              nowIso: now.toISOString(),
+              today,
+              dateBasis,
+              readWindow,
+              period,
+            })
+          )
         : null,
     };
     return NextResponse.json(body);

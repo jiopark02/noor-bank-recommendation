@@ -58,6 +58,13 @@ describe("money screen reads the finance summary", () => {
     );
   });
 
+  // Red if: the summary request stops naming the browser's time zone, so the
+  // server counts dates in UTC for every user.
+  it("sends the browser's time zone with the summary request", () => {
+    const loadSummary = slice("const loadSummary = useCallback(", "const loadTransactions =");
+    expect(loadSummary).toContain("body: JSON.stringify({ timeZone: browserTimeZone() }),");
+  });
+
   it("keeps no arithmetic of its own over bank data", () => {
     expect(PAGE).not.toMatch(/\.reduce\(/);
     expect(PAGE).not.toContain("Net Worth");

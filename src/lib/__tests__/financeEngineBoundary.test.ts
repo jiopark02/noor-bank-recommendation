@@ -91,6 +91,9 @@ function maximalInput(): EngineInput {
     ({ ...a, institution_name: SENTINEL, official_name: SENTINEL } as EngineAccount);
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [
       withSentinel(account({})),
@@ -193,7 +196,7 @@ const EXPECTED_KEYS = [
   "anyAsOfUnknown", "asOf", "asOfSource", "assumptions", "balanceCents", "balances", "basis",
   "basisCents", "betweenAccounts", "bufferCents", "cardPayments", "cashFlow", "cents",
   "classificationSource", "completeness", "computedAt", "count", "creditCardBalances",
-  "creditUtilization", "currency", "dataIssues", "days", "dueDate", "end", "engineVersion",
+  "creditUtilization", "currency", "dataIssues", "dateBasis", "days", "dueDate", "end", "engineVersion",
   "excluded", "excludedAccounts", "excludedRecurring", "fetchedAt", "field", "frequency", "freshness", "from",
   "horizon", "id", "incomeCents", "inputs", "invalid", "items", "kind", "label", "legacy",
   "limitCents", "loanDisbursements", "monthlyCents", "netCents", "nextDate", "nonCashAccounts", "none",

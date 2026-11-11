@@ -50,6 +50,9 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
 function scenario(): EngineInput {
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [
       account({}),
@@ -92,6 +95,23 @@ describe("computeCashFlow", () => {
     const r = computeCashFlow(scenario());
     expect(r.assumptions).toContain("account_to_account_excluded_ownership_unknown");
     expect(r.assumptions).toContain("dates_utc");
+  });
+
+  it("states dates_utc only when today was taken in UTC", () => {
+    const input = scenario();
+    input.dateBasis = "user_time_zone";
+    expect(computeCashFlow(input).assumptions).not.toContain("dates_utc");
+  });
+
+  // The read window is longer than the cash-flow period; only the period counts.
+  it("counts only the period of a longer read window", () => {
+    const input = scenario();
+    input.readWindow = { start: "2025-09-09", end: "2026-10-10" };
+    input.transactions.push(txn("last-year", { amountCents: 999, date: "2025-10-01" }));
+    const r = computeCashFlow(input);
+    expect(r.spendingGrossCents).toBe(160000);
+    expect(r.excluded.outsidePeriod.count).toBe(1);
+    expect(r.period.days).toBe(30);
   });
 
   it("does not claim the ownership assumption when nothing was excluded for it", () => {

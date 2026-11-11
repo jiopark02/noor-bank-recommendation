@@ -6,8 +6,10 @@ import type {
   RecurringFrequency,
 } from "./types";
 
-// All date arithmetic is on UTC calendar days. The engine has no user time
-// zone, and says so through the "dates_utc" assumption code.
+// Date arithmetic is on calendar days, carried as day numbers on the UTC
+// axis. Which calendar "today" belongs to is the caller's decision
+// (EngineInput.today and dateBasis); when the caller had no user time zone,
+// the engine says so through the "dates_utc" assumption code.
 
 const MS_PER_DAY = 86400000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -134,9 +136,9 @@ export function freshnessOf(a: EngineAccount): Freshness {
 }
 
 /** Last day of the month containing `d`. Throws on an invalid date (caller bug). */
-export function endOfMonthUtc(d: IsoDate): IsoDate {
+export function endOfMonth(d: IsoDate): IsoDate {
   const p = parseYmd(d);
-  if (!p) throw new Error("endOfMonthUtc: invalid date");
+  if (!p) throw new Error("endOfMonth: invalid date");
   return formatYmd(p.year, p.month, daysInMonth(p.year, p.month));
 }
 

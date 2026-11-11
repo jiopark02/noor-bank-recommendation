@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   bankActionLines,
   banksNotRead,
+  browserTimeZone,
   creditUsedCents,
   decideBankView,
   describeBankAction,
@@ -43,6 +44,9 @@ import type {
 function summary(over: Partial<EngineInput> = {}): FinancialSummary {
   return computeFinancialSummary({
     now: "2026-11-11T12:00:00Z",
+    today: "2026-11-11",
+    dateBasis: "utc",
+    readWindow: { start: "2026-08-14", end: "2026-11-11" },
     currency: "USD",
     accounts: [
       {
@@ -180,6 +184,30 @@ describe("decideBankView — data issues are information, not a task", () => {
     });
     expect(view.showSafeToSpend).toBe(true);
     expect(view.actions).toEqual([]);
+  });
+});
+
+describe("browserTimeZone", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names the platform's zone", () => {
+    expect(browserTimeZone()).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  // Red if: a platform that throws or names no zone breaks the request
+  // instead of leaving the server to fall back to UTC.
+  it("is null when the platform throws or names no zone", () => {
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(() => {
+      throw new Error("no Intl");
+    });
+    expect(browserTimeZone()).toBeNull();
+    vi.restoreAllMocks();
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(
+      () => ({ resolvedOptions: () => ({ timeZone: "" }) }) as unknown as Intl.DateTimeFormat
+    );
+    expect(browserTimeZone()).toBeNull();
   });
 });
 
@@ -325,6 +353,9 @@ describe("creditUsedCents", () => {
     computeFinancialSummary(
       {
         now: "2026-11-11T12:00:00Z",
+        today: "2026-11-11",
+        dateBasis: "utc",
+        readWindow: { start: "2026-08-14", end: "2026-11-11" },
         currency: "USD",
         accounts: [
           {

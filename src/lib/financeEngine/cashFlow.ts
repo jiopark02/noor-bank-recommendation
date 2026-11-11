@@ -191,7 +191,7 @@ export function cashFlowDetail(input: EngineInput): {
   result.spendingNetCents = result.spendingGrossCents - result.refundsCents;
   result.netCents = result.incomeCents - result.spendingNetCents;
 
-  const assumptions: AssumptionCode[] = ["dates_utc"];
+  const assumptions: AssumptionCode[] = input.dateBasis === "utc" ? ["dates_utc"] : [];
   if (ex.betweenAccounts.count > 0) {
     assumptions.push("account_to_account_excluded_ownership_unknown");
   }

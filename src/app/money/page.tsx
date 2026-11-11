@@ -25,6 +25,7 @@ import {
 import {
   bankActionLines,
   banksNotRead,
+  browserTimeZone,
   creditUsedCents,
   decideBankView,
   describeBankAction,
@@ -186,7 +187,7 @@ export default function MoneyPage() {
         const res = await fetch("/api/finance/summary", {
           method: "POST",
           headers,
-          body: JSON.stringify({}),
+          body: JSON.stringify({ timeZone: browserTimeZone() }),
         });
 
         if (!res.ok) {
@@ -221,7 +222,7 @@ export default function MoneyPage() {
       const res = await fetch("/api/plaid/transactions", {
         method: "POST",
         headers,
-        body: JSON.stringify({}),
+        body: JSON.stringify({ timeZone: browserTimeZone() }),
       });
 
       if (!res.ok) {

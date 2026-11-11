@@ -56,6 +56,9 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
 function input(transactions: EngineTransaction[]): EngineInput {
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [checking],
     transactions,

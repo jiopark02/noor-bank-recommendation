@@ -17,12 +17,14 @@ import {
   type TransactionsRecurringGetResponse,
 } from "plaid";
 import {
-  LOOKBACK_DAYS,
   MAX_TRANSACTION_PAGES,
+  READ_WINDOW_DAYS,
   TRANSACTIONS_PAGE_SIZE,
   bankWindow,
   readBankData,
+  resolveToday,
   toEngineInput,
+  type EngineInputDates,
   type BankAdapterDeps,
   type PlaidReadCalls,
   type StoredConnectionRow,
@@ -56,7 +58,14 @@ import { computeFinancialSummary } from "../financeEngine";
  */
 
 const RANGE = { start: "2026-08-14", end: "2026-11-11" };
-const ALL = { accounts: true, transactions: true, recurring: true };
+const DATES: EngineInputDates = {
+  nowIso: "2026-11-11T12:00:00Z",
+  today: "2026-11-11",
+  dateBasis: "utc",
+  readWindow: RANGE,
+  period: RANGE,
+};
+const ALL ={ accounts: true, transactions: true, recurring: true };
 const USER = "user-1";
 
 function row(n: number): StoredConnectionRow {
@@ -245,12 +254,82 @@ beforeEach(() => {
 });
 
 describe("bankWindow", () => {
-  it("ends today (UTC) and spans the lookback inclusive of both ends", () => {
-    expect(bankWindow(new Date("2026-11-11T23:30:00Z"))).toEqual({
-      start: "2026-08-14",
+  it("ends on the given day and spans the given days, inclusive of both ends", () => {
+    expect(bankWindow("2026-11-11", 90)).toEqual({ start: "2026-08-14", end: "2026-11-11" });
+    expect(bankWindow("2026-11-11", READ_WINDOW_DAYS)).toEqual({
+      start: "2025-10-11",
       end: "2026-11-11",
     });
-    expect(LOOKBACK_DAYS).toBe(90);
+    expect(bankWindow("2026-11-11", 1)).toEqual({ start: "2026-11-11", end: "2026-11-11" });
+    expect(READ_WINDOW_DAYS).toBe(397);
+  });
+
+  it("crosses a leap day", () => {
+    expect(bankWindow("2028-03-01", 2)).toEqual({ start: "2028-02-29", end: "2028-03-01" });
+  });
+
+  it("refuses an invalid day or length (caller bug)", () => {
+    expect(() => bankWindow("2026-11-31", 90)).toThrow(/invalid today/);
+    expect(() => bankWindow("2026-11-11", 0)).toThrow(/invalid days/);
+    expect(() => bankWindow("2026-11-11", 1.5)).toThrow(/invalid days/);
+  });
+});
+
+/*
+ * The user's today from the time zone the client sent.
+ *
+ * Mutations that turn this block red:
+ *   - the character check skipped (an offset like "+05:30" is a valid zone
+ *     for the platform)                                -> "refuses …"
+ *   - today taken in UTC whatever the zone             -> "takes the date …"
+ *   - a refused value answered as user_time_zone       -> "refuses …"
+ */
+describe("resolveToday", () => {
+  const AT_0500Z = new Date("2026-11-11T05:00:00Z");
+
+  it("takes the date in the given zone", () => {
+    expect(resolveToday("America/Los_Angeles", AT_0500Z)).toEqual({
+      today: "2026-11-10",
+      dateBasis: "user_time_zone",
+    });
+    expect(resolveToday("Asia/Seoul", AT_0500Z)).toEqual({
+      today: "2026-11-11",
+      dateBasis: "user_time_zone",
+    });
+    expect(resolveToday("Pacific/Kiritimati", new Date("2026-11-11T12:00:00Z"))).toEqual({
+      today: "2026-11-12",
+      dateBasis: "user_time_zone",
+    });
+  });
+
+  it("accepts aliases and any letter case, as the platform does", () => {
+    for (const zone of ["america/los_angeles", "US/Pacific", "UTC", "Etc/UTC"]) {
+      expect(resolveToday(zone, AT_0500Z).dateBasis, zone).toBe("user_time_zone");
+    }
+    expect(resolveToday("US/Pacific", AT_0500Z).today).toBe("2026-11-10");
+  });
+
+  it("refuses anything else and falls back to the UTC date", () => {
+    const refused: unknown[] = [
+      undefined,
+      null,
+      123,
+      {},
+      "",
+      " ",
+      "Etc/Unknown",
+      "Mars/Base",
+      "+05:30",
+      "America/Los Angeles",
+      "America/Los_Angeles\n",
+      "A".repeat(65),
+    ];
+    for (const raw of refused) {
+      expect(resolveToday(raw, AT_0500Z), JSON.stringify(raw)).toEqual({
+        today: "2026-11-11",
+        dateBasis: "utc",
+      });
+    }
   });
 });
 
@@ -420,7 +499,7 @@ describe("stream currency", () => {
   const streamsOf = (read: Awaited<ReturnType<typeof readBankData>>) =>
     read.recurring.source === "plaid_streams" ? read.recurring.streams : [];
   const engineRecurring = (read: Awaited<ReturnType<typeof readBankData>>) =>
-    computeFinancialSummary(toEngineInput(read, "2026-11-11T12:00:00Z", RANGE)).recurring;
+    computeFinancialSummary(toEngineInput(read, DATES)).recurring;
   const bankReadLine = (spy: unknown) =>
     (spy as { mock: { calls: unknown[][] } }).mock.calls
       .map((c) => String(c[0]))
@@ -606,7 +685,7 @@ describe("engine input", () => {
   it("carries no display fields into the engine", async () => {
     const { plaid } = fakePlaid({});
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
-    const input = toEngineInput(read, "2026-11-11T12:00:00Z", RANGE);
+    const input = toEngineInput(read, DATES);
     const text = JSON.stringify(input);
     expect(text).not.toContain("Bank 1");
     expect(text).not.toContain("item-1");

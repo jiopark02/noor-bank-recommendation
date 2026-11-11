@@ -41,8 +41,9 @@ import {
 import { plaidClient } from "@/lib/plaid";
 import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
-import { toCents } from "@/lib/financeEngine";
+import { dayNumber, fromDayNumber, isIsoDate, toCents } from "@/lib/financeEngine";
 import type {
+  DateBasis,
   EngineAccount,
   EngineInput,
   EngineRecurringStream,
@@ -52,8 +53,12 @@ import type {
   RecurringStatus,
 } from "@/lib/financeEngine";
 
-/** Days of transactions read, counting today. */
-export const LOOKBACK_DAYS = 90;
+/**
+ * Days of transactions read, counting today: a full year plus the month
+ * before it, inclusive on both ends. The cash flow the screens show covers a
+ * shorter window inside it (DISPLAY_WINDOW_DAYS in bankSummaryView).
+ */
+export const READ_WINDOW_DAYS = 397;
 /** Plaid's documented maximum for /transactions/get `count`. */
 export const TRANSACTIONS_PAGE_SIZE = 500;
 /** Pages read per connection before the window is reported as possibly truncated. */
@@ -178,17 +183,76 @@ export interface BankReadRequest {
 
 // ---- dates --------------------------------------------------------------------
 
-function isoDay(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+/** What the request said about the user's calendar, as far as it could be used. */
+export interface UserToday {
+  today: string;
+  dateBasis: DateBasis;
 }
 
-/** The UTC window ending today, LOOKBACK_DAYS long, inclusive on both ends. */
-export function bankWindow(now: Date): BankWindow {
-  const endMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return {
-    start: isoDay(endMs - (LOOKBACK_DAYS - 1) * 86_400_000),
-    end: isoDay(endMs),
-  };
+// Characters an IANA zone name (or Etc/GMT±n) can contain. Anything else is
+// refused before the platform sees it.
+const TIME_ZONE_PATTERN = /^[A-Za-z0-9_+\-/]+$/;
+const TIME_ZONE_MAX_LENGTH = 64;
+
+function utcToday(now: Date): UserToday {
+  return { today: now.toISOString().slice(0, 10), dateBasis: "utc" };
+}
+
+/**
+ * The user's calendar date at `now`, from a time zone the client sent.
+ *
+ * The value must be a string of 1 to 64 characters from TIME_ZONE_PATTERN that
+ * the platform accepts as a time zone (Intl.DateTimeFormat throws a
+ * RangeError otherwise). It is not compared against Intl.supportedValuesOf:
+ * that list names one spelling per zone and differs between ICU versions, so
+ * valid aliases would be refused. An accepted value is normalized through
+ * resolvedOptions(), and the date is taken in the normalized zone.
+ *
+ * Anything else falls back to the UTC date with dateBasis "utc". The value is
+ * never returned, logged or stored.
+ */
+export function resolveToday(raw: unknown, now: Date): UserToday {
+  if (
+    typeof raw !== "string" ||
+    raw.length < 1 ||
+    raw.length > TIME_ZONE_MAX_LENGTH ||
+    !TIME_ZONE_PATTERN.test(raw)
+  ) {
+    return utcToday(now);
+  }
+  try {
+    const zone = new Intl.DateTimeFormat("en-US", { timeZone: raw }).resolvedOptions().timeZone;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    let year = "";
+    let month = "";
+    let day = "";
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].type === "year") year = parts[i].value;
+      else if (parts[i].type === "month") month = parts[i].value;
+      else if (parts[i].type === "day") day = parts[i].value;
+    }
+    const today = `${year}-${month}-${day}`;
+    if (!isIsoDate(today)) return utcToday(now);
+    return { today, dateBasis: "user_time_zone" };
+  } catch {
+    return utcToday(now);
+  }
+}
+
+/**
+ * The `days`-long window ending on `today`, inclusive on both ends. Throws on
+ * an invalid date or length (caller bug).
+ */
+export function bankWindow(today: string, days: number): BankWindow {
+  const end = dayNumber(today);
+  if (end === null) throw new Error("bankWindow: invalid today");
+  if (!(Number.isSafeInteger(days) && days >= 1)) throw new Error("bankWindow: invalid days");
+  return { start: fromDayNumber(end - (days - 1)), end: today };
 }
 
 // ---- mappers ------------------------------------------------------------------
@@ -638,10 +702,23 @@ function toEngineTransaction(t: DisplayTransaction): EngineTransaction {
   };
 }
 
+/** The request-wide dates an engine input is built from, all from one `today`. */
+export interface EngineInputDates {
+  nowIso: string;
+  today: string;
+  dateBasis: DateBasis;
+  /** The window the transactions were read over. */
+  readWindow: BankWindow;
+  /** The cash-flow period, inside readWindow. */
+  period: BankWindow;
+}
+
 /** Only the fields the engine reads: no names, masks or institution. */
-export function toEngineInput(read: BankRead, nowIso: string, range: BankWindow): EngineInput {
+export function toEngineInput(read: BankRead, dates: EngineInputDates): EngineInput {
   return {
-    now: nowIso,
+    now: dates.nowIso,
+    today: dates.today,
+    dateBasis: dates.dateBasis,
     currency: ENGINE_CURRENCY,
     accounts: read.accounts.map((a) => ({
       accountId: a.accountId,
@@ -655,7 +732,12 @@ export function toEngineInput(read: BankRead, nowIso: string, range: BankWindow)
       fetchedAt: a.fetchedAt,
     })),
     transactions: read.transactions.map(toEngineTransaction),
-    period: { start: range.start, end: range.end, completeness: read.completeness },
+    readWindow: { start: dates.readWindow.start, end: dates.readWindow.end },
+    period: {
+      start: dates.period.start,
+      end: dates.period.end,
+      completeness: read.completeness,
+    },
     recurring: read.recurring,
   };
 }

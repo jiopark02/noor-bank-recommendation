@@ -131,9 +131,10 @@ function collectDataIssues(input: EngineInput): DataIssue[] {
 }
 
 /**
- * Computes every v1 metric from one input. Throws only when `input.now` does
- * not parse or the policy is invalid, both caller bugs; bad data is skipped
- * and reported in `dataIssues` and in each metric's exclusion counts.
+ * Computes every v1 metric from one input. Throws only when `input.now` or
+ * `input.today` does not parse, `input.dateBasis` is not a known basis, or the
+ * policy is invalid, all caller bugs; bad data is skipped and reported in
+ * `dataIssues` and in each metric's exclusion counts.
  */
 export function computeFinancialSummary(
   input: EngineInput,
@@ -141,6 +142,12 @@ export function computeFinancialSummary(
 ): FinancialSummary {
   if (utcDateOf(input.now) === null) {
     throw new Error("computeFinancialSummary: invalid now");
+  }
+  if (!isIsoDate(input.today)) {
+    throw new Error("computeFinancialSummary: invalid today");
+  }
+  if (input.dateBasis !== "user_time_zone" && input.dateBasis !== "utc") {
+    throw new Error("computeFinancialSummary: invalid dateBasis");
   }
   const recurring = computeRecurring(input);
   const cashFlow = cashFlowDetail(input);
@@ -173,7 +180,7 @@ export {
   fromDayNumber,
   utcDateOf,
   parseTimestampMs,
-  endOfMonthUtc,
+  endOfMonth,
   addCadence,
   freshnessOf,
 } from "./dates";

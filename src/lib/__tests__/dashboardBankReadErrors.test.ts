@@ -175,6 +175,11 @@ describe("dashboard money figures come only from the summary route", () => {
     ]);
   });
 
+  it("sends the browser's time zone with the summary request", () => {
+    // Red if: the summary request stops naming the browser's time zone.
+    expect(FETCH_LIVE).toContain("body: JSON.stringify({ timeZone: browserTimeZone() }),");
+  });
+
   it("keeps no arithmetic of its own over bank data", () => {
     // Red if: a client-side total, net worth or budget comes back.
     expect(PAGE).not.toMatch(/\.reduce\(/);

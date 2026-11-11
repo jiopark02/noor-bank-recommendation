@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
 
@@ -14,6 +16,8 @@ import type { NextRequest } from "next/server";
  *   - the empty-case wording changed                                -> no active connection
  *   - completeness not taken from the connection statuses           -> partial failure
  *   - a summary computed when no bank was read                      -> nothing read
+ *   - the body's timeZone ignored, or today taken twice             -> user's today
+ *   - the time zone value written to the log                        -> user's today / fallback
  */
 
 const PLAINTEXT = "access-sandbox-PLAINTEXT-TOKEN-7f3a";
@@ -29,6 +33,7 @@ const state = {
   connectionReadUserIds: [] as string[],
   plaidCalls: 0,
   decryptUserIds: [] as string[],
+  transactionWindows: [] as Array<{ start: string; end: string }>,
 };
 
 function plaidError(code: string): Error {
@@ -104,8 +109,9 @@ vi.mock("@/lib/plaid", () => ({
         },
       };
     },
-    async transactionsGet(req: { access_token: string }) {
+    async transactionsGet(req: { access_token: string; start_date: string; end_date: string }) {
       state.plaidCalls += 1;
+      state.transactionWindows.push({ start: req.start_date, end: req.end_date });
       const suffix = suffixOf(req.access_token);
       return {
         data: {
@@ -159,13 +165,15 @@ function conn(n: number, over: Record<string, unknown> = {}) {
   };
 }
 
-async function post(): Promise<{ status: number; text: string; json: any }> {
+async function post(
+  body: Record<string, unknown> = {}
+): Promise<{ status: number; text: string; json: any }> {
   const { POST } = await import("../../app/api/finance/summary/route");
   const res = await POST(
     new Request("https://noor.test/api/finance/summary", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer test" },
-      body: JSON.stringify({ userId: "someone-else" }),
+      body: JSON.stringify({ userId: "someone-else", ...body }),
     }) as unknown as NextRequest
   );
   const text = await res.text();
@@ -181,6 +189,8 @@ beforeEach(() => {
   state.connectionReadUserIds = [];
   state.plaidCalls = 0;
   state.decryptUserIds = [];
+  state.transactionWindows = [];
+  vi.useRealTimers();
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -274,6 +284,60 @@ describe("POST /api/finance/summary — response", () => {
     ]);
     expect(res.json.summary.cashFlow.period.completeness).toBe("unknown");
     expect(res.json.accounts.map((a: { accountId: string }) => a.accountId)).toEqual(["chk-1"]);
+  });
+
+  it("counts dates from the user's today when the request names a usable time zone", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-11T05:00:00Z"));
+    const res = await post({ timeZone: "America/Los_Angeles" });
+    expect(res.status).toBe(200);
+    // One today for the read window, the cash-flow period and the horizon.
+    expect(state.transactionWindows).toEqual([{ start: "2025-10-10", end: "2026-11-10" }]);
+    expect(res.json.summary.cashFlow.period).toMatchObject({ start: "2026-08-13", end: "2026-11-10" });
+    expect(res.json.summary.safeToSpend.horizon).toEqual({
+      from: "2026-11-10",
+      to: "2026-11-30",
+      rule: "end_of_calendar_month",
+      dateBasis: "user_time_zone",
+    });
+    expect(res.json.summary.safeToSpend.assumptions).not.toContain("dates_utc");
+
+    const logged = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((c) => c.map(String).join(" "))
+      .join("\n");
+    expect(logged).toContain("[finance-summary] date_basis=user");
+    expect(logged).not.toMatch(/Los_Angeles|America/);
+  });
+
+  it("falls back to the UTC date, and says so, for a missing or unusable time zone", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-11T05:00:00Z"));
+    for (const body of [{}, { timeZone: "Mars/Base" }, { timeZone: 42 }]) {
+      state.transactionWindows = [];
+      (console.log as unknown as { mockClear: () => void }).mockClear();
+      const res = await post(body);
+      expect(res.status).toBe(200);
+      expect(state.transactionWindows).toEqual([{ start: "2025-10-11", end: "2026-11-11" }]);
+      expect(res.json.summary.safeToSpend.horizon.dateBasis).toBe("utc");
+      expect(res.json.summary.safeToSpend.assumptions).toContain("dates_utc");
+      const logged = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map((c) => c.map(String).join(" "))
+        .join("\n");
+      expect(logged).toContain("[finance-summary] date_basis=utc_fallback");
+      expect(logged).not.toContain("Mars");
+    }
+  });
+
+  // Source probe: a second clock read or a second resolveToday could put two
+  // different todays into one answer at midnight.
+  it("reads the clock and decides today once", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../../app/api/finance/summary/route.ts", import.meta.url)),
+      "utf8"
+    ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(source.match(/\bresolveToday\(/g) ?? []).toHaveLength(1);
+    expect(source.match(/\bnew Date\(/g) ?? []).toHaveLength(1);
+    expect(source.match(/\bDate\.now\(/g) ?? []).toHaveLength(0);
   });
 
   it("with no bank read there is no summary, only the statuses", async () => {

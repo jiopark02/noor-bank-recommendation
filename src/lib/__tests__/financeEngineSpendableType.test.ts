@@ -34,6 +34,9 @@ function spendableCash(accounts: EngineAccount[], policy = DEFAULT_POLICY): numb
   return computeFinancialSummary(
     {
       now: "2026-11-11T12:00:00Z",
+      today: "2026-11-11",
+      dateBasis: "utc",
+      readWindow: { start: "2026-08-14", end: "2026-11-11" },
       currency: "USD",
       accounts,
       transactions: [],

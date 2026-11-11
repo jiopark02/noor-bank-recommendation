@@ -22,6 +22,7 @@ import {
 } from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 import {
+  browserTimeZone,
   creditUsedCents,
   decideBankView,
   describeBankAction,
@@ -73,7 +74,10 @@ const QUICK_PROMPTS = [
   "Am I on track this month?",
 ];
 
-/** A calendar date (YYYY-MM-DD, UTC) as "Nov 30". */
+/**
+ * A calendar date (YYYY-MM-DD) as "Nov 30", exactly as given: it is read and
+ * formatted on the UTC axis so the viewer's own zone cannot move it a day.
+ */
 function formatDay(isoDate: string): string {
   return new Date(isoDate + "T00:00:00Z").toLocaleDateString("en-US", {
     month: "short",
@@ -285,7 +289,7 @@ export default function HomePage() {
         {
           method: "POST",
           headers: plaidHeaders,
-          body: JSON.stringify({}),
+          body: JSON.stringify({ timeZone: browserTimeZone() }),
         },
         BANK_DATA_LOAD_FAILED
       );

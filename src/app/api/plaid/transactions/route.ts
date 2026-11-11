@@ -6,10 +6,12 @@ import {
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
+import { DISPLAY_WINDOW_DAYS } from "@/lib/bankSummaryView";
 import {
   bankWindow,
   liveAdapterDeps,
   readBankData,
+  resolveToday,
   type TransactionsListResponse,
 } from "@/lib/plaidEngineAdapter";
 
@@ -17,12 +19,14 @@ import {
  * POST /api/plaid/transactions
  *
  * The signed-in user's transactions over the server's fixed window (the last
- * LOOKBACK_DAYS days, UTC), every page of them, with Plaid's personal finance
- * category, plus each bank connection's status. For listing only: totals and
- * recurring charges come from POST /api/finance/summary.
+ * DISPLAY_WINDOW_DAYS days, ending on the user's today), every page of them,
+ * with Plaid's personal finance category, plus each bank connection's status.
+ * For listing only: totals and recurring charges come from POST
+ * /api/finance/summary.
  *
- * Takes no input. Dates in the request body are ignored, so a caller cannot
- * widen the window and multiply the Plaid calls a request makes.
+ * The only body field read is `timeZone`, which decides the window's last
+ * day as in the summary route. Dates in the request body are ignored, so a
+ * caller cannot widen the window and multiply the Plaid calls a request makes.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -63,7 +67,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const range = bankWindow(new Date());
+    const { today } = resolveToday(auth.body.timeZone, new Date());
+    const range = bankWindow(today, DISPLAY_WINDOW_DAYS);
     const read = await readBankData(
       userId,
       activeConnections,

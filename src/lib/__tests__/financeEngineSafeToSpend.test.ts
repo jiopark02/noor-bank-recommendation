@@ -26,6 +26,8 @@ import type {
  *   - lastDate check on past-due dates removed      -> "a past-due date already recorded …"
  *   - pastDueGraceDays check removed                -> "an invalid grace is a caller bug"
  *   - spendableSubtypes array check removed         -> "a spendable-subtype list that is not an array …"
+ *   - today taken from utcDateOf(now) again          -> "counts every date from today …"
+ *   - dates_utc stated whatever the date basis       -> "states dates_utc only when …"
  *   - SEMI_MONTHLY assumption push removed          -> "states the SEMI_MONTHLY spacing approximation"
  *   - due-today assumption push removed             -> "a charge due today is flagged"
  */
@@ -73,6 +75,9 @@ const insurance: EngineRecurringStream = {
 function scenario(): EngineInput {
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [
       account({}),
@@ -96,7 +101,12 @@ describe("computeSafeToSpend", () => {
     expect(r.amountCents).toBe(118451);
     expect(r.uncoveredObligationsCents).toBe(0);
     expect(r.obligationsExceedCash).toBe(false);
-    expect(r.horizon).toEqual({ from: "2026-10-10", to: "2026-10-31", rule: "end_of_calendar_month_utc" });
+    expect(r.horizon).toEqual({
+      from: "2026-10-10",
+      to: "2026-10-31",
+      rule: "end_of_calendar_month",
+      dateBasis: "utc",
+    });
     expect(r.inputs.balances).toEqual([
       { accountId: "chk", subtype: "checking", field: "available", cents: 180000, asOf: null, fetchedAt: FETCHED, asOfSource: "unknown" },
     ]);
@@ -337,6 +347,41 @@ describe("computeSafeToSpend", () => {
     for (const pastDueGraceDays of [-1, 1.5, NaN]) {
       expect(() => run(scenario(), { ...DEFAULT_POLICY, pastDueGraceDays })).toThrow(/invalid pastDueGraceDays/);
     }
+  });
+
+  // now is 2026-11-01 in UTC, but the user's calendar still says October 31.
+  it("counts every date from today, not from the UTC date of now", () => {
+    const input = scenario();
+    input.now = "2026-11-01T03:00:00Z";
+    input.today = "2026-10-31";
+    input.dateBasis = "user_time_zone";
+    input.recurring = {
+      source: "plaid_streams",
+      streams: [{ ...netflix, streamId: "late", predictedNextDate: "2026-10-24", lastDate: "2026-09-24" }],
+    };
+    const r = run(input);
+    expect(r.horizon).toEqual({
+      from: "2026-10-31",
+      to: "2026-10-31",
+      rule: "end_of_calendar_month",
+      dateBasis: "user_time_zone",
+    });
+    // The grace window is [10-24, 10-31): the charge on 10-24 is inside it.
+    expect(r.inputs.upcomingRecurring.map((u) => u.dueDate)).toEqual(["2026-10-24"]);
+    expect(r.assumptions).not.toContain("dates_utc");
+  });
+
+  it("states dates_utc only when today was taken in UTC", () => {
+    expect(run(scenario()).assumptions).toContain("dates_utc");
+    const input = scenario();
+    input.dateBasis = "user_time_zone";
+    expect(run(input).assumptions).not.toContain("dates_utc");
+  });
+
+  it("an invalid today is a caller bug", () => {
+    const input = scenario();
+    input.today = "2026-02-30";
+    expect(() => run(input)).toThrow(/invalid today/);
   });
 
   it("throws only on an unparseable now", () => {

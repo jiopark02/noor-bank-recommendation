@@ -90,14 +90,30 @@ export interface EngineRecurringStream {
   status: RecurringStatus;
 }
 
+/**
+ * Which calendar `today` was taken in: the user's own time zone, or UTC when
+ * the caller had no usable time zone for the user.
+ */
+export type DateBasis = "user_time_zone" | "utc";
+
 export interface EngineInput {
-  /** The current time, injected by the caller. */
+  /** The current time, injected by the caller. Used for freshness only. */
   now: IsoDateTime;
+  /**
+   * The user's calendar date, decided once by the caller. Every date the
+   * engine works out (the month-end horizon, the grace window, past-due
+   * charges) counts from this date, never from `now`.
+   */
+  today: IsoDate;
+  dateBasis: DateBasis;
   /** The single currency every figure is computed in. Nothing is converted. */
   currency: string;
   accounts: EngineAccount[];
+  /** Transactions over `readWindow`; the cash flow counts only `period`. */
   transactions: EngineTransaction[];
   /** The window the caller fetched transactions for, inclusive on both ends. */
+  readWindow: { start: IsoDate; end: IsoDate };
+  /** The cash-flow period, inclusive on both ends, inside `readWindow`. */
   period: {
     start: IsoDate;
     end: IsoDate;
@@ -225,7 +241,8 @@ export interface SafeToSpendResult {
   /** How far committed obligations exceed spendable cash; 0 when they do not. */
   uncoveredObligationsCents: Cents | null;
   obligationsExceedCash: boolean;
-  horizon: { from: IsoDate; to: IsoDate; rule: "end_of_calendar_month_utc" };
+  /** From `today` through the end of its calendar month, in `dateBasis`. */
+  horizon: { from: IsoDate; to: IsoDate; rule: "end_of_calendar_month"; dateBasis: DateBasis };
   inputs: {
     balances: Array<
       {

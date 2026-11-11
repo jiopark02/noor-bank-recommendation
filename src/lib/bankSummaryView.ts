@@ -56,6 +56,27 @@ export interface BankView {
 
 export const UNNAMED_BANK = "Your bank";
 
+/**
+ * Days of income and spending the screens show, counting today. The summary
+ * route computes the cash flow over exactly this window, so the label the
+ * screens draw and the figures under it cannot disagree.
+ */
+export const DISPLAY_WINDOW_DAYS = 90;
+
+/**
+ * The browser's IANA time zone, sent with the summary request so the server
+ * can count dates in the user's calendar. null when the browser does not say;
+ * the server then falls back to UTC.
+ */
+export function browserTimeZone(): string | null {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zone === "string" && zone !== "" ? zone : null;
+  } catch {
+    return null;
+  }
+}
+
 function actionFor(c: BankConnectionStatus): BankAction | null {
   const institutionName = c.institutionName || UNNAMED_BANK;
   switch (c.status) {
