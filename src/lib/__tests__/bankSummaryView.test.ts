@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
+  creditUsedCents,
   decideBankView,
+  describeBankAction,
   formatCents,
   formatCentsOrDash,
   formatMonthlyOrUnknown,
+  formatSpending,
+  missingBanksNote,
+  parseFinanceSummaryResponse,
 } from "../bankSummaryView";
-import { computeFinancialSummary } from "../financeEngine";
+import { computeFinancialSummary, DEFAULT_POLICY } from "../financeEngine";
 import type { EngineInput, FinancialSummary } from "../financeEngine";
 import type {
   BankConnectionStatus,
@@ -65,7 +70,7 @@ describe("decideBankView — figures", () => {
   it("draws nothing while loading", () => {
     expect(
       decideBankView({ hasActiveConnection: true, fetchState: "loading", response: null })
-    ).toEqual({ figures: "loading", showSafeToSpend: false, actions: [] });
+    ).toEqual({ figures: "loading", showSafeToSpend: false, actions: [], missingFrom: [] });
   });
 
   it("a failed load is unavailable even when an earlier response is held", () => {
@@ -87,7 +92,7 @@ describe("decideBankView — figures", () => {
   it("every bank read: figures ready and safe-to-spend shown", () => {
     expect(
       decideBankView({ hasActiveConnection: true, fetchState: "loaded", response: response([ok(1), ok(2)]) })
-    ).toEqual({ figures: "ready", showSafeToSpend: true, actions: [] });
+    ).toEqual({ figures: "ready", showSafeToSpend: true, actions: [], missingFrom: [] });
   });
 });
 
@@ -178,8 +183,237 @@ describe("formatting", () => {
     expect(formatMonthlyOrUnknown(0)).toBe("$0.00");
   });
 
+  // Red if: a sign is added in front of formatCents again ("--$5.00"), or
+  // net refunds lose their "+".
+  it("net spending carries exactly one sign, decided by the value", () => {
+    expect(formatSpending(4000)).toBe("-$40.00");
+    expect(formatSpending(0)).toBe("-$0.00");
+    expect(formatSpending(-500)).toBe("+$5.00");
+  });
+
   it("a missing balance is a dash, never $0.00", () => {
     expect(formatCentsOrDash(null)).toBe("—");
     expect(formatCentsOrDash(0)).toBe("$0.00");
+  });
+});
+
+/*
+ * Figures shown while a bank was not read name the banks they leave out.
+ *
+ * Mutations that turn this block red:
+ *   - the list built from `actions` (one entry per connection, no dedupe)
+ *     -> "two unnamed banks are named once"
+ *   - names pushed without the duplicate check -> the same test
+ *   - the list filled from data issues        -> "data issues alone leave the list empty"
+ */
+describe("decideBankView — banks the figures leave out", () => {
+  const notRead = (
+    n: number,
+    status: BankConnectionStatus["status"],
+    name: string | null = `Bank ${n}`
+  ): BankConnectionStatus => ({ itemId: `item-${n}`, institutionName: name, status });
+
+  it("one bank not read: figures stay, and the line names it", () => {
+    const view = decideBankView({
+      hasActiveConnection: true,
+      fetchState: "loaded",
+      response: response([ok(1), notRead(2, "login_required")]),
+    });
+    expect(view.figures).toBe("ready");
+    expect(view.missingFrom).toEqual(["Bank 2"]);
+    expect(missingBanksNote(view.missingFrom)).toBe("Doesn't include Bank 2");
+  });
+
+  it("two and three banks read as a list", () => {
+    expect(missingBanksNote(["Bank 2", "Bank 3"])).toBe("Doesn't include Bank 2 or Bank 3");
+    expect(missingBanksNote(["Bank 2", "Bank 3", "Bank 4"])).toBe(
+      "Doesn't include Bank 2, Bank 3 or Bank 4"
+    );
+    const view = decideBankView({
+      hasActiveConnection: true,
+      fetchState: "loaded",
+      response: response([
+        notRead(2, "failed"),
+        ok(1),
+        notRead(3, "syncing"),
+        notRead(4, "login_required"),
+      ]),
+    });
+    expect(view.missingFrom).toEqual(["Bank 2", "Bank 3", "Bank 4"]);
+  });
+
+  it("two unnamed banks are named once", () => {
+    const view = decideBankView({
+      hasActiveConnection: true,
+      fetchState: "loaded",
+      response: response([ok(1), notRead(2, "failed", null), notRead(3, "login_required", null)]),
+    });
+    expect(view.missingFrom).toEqual(["Your bank"]);
+    expect(view.actions).toHaveLength(2);
+    expect(missingBanksNote(view.missingFrom)).toBe("Doesn't include Your bank");
+  });
+
+  it("data issues alone leave the list empty and the line absent", () => {
+    const s = summary({
+      transactions: [
+        {
+          transactionId: "o1",
+          accountId: "chk",
+          amountCents: 1200,
+          currency: "USD",
+          date: "2026-11-01",
+          pending: false,
+          pfcPrimary: "OTHER",
+          pfcDetailed: "OTHER_OTHER",
+          legacyCategory: [],
+        },
+      ],
+    });
+    const view = decideBankView({
+      hasActiveConnection: true,
+      fetchState: "loaded",
+      response: response([ok(1)], s),
+    });
+    expect(view.missingFrom).toEqual([]);
+    expect(missingBanksNote(view.missingFrom)).toBeNull();
+  });
+
+  it("no line when the figures are not shown", () => {
+    const view = decideBankView({
+      hasActiveConnection: true,
+      fetchState: "loaded",
+      response: response([notRead(1, "login_required")], null),
+    });
+    expect(view.missingFrom).toEqual([]);
+  });
+});
+
+/*
+ * Credit used comes from the engine's per-account credit entries.
+ *
+ * Mutations that turn this block red:
+ *   - the engine aggregate used instead (it leaves out cards with no limit)
+ *     -> "includes a card with no limit"
+ *   - safe-to-spend's reserved card total used instead (0 when the policy
+ *     does not reserve card balances) -> "is the same whatever the policy"
+ *   - a missing balance counted as 0 -> "an unknown card balance"
+ */
+describe("creditUsedCents", () => {
+  const card = (id: string, currentCents: number | null, limitCents: number | null, currency = "USD") => ({
+    accountId: id,
+    type: "credit" as const,
+    subtype: "credit card",
+    currentCents,
+    availableCents: null,
+    limitCents,
+    currency,
+    balanceAsOf: null,
+    fetchedAt: "2026-11-11T11:59:00Z",
+  });
+  const withCards = (cards: Array<ReturnType<typeof card>>, policy = DEFAULT_POLICY) =>
+    computeFinancialSummary(
+      {
+        now: "2026-11-11T12:00:00Z",
+        currency: "USD",
+        accounts: [
+          {
+            accountId: "chk",
+            type: "depository",
+            subtype: "checking",
+            currentCents: 100000,
+            availableCents: 100000,
+            limitCents: null,
+            currency: "USD",
+            balanceAsOf: null,
+            fetchedAt: "2026-11-11T11:59:00Z",
+          },
+          ...cards,
+        ],
+        transactions: [],
+        period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
+        recurring: { source: "unavailable" },
+      },
+      policy
+    );
+
+  it("includes a card with no limit", () => {
+    const s = withCards([card("a", 30000, 100000), card("b", 12000, null)]);
+    expect(s.creditUtilization.aggregate.balanceCents).toBe(30000);
+    expect(creditUsedCents(s)).toBe(42000);
+  });
+
+  it("is the same whatever the policy says about reserving card balances", () => {
+    const cards = [card("a", 30000, 100000), card("b", 12000, null)];
+    const reserved = withCards(cards, { ...DEFAULT_POLICY, reserveCreditCardBalances: true });
+    const notReserved = withCards(cards, { ...DEFAULT_POLICY, reserveCreditCardBalances: false });
+    expect(notReserved.safeToSpend.totals.reservedCreditCents).toBe(0);
+    expect(creditUsedCents(reserved)).toBe(42000);
+    expect(creditUsedCents(notReserved)).toBe(42000);
+  });
+
+  it("a credit balance counts as 0, and another currency is left out", () => {
+    expect(
+      creditUsedCents(withCards([card("a", -5000, 100000), card("c", 7000, 100000, "CAD")]))
+    ).toBe(0);
+  });
+
+  it("an unknown card balance makes the figure unknown, not 0", () => {
+    expect(
+      creditUsedCents(withCards([card("a", 30000, 100000), card("b", null, 100000)]))
+    ).toBeNull();
+  });
+
+  it("no credit accounts is a true 0", () => {
+    expect(creditUsedCents(withCards([]))).toBe(0);
+  });
+});
+
+/*
+ * Mutations that turn this block red:
+ *   - a missing or non-array field accepted as empty -> "a wrong-shaped body"
+ *   - an unknown connection status accepted          -> "an unknown status"
+ */
+describe("parseFinanceSummaryResponse", () => {
+  const good = () => JSON.parse(JSON.stringify(response([ok(1)])));
+
+  it("accepts what the route sends, with and without a summary", () => {
+    expect(parseFinanceSummaryResponse(good())).not.toBeNull();
+    expect(parseFinanceSummaryResponse({ ...good(), summary: null })).not.toBeNull();
+  });
+
+  it("a wrong-shaped body is a failed read", () => {
+    const bodies: unknown[] = [
+      null,
+      [],
+      { ...good(), connections: undefined },
+      { ...good(), connections: {} },
+      { ...good(), accounts: null },
+      { ...good(), accounts: [1] },
+      { ...good(), summary: undefined },
+      { ...good(), summary: { cashFlow: {} } },
+    ];
+    for (const bad of bodies) {
+      expect(parseFinanceSummaryResponse(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it("an unknown status is a failed read", () => {
+    const body = good();
+    body.connections[0].status = "broken";
+    expect(parseFinanceSummaryResponse(body)).toBeNull();
+  });
+});
+
+describe("describeBankAction", () => {
+  it("says what each kind of problem asks of the user", () => {
+    expect(describeBankAction({ kind: "relink", itemId: "i", institutionName: "Bank 2" })).toBe(
+      "Bank 2 needs you to sign in again."
+    );
+    expect(describeBankAction({ kind: "wait", itemId: "i", institutionName: "Bank 3" })).toBe(
+      "Bank 3 is still importing your transactions. Check back shortly."
+    );
+    expect(describeBankAction({ kind: "retry", itemId: "i", institutionName: "Bank 4" })).toBe(
+      "We couldn't reach Bank 4 just now. Try again in a moment."
+    );
   });
 });

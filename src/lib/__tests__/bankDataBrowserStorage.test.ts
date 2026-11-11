@@ -82,11 +82,7 @@ function storageCalls(
 }
 
 // Keys the dashboard may read or write. None of them hold bank data.
-const DASHBOARD_ALLOWED_READS = [
-  '"noor_user_id"',
-  '"noor_user_profile"',
-  "STORAGE_KEY_BUDGET",
-];
+const DASHBOARD_ALLOWED_READS = ['"noor_user_id"', '"noor_user_profile"'];
 const DASHBOARD_ALLOWED_WRITES = ['"noor_quick_prompt"'];
 
 describe("dashboard and connect card keep no bank keys in browser storage; Plaid keys cleared on mount", () => {
