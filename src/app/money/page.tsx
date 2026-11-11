@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { ConnectBankCard, PlaidLinkButton } from "@/components/plaid";
-import { CATEGORY_ICONS } from "@/lib/plaid";
+import { CATEGORY_ICONS } from "@/lib/categoryIcons";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";

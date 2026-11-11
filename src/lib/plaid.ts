@@ -211,22 +211,3 @@ export interface Subscription {
   is_active: boolean;
   created_at: string;
 }
-
-// Category mappings for better display
-export const CATEGORY_ICONS: Record<string, string> = {
-  "Food and Drink": "🍔",
-  Shops: "🛍️",
-  Travel: "✈️",
-  Transfer: "💸",
-  Payment: "💳",
-  Recreation: "🎮",
-  Service: "🔧",
-  Community: "🏘️",
-  Healthcare: "🏥",
-  "Bank Fees": "🏦",
-  Interest: "📈",
-  Tax: "📋",
-  Rent: "🏠",
-  Utilities: "💡",
-  Subscription: "📱",
-};
