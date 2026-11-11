@@ -18,6 +18,9 @@
 //     per-connection condition and must not be reported as one.
 //   - Each connection answers with a status. A connection that is not `ok`
 //     contributes no data at all, so a half-read bank never looks complete.
+//   - A recurring stream keeps the currency code Plaid sent with its amounts.
+//     Only a stream that names none at all takes its account's currency, from
+//     the accounts read on the same connection (see mapStream).
 //   - Logs carry status, error code and counts only: no item id, token,
 //     amount or name.
 // =============================================================================
@@ -29,6 +32,7 @@ import {
   type AccountsGetResponse,
   type Transaction,
   type TransactionStream,
+  type TransactionStreamAmount,
   type TransactionsGetRequest,
   type TransactionsGetResponse,
   type TransactionsRecurringGetRequest,
@@ -279,17 +283,87 @@ function oneOf<T extends string>(raw: unknown, allowed: ReadonlyArray<T>): T | n
   return null;
 }
 
-/** An outflow stream as Plaid reported it; nothing is normalized away. */
-export function mapStream(stream: TransactionStream): EngineRecurringStream {
+/**
+ * How a stream's amounts name their currency. The first of average_amount and
+ * last_amount that carries any code decides:
+ *   usd        an ISO code equal to ENGINE_CURRENCY, exactly as sent
+ *   other_iso  any other ISO code, including a differently cased "usd"
+ *   unofficial an unofficial (non-ISO) code
+ *   none       neither amount carries a code of either kind
+ */
+export type StreamCurrencyShape = "usd" | "other_iso" | "unofficial" | "none";
+
+export const STREAM_CURRENCY_SHAPES: ReadonlyArray<StreamCurrencyShape> = [
+  "usd",
+  "other_iso",
+  "unofficial",
+  "none",
+];
+
+function isSent(value: unknown): boolean {
+  return value !== null && value !== undefined;
+}
+
+type AmountCode = { kind: "iso"; code: unknown } | { kind: "unofficial" } | { kind: "none" };
+
+function amountCode(amount: TransactionStreamAmount | null | undefined): AmountCode {
+  if (!amount) return { kind: "none" };
+  if (isSent(amount.iso_currency_code)) return { kind: "iso", code: amount.iso_currency_code };
+  if (isSent(amount.unofficial_currency_code)) return { kind: "unofficial" };
+  return { kind: "none" };
+}
+
+/** The stream's currency shape and the ISO code it names, if it names one. */
+export function streamCurrency(stream: TransactionStream): {
+  shape: StreamCurrencyShape;
+  iso: string | null;
+} {
+  let code = amountCode(stream.average_amount);
+  if (code.kind === "none") code = amountCode(stream.last_amount);
+  if (code.kind === "iso") {
+    const iso = typeof code.code === "string" ? code.code : null;
+    return { shape: iso === ENGINE_CURRENCY ? "usd" : "other_iso", iso };
+  }
+  return { shape: code.kind, iso: null };
+}
+
+type ShapeCounts = Record<StreamCurrencyShape, number>;
+
+function emptyShapeCounts(): ShapeCounts {
+  return { usd: 0, other_iso: 0, unofficial: 0, none: 0 };
+}
+
+/** `usd:N,other_iso:N,unofficial:N,none:N` — counts only. */
+function formatShapeCounts(counts: ShapeCounts): string {
+  const parts: string[] = [];
+  for (let i = 0; i < STREAM_CURRENCY_SHAPES.length; i++) {
+    parts.push(`${STREAM_CURRENCY_SHAPES[i]}:${counts[STREAM_CURRENCY_SHAPES[i]]}`);
+  }
+  return parts.join(",");
+}
+
+/**
+ * An outflow stream as Plaid reported it. One gap is filled: when neither
+ * amount names a currency of any kind, the stream takes the currency of its
+ * own account (`account_id`) from `accountCurrencies`, the accounts read on
+ * the same connection; with no such account, or an account without an ISO
+ * code, it stays null. A code Plaid did send is kept as sent, so an
+ * unofficial or unexpected code still keeps the stream out of the totals.
+ */
+export function mapStream(
+  stream: TransactionStream,
+  accountCurrencies: ReadonlyMap<string, string | null>
+): EngineRecurringStream {
   const avg = stream.average_amount ?? {};
   const last = stream.last_amount ?? {};
+  const { shape, iso } = streamCurrency(stream);
   return {
     streamId: stream.stream_id,
     label: stream.merchant_name || stream.description || "Recurring charge",
     frequency: oneOf(stream.frequency, FREQUENCIES) ?? "UNKNOWN",
     averageAmountCents: centsOrNull(avg.amount),
     lastAmountCents: centsOrNull(last.amount),
-    currency: avg.iso_currency_code ?? last.iso_currency_code ?? null,
+    currency: shape === "none" ? accountCurrencies.get(stream.account_id) ?? null : iso,
     lastDate: stream.last_date ?? null,
     predictedNextDate: stream.predicted_next_date ?? null,
     isActive: stream.is_active === true,
@@ -387,7 +461,8 @@ async function readConnection(
     const { state, code } = stateForError(error);
     console.warn(
       `[bank-read] idx=${index} status=${state} code=${code} pages=${pages} ` +
-        `truncated=false pfc_v2=0 pfc_other_version=0 recurring=skipped streams=0`
+        `truncated=false pfc_v2=0 pfc_other_version=0 recurring=skipped streams=0 ` +
+        `stream_ccy=${formatShapeCounts(emptyShapeCounts())}`
     );
     return {
       status: { itemId, institutionName, status: state },
@@ -400,7 +475,15 @@ async function readConnection(
 
   let streams: EngineRecurringStream[] | null = null;
   let recurringCode = "none";
+  const shapeCounts = emptyShapeCounts();
   if (want.recurring) {
+    // Only this connection's accounts: a stream belongs to an account of its own Item.
+    const accountCurrencies = new Map<string, string | null>();
+    for (let i = 0; i < accounts.length; i++) {
+      if (!accountCurrencies.has(accounts[i].accountId)) {
+        accountCurrencies.set(accounts[i].accountId, accounts[i].currency);
+      }
+    }
     try {
       const response = await plaid.transactionsRecurringGet(
         {
@@ -413,8 +496,18 @@ async function readConnection(
         options
       );
       const outflow = response.data.outflow_streams ?? [];
-      streams = [];
-      for (let i = 0; i < outflow.length; i++) streams.push(mapStream(outflow[i]));
+      const mapped: EngineRecurringStream[] = [];
+      const counted = emptyShapeCounts();
+      for (let i = 0; i < outflow.length; i++) {
+        counted[streamCurrency(outflow[i]).shape] += 1;
+        mapped.push(mapStream(outflow[i], accountCurrencies));
+      }
+      // Committed only once every stream mapped, so a failure part-way through
+      // reports no streams and no counts rather than some of each.
+      streams = mapped;
+      for (let i = 0; i < STREAM_CURRENCY_SHAPES.length; i++) {
+        shapeCounts[STREAM_CURRENCY_SHAPES[i]] = counted[STREAM_CURRENCY_SHAPES[i]];
+      }
     } catch (error: unknown) {
       recurringCode = getPlaidErrorCode(error) ?? "none";
       streams = null;
@@ -425,7 +518,8 @@ async function readConnection(
   console.log(
     `[bank-read] idx=${index} status=ok code=${recurringCode} pages=${pages} ` +
       `truncated=${truncated} pfc_v2=${pfcV2} pfc_other_version=${pfcOtherVersion} ` +
-      `recurring=${recurringLabel} streams=${streams === null ? 0 : streams.length}`
+      `recurring=${recurringLabel} streams=${streams === null ? 0 : streams.length} ` +
+      `stream_ccy=${formatShapeCounts(shapeCounts)}`
   );
 
   return {
