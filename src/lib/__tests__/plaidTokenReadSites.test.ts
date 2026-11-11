@@ -75,6 +75,9 @@ const CONSUMING_SITES = [
   // ordering can be tested by executing it), but the production wiring lives
   // here, which is what makes this a consuming site.
   "lib/plaidRevocation.ts",
+  // liveAdapterDeps() decrypts each stored token before the adapter calls
+  // Plaid with it; readBankData takes that decrypt as an injected dependency.
+  "lib/plaidEngineAdapter.ts",
 ];
 
 /**

@@ -33,7 +33,7 @@ export type IsoDateTime = string;
 export interface EngineAccount {
   accountId: string;
   /** Plaid's account type, not the app's collapsed mapping. */
-  type: "depository" | "credit" | "loan" | "investment" | "other";
+  type: "depository" | "credit" | "loan" | "investment" | "brokerage" | "other";
   subtype: string | null;
   /** null means the source returned no balance — never coerced to 0. */
   currentCents: Cents | null;
