@@ -581,6 +581,35 @@ describe("account export: explicit column lists match the schema", () => {
     expect(new Set(exported).size).toBe(exported.length);
     expect([...exported].sort()).toEqual([...schema].sort());
   });
+
+  it("E18 chat_sessions: the cron state columns are in the schema and in the export", () => {
+    // E10 compares the two sides with each other, so it stays green when
+    // both lack these columns: a migration the parser cannot read and an
+    // export list without them. This names the columns on both sides.
+    const added = [
+      "summary_failures",
+      "summary_next_attempt_at",
+      "summary_outcome",
+      "summary_given_up_reason",
+      "summary_given_up_at",
+      "facts_failures",
+      "facts_next_attempt_at",
+      "facts_outcome",
+      "facts_given_up_reason",
+      "facts_given_up_at",
+    ];
+    const exported = sectionFor("chat_sessions").columns.split(", ");
+    const schema = migrationColumns("chat_sessions");
+    for (const column of added) {
+      expect(exported).toContain(column);
+      expect(schema).toContain(column);
+    }
+    // The file's reversal, quoted only in its header, drops every one of
+    // them; read as a statement it would remove them from the schema.
+    const text = readMigration("20261111120000_add_cron_retry_state_to_chat_sessions.sql");
+    expect(text).toContain("add column summary_failures");
+    expect(text).not.toContain("drop column");
+  });
 });
 
 describe("account export: the production page reader", () => {

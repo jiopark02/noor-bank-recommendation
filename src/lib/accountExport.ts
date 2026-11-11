@@ -64,7 +64,7 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     key: "chat_sessions",
     table: "chat_sessions",
     columns:
-      "id, title, started_at, ended_at, last_message_at, message_count, summarized, facts_extracted, created_at, updated_at",
+      "id, title, started_at, ended_at, last_message_at, message_count, summarized, facts_extracted, summary_failures, summary_next_attempt_at, summary_outcome, summary_given_up_reason, summary_given_up_at, facts_failures, facts_next_attempt_at, facts_outcome, facts_given_up_reason, facts_given_up_at, created_at, updated_at",
     filterColumn: "user_id",
     orderColumn: "id",
     orderKeyType: "uuid",
