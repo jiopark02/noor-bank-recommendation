@@ -49,7 +49,35 @@ export interface ChatSession {
   facts_extracted: boolean;
   created_at: string;
   updated_at: string;
+  // Retry and give-up state of the two memory crons (prefix summary_ for the
+  // summarize cron, facts_ for the extract-facts cron). See
+  // src/lib/memoryCronBatch.ts for how they are written.
+  summary_failures: number;
+  summary_next_attempt_at: string | null;
+  summary_outcome: CronOutcome | null;
+  summary_given_up_reason: CronGiveUpReason | null;
+  summary_given_up_at: string | null;
+  facts_failures: number;
+  facts_next_attempt_at: string | null;
+  facts_outcome: CronOutcome | null;
+  facts_given_up_reason: CronGiveUpReason | null;
+  facts_given_up_at: string | null;
 }
+
+/** How a memory cron ended with a session; null while it has not ended. */
+export type CronOutcome = "done" | "given_up";
+
+/** Why a memory cron gave up on a session. A closed list, enforced by a check. */
+export type CronGiveUpReason = "output_unusable" | "input_rejected";
+
+/** Column prefix of a memory cron's state: summarize or extract-facts. */
+export type CronStatePrefix = "summary" | "facts";
+
+/** Each memory cron's completion flag on chat_sessions. */
+const CRON_COMPLETION_FLAG: Record<CronStatePrefix, "summarized" | "facts_extracted"> = {
+  summary: "summarized",
+  facts: "facts_extracted",
+};
 
 /**
  * A single message stored in the database. This is distinct from the client-side
@@ -1186,8 +1214,10 @@ export async function getSummaryBySessionId(
  * session_id triggers code 23505), returns the existing one instead of
  * throwing. This makes the function retry-safe for cron / fact pipelines.
  *
- * Also best-effort sets chat_sessions.summarized = true. If that step fails,
- * the summary is still saved and {@link markSessionSummarized} can recover.
+ * Also best-effort marks the session done for the summarize cron, with the
+ * same update {@link markSessionSummarized} makes. If that step fails, the
+ * summary is still saved; the cron finds the summary on its next run and
+ * marks the session done without calling the model.
  *
  * SECURITY: Verifies session ownership before insert.
  *
@@ -1257,10 +1287,10 @@ export async function createSummary(
     summary = data as ChatSummary;
   }
 
-  // Best-effort: flip chat_sessions.summarized = true.
+  // Best-effort: mark the session done for the summarize cron.
   const { error: flagError } = await supabase
     .from("chat_sessions")
-    .update({ summarized: true })
+    .update(cronDonePayload("summary"))
     .eq("id", sessionId)
     .eq("user_id", userId);
 
@@ -1275,8 +1305,29 @@ export async function createSummary(
 }
 
 /**
- * Sets chat_sessions.summarized = true. Recovery operation for
- * createSummary's best-effort flag update.
+ * The update that marks a session done for one memory cron: its completion
+ * flag true, outcome 'done', and no give-up reason, give-up time or next
+ * attempt. Every completion writes exactly this, whatever the path (a stored
+ * summary or facts, an empty session, a summary found already stored, a
+ * summary withheld by the crisis gate), so the row does not record which path
+ * it was. Clearing the give-up columns keeps the write inside the pair check
+ * whatever state the row was in before.
+ */
+export function cronDonePayload(
+  prefix: CronStatePrefix
+): Record<string, boolean | string | null> {
+  return {
+    [CRON_COMPLETION_FLAG[prefix]]: true,
+    [`${prefix}_outcome`]: "done",
+    [`${prefix}_given_up_reason`]: null,
+    [`${prefix}_given_up_at`]: null,
+    [`${prefix}_next_attempt_at`]: null,
+  };
+}
+
+/**
+ * Marks the session done for the summarize cron ({@link cronDonePayload}).
+ * Also the recovery for createSummary's best-effort update.
  *
  * SECURITY: Filters by both session id and user id.
  *
@@ -1289,7 +1340,7 @@ export async function markSessionSummarized(
   const supabase = getAdmin();
   const { error } = await supabase
     .from("chat_sessions")
-    .update({ summarized: true })
+    .update(cronDonePayload("summary"))
     .eq("id", sessionId)
     .eq("user_id", userId);
 
@@ -1362,11 +1413,16 @@ export async function getSessionsToClose(
  *
  * The cron passes a SMALL limit because each session triggers an LLM call.
  *
- * @param limit  Max sessions. Defaults to DEFAULT_CRON_BATCH_LIMIT.
+ * A session whose summary_next_attempt_at is still in the future is left out
+ * until then (see {@link cronAttemptDueFilter}).
+ *
+ * @param limit  Max sessions.
+ * @param nowIso The run's current time, as an ISO string.
  * @throws Error when the database query fails.
  */
 export async function getSessionsNeedingSummary(
-  limit: number = DEFAULT_CRON_BATCH_LIMIT
+  limit: number,
+  nowIso: string
 ): Promise<ChatSession[]> {
   const supabase = getAdmin();
 
@@ -1375,6 +1431,7 @@ export async function getSessionsNeedingSummary(
     .select("*")
     .eq("summarized", false)
     .not("ended_at", "is", null)
+    .or(cronAttemptDueFilter("summary", nowIso))
     .order("ended_at", { ascending: true })
     .limit(limit);
 
@@ -1404,11 +1461,16 @@ export async function getSessionsNeedingSummary(
  * the summarized flag. Summarization (PR4) and facts extraction (PR5) are
  * separate pipelines.
  *
- * @param limit  Max sessions. Defaults to DEFAULT_CRON_BATCH_LIMIT.
+ * A session whose facts_next_attempt_at is still in the future is left out
+ * until then (see {@link cronAttemptDueFilter}).
+ *
+ * @param limit  Max sessions.
+ * @param nowIso The run's current time, as an ISO string.
  * @throws Error when the database query fails.
  */
 export async function getSessionsNeedingFactsExtraction(
-  limit: number = DEFAULT_CRON_BATCH_LIMIT
+  limit: number,
+  nowIso: string
 ): Promise<ChatSession[]> {
   const supabase = getAdmin();
 
@@ -1417,6 +1479,7 @@ export async function getSessionsNeedingFactsExtraction(
     .select("*")
     .eq("facts_extracted", false)
     .not("ended_at", "is", null)
+    .or(cronAttemptDueFilter("facts", nowIso))
     .order("ended_at", { ascending: true })
     .limit(limit);
 
@@ -1431,13 +1494,13 @@ export async function getSessionsNeedingFactsExtraction(
 }
 
 /**
- * Sets chat_sessions.facts_extracted = true. Marks a session as processed
- * by the facts-extraction cron.
+ * Marks the session done for the facts-extraction cron
+ * ({@link cronDonePayload}).
  *
  * Unlike summarization (which has createSummary's best-effort flag update),
- * this flag is the ONLY completion signal for facts extraction. The cron
- * must call this on every processed session — including empty sessions and
- * sessions whose LLM output produced zero fact operations.
+ * this is the ONLY completion write for facts extraction. The cron calls it on
+ * every finished session — including empty sessions and sessions whose LLM
+ * output produced zero fact operations — and never after a fact write failed.
  *
  * SECURITY: Filters by both session id and user id.
  *
@@ -1450,7 +1513,7 @@ export async function markFactsExtracted(
   const supabase = getAdmin();
   const { error } = await supabase
     .from("chat_sessions")
-    .update({ facts_extracted: true })
+    .update(cronDonePayload("facts"))
     .eq("id", sessionId)
     .eq("user_id", userId);
 
@@ -1460,6 +1523,143 @@ export async function markFactsExtracted(
       error
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 5c-2: Memory cron retry state (server-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * The PostgREST `or` filter that keeps a session whose next attempt is due:
+ * <prefix>_next_attempt_at is null, or no later than `nowIso`.
+ */
+export function cronAttemptDueFilter(
+  prefix: CronStatePrefix,
+  nowIso: string
+): string {
+  const column = `${prefix}_next_attempt_at`;
+  return `${column}.is.null,${column}.lte.${nowIso}`;
+}
+
+/** How many rows a cron state write changed. */
+export interface CronStateWriteResult {
+  updated: number;
+}
+
+function assertFailureCount(value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error("cron state write: failure count must be a non-negative integer");
+  }
+}
+
+/**
+ * One update of a session's cron state, only while that cron has not finished
+ * with it (completion flag false), and, when `failuresBefore` is given, only
+ * while its failure count is still that value. A run that read the session
+ * before another run changed it therefore changes nothing (updated 0) rather
+ * than counting a failure twice or reopening a finished session.
+ *
+ * SECURITY: Filters by both session id and user id.
+ *
+ * @throws Error when the update fails or returns no row list.
+ */
+async function updateCronState(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  payload: Record<string, boolean | number | string | null>,
+  failuresBefore?: number
+): Promise<CronStateWriteResult> {
+  const supabase = getAdmin();
+  let query = supabase
+    .from("chat_sessions")
+    .update(payload)
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .eq(CRON_COMPLETION_FLAG[prefix], false);
+  if (failuresBefore !== undefined) {
+    query = query.eq(`${prefix}_failures`, failuresBefore);
+  }
+  const { data, error } = await query.select("id");
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to write ${prefix} cron state: ${error.message}`,
+      error
+    );
+  }
+  if (!Array.isArray(data)) {
+    throw new Error(`Failed to write ${prefix} cron state: no row list returned`);
+  }
+  return { updated: data.length };
+}
+
+/**
+ * A failure that is not counted: only the next attempt time moves.
+ */
+export async function writeCronBackoff(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  nextAttemptAtIso: string
+): Promise<CronStateWriteResult> {
+  return updateCronState(prefix, sessionId, userId, {
+    [`${prefix}_next_attempt_at`]: nextAttemptAtIso,
+  });
+}
+
+/**
+ * A counted failure below the give-up bound: the failure count goes from
+ * `failuresBefore` to one more, and the next attempt time moves.
+ */
+export async function writeCronCountedFailure(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  failuresBefore: number,
+  nextAttemptAtIso: string
+): Promise<CronStateWriteResult> {
+  assertFailureCount(failuresBefore);
+  return updateCronState(
+    prefix,
+    sessionId,
+    userId,
+    {
+      [`${prefix}_failures`]: failuresBefore + 1,
+      [`${prefix}_next_attempt_at`]: nextAttemptAtIso,
+    },
+    failuresBefore
+  );
+}
+
+/**
+ * A counted failure that reaches the give-up bound. One update sets the
+ * completion flag, outcome 'given_up', the reason and the time together, as
+ * the pair check requires, with the failure count and no next attempt.
+ */
+export async function writeCronGiveUp(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  failuresBefore: number,
+  reason: CronGiveUpReason,
+  givenUpAtIso: string
+): Promise<CronStateWriteResult> {
+  assertFailureCount(failuresBefore);
+  return updateCronState(
+    prefix,
+    sessionId,
+    userId,
+    {
+      [CRON_COMPLETION_FLAG[prefix]]: true,
+      [`${prefix}_outcome`]: "given_up",
+      [`${prefix}_given_up_reason`]: reason,
+      [`${prefix}_given_up_at`]: givenUpAtIso,
+      [`${prefix}_failures`]: failuresBefore + 1,
+      [`${prefix}_next_attempt_at`]: null,
+    },
+    failuresBefore
+  );
 }
 
 /**

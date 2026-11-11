@@ -109,14 +109,14 @@ describe.each([
   [
     "summarize",
     "../../app/api/cron/summarize/route.ts",
-    "getSessionsNeedingSummary(SESSION_CANDIDATE_LIMIT)",
+    "getSessionsNeedingSummary(\n      SESSION_CANDIDATE_LIMIT,\n      startedAt.toISOString()\n    )",
     "cron_summarize",
     "mark: (s) => markSessionSummarized(s.id, s.user_id),",
   ],
   [
     "extract-facts",
     "../../app/api/cron/extract-facts/route.ts",
-    "getSessionsNeedingFactsExtraction(\n      SESSION_CANDIDATE_LIMIT\n    )",
+    "getSessionsNeedingFactsExtraction(\n      SESSION_CANDIDATE_LIMIT,\n      startedAt.toISOString()\n    )",
     "cron_extract_facts",
     "mark: (s) => markFactsExtracted(s.id, s.user_id),",
   ],

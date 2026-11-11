@@ -353,7 +353,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const candidates = await getSessionsNeedingSummary(SESSION_CANDIDATE_LIMIT);
+    const candidates = await getSessionsNeedingSummary(
+      SESSION_CANDIDATE_LIMIT,
+      startedAt.toISOString()
+    );
     let toSummarize = candidates.slice(0, SUMMARIZE_BATCH_LIMIT);
 
     // Retry bound: give up on sessions whose summary has already had the

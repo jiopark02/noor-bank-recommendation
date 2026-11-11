@@ -535,7 +535,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const candidates = await getSessionsNeedingFactsExtraction(
-      SESSION_CANDIDATE_LIMIT
+      SESSION_CANDIDATE_LIMIT,
+      startedAt.toISOString()
     );
     let toExtract = candidates.slice(0, EXTRACT_BATCH_LIMIT);
 
