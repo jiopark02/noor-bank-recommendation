@@ -64,6 +64,45 @@ export const UNNAMED_BANK = "Your bank";
  */
 export const DISPLAY_WINDOW_DAYS = 90;
 
+/** The heading over the figures and the list that cover DISPLAY_WINDOW_DAYS. */
+export const DISPLAY_WINDOW_LABEL = `Last ${DISPLAY_WINDOW_DAYS} days`;
+
+const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A calendar date (YYYY-MM-DD) as "Nov 1", exactly as given. It is read and
+ * formatted on the UTC axis: read as local time, a date west of UTC would
+ * show as the day before. Anything that is not such a date is returned as is.
+ */
+export function formatCalendarDay(isoDate: string): string {
+  if (!CALENDAR_DATE.test(isoDate)) return isoDate;
+  const date = new Date(isoDate + "T00:00:00Z");
+  if (isNaN(date.getTime())) return isoDate;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * Tells a screen whether an answer belongs to its latest request. A screen
+ * calls begin() when it starts a load and draws an answer only while
+ * isCurrent(token) holds, so an earlier request that answers late can never
+ * cover a later one.
+ */
+export interface RequestGate {
+  begin(): number;
+  isCurrent(token: number): boolean;
+}
+
+export function createRequestGate(): RequestGate {
+  let latest = 0;
+  return {
+    begin: () => {
+      latest += 1;
+      return latest;
+    },
+    isCurrent: (token) => token === latest,
+  };
+}
+
 /**
  * The browser's IANA time zone, sent with the summary request so the server
  * can count dates in the user's calendar. null when the browser does not say;
@@ -335,9 +374,21 @@ const CONNECTION_FIELDS = {
 
 const COMPLETENESS = { oneOf: ["complete", "possibly_truncated", "unknown"] } as const;
 
+const TRANSACTION_FIELDS = {
+  transactionId: "string",
+  accountId: "string",
+  amountCents: "number",
+  date: "string",
+  pending: "boolean",
+  name: "string",
+  merchantName: "string|null",
+  category: { listOf: "string" },
+} as const;
+
 /** What the dashboard, the money screen and this module read from a summary body. */
 export const SUMMARY_RESPONSE_FIELDS = {
   connections: { listOf: CONNECTION_FIELDS },
+  transactions: { listOf: TRANSACTION_FIELDS },
   accounts: {
     listOf: {
       accountId: "string",
@@ -398,18 +449,7 @@ export const SUMMARY_RESPONSE_FIELDS = {
 
 /** What the money screen reads from a transaction list body. */
 export const TRANSACTIONS_RESPONSE_FIELDS = {
-  transactions: {
-    listOf: {
-      transactionId: "string",
-      accountId: "string",
-      amountCents: "number",
-      date: "string",
-      pending: "boolean",
-      name: "string",
-      merchantName: "string|null",
-      category: { listOf: "string" },
-    },
-  },
+  transactions: { listOf: TRANSACTION_FIELDS },
   connections: { listOf: CONNECTION_FIELDS },
   period: { completeness: COMPLETENESS },
 } as const;
@@ -417,7 +457,7 @@ export const TRANSACTIONS_RESPONSE_FIELDS = {
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
 export type ScreenSummary = NonNullable<ScreenSummaryResponse["summary"]>;
 export type ScreenTransactionsList = FieldsOf<typeof TRANSACTIONS_RESPONSE_FIELDS>;
-export type ScreenTransaction = ScreenTransactionsList["transactions"][number];
+export type ScreenTransaction = ScreenSummaryResponse["transactions"][number];
 
 type Holds<T extends true> = T;
 /** Compile-time only: what the routes declare they send has every listed field. */

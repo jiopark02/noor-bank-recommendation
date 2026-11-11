@@ -22,6 +22,7 @@ import {
   READ_WINDOW_DAYS,
   TRANSACTIONS_PAGE_SIZE,
   bankWindow,
+  displayTransactions,
   readBankData,
   readCompleteness,
   resolveToday,
@@ -926,6 +927,33 @@ describe("engine input fields", () => {
       .filter((l) => l.startsWith("[bank-read]"))[0];
     expect(line).toContain("item=ok last_update=present inflow_streams=1 stream_pfc=2 history_days=6");
     expect(line).not.toMatch(/2026-|ENTERTAINMENT|Netflix|TOKEN|item-1|acc-1/);
+  });
+});
+
+// Red if: the screen's list is built from the whole read window, or keeps a
+// field only the engine reads.
+describe("displayTransactions", () => {
+  it("keeps only the transactions dated inside the window, inclusive, in read order", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: {
+        pages: [
+          {
+            transactions: [
+              txn("today", { date: "2026-11-11" }),
+              txn("first-day", { date: "2026-08-14" }),
+              txn("day-before", { date: "2026-08-13" }),
+              txn("last-year", { date: "2025-11-20", merchant_entity_id: "m-1" }),
+              txn("bad", { date: "11/01/2026" }),
+            ],
+            total: 5,
+          },
+        ],
+      },
+    });
+    const read = await readBankData(USER, [row(1)], ALL, { start: "2025-10-11", end: "2026-11-11" }, deps(plaid));
+    const list = displayTransactions(read, { start: "2026-08-14", end: "2026-11-11" });
+    expect(list.map((t) => t.transactionId)).toEqual(["today", "first-day"]);
+    expect(list.every((t) => !("merchantEntityId" in t))).toBe(true);
   });
 });
 

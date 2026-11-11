@@ -23,37 +23,56 @@ import {
   readString,
 } from "@/lib/requestJson";
 import {
+  DISPLAY_WINDOW_LABEL,
   bankActionLines,
-  banksNotRead,
   browserTimeZone,
+  createRequestGate,
   creditUsedCents,
   decideBankView,
   describeBankAction,
+  formatCalendarDay,
   formatCents,
   formatCentsOrDash,
   formatMonthlyOrUnknown,
   formatSpending,
-  incompletePeriodNote,
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
-  parseTransactionsListResponse,
   summaryLoadInputs,
   summaryPeriodNote,
   utilizationPercent,
   type MoneyDisplayState,
   type ScreenSummaryResponse,
-  type ScreenTransaction,
 } from "@/lib/bankSummaryView";
-import type {
-  BankCompleteness,
-  BankConnectionStatus,
-} from "@/lib/plaidEngineAdapter";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
 
 const BANK_DATA_LOAD_FAILED =
   "We couldn't load your bank data right now. Please try again in a moment.";
+
+// A fetch that rejects and a 2xx body that does not parse are not something
+// the server said, and the browser's or the parser's own wording is not for
+// the screen. Both end as `message`; an error the server sent in a body is
+// thrown by the caller, with its text. The dashboard follows the same rule.
+async function fetchOrFail(
+  input: string,
+  init: RequestInit,
+  message: string
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error(message);
+  }
+}
+
+async function readJsonOrFail(res: Response, message: string): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(message);
+  }
+}
 
 // Only "ready" and "none" may render a dollar amount (decideBankView decides
 // which applies). An unknown figure must not look like a real $0.
@@ -100,18 +119,9 @@ export default function MoneyPage() {
   // True only once the summary route has answered successfully in this load.
   const [hasMoneyData, setHasMoneyData] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<ScreenTransaction[]>([]);
-  // The list's period as the list route reported it; null until it answers.
-  const [transactionsCompleteness, setTransactionsCompleteness] =
-    useState<BankCompleteness | null>(null);
-  // The list route's own connection statuses: a bank it could not read is
-  // missing from the list, which says so.
-  const [transactionConnections, setTransactionConnections] = useState<
-    BankConnectionStatus[]
-  >([]);
-  const [transactionsError, setTransactionsError] = useState<string | null>(
-    null
-  );
+  // Only the answer to the latest load is drawn: a load that answers after a
+  // later one has started is dropped.
+  const [requestGate] = useState(createRequestGate);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
   const [relinkToken, setRelinkToken] = useState<string | null>(null);
@@ -179,19 +189,26 @@ export default function MoneyPage() {
     };
   }, [router]);
 
-  // The figures, accounts and connection statuses. A failure here is shown as
-  // a failed load (dashes), never as an empty one.
+  // The figures, accounts, transactions and connection statuses, all from one
+  // read. A failure here is shown as a failed load (dashes), never as an
+  // empty one. `token` is this load's; an answer for an earlier load is
+  // dropped, so it can never cover a later one.
   const loadSummary = useCallback(
-    async (headers: HeadersInit) => {
+    async (headers: HeadersInit, token: number) => {
       try {
-        const res = await fetch("/api/finance/summary", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ timeZone: browserTimeZone() }),
-        });
+        const res = await fetchOrFail(
+          "/api/finance/summary",
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ timeZone: browserTimeZone() }),
+          },
+          BANK_DATA_LOAD_FAILED
+        );
 
         if (!res.ok) {
           const data = asPlainObject(await res.json().catch(() => ({})));
+          if (!requestGate.isCurrent(token)) return;
           const errText = readString(data, "error") ?? null;
           if (isNoActiveConnectionMessage(errText)) {
             // Re-pull authoritative connection state from the DB, which is the
@@ -202,57 +219,29 @@ export default function MoneyPage() {
         }
 
         const parsed = parseFinanceSummaryResponse(
-          await res.json().catch(() => null)
+          await readJsonOrFail(res, BANK_DATA_LOAD_FAILED)
         );
+        if (!requestGate.isCurrent(token)) return;
         if (parsed === null) {
           throw new Error(BANK_DATA_LOAD_FAILED);
         }
         setBank(parsed);
         setHasMoneyData(true);
       } catch (err) {
+        if (!requestGate.isCurrent(token)) return;
         setError(err instanceof Error ? err.message : BANK_DATA_LOAD_FAILED);
       }
     },
-    [refetchConnections]
+    [refetchConnections, requestGate]
   );
 
-  // The transaction list. Its failure affects the list only, not the figures.
-  const loadTransactions = useCallback(async (headers: HeadersInit) => {
-    try {
-      const res = await fetch("/api/plaid/transactions", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ timeZone: browserTimeZone() }),
-      });
-
-      if (!res.ok) {
-        const data = asPlainObject(await res.json().catch(() => ({})));
-        throw new Error(readErrorMessage(data) || "Failed to fetch transactions");
-      }
-
-      const parsed = parseTransactionsListResponse(
-        await res.json().catch(() => null)
-      );
-      if (parsed === null) {
-        throw new Error(BANK_DATA_LOAD_FAILED);
-      }
-      setTransactions(parsed.transactions);
-      setTransactionConnections(parsed.connections);
-      setTransactionsCompleteness(parsed.period.completeness);
-    } catch (err) {
-      setTransactionsError(
-        err instanceof Error ? err.message : "Failed to fetch transactions"
-      );
-    }
-  }, []);
-
-  // Fetch the summary and the transaction list, independently.
   const fetchData = useCallback(async () => {
+    // Every call starts a new load, so whatever an earlier one answers later
+    // is dropped, including after the branch below.
+    const token = requestGate.begin();
     if (!userId || !plaidConnections.hasActive) {
       setBank(null);
-      setTransactions([]);
-      setTransactionConnections([]);
-      setTransactionsCompleteness(null);
+      setIsLoadingData(false);
       return;
     }
 
@@ -261,10 +250,6 @@ export default function MoneyPage() {
     setHasMoneyData(false);
     setError(null);
     setBank(null);
-    setTransactions([]);
-    setTransactionConnections([]);
-    setTransactionsCompleteness(null);
-    setTransactionsError(null);
     setRelinkFailedItemId(null);
     setIsLoadingData(true);
 
@@ -272,17 +257,15 @@ export default function MoneyPage() {
       const plaidHeaders = buildJsonAuthorizedHeaders(
         await getSupabaseBearerHeaders()
       );
-      await Promise.all([
-        loadSummary(plaidHeaders),
-        loadTransactions(plaidHeaders),
-      ]);
+      await loadSummary(plaidHeaders, token);
     } catch (err) {
       console.error("Error fetching data:", err);
-      setError(err instanceof Error ? err.message : BANK_DATA_LOAD_FAILED);
+      // Not something the server said: a fixed sentence, not the error's own.
+      if (requestGate.isCurrent(token)) setError(BANK_DATA_LOAD_FAILED);
     } finally {
-      setIsLoadingData(false);
+      if (requestGate.isCurrent(token)) setIsLoadingData(false);
     }
-  }, [userId, plaidConnections.hasActive, loadSummary, loadTransactions]);
+  }, [userId, plaidConnections.hasActive, loadSummary, requestGate]);
 
   // Fetch data when the user connects a bank
   useEffect(() => {
@@ -439,12 +422,11 @@ export default function MoneyPage() {
   const moneyDisplay: MoneyDisplayState = view.figures;
   const summary = view.figures === "ready" && bank ? bank.summary : null;
   const accounts = summary && bank ? bank.accounts : [];
+  // The list comes from the same answer as the figures, over the same
+  // window, so it carries the same missing-bank and incomplete-period lines.
+  const transactions = summary && bank ? bank.transactions : [];
   const missingNote = missingBanksNote(view.missingFrom);
   const periodNote = summaryPeriodNote(view, bank);
-  const transactionsMissingNote = missingBanksNote(
-    banksNotRead(transactionConnections)
-  );
-  const transactionsPeriodNote = incompletePeriodNote(transactionsCompleteness);
   const loadFailedMessage =
     moneyDisplay === "unavailable" && !isNoActiveConnectionMessage(error)
       ? error ?? "We couldn't read any of your banks just now."
@@ -633,8 +615,8 @@ export default function MoneyPage() {
               </div>
             </div>
 
-            {/* Last 90 days */}
-            <p className="text-gray-500 text-xs mb-2">Last 90 days</p>
+            {/* The display window */}
+            <p className="text-gray-500 text-xs mb-2">{DISPLAY_WINDOW_LABEL}</p>
             {periodNote && (
               <p className="text-xs text-amber-800 mb-2">{periodNote}</p>
             )}
@@ -870,20 +852,12 @@ export default function MoneyPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
           >
-            {transactionsError && (
-              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-                <p className="text-sm text-red-700">{transactionsError}</p>
-              </div>
+            <p className="text-gray-500 text-xs mb-2">{DISPLAY_WINDOW_LABEL}</p>
+            {missingNote && (
+              <p className="text-xs text-amber-800 mb-3">{missingNote}</p>
             )}
-            {transactionsMissingNote && (
-              <p className="text-xs text-amber-800 mb-3">
-                {transactionsMissingNote}
-              </p>
-            )}
-            {transactionsPeriodNote && (
-              <p className="text-xs text-amber-800 mb-3">
-                {transactionsPeriodNote}
-              </p>
+            {periodNote && (
+              <p className="text-xs text-amber-800 mb-3">{periodNote}</p>
             )}
             <div className="space-y-2">
               {transactions.map((txn) => (
@@ -901,10 +875,7 @@ export default function MoneyPage() {
                         {txn.merchantName || txn.name}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {new Date(txn.date).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatCalendarDay(txn.date)}
                         {txn.pending && " · Pending"}
                       </p>
                     </div>

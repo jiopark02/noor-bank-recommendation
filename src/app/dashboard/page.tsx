@@ -22,6 +22,7 @@ import {
 } from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 import {
+  DISPLAY_WINDOW_LABEL,
   browserTimeZone,
   creditUsedCents,
   decideBankView,
@@ -705,7 +706,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <p className="text-gray-500 text-xs mb-2">Last 90 days</p>
+            <p className="text-gray-500 text-xs mb-2">{DISPLAY_WINDOW_LABEL}</p>
             {periodNote && (
               <p className="text-xs text-amber-800 mb-2">{periodNote}</p>
             )}

@@ -11,6 +11,7 @@ import { DISPLAY_WINDOW_DAYS } from "@/lib/bankSummaryView";
 import {
   READ_WINDOW_DAYS,
   bankWindow,
+  displayTransactions,
   liveAdapterDeps,
   readBankData,
   resolveToday,
@@ -23,9 +24,9 @@ import {
  * POST /api/finance/summary
  *
  * The money figures the dashboard and the money screen show: the signed-in
- * user's accounts, the finance engine's summary over them, and each bank
- * connection's status. Every amount on those screens comes from here; the
- * screens only format it.
+ * user's accounts, the finance engine's summary over them, the transactions
+ * of the display window, and each bank connection's status. Every amount on
+ * those screens comes from here; the screens only format it.
  *
  * The user is the verified token's user. The only body field read is
  * `timeZone`, the browser's IANA zone: it decides which calendar date is
@@ -96,6 +97,9 @@ export async function POST(request: NextRequest) {
       success: true,
       connections: read.connections,
       accounts: anyRead ? read.accounts.map(toDisplayAccount) : [],
+      // The list the money screen shows, from this same read and window: the
+      // screen makes no second read of the transactions.
+      transactions: anyRead ? displayTransactions(read, period) : [],
       summary: anyRead
         ? computeFinancialSummary(
             toEngineInput(read, {

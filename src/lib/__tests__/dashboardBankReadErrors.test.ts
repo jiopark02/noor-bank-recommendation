@@ -280,6 +280,13 @@ describe("dashboard: checked fields and the incomplete-period line", () => {
 
   it("puts the period line next to the 90-day figures", () => {
     expect(PAGE).toContain("const periodNote = summaryPeriodNote(view, bank);");
-    expect(slice(PAGE, "Last 90 days</p>", "Income</p>")).toContain("{periodNote}");
+    expect(slice(PAGE, "{DISPLAY_WINDOW_LABEL}</p>", "Income</p>")).toContain("{periodNote}");
+  });
+
+  // Red if: the window heading is a literal again, apart from the window the
+  // route computes the figures over.
+  it("takes the window heading from the shared constant", () => {
+    expect(PAGE).not.toContain("Last 90 days");
+    expect(PAGE).toContain("{DISPLAY_WINDOW_LABEL}");
   });
 });

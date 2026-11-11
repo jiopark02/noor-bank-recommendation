@@ -48,21 +48,72 @@ describe("money screen reads the finance summary", () => {
     expect(PAGE).toContain('action.kind === "relink"');
   });
 
-  it("fetches the summary for figures and no other bank-data route but the list", () => {
+  // Red if: the transactions route (or any other bank-data route) is fetched
+  // again: figures and the list come from one read.
+  it("fetches the summary for figures and the list, and no other bank-data route", () => {
     expect(PAGE).not.toContain("/api/plaid/accounts");
-    const fetched = (PAGE.match(/fetch\(\s*"([^"]+)"/g) ?? []).map((m) =>
-      m.replace(/fetch\(\s*"/, "").replace(/"$/, "")
+    expect(PAGE).not.toContain("/api/plaid/transactions");
+    const fetched = (PAGE.match(/\bfetch(?:OrFail)?\(\s*"([^"]+)"/g) ?? []).map((m) =>
+      m.replace(/\bfetch(?:OrFail)?\(\s*"/, "").replace(/"$/, "")
     );
-    expect(fetched.sort()).toEqual(
-      ["/api/finance/summary", "/api/plaid/exchange-token", "/api/plaid/transactions"].sort()
-    );
+    expect(fetched.sort()).toEqual(["/api/finance/summary", "/api/plaid/exchange-token"].sort());
   });
 
   // Red if: the summary request stops naming the browser's time zone, so the
   // server counts dates in UTC for every user.
   it("sends the browser's time zone with the summary request", () => {
-    const loadSummary = slice("const loadSummary = useCallback(", "const loadTransactions =");
+    const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
     expect(loadSummary).toContain("body: JSON.stringify({ timeZone: browserTimeZone() }),");
+  });
+
+  // Red if: an answer is drawn without asking whether it belongs to the
+  // latest load (a late answer could cover a newer one).
+  it("draws an answer only while it belongs to the latest load", () => {
+    const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
+    const fetchData = slice("const fetchData = useCallback(", "useEffect(() => {");
+    expect(PAGE).toContain("const [requestGate] = useState(createRequestGate);");
+    expect(fetchData).toMatch(/const token = requestGate\.begin\(\);/);
+    expect(fetchData.indexOf("requestGate.begin()")).toBeLessThan(fetchData.indexOf("if (!userId"));
+    // Every state write in the loader comes after a current-load check.
+    for (const write of ["setBank(parsed);", "setError(err instanceof Error", "refetchConnections();"]) {
+      const at = loadSummary.indexOf(write);
+      expect(at, write).toBeGreaterThan(-1);
+      const before = loadSummary.slice(0, at);
+      expect(before.lastIndexOf("if (!requestGate.isCurrent(token)) return;"), write).toBeGreaterThan(-1);
+    }
+    expect(fetchData).toContain("if (requestGate.isCurrent(token)) setError(BANK_DATA_LOAD_FAILED);");
+    expect(fetchData).toContain("if (requestGate.isCurrent(token)) setIsLoadingData(false);");
+  });
+
+  // Red if: a rejected fetch or an unparsable body puts the browser's or the
+  // parser's wording on the screen. The server's own error text still shows.
+  it("shows no browser or parser wording", () => {
+    const fetchOrFail = slice("async function fetchOrFail(", "async function readJsonOrFail(");
+    const readJsonOrFail = slice("async function readJsonOrFail(", "export default function");
+    for (const helper of [fetchOrFail, readJsonOrFail]) {
+      expect(helper).toMatch(/catch\s*\{\s*throw new Error\(message\);\s*\}/);
+      expect(helper).not.toContain(".message");
+    }
+    expect(PAGE.match(/\bfetch\(/g) ?? []).toHaveLength(2);
+    const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
+    expect(loadSummary).toMatch(/fetchOrFail\(\s*"\/api\/finance\/summary"[\s\S]*?BANK_DATA_LOAD_FAILED\s*\)/);
+    expect(loadSummary).toContain("readJsonOrFail(res, BANK_DATA_LOAD_FAILED)");
+    expect(loadSummary).not.toMatch(/\.json\(\)(?!\.catch\()/);
+    const fetchData = slice("const fetchData = useCallback(", "useEffect(() => {");
+    expect(fetchData).not.toMatch(/setError\(err/);
+  });
+
+  // Red if: a transaction date goes back through the viewer's local zone.
+  it("shows each transaction's calendar date as given", () => {
+    expect(PAGE).toContain("{formatCalendarDay(txn.date)}");
+    expect(PAGE).not.toMatch(/new Date\(txn\.date\)/);
+  });
+
+  // Red if: the window heading is a literal again, apart from the window the
+  // route computes over.
+  it("takes the window heading from the shared constant", () => {
+    expect(PAGE).not.toContain("Last 90 days");
+    expect(PAGE.match(/\{DISPLAY_WINDOW_LABEL\}/g) ?? []).toHaveLength(2);
   });
 
   // Red if: a charge whose date has passed is shown as "Next expected" again.
@@ -141,10 +192,9 @@ describe("money screen reads the finance summary", () => {
  *
  * Every amount drawn in the page's markup is either inside MoneyFigure (which
  * draws no amount while loading or after a failed load) or a row value
- * (`item.`, `account.`, `txn.`) from a list that is emptied when a load starts
- * and filled only by a successful answer. Transaction rows are not wrapped in
- * MoneyFigure on purpose: they come from their own route, and a failed summary
- * must not hide a list that did load.
+ * (`item.`, `account.`, `txn.`) from a list that is empty unless the figures
+ * are ready. Transaction rows come from the same answer as the figures, so
+ * they are drawn exactly when the figures are.
  *
  * Mutations that turn this block red:
  *   - a recurring total (or any figure) moved out of MoneyFigure
@@ -199,41 +249,38 @@ describe("money screen: no amount drawn while loading or after a failure", () =>
     expect(PAGE).toContain('const summary = view.figures === "ready" && bank ? bank.summary : null;');
     expect(PAGE).toContain("const accounts = summary && bank ? bank.accounts : [];");
     expect(PAGE).toContain("recurringItems: summary ? summary.recurring.items : [],");
+    // The list comes from the same answer, behind the same ready gate.
+    expect(PAGE).toContain("const transactions = summary && bank ? bank.transactions : [];");
+    expect(PAGE).not.toMatch(/setTransactions\(/);
 
     const fetchData = slice("const fetchData = useCallback(", "useEffect(() => {");
     const firstAwait = fetchData.indexOf("await ");
     const reset = fetchData.slice(fetchData.indexOf("setHasMoneyData(false);"), firstAwait);
     expect(reset).toContain("setBank(null);");
-    expect(reset).toContain("setTransactions([]);");
 
-    const loadSummary = slice("const loadSummary = useCallback(", "const loadTransactions =");
-    const loadTransactions = slice("const loadTransactions = useCallback(", "const fetchData =");
-    const elsewhere = PAGE.replace(loadSummary, "").replace(loadTransactions, "");
+    const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
+    const elsewhere = PAGE.replace(loadSummary, "");
     expect(loadSummary).toContain("setBank(parsed);");
-    expect(loadTransactions).toContain("setTransactions(parsed.transactions);");
     expect(elsewhere.match(/setBank\((?!null\))/g) ?? []).toEqual([]);
-    expect(elsewhere.match(/setTransactions\((?!\[\]\))/g) ?? []).toEqual([]);
-    // Each loader runs only from fetchData, after its reset.
+    // The loader runs only from fetchData, after its reset.
     expect(elsewhere.match(/loadSummary\(/g) ?? []).toHaveLength(1);
-    expect(elsewhere.match(/loadTransactions\(/g) ?? []).toHaveLength(1);
-    expect(fetchData).toContain("loadSummary(plaidHeaders)");
-    expect(fetchData).toContain("loadTransactions(plaidHeaders)");
+    expect(fetchData).toContain("loadSummary(plaidHeaders, token)");
   });
 });
 
 /*
  * The screen sees only the fields bankSummaryView checks, and shows the
- * incomplete-period line from both responses.
+ * incomplete-period and missing-bank lines next to the figures and on the
+ * list, both from the one answer.
  *
  * Mutations that turn this block red:
  *   - the summary state typed with the route's full body type again
- *   - the period line dropped, or moved away from the 90-day figures
- *   - the list's period not reset when a load starts
+ *   - a line dropped from the figures or from the list
  */
 describe("money screen: checked fields and the incomplete-period line", () => {
   it("holds the responses in the checked types only", () => {
     expect(PAGE).toContain("useState<ScreenSummaryResponse | null>(null)");
-    expect(PAGE).toContain("useState<ScreenTransaction[]>([])");
+    expect(PAGE).not.toContain("parseTransactionsListResponse");
     expect(PAGE).not.toMatch(/\bFinanceSummaryResponse\b/);
     expect(PAGE).not.toMatch(/\bTransactionsListResponse\b/);
     expect(PAGE).not.toMatch(/\bDisplayTransaction\b/);
@@ -241,26 +288,15 @@ describe("money screen: checked fields and the incomplete-period line", () => {
     expect(PAGE).not.toMatch(/\bas any\b|as unknown as/);
   });
 
-  it("puts the period line next to the 90-day figures and on the list", () => {
+  it("puts the period line next to the window's figures and on the list", () => {
     expect(PAGE).toContain("const periodNote = summaryPeriodNote(view, bank);");
-    const ninety = slice("Last 90 days</p>", "Income</p>");
-    expect(ninety).toContain("{periodNote}");
+    const figures = slice("{DISPLAY_WINDOW_LABEL}</p>", "Income</p>");
+    expect(figures).toContain("{periodNote}");
 
-    expect(PAGE).toContain(
-      "const transactionsPeriodNote = incompletePeriodNote(transactionsCompleteness);"
-    );
-    expect(PAGE).toContain("setTransactionsCompleteness(parsed.period.completeness);");
     const list = slice('key="transactions"', "transactions.map(");
-    expect(list).toContain("{transactionsPeriodNote}");
-
-    // In the reset that runs when a load starts, not only in the
-    // no-connection branch.
-    const fetchData = slice("const fetchData = useCallback(", "useEffect(() => {");
-    const reset = fetchData.slice(
-      fetchData.indexOf("setHasMoneyData(false);"),
-      fetchData.indexOf("await ")
-    );
-    expect(reset).toContain("setTransactionsCompleteness(null);");
+    expect(list).toContain("{periodNote}");
+    expect(list).toContain("{missingNote}");
+    expect(list).toContain("{DISPLAY_WINDOW_LABEL}");
   });
 });
 

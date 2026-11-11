@@ -137,6 +137,12 @@ export interface FinanceSummaryResponse {
   success: true;
   connections: BankConnectionStatus[];
   accounts: DisplayAccount[];
+  /**
+   * The transactions dated inside the cash-flow period (the screens'
+   * display window), from the same read as the figures. Empty when no
+   * connection could be read.
+   */
+  transactions: DisplayTransaction[];
   /** null when no connection could be read. */
   summary: FinancialSummary | null;
 }
@@ -931,6 +937,22 @@ export function toDisplayTransaction(t: ReadTransaction): DisplayTransaction {
     pfcPrimary: t.pfcPrimary,
     pfcDetailed: t.pfcDetailed,
   };
+}
+
+/**
+ * The read's transactions dated inside `window` (inclusive), as the screens
+ * receive them, in the order they were read. A transaction whose date is not
+ * a calendar date is left out.
+ */
+export function displayTransactions(read: BankRead, window: BankWindow): DisplayTransaction[] {
+  const out: DisplayTransaction[] = [];
+  for (let i = 0; i < read.transactions.length; i++) {
+    const t = read.transactions[i];
+    if (!isIsoDate(t.date)) continue;
+    if (t.date < window.start || t.date > window.end) continue;
+    out.push(toDisplayTransaction(t));
+  }
+  return out;
 }
 
 function toEngineTransaction(t: ReadTransaction): EngineTransaction {

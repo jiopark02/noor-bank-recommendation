@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  DISPLAY_WINDOW_DAYS,
+  DISPLAY_WINDOW_LABEL,
   bankActionLines,
   banksNotRead,
   browserTimeZone,
+  createRequestGate,
+  formatCalendarDay,
   creditUsedCents,
   decideBankView,
   describeBankAction,
@@ -108,7 +112,7 @@ function response(
     s !== undefined
       ? s
       : summary({ connections: connections.map((c, i) => engineConnection("c" + i, c.status)) });
-  return { success: true, connections, accounts: [], summary: computed };
+  return { success: true, connections, accounts: [], transactions: [], summary: computed };
 }
 
 describe("decideBankView — figures", () => {
@@ -254,6 +258,46 @@ describe("browserTimeZone", () => {
       () => ({ resolvedOptions: () => ({ timeZone: "" }) }) as unknown as Intl.DateTimeFormat
     );
     expect(browserTimeZone()).toBeNull();
+  });
+});
+
+/*
+ * Mutations that turn this block red:
+ *   - timeZone "UTC" dropped from formatCalendarDay (west of UTC the day
+ *     before shows)                                      -> "shows the calendar date as given"
+ *   - the gate's token not advanced, or every token current -> "only the latest load is current"
+ *   - the label built apart from DISPLAY_WINDOW_DAYS        -> "the window label"
+ */
+describe("calendar dates, request order and the window label", () => {
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = originalTz;
+  });
+
+  it("shows the calendar date as given, whatever the viewer's zone", () => {
+    for (const tz of ["America/Los_Angeles", "Pacific/Honolulu", "Asia/Tokyo", "UTC"]) {
+      process.env.TZ = tz;
+      expect(formatCalendarDay("2026-11-01"), tz).toBe("Nov 1");
+      expect(formatCalendarDay("2026-12-31"), tz).toBe("Dec 31");
+    }
+    expect(formatCalendarDay("not a date")).toBe("not a date");
+    expect(formatCalendarDay("2026-13-45")).toBe("2026-13-45");
+  });
+
+  it("only the latest load is current", () => {
+    const gate = createRequestGate();
+    const first = gate.begin();
+    expect(gate.isCurrent(first)).toBe(true);
+    const second = gate.begin();
+    expect(gate.isCurrent(first)).toBe(false);
+    expect(gate.isCurrent(second)).toBe(true);
+    // Separate screens do not share a gate.
+    expect(createRequestGate().isCurrent(second)).toBe(false);
+  });
+
+  it("the window label comes from the window length", () => {
+    expect(DISPLAY_WINDOW_DAYS).toBe(90);
+    expect(DISPLAY_WINDOW_LABEL).toBe(`Last ${DISPLAY_WINDOW_DAYS} days`);
   });
 });
 
@@ -880,6 +924,22 @@ describe("response bodies — every field the screens read is checked", () => {
             availableCents: 100000,
             limitCents: null,
             currency: "USD",
+          },
+        ],
+        transactions: [
+          {
+            transactionId: "t1",
+            accountId: "chk",
+            amountCents: 1250,
+            currency: "USD",
+            date: "2026-11-01",
+            pending: false,
+            name: "Grocer",
+            merchantName: null,
+            logoUrl: null,
+            category: ["Shops"],
+            pfcPrimary: "FOOD_AND_DRINK",
+            pfcDetailed: null,
           },
         ],
         summary: richSummary(),

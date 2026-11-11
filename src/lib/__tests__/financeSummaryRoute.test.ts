@@ -354,6 +354,22 @@ describe("POST /api/finance/summary — response", () => {
     expect(source.match(/\bDate\.now\(/g) ?? []).toHaveLength(0);
   });
 
+  it("returns the display window's transactions from the same read, for the list", async () => {
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(res.json.transactions.map((t: { transactionId: string }) => t.transactionId)).toEqual([
+      "pay-1",
+      "food-1",
+    ]);
+    expect(res.json.transactions[1]).toMatchObject({
+      accountId: "chk-1",
+      amountCents: 4000,
+      name: "Grocer",
+      merchantName: "Grocer",
+    });
+    expect(res.json.transactions[0]).not.toHaveProperty("merchantEntityId");
+  });
+
   it("with no bank read there is no summary, only the statuses", async () => {
     state.connections = [conn(1), conn(2)];
     state.failItems = { "item-1": "ITEM_LOGIN_REQUIRED", "item-2": "ITEM_LOGIN_REQUIRED" };
@@ -361,6 +377,7 @@ describe("POST /api/finance/summary — response", () => {
     expect(res.status).toBe(200);
     expect(res.json.summary).toBeNull();
     expect(res.json.accounts).toEqual([]);
+    expect(res.json.transactions).toEqual([]);
     expect(res.json.connections.map((c: { itemId: string }) => c.itemId)).toEqual([
       "item-1",
       "item-2",
