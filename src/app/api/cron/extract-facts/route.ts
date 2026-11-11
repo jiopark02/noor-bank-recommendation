@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   isAiMemoryEnabled,
   getSessionsNeedingFactsExtraction,
-  getRespondedAttemptCounts,
   markFactsExtracted,
+  writeCronBackoff,
+  writeCronCountedFailure,
+  writeCronGiveUp,
   getSessionMessages,
   getUserFacts,
   saveUserFact,
@@ -34,12 +36,12 @@ import {
   type ObservedLlmCall,
 } from "@/lib/llmCallTelemetry";
 import { recordLlmCall } from "@/lib/llmCallLog";
+import { SESSION_CANDIDATE_LIMIT } from "@/lib/cronRetryBound";
 import {
-  CRON_MAX_RESPONDED_ATTEMPTS,
-  SESSION_CANDIDATE_LIMIT,
-  applyGiveUps,
-  partitionByAttemptBound,
-} from "@/lib/cronRetryBound";
+  cronRunItems,
+  runMemoryCronBatch,
+  type StageTracker,
+} from "@/lib/memoryCronBatch";
 import {
   OPENROUTER_URL,
   buildOpenRouterRequestBody,
@@ -87,12 +89,16 @@ const CRON_RUNS_RETENTION_DAYS = 180;
  * Every exit records one llm_calls row first. recordLlmCall never rejects
  * (llmCallLog.ts), so the `finally` cannot replace the error this throws or the
  * content it returns.
+ *
+ * What the call observed (the status, whether it timed out) is also copied to
+ * `tracker.call`, from which the batch loop decides how a failure counts.
  */
 async function callOpenRouterForExtraction(
   apiKey: string,
   systemPrompt: string,
   userContent: string,
-  ctx: { userId: string; sessionId: string }
+  ctx: { userId: string; sessionId: string },
+  tracker: StageTracker
 ): Promise<string> {
   const startedAtMs = Date.now();
   const signal = AbortSignal.timeout(CRON_LLM_TIMEOUT_MS);
@@ -114,6 +120,10 @@ async function callOpenRouterForExtraction(
     if (observed.timedOut) {
       logLlmTimeout("cron_extract_facts", EXTRACTION_MODEL, CRON_LLM_TIMEOUT_MS);
     }
+    tracker.call = {
+      httpStatus: observed.httpStatus,
+      timedOut: observed.timedOut,
+    };
     await recordLlmCall(
       buildCronLlmCallRow({
         route: "cron_extract_facts",
@@ -312,11 +322,16 @@ interface SessionFactStats {
  *
  * LLM/파싱 실패는 throw → 바깥 세션 try/catch가 받음 (세션 미완료, 재시도).
  * 개별 fact DB 실패는 stats.failed에 집계하고 계속 진행.
+ *
+ * Records on `tracker` each stage it reaches (see memoryCronBatch.ts). If any
+ * fact write failed, the session is not marked done: it throws in the store
+ * stage, and the whole session is extracted again on a later run.
  */
 async function extractOneSession(
   apiKey: string,
   session: ChatSession,
-  stats: SessionFactStats
+  stats: SessionFactStats,
+  tracker: StageTracker
 ): Promise<void> {
   // 1. 빈 세션 → LLM 없이 완료 표시.
   if (session.message_count === 0) {
@@ -361,12 +376,15 @@ async function extractOneSession(
     `[Existing facts]  (most recent first)\n${existing.text}\n\n` +
     `[Conversation]\n${conversation.text}`;
 
+  tracker.stage = "call";
   const rawOutput = await callOpenRouterForExtraction(
     apiKey,
     EXTRACTION_SYSTEM_PROMPT,
     userContent,
-    { userId: session.user_id, sessionId: session.id }
+    { userId: session.user_id, sessionId: session.id },
+    tracker
   );
+  tracker.stage = "interpret";
   if (!rawOutput.trim()) {
     throw new Error(
       `Extraction model returned empty output for session ${session.id}`
@@ -381,6 +399,8 @@ async function extractOneSession(
     session.id
   );
   validated.newFacts = capNewFacts(validated.newFacts);
+
+  tracker.stage = "store";
 
   // 7. 분기 실행 — 순서 고정: supersede → expire → new_facts.
   //    fact 작업 단위 try/catch. 하나 실패해도 나머지 계속.
@@ -412,6 +432,12 @@ async function extractOneSession(
         await saveUserFact(session.user_id, payload);
         stats.superseded++;
       } catch (recoveryError) {
+        // The same active fact text already exists: the fact the model asked
+        // for is in place, as with a new fact below.
+        if (isUniqueViolation(recoveryError)) {
+          stats.skipped++;
+          continue;
+        }
         stats.failed++;
         console.error(
           `Extract cron: supersede failed for session ${session.id}, ` +
@@ -470,10 +496,17 @@ async function extractOneSession(
     }
   }
 
-  // 8. 완료 표시. 개별 fact 실패가 있어도 세션은 추출 완료로 마크
-  //    (미완료로 두면 다음 cron이 세션 전체를 재추출 → 중복/오류).
-  //    markFactsExtracted 실패 시 throw → 바깥 세션 try/catch가
-  //    processFailed로 처리 (CRITICAL 로그는 GET 핸들러에서).
+  // 8. Mark the session done only when every fact write succeeded (a filtered
+  //    or duplicate fact is not a failure). Otherwise throw in the store
+  //    stage: the session is not marked, and it is extracted again on a later
+  //    run. There a fact already stored is absorbed only when the new answer
+  //    repeats its text ignoring case (the unique index covers lower(fact));
+  //    a fact worded differently is stored as another row.
+  if (stats.failed > 0) {
+    throw new Error(
+      `Extract cron: ${stats.failed} fact write(s) failed for session ${session.id}`
+    );
+  }
   await markFactsExtracted(session.id, session.user_id);
 }
 
@@ -524,94 +557,78 @@ export async function GET(request: NextRequest) {
     factsExpired: 0,
     factsFailed: 0,
     factsFiltered: 0,
-    // Sessions given up under the retry bound, and give-ups whose flag write
-    // failed (those are selected and given up again on a later run).
+    // How the failed sessions were recorded (see memoryCronBatch.ts):
+    // counted or not, given up, and state writes that failed (those
+    // sessions are selected again on a later run).
+    counted: 0,
+    notCounted: 0,
     givenUp: 0,
-    giveUpFailed: 0,
-    // Sessions not started because the run deadline was reached; they stay
-    // eligible and are picked up by the next run.
+    stateWriteFailed: 0,
+    // Sessions not started because the run deadline was reached, or because
+    // an earlier failure stopped the run; they stay eligible.
     deferred: 0,
+    stoppedSkipped: 0,
+    stopped: false,
   };
 
   try {
-    const candidates = await getSessionsNeedingFactsExtraction(
-      SESSION_CANDIDATE_LIMIT,
-      startedAt.toISOString()
-    );
-    let toExtract = candidates.slice(0, EXTRACT_BATCH_LIMIT);
-
-    // Retry bound: give up on sessions whose extraction has already had the
-    // maximum number of answered attempts. If the counts cannot be read, the
-    // run goes ahead without the bound rather than giving up on anything.
-    let attemptCounts: Record<string, number> | null = null;
-    try {
-      attemptCounts = await getRespondedAttemptCounts(
-        "cron_extract_facts",
-        candidates.map((s) => s.id)
-      );
-    } catch (error) {
-      console.error(
-        "Extract cron: could not read attempt counts; running without the retry bound:",
-        error
-      );
-    }
-    if (attemptCounts) {
-      const { toProcess, toGiveUp } = partitionByAttemptBound(
-        candidates,
-        attemptCounts,
-        { max: CRON_MAX_RESPONDED_ATTEMPTS, limit: EXTRACT_BATCH_LIMIT }
-      );
-      const giveUps = await applyGiveUps(toGiveUp, attemptCounts, {
-        route: "cron_extract_facts",
-        mark: (s) => markFactsExtracted(s.id, s.user_id),
-      });
-      stats.givenUp = giveUps.givenUp;
-      stats.giveUpFailed = giveUps.giveUpFailed;
-      toExtract = toProcess;
-    }
-
-    for (const session of toExtract) {
-      if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {
-        stats.deferred =
-          toExtract.length - (stats.processed + stats.processFailed);
-        console.warn(
-          `Extract cron: run deadline reached; ${stats.deferred} ` +
-            `session(s) left for the next run.`
-        );
-        break;
-      }
-      const sessionStats: SessionFactStats = {
-        saved: 0,
-        skipped: 0,
-        superseded: 0,
-        expired: 0,
-        failed: 0,
-        filtered: 0,
-      };
-      try {
-        await extractOneSession(apiKey, session, sessionStats);
-        stats.processed++;
-      } catch (error) {
-        stats.processFailed++;
-        // markFactsExtracted 실패를 포함한 세션 단위 실패. 일부 fact가
-        // 이미 반영됐는데 완료 마크가 안 됐을 수 있어 다음 cron이 세션을
-        // 재추출 → 이미 superseded된 번호 재시도 위험. CRITICAL로 남김.
+    const batch = await runMemoryCronBatch<ChatSession>({
+      route: "cron_extract_facts",
+      now: Date.now,
+      runStartedAtMs: startedAt.getTime(),
+      candidateLimit: SESSION_CANDIDATE_LIMIT,
+      batchLimit: EXTRACT_BATCH_LIMIT,
+      hasBudget: cronRunHasBudgetForAnotherCall,
+      fetchCandidates: (limit, nowIso) =>
+        getSessionsNeedingFactsExtraction(limit, nowIso),
+      failuresOf: (s) => s.facts_failures,
+      processSession: async (s, tracker) => {
+        const sessionStats: SessionFactStats = {
+          saved: 0,
+          skipped: 0,
+          superseded: 0,
+          expired: 0,
+          failed: 0,
+          filtered: 0,
+        };
+        try {
+          await extractOneSession(apiKey, s, sessionStats, tracker);
+        } finally {
+          // 세션 처리 도중 일부라도 반영된 fact 카운트는 합산.
+          stats.factsSaved += sessionStats.saved;
+          stats.factsSkipped += sessionStats.skipped;
+          stats.factsSuperseded += sessionStats.superseded;
+          stats.factsExpired += sessionStats.expired;
+          stats.factsFailed += sessionStats.failed;
+          stats.factsFiltered += sessionStats.filtered;
+        }
+      },
+      onSessionError: (s, error) => {
+        // Facts may be partially applied; the session is not marked done and
+        // is extracted again on a later run.
         console.error(
-          `Extract cron: CRITICAL — session ${session.id} failed during ` +
-            `extraction (facts may be partially applied and the session ` +
-            `may be re-processed next run):`,
+          `Extract cron: session ${s.id} failed during extraction ` +
+            `(facts may be partially applied):`,
           error
         );
-      } finally {
-        // 세션 처리 도중 일부라도 반영된 fact 카운트는 합산.
-        stats.factsSaved += sessionStats.saved;
-        stats.factsSkipped += sessionStats.skipped;
-        stats.factsSuperseded += sessionStats.superseded;
-        stats.factsExpired += sessionStats.expired;
-        stats.factsFailed += sessionStats.failed;
-        stats.factsFiltered += sessionStats.filtered;
-      }
-    }
+      },
+      writeBackoff: (s, next) =>
+        writeCronBackoff("facts", s.id, s.user_id, next),
+      writeCountedFailure: (s, before, next) =>
+        writeCronCountedFailure("facts", s.id, s.user_id, before, next),
+      writeGiveUp: (s, before, reason, at) =>
+        writeCronGiveUp("facts", s.id, s.user_id, before, reason, at),
+    });
+    const items = cronRunItems(batch);
+    stats.processed = items.itemsProcessed;
+    stats.processFailed = items.itemsFailed;
+    stats.counted = batch.counted;
+    stats.notCounted = batch.notCounted;
+    stats.givenUp = batch.givenUp;
+    stats.stateWriteFailed = batch.stateWriteFailed;
+    stats.deferred = batch.deferred;
+    stats.stoppedSkipped = batch.stoppedSkipped;
+    stats.stopped = batch.stopped;
   } catch (error) {
     console.error(
       "Extract cron: getSessionsNeedingFactsExtraction failed:",
@@ -625,6 +642,8 @@ export async function GET(request: NextRequest) {
   console.info("Extract cron complete:", stats);
 
   // cron_runs에 실행 기록 (격리). items_*는 세션 단위 (factsFailed는 stats에만).
+  // A session given up this run failed this run, so it is among the failed
+  // items and the run's status reflects it.
   try {
     await recordCronRun({
       jobName: "extract-facts",

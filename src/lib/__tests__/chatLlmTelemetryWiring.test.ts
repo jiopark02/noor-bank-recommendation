@@ -537,13 +537,13 @@ describe.each([
     expect(recordAt).toBeGreaterThan(markAt);
   });
 
-  it("checks the run deadline before starting each session", () => {
-    expect(
-      occurrences(
-        getBody,
-        "if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {"
-      )
-    ).toBe(1);
-    expect(getBody).toContain("deferred: 0,");
+  it("hands the run deadline check to the batch loop, timed from the start of the run", () => {
+    // The check itself, before each session, is executed in
+    // memoryCronBatch.test.ts.
+    expect(occurrences(getBody, "await runMemoryCronBatch<ChatSession>({")).toBe(1);
+    expect(getBody).toContain("      now: Date.now,\n");
+    expect(getBody).toContain("      runStartedAtMs: startedAt.getTime(),\n");
+    expect(getBody).toContain("      hasBudget: cronRunHasBudgetForAnotherCall,\n");
+    expect(getBody).toContain("    deferred: 0,");
   });
 });

@@ -3,11 +3,14 @@ import {
   isAiMemoryEnabled,
   getSessionsToClose,
   getSessionsNeedingSummary,
-  getRespondedAttemptCounts,
   endSession,
   getSessionMessages,
+  getSummaryBySessionId,
   createSummary,
   markSessionSummarized,
+  writeCronBackoff,
+  writeCronCountedFailure,
+  writeCronGiveUp,
   recordCronRun,        // ← 추가
   type ChatSession,
   type DbChatMessage,
@@ -24,12 +27,12 @@ import {
   logCronInputBudget,
   type CronConversation,
 } from "@/lib/cronInputBudget";
+import { SESSION_CANDIDATE_LIMIT } from "@/lib/cronRetryBound";
 import {
-  CRON_MAX_RESPONDED_ATTEMPTS,
-  SESSION_CANDIDATE_LIMIT,
-  applyGiveUps,
-  partitionByAttemptBound,
-} from "@/lib/cronRetryBound";
+  cronRunItems,
+  runMemoryCronBatch,
+  type StageTracker,
+} from "@/lib/memoryCronBatch";
 import {
   OPENROUTER_URL,
   buildOpenRouterRequestBody,
@@ -77,12 +80,16 @@ const SUMMARIZE_BATCH_LIMIT = 8;
  * The call is cut off after CRON_LLM_TIMEOUT_MS. If that happened before the
  * body was parsed, the row records it as a timeout (network_error) rather than
  * as the invalid-JSON error the cut-off body read produces.
+ *
+ * What the call observed (the status, whether it timed out) is also copied to
+ * `tracker.call`, from which the batch loop decides how a failure counts.
  */
 async function callOpenRouterForSummary(
   apiKey: string,
   systemPrompt: string,
   conversationText: string,
-  ctx: { userId: string; sessionId: string }
+  ctx: { userId: string; sessionId: string },
+  tracker: StageTracker
 ): Promise<string> {
   const startedAtMs = Date.now();
   const signal = AbortSignal.timeout(CRON_LLM_TIMEOUT_MS);
@@ -104,6 +111,10 @@ async function callOpenRouterForSummary(
     if (observed.timedOut) {
       logLlmTimeout("cron_summarize", SUMMARY_MODEL, CRON_LLM_TIMEOUT_MS);
     }
+    tracker.call = {
+      httpStatus: observed.httpStatus,
+      timedOut: observed.timedOut,
+    };
     await recordLlmCall(
       buildCronLlmCallRow({
         route: "cron_summarize",
@@ -231,11 +242,25 @@ function parseSummaryOutput(raw: string): {
   return { summary: summary || text, topics };
 }
 
+/**
+ * Summarizes one session and marks it done. Records on `tracker` each stage it
+ * reaches (see memoryCronBatch.ts), because a failure is counted or not by the
+ * stage it happened in.
+ */
 async function summarizeOneSession(
   apiKey: string,
-  session: ChatSession
+  session: ChatSession,
+  tracker: StageTracker
 ): Promise<void> {
   if (session.message_count === 0) {
+    await markSessionSummarized(session.id, session.user_id);
+    return;
+  }
+
+  // A summary is already stored when an earlier run's completion write
+  // failed after storing it: mark the session done without the model.
+  const stored = await getSummaryBySessionId(session.id, session.user_id);
+  if (stored) {
     await markSessionSummarized(session.id, session.user_id);
     return;
   }
@@ -259,13 +284,16 @@ async function summarizeOneSession(
   logCronInputBudget("cron_summarize", conversation);
   const conversationText = conversation.text;
 
+  tracker.stage = "call";
   const rawOutput = await callOpenRouterForSummary(
     apiKey,
     SUMMARY_SYSTEM_PROMPT,
     conversationText,
-    { userId: session.user_id, sessionId: session.id }
+    { userId: session.user_id, sessionId: session.id },
+    tracker
   );
 
+  tracker.stage = "interpret";
   if (!rawOutput.trim()) {
     throw new Error(
       `Summarization model returned empty output for session ${session.id}`
@@ -273,6 +301,7 @@ async function summarizeOneSession(
   }
 
   const { summary, topics } = parseSummaryOutput(rawOutput);
+  tracker.stage = "store";
   await storeSummaryUnlessCrisis({ createSummary, markSessionSummarized }, session, {
     summary,
     topics,
@@ -322,13 +351,18 @@ export async function GET(request: NextRequest) {
     closeFailed: 0,
     summarized: 0,
     summarizeFailed: 0,
-    // Sessions given up under the retry bound, and give-ups whose flag write
-    // failed (those are selected and given up again on a later run).
+    // How the failed sessions were recorded (see memoryCronBatch.ts):
+    // counted or not, given up, and state writes that failed (those
+    // sessions are selected again on a later run).
+    counted: 0,
+    notCounted: 0,
     givenUp: 0,
-    giveUpFailed: 0,
-    // Sessions not started because the run deadline was reached; they stay
-    // eligible and are picked up by the next run.
+    stateWriteFailed: 0,
+    // Sessions not started because the run deadline was reached, or because
+    // an earlier failure stopped the run; they stay eligible.
     deferred: 0,
+    stoppedSkipped: 0,
+    stopped: false,
   };
 
   try {
@@ -353,63 +387,40 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const candidates = await getSessionsNeedingSummary(
-      SESSION_CANDIDATE_LIMIT,
-      startedAt.toISOString()
-    );
-    let toSummarize = candidates.slice(0, SUMMARIZE_BATCH_LIMIT);
-
-    // Retry bound: give up on sessions whose summary has already had the
-    // maximum number of answered attempts. If the counts cannot be read, the
-    // run goes ahead without the bound rather than giving up on anything.
-    let attemptCounts: Record<string, number> | null = null;
-    try {
-      attemptCounts = await getRespondedAttemptCounts(
-        "cron_summarize",
-        candidates.map((s) => s.id)
-      );
-    } catch (error) {
-      console.error(
-        "Summarize cron: could not read attempt counts; running without the retry bound:",
-        error
-      );
-    }
-    if (attemptCounts) {
-      const { toProcess, toGiveUp } = partitionByAttemptBound(
-        candidates,
-        attemptCounts,
-        { max: CRON_MAX_RESPONDED_ATTEMPTS, limit: SUMMARIZE_BATCH_LIMIT }
-      );
-      const giveUps = await applyGiveUps(toGiveUp, attemptCounts, {
-        route: "cron_summarize",
-        mark: (s) => markSessionSummarized(s.id, s.user_id),
-      });
-      stats.givenUp = giveUps.givenUp;
-      stats.giveUpFailed = giveUps.giveUpFailed;
-      toSummarize = toProcess;
-    }
-
-    for (const session of toSummarize) {
-      if (!cronRunHasBudgetForAnotherCall(Date.now() - startedAt.getTime())) {
-        stats.deferred =
-          toSummarize.length - (stats.summarized + stats.summarizeFailed);
-        console.warn(
-          `Summarize cron: run deadline reached; ${stats.deferred} ` +
-            `session(s) left for the next run.`
-        );
-        break;
-      }
-      try {
-        await summarizeOneSession(apiKey, session);
-        stats.summarized++;
-      } catch (error) {
-        stats.summarizeFailed++;
+    const batch = await runMemoryCronBatch<ChatSession>({
+      route: "cron_summarize",
+      now: Date.now,
+      runStartedAtMs: startedAt.getTime(),
+      candidateLimit: SESSION_CANDIDATE_LIMIT,
+      batchLimit: SUMMARIZE_BATCH_LIMIT,
+      hasBudget: cronRunHasBudgetForAnotherCall,
+      fetchCandidates: (limit, nowIso) =>
+        getSessionsNeedingSummary(limit, nowIso),
+      failuresOf: (s) => s.summary_failures,
+      processSession: (s, tracker) => summarizeOneSession(apiKey, s, tracker),
+      onSessionError: (s, error) => {
         console.error(
-          `Summarize cron: failed to summarize session ${session.id}:`,
+          `Summarize cron: failed to summarize session ${s.id}:`,
           error
         );
-      }
-    }
+      },
+      writeBackoff: (s, next) =>
+        writeCronBackoff("summary", s.id, s.user_id, next),
+      writeCountedFailure: (s, before, next) =>
+        writeCronCountedFailure("summary", s.id, s.user_id, before, next),
+      writeGiveUp: (s, before, reason, at) =>
+        writeCronGiveUp("summary", s.id, s.user_id, before, reason, at),
+    });
+    const items = cronRunItems(batch);
+    stats.summarized = items.itemsProcessed;
+    stats.summarizeFailed = items.itemsFailed;
+    stats.counted = batch.counted;
+    stats.notCounted = batch.notCounted;
+    stats.givenUp = batch.givenUp;
+    stats.stateWriteFailed = batch.stateWriteFailed;
+    stats.deferred = batch.deferred;
+    stats.stoppedSkipped = batch.stoppedSkipped;
+    stats.stopped = batch.stopped;
   } catch (error) {
     console.error(
       "Summarize cron: getSessionsNeedingSummary failed:",
@@ -424,6 +435,8 @@ export async function GET(request: NextRequest) {
   console.info("Summarize cron complete:", stats);
 
   // cron_runs에 실행 기록 (격리 — 기록 실패가 본업/응답을 망치지 않게).
+  // A session given up this run failed this run, so it is among the failed
+  // items and the run's status reflects it.
   try {
     await recordCronRun({
       jobName: "summarize",
