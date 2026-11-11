@@ -66,7 +66,6 @@ const IDENTIFIER = ["access", "token"].join("_");
  */
 const CONSUMING_SITES = [
   "app/api/plaid/accounts/route.ts",
-  "app/api/plaid/transactions/route.ts",
   "app/api/plaid/relink/route.ts",
   "lib/plaidChatState.ts",
   // liveRevocationDeps() decrypts a stored token and hands the plaintext

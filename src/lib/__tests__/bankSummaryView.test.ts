@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  banksNotRead,
   creditUsedCents,
   decideBankView,
   describeBankAction,
@@ -10,6 +11,7 @@ import {
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
+  parseTransactionsListResponse,
   summaryLoadInputs,
   utilizationPercent,
 } from "../bankSummaryView";
@@ -495,6 +497,68 @@ describe("utilizationPercent", () => {
     expect(utilizationPercent(withCard(25000, null), "card")).toBeNull();
     expect(utilizationPercent(withCard(null, 100000), "card")).toBeNull();
     expect(utilizationPercent(withCard(25000, 100000), "other")).toBeNull();
+  });
+});
+
+/*
+ * The transaction list names the banks it could not read, by the same rule
+ * as the figures.
+ *
+ * Mutations that turn this block red:
+ *   - an ok connection named           -> "only banks not read"
+ *   - the duplicate check removed      -> "each name once"
+ *   - a wrong-shaped list read as empty -> "a wrong-shaped list body"
+ */
+describe("banksNotRead and the list body", () => {
+  it("only banks not read, each name once, in order", () => {
+    expect(
+      banksNotRead([
+        ok(1),
+        { itemId: "a", institutionName: "Bank 2", status: "syncing" },
+        { itemId: "b", institutionName: null, status: "failed" },
+        { itemId: "c", institutionName: null, status: "login_required" },
+      ])
+    ).toEqual(["Bank 2", "Your bank"]);
+    expect(banksNotRead([ok(1), ok(2)])).toEqual([]);
+  });
+
+  const goodList = () => ({
+    success: true,
+    transactions: [
+      {
+        transactionId: "t1",
+        accountId: "a1",
+        amountCents: 1250,
+        currency: "USD",
+        date: "2026-11-01",
+        pending: false,
+        name: "Grocer",
+        merchantName: null,
+        logoUrl: null,
+        category: [],
+        pfcPrimary: "FOOD_AND_DRINK",
+        pfcDetailed: null,
+      },
+    ],
+    connections: [ok(1)],
+    period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
+  });
+
+  it("accepts what the route sends", () => {
+    expect(parseTransactionsListResponse(goodList())).not.toBeNull();
+  });
+
+  it("a wrong-shaped list body is a failed read", () => {
+    const bodies: unknown[] = [
+      null,
+      { ...goodList(), transactions: undefined },
+      { ...goodList(), transactions: [{ transactionId: "t1", amount: 12.5 }] },
+      { ...goodList(), connections: undefined },
+      { ...goodList(), connections: [{ itemId: "x", institutionName: null, status: "nope" }] },
+    ];
+    for (const bad of bodies) {
+      expect(parseTransactionsListResponse(bad), JSON.stringify(bad)).toBeNull();
+    }
   });
 });
 

@@ -5,11 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { ConnectBankCard, PlaidLinkButton } from "@/components/plaid";
-import {
-  PlaidTransaction,
-  formatCurrency,
-  CATEGORY_ICONS,
-} from "@/lib/plaid";
+import { CATEGORY_ICONS } from "@/lib/plaid";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
@@ -27,6 +23,7 @@ import {
   readString,
 } from "@/lib/requestJson";
 import {
+  banksNotRead,
   creditUsedCents,
   decideBankView,
   describeBankAction,
@@ -37,11 +34,16 @@ import {
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
+  parseTransactionsListResponse,
   summaryLoadInputs,
   utilizationPercent,
   type MoneyDisplayState,
 } from "@/lib/bankSummaryView";
-import type { FinanceSummaryResponse } from "@/lib/plaidEngineAdapter";
+import type {
+  BankConnectionStatus,
+  DisplayTransaction,
+  FinanceSummaryResponse,
+} from "@/lib/plaidEngineAdapter";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
 
@@ -91,7 +93,12 @@ export default function MoneyPage() {
   // True only once the summary route has answered successfully in this load.
   const [hasMoneyData, setHasMoneyData] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<PlaidTransaction[]>([]);
+  const [transactions, setTransactions] = useState<DisplayTransaction[]>([]);
+  // The list route's own connection statuses: a bank it could not read is
+  // missing from the list, which says so.
+  const [transactionConnections, setTransactionConnections] = useState<
+    BankConnectionStatus[]
+  >([]);
   const [transactionsError, setTransactionsError] = useState<string | null>(
     null
   );
@@ -208,11 +215,14 @@ export default function MoneyPage() {
         throw new Error(readErrorMessage(data) || "Failed to fetch transactions");
       }
 
-      const data = asPlainObject(await res.json().catch(() => null));
-      if (!Array.isArray(data.transactions)) {
+      const parsed = parseTransactionsListResponse(
+        await res.json().catch(() => null)
+      );
+      if (parsed === null) {
         throw new Error(BANK_DATA_LOAD_FAILED);
       }
-      setTransactions(data.transactions as PlaidTransaction[]);
+      setTransactions(parsed.transactions);
+      setTransactionConnections(parsed.connections);
     } catch (err) {
       setTransactionsError(
         err instanceof Error ? err.message : "Failed to fetch transactions"
@@ -225,6 +235,7 @@ export default function MoneyPage() {
     if (!userId || !plaidConnections.hasActive) {
       setBank(null);
       setTransactions([]);
+      setTransactionConnections([]);
       return;
     }
 
@@ -233,6 +244,8 @@ export default function MoneyPage() {
     setHasMoneyData(false);
     setError(null);
     setBank(null);
+    setTransactions([]);
+    setTransactionConnections([]);
     setTransactionsError(null);
     setIsLoadingData(true);
 
@@ -408,6 +421,9 @@ export default function MoneyPage() {
   const summary = view.figures === "ready" && bank ? bank.summary : null;
   const accounts = summary && bank ? bank.accounts : [];
   const missingNote = missingBanksNote(view.missingFrom);
+  const transactionsMissingNote = missingBanksNote(
+    banksNotRead(transactionConnections)
+  );
   const loadFailedMessage =
     moneyDisplay === "unavailable" && !isNoActiveConnectionMessage(error)
       ? error ?? "We couldn't read any of your banks just now."
@@ -830,10 +846,15 @@ export default function MoneyPage() {
                 <p className="text-sm text-red-700">{transactionsError}</p>
               </div>
             )}
+            {transactionsMissingNote && (
+              <p className="text-xs text-amber-800 mb-3">
+                {transactionsMissingNote}
+              </p>
+            )}
             <div className="space-y-2">
               {transactions.map((txn) => (
                 <motion.div
-                  key={txn.id}
+                  key={`${txn.accountId}:${txn.transactionId}`}
                   className="noor-card px-4 py-3 flex items-center justify-between"
                   whileHover={{ scale: 1.01 }}
                 >
@@ -843,7 +864,7 @@ export default function MoneyPage() {
                     </span>
                     <div>
                       <p className="font-medium text-black text-sm">
-                        {txn.merchant_name || txn.name}
+                        {txn.merchantName || txn.name}
                       </p>
                       <p className="text-xs text-gray-500">
                         {new Date(txn.date).toLocaleDateString("en-US", {
@@ -856,11 +877,10 @@ export default function MoneyPage() {
                   </div>
                   <p
                     className={`font-semibold ${
-                      txn.amount < 0 ? "text-green-600" : "text-black"
+                      txn.amountCents < 0 ? "text-green-600" : "text-black"
                     }`}
                   >
-                    {txn.amount < 0 ? "+" : "-"}
-                    {formatCurrency(Math.abs(txn.amount))}
+                    {formatSpending(txn.amountCents)}
                   </p>
                 </motion.div>
               ))}

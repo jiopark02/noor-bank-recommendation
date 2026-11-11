@@ -18,7 +18,9 @@
 
 import type {
   BankConnectionStatus,
+  DisplayTransaction,
   FinanceSummaryResponse,
+  TransactionsListResponse,
 } from "./plaidEngineAdapter";
 import type { FinancialSummary } from "./financeEngine";
 
@@ -103,6 +105,20 @@ export function summaryLoadInputs(input: {
   };
 }
 
+/**
+ * Names of the connections that were not read, in order, each name once
+ * (unnamed banks share UNNAMED_BANK).
+ */
+export function banksNotRead(connections: BankConnectionStatus[]): string[] {
+  const names: string[] = [];
+  for (let i = 0; i < connections.length; i++) {
+    if (connections[i].status === "ok") continue;
+    const name = connections[i].institutionName || UNNAMED_BANK;
+    if (names.indexOf(name) < 0) names.push(name);
+  }
+  return names;
+}
+
 export function decideBankView(input: {
   hasActiveConnection: boolean;
   fetchState: SummaryFetchState;
@@ -131,12 +147,7 @@ export function decideBankView(input: {
     return { figures: "unavailable", showSafeToSpend: false, actions, missingFrom: [] };
   }
 
-  const missingFrom: string[] = [];
-  for (let i = 0; i < connections.length; i++) {
-    if (connections[i].status === "ok") continue;
-    const name = connections[i].institutionName || UNNAMED_BANK;
-    if (missingFrom.indexOf(name) < 0) missingFrom.push(name);
-  }
+  const missingFrom = banksNotRead(connections);
 
   const everyConnectionRead =
     connections.length > 0 && connections.every((c) => c.status === "ok");
@@ -241,6 +252,28 @@ export function parseFinanceSummaryResponse(value: unknown): FinanceSummaryRespo
   if (!Array.isArray(value.accounts) || !value.accounts.every(isRecord)) return null;
   if (value.summary !== null && !isSummary(value.summary)) return null;
   return value as unknown as FinanceSummaryResponse;
+}
+
+function isTransaction(value: unknown): value is DisplayTransaction {
+  return (
+    isRecord(value) &&
+    typeof value.transactionId === "string" &&
+    typeof value.amountCents === "number" &&
+    typeof value.date === "string" &&
+    typeof value.name === "string" &&
+    Array.isArray(value.category)
+  );
+}
+
+/**
+ * A transaction list response body, or null when it does not have the shape
+ * the route sends. A wrong-shaped 2xx is a failed read, never an empty list.
+ */
+export function parseTransactionsListResponse(value: unknown): TransactionsListResponse | null {
+  if (!isRecord(value)) return null;
+  if (!Array.isArray(value.transactions) || !value.transactions.every(isTransaction)) return null;
+  if (!Array.isArray(value.connections) || !value.connections.every(isConnection)) return null;
+  return value as unknown as TransactionsListResponse;
 }
 
 const USD = new Intl.NumberFormat("en-US", {
