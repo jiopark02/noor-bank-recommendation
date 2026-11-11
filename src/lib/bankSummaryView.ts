@@ -24,7 +24,6 @@ import type {
   BankCompleteness,
   BankConnectionStatus,
   FinanceSummaryResponse,
-  TransactionsListResponse,
 } from "./plaidEngineAdapter";
 
 /**
@@ -447,26 +446,14 @@ export const SUMMARY_RESPONSE_FIELDS = {
   },
 } as const;
 
-/** What the money screen reads from a transaction list body. */
-export const TRANSACTIONS_RESPONSE_FIELDS = {
-  transactions: { listOf: TRANSACTION_FIELDS },
-  connections: { listOf: CONNECTION_FIELDS },
-  period: { completeness: COMPLETENESS },
-} as const;
-
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
 export type ScreenSummary = NonNullable<ScreenSummaryResponse["summary"]>;
-export type ScreenTransactionsList = FieldsOf<typeof TRANSACTIONS_RESPONSE_FIELDS>;
 export type ScreenTransaction = ScreenSummaryResponse["transactions"][number];
 
 type Holds<T extends true> = T;
-/** Compile-time only: what the routes declare they send has every listed field. */
+/** Compile-time only: what the route declares it sends has every listed field. */
 export type RouteBodiesSatisfyScreenFields = Holds<
-  [FinanceSummaryResponse] extends [ScreenSummaryResponse]
-    ? [TransactionsListResponse] extends [ScreenTransactionsList]
-      ? true
-      : false
-    : false
+  [FinanceSummaryResponse] extends [ScreenSummaryResponse] ? true : false
 >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -522,17 +509,6 @@ export function fitsFields(spec: FieldSpec, value: unknown): boolean {
  */
 export function parseFinanceSummaryResponse(value: unknown): ScreenSummaryResponse | null {
   return fitsFields(SUMMARY_RESPONSE_FIELDS, value) ? (value as ScreenSummaryResponse) : null;
-}
-
-/**
- * A transaction list response body, or null when it lacks a field the money
- * screen reads or carries one with the wrong type. A wrong-shaped 2xx is a
- * failed read, never an empty list.
- */
-export function parseTransactionsListResponse(value: unknown): ScreenTransactionsList | null {
-  return fitsFields(TRANSACTIONS_RESPONSE_FIELDS, value)
-    ? (value as ScreenTransactionsList)
-    : null;
 }
 
 const USD = new Intl.NumberFormat("en-US", {

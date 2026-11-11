@@ -101,10 +101,6 @@ const ROUTES: RouteProbe[] = [
     relativePath: "../../app/api/plaid/accounts/route.ts",
   },
   {
-    label: "/api/plaid/transactions",
-    relativePath: "../../app/api/plaid/transactions/route.ts",
-  },
-  {
     label: "/api/finance/summary",
     relativePath: "../../app/api/finance/summary/route.ts",
   },

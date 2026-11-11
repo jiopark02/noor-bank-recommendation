@@ -24,7 +24,6 @@ import {
   bankWindow,
   displayTransactions,
   readBankData,
-  readCompleteness,
   resolveToday,
   toDisplayTransaction,
   toEngineInput,
@@ -33,7 +32,7 @@ import {
   type PlaidReadCalls,
   type StoredConnectionRow,
 } from "../plaidEngineAdapter";
-import { computeFinancialSummary } from "../financeEngine";
+import { computeCoverage, computeFinancialSummary } from "../financeEngine";
 
 /**
  * Plaid -> engine adapter, executed against a fake Plaid client.
@@ -71,6 +70,11 @@ const DATES: EngineInputDates = {
 };
 const ALL ={ accounts: true, transactions: true, recurring: true };
 const USER = "user-1";
+
+/** How complete the engine finds a read, from its connections. */
+function readCompleteness(read: Awaited<ReturnType<typeof readBankData>>) {
+  return computeCoverage(read.engineConnections, read.streams.length).completeness;
+}
 
 /** The engine's recurring answer for a read, with DATES. */
 function engineRecurringOf(read: Awaited<ReturnType<typeof readBankData>>) {

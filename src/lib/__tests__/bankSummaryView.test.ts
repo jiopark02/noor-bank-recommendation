@@ -18,11 +18,9 @@ import {
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
-  parseTransactionsListResponse,
   summaryLoadInputs,
   summaryPeriodNote,
   SUMMARY_RESPONSE_FIELDS,
-  TRANSACTIONS_RESPONSE_FIELDS,
   utilizationPercent,
   type FieldSpec,
 } from "../bankSummaryView";
@@ -657,8 +655,9 @@ describe("banksNotRead and the list body", () => {
     expect(banksNotRead([ok(1), ok(2)])).toEqual([]);
   });
 
-  const goodList = () => ({
-    success: true,
+  // The list arrives in the summary body, next to the figures.
+  const withList = () => ({
+    ...JSON.parse(JSON.stringify(response([ok(1)]))),
     transactions: [
       {
         transactionId: "t1",
@@ -675,24 +674,21 @@ describe("banksNotRead and the list body", () => {
         pfcDetailed: null,
       },
     ],
-    connections: [ok(1)],
-    period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
   });
 
   it("accepts what the route sends", () => {
-    expect(parseTransactionsListResponse(goodList())).not.toBeNull();
+    expect(parseFinanceSummaryResponse(withList())).not.toBeNull();
   });
 
   it("a wrong-shaped list body is a failed read", () => {
     const bodies: unknown[] = [
-      null,
-      { ...goodList(), transactions: undefined },
-      { ...goodList(), transactions: [{ transactionId: "t1", amount: 12.5 }] },
-      { ...goodList(), connections: undefined },
-      { ...goodList(), connections: [{ itemId: "x", institutionName: null, status: "nope" }] },
+      { ...withList(), transactions: undefined },
+      { ...withList(), transactions: null },
+      { ...withList(), transactions: [{ transactionId: "t1", amount: 12.5 }] },
+      { ...withList(), connections: [{ itemId: "x", institutionName: null, status: "nope" }] },
     ];
     for (const bad of bodies) {
-      expect(parseTransactionsListResponse(bad), JSON.stringify(bad)).toBeNull();
+      expect(parseFinanceSummaryResponse(bad), JSON.stringify(bad)).toBeNull();
     }
   });
 });
@@ -946,46 +942,21 @@ describe("response bodies — every field the screens read is checked", () => {
       })
     );
 
-  const goodListBody = () => ({
-    success: true,
-    transactions: [
-      {
-        transactionId: "t1",
-        accountId: "a1",
-        amountCents: 1250,
-        currency: "USD",
-        date: "2026-11-01",
-        pending: false,
-        name: "Grocer",
-        merchantName: null,
-        logoUrl: null,
-        category: ["Shops"],
-        pfcPrimary: "FOOD_AND_DRINK",
-        pfcDetailed: null,
-      },
-    ],
-    connections: [ok(1)],
-    period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
-  });
-
+  // The transaction list is part of this body, so this walk checks its
+  // fields too.
   it("summary body: each listed field, missing or mistyped, is a failed read", () => {
     checksEveryField(SUMMARY_RESPONSE_FIELDS, goodSummaryBody(), parseFinanceSummaryResponse);
-  });
-
-  it("list body: each listed field, missing or mistyped, is a failed read", () => {
-    checksEveryField(TRANSACTIONS_RESPONSE_FIELDS, goodListBody(), parseTransactionsListResponse);
   });
 
   it("fields that are not listed are ignored", () => {
     const body = goodSummaryBody();
     body.extra = 1;
     body.accounts[0].extra = { nested: true };
+    body.transactions[0].extra = { nested: true };
     body.summary.cashFlow.extra = "x";
     body.summary.recurring.items[0].extra = null;
     body.summary.dataIssues = "not read by any screen";
     expect(parseFinanceSummaryResponse(body)).not.toBeNull();
-    const list = { ...goodListBody(), extra: 1 } as Record<string, unknown>;
-    expect(parseTransactionsListResponse(list)).not.toBeNull();
   });
 
   it("a summary of null is still a valid body (no bank read)", () => {

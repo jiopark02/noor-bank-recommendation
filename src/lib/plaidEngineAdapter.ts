@@ -2,8 +2,9 @@
 // Plaid -> finance engine adapter. SERVER ONLY.
 //
 // The one place where Plaid's account, transaction and recurring-stream
-// responses are read and turned into the engine's input. The routes that serve
-// the dashboard and the money screen call this; the chat path does not.
+// responses are read and turned into the engine's input. The summary route,
+// which serves the dashboard and the money screen, calls this; the chat path
+// does not.
 //
 // Server only: it decrypts stored access tokens and calls Plaid. Client code may
 // import its TYPES (`import type`), never its values; a source probe in the test
@@ -48,7 +49,6 @@ import { plaidClient } from "@/lib/plaid";
 import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
 import {
-  computeCoverage,
   dayNumber,
   fromDayNumber,
   isCardPaymentCategory,
@@ -145,14 +145,6 @@ export interface FinanceSummaryResponse {
   transactions: DisplayTransaction[];
   /** null when no connection could be read. */
   summary: FinancialSummary | null;
-}
-
-/** Body of a successful POST /api/plaid/transactions. */
-export interface TransactionsListResponse {
-  success: true;
-  transactions: DisplayTransaction[];
-  connections: BankConnectionStatus[];
-  period: BankWindow & { completeness: BankCompleteness };
 }
 
 // ---- dependencies -------------------------------------------------------------
@@ -635,7 +627,7 @@ async function readConnection(
   let pfcV2 = 0;
   let pfcOtherVersion = 0;
   // Read with the accounts: the Item's status belongs to the connection, and
-  // a read that skips accounts (the transaction list) has no use for it.
+  // a read that skips accounts has no use for it.
   const itemStatus: Promise<ItemStatusRead> = want.accounts
     ? readItemStatus(plaid, accessToken, options)
     : Promise.resolve({ state: "skipped" });
@@ -895,11 +887,6 @@ export async function readBankData(
   }
 
   return { connections, engineConnections, accounts, transactions, streams, incomeStreams };
-}
-
-/** How complete the read was, decided by the engine from the connections. */
-export function readCompleteness(read: BankRead): BankCompleteness {
-  return computeCoverage(read.engineConnections, read.streams.length).completeness;
 }
 
 // ---- engine input and display -------------------------------------------------
