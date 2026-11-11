@@ -7,8 +7,11 @@ import {
   formatCentsOrDash,
   formatMonthlyOrUnknown,
   formatSpending,
+  isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
+  summaryLoadInputs,
+  utilizationPercent,
 } from "../bankSummaryView";
 import { computeFinancialSummary, DEFAULT_POLICY } from "../financeEngine";
 import type { EngineInput, FinancialSummary } from "../financeEngine";
@@ -401,6 +404,97 @@ describe("parseFinanceSummaryResponse", () => {
     const body = good();
     body.connections[0].status = "broken";
     expect(parseFinanceSummaryResponse(body)).toBeNull();
+  });
+});
+
+/*
+ * A screen with its own connection list (the money screen) must not draw
+ * "no connection" zeros while that list is loading, and must not draw an
+ * earlier answer after a failed load.
+ *
+ * Mutations that turn this block red:
+ *   - the loading-connections branch removed     -> "$0.00 while the list loads"
+ *   - a failed list read treated as no connection -> "a failed connection list"
+ *   - the no-active answer treated as a failure   -> "no active connection"
+ *   - a load error ignored when data is held      -> "a failed load after a good one"
+ */
+describe("summaryLoadInputs", () => {
+  const base = {
+    connectionsLoading: false,
+    connectionsFailed: false,
+    hasActiveConnection: true,
+    loadError: null as string | null,
+    hasData: false,
+  };
+  const figuresFor = (over: Partial<typeof base>, resp: FinanceSummaryResponse | null = null) =>
+    decideBankView({ ...summaryLoadInputs({ ...base, ...over }), response: resp }).figures;
+
+  it("draws no $0.00 while the connection list loads", () => {
+    expect(figuresFor({ connectionsLoading: true, hasActiveConnection: false })).toBe("loading");
+  });
+
+  it("a failed connection list is a failed load, not no connection", () => {
+    expect(figuresFor({ connectionsFailed: true, hasActiveConnection: false })).toBe("unavailable");
+  });
+
+  it("no active connection, known, shows the true zeros", () => {
+    expect(figuresFor({ hasActiveConnection: false })).toBe("none");
+    expect(
+      figuresFor({
+        loadError: "No active bank connections found. Please connect a bank first.",
+      })
+    ).toBe("none");
+  });
+
+  it("connected and waiting is loading; answered is ready", () => {
+    expect(figuresFor({})).toBe("loading");
+    expect(figuresFor({ hasData: true }, response([ok(1)]))).toBe("ready");
+  });
+
+  it("a failed load after a good one draws nothing from the good one", () => {
+    expect(figuresFor({ hasData: true, loadError: "boom" }, response([ok(1)]))).toBe(
+      "unavailable"
+    );
+  });
+
+  it("recognizes the routes' no-active wording only", () => {
+    expect(isNoActiveConnectionMessage("No active bank connections found. Please connect a bank first.")).toBe(true);
+    expect(isNoActiveConnectionMessage("We couldn't load your bank data right now.")).toBe(false);
+    expect(isNoActiveConnectionMessage(null)).toBe(false);
+  });
+});
+
+/*
+ * Mutations that turn this block red:
+ *   - the ratio computed from balance and limit on the screen side instead
+ *     of read from the engine  -> "an unmeasured card has no percent"
+ */
+describe("utilizationPercent", () => {
+  const withCard = (current: number | null, limit: number | null) =>
+    summary({
+      accounts: [
+        {
+          accountId: "card",
+          type: "credit",
+          subtype: "credit card",
+          currentCents: current,
+          availableCents: null,
+          limitCents: limit,
+          currency: "USD",
+          balanceAsOf: null,
+          fetchedAt: "2026-11-11T11:59:00Z",
+        },
+      ],
+    });
+
+  it("reads the engine's ratio as a whole percent", () => {
+    expect(utilizationPercent(withCard(25000, 100000), "card")).toBe(25);
+  });
+
+  it("an unmeasured card has no percent", () => {
+    expect(utilizationPercent(withCard(25000, null), "card")).toBeNull();
+    expect(utilizationPercent(withCard(null, 100000), "card")).toBeNull();
+    expect(utilizationPercent(withCard(25000, 100000), "other")).toBeNull();
   });
 });
 

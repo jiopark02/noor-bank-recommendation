@@ -66,6 +66,43 @@ function actionFor(c: BankConnectionStatus): BankAction | null {
   }
 }
 
+/** The routes' wording for "no active connection"; the screens match on it. */
+const NO_ACTIVE_CONNECTION = /no active bank connection/i;
+
+export function isNoActiveConnectionMessage(message: string | null): boolean {
+  return message !== null && NO_ACTIVE_CONNECTION.test(message);
+}
+
+/**
+ * decideBankView's inputs for a screen that learns about connections from its
+ * own connection list and loads the summary separately:
+ *   - while the connection list is still loading, the screen is loading (it
+ *     must not show "no connection" zeros yet);
+ *   - a failed connection list or a failed summary load is a failed load;
+ *   - the summary route's "no active connection" answer means none, not failed.
+ */
+export function summaryLoadInputs(input: {
+  connectionsLoading: boolean;
+  connectionsFailed: boolean;
+  hasActiveConnection: boolean;
+  loadError: string | null;
+  hasData: boolean;
+}): { hasActiveConnection: boolean; fetchState: SummaryFetchState } {
+  if (input.connectionsFailed) {
+    return { hasActiveConnection: true, fetchState: "failed" };
+  }
+  if (input.connectionsLoading) {
+    return { hasActiveConnection: true, fetchState: "loading" };
+  }
+  if (isNoActiveConnectionMessage(input.loadError)) {
+    return { hasActiveConnection: false, fetchState: "idle" };
+  }
+  return {
+    hasActiveConnection: input.hasActiveConnection,
+    fetchState: input.loadError !== null ? "failed" : input.hasData ? "loaded" : "loading",
+  };
+}
+
 export function decideBankView(input: {
   hasActiveConnection: boolean;
   fetchState: SummaryFetchState;
@@ -128,6 +165,21 @@ export function creditUsedCents(summary: FinancialSummary): number | null {
     total += Math.max(0, cents);
   }
   return total;
+}
+
+/**
+ * A credit account's utilization as a whole percent, from the engine's own
+ * ratio. null when the engine could not measure it (no limit, no balance,
+ * another currency) — the screen draws no bar then.
+ */
+export function utilizationPercent(summary: FinancialSummary, accountId: string): number | null {
+  const entries = summary.creditUtilization.accounts;
+  for (let i = 0; i < entries.length; i++) {
+    if (entries[i].accountId !== accountId) continue;
+    const bp = entries[i].ratioBasisPoints;
+    return bp === null ? null : Math.round(bp / 100);
+  }
+  return null;
 }
 
 /** One line naming the banks the figures leave out, or null when none are. */
