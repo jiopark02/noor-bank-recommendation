@@ -305,8 +305,9 @@ interface SessionFactStats {
 /**
  * 세션 1개의 facts를 추출·반영한다.
  *
- * 흐름: 빈 세션 처리 → 메시지 조회 → 기존 facts 조회(번호 매김) →
- *       LLM 호출 → 파싱·검증 → supersede→expire→new_facts 실행 →
+ * Flow: empty session → read messages → read existing facts and number the
+ *       leading ones that fit the facts budget (existing.facts) → LLM call →
+ *       parse and validate → supersede → expire → new_facts →
  *       markFactsExtracted.
  *
  * LLM/파싱 실패는 throw → 바깥 세션 try/catch가 받음 (세션 미완료, 재시도).
@@ -340,8 +341,10 @@ async function extractOneSession(
     return;
   }
 
-  // 4. 기존 active facts 조회 + 번호 매김 스냅샷.
-  //    factsArray는 이후 LLM 응답 해석·실행이 끝날 때까지 변형 금지.
+  // 4. Read the user's active facts. Only the leading ones that fit the
+  //    facts budget become existing.facts and are numbered for the model
+  //    (step 5). Neither array may change until execution ends: old_number
+  //    is resolved by index into existing.facts.
   const factsArray = await getUserFacts(session.user_id, {
     limit: EXISTING_FACTS_LIMIT,
   });
