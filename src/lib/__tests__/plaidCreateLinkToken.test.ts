@@ -13,6 +13,7 @@ import { PLAID_TRANSACTIONS_DAYS_REQUESTED } from "../plaid";
  *   - client_user_id taken from anywhere but the verified token -> "the verified user"
  *   - the auth check removed, or moved after linkTokenCreate    -> "unauthenticated"
  *   - the transactions field removed, or sent only on some path -> "requests the history days"
+ *   - the transactions field sent only when no webhook is set   -> "with a webhook set"
  *   - the history-days constant changed                         -> "is 730"
  *   - any history-days value read from the request body         -> "cannot be set by the body"
  *
@@ -105,6 +106,26 @@ describe("create-link-token request", () => {
     expect(state.linkTokenCalls[0].transactions).toEqual({
       days_requested: PLAID_TRANSACTIONS_DAYS_REQUESTED,
     });
+  });
+
+  it("with a webhook set, requests the history days and registers the webhook", async () => {
+    // Red if: the transactions field is sent only when no webhook is set.
+    const previous = process.env.PLAID_WEBHOOK_URL;
+    process.env.PLAID_WEBHOOK_URL = "https://noor.test/api/plaid/webhook";
+    try {
+      const { status } = await post();
+      expect(status).toBe(200);
+      expect(state.linkTokenCalls).toHaveLength(1);
+      expect(state.linkTokenCalls[0].transactions).toEqual({
+        days_requested: PLAID_TRANSACTIONS_DAYS_REQUESTED,
+      });
+      expect(state.linkTokenCalls[0].webhook).toBe(
+        "https://noor.test/api/plaid/webhook"
+      );
+    } finally {
+      if (previous === undefined) delete process.env.PLAID_WEBHOOK_URL;
+      else process.env.PLAID_WEBHOOK_URL = previous;
+    }
   });
 
   it("the history-days constant is 730", () => {
