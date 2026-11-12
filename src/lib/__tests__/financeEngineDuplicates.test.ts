@@ -14,7 +14,12 @@ import type {
  *
  * Mutations that turn this file red:
  *   - the first copy kept instead of the freshest      -> "keeps the copy whose balance …"
- *   - fetchedAt or accountId tie-break removed          -> "falls back to …"
+ *   - the connection's last update or the accountId
+ *     tie-break removed                                 -> "falls back to …"
+ *   - fetchedAt compared again                          -> "when our server received a copy …"
+ *   - the last update looked up by list position, or the
+ *     first-read connection preferred                   -> "the same copy whatever order …"
+ *   - a missing connection or time ranked first         -> "a connection that cannot be found …"
  *   - accounts with no key merged                       -> "never merges an account without a key"
  *   - copies on one connection merged                   -> "never merges two accounts on one connection"
  *   - the dropped copy's transactions or streams kept   -> "leaves out the dropped copy's …"
@@ -104,6 +109,17 @@ function input(accounts: EngineAccount[]): EngineInput {
 
 const kept = (i: EngineInput) => dropDuplicateAccountCopies(i).input.accounts.map((a) => a.accountId);
 
+/** An input whose connections are the given ones, in the given order. */
+function withConnections(accounts: EngineAccount[], connections: unknown[]): EngineInput {
+  const i = input(accounts);
+  i.connections = connections as EngineConnection[];
+  return i;
+}
+
+function updated(connectionKey: string, lastSuccessfulUpdate: string | null): EngineConnection {
+  return { ...conn(connectionKey), lastSuccessfulUpdate };
+}
+
 describe("dropDuplicateAccountCopies", () => {
   it("keeps the copy whose balance the institution measured most recently", () => {
     const older = acct({ accountId: "a1", balanceAsOf: "2026-10-09T08:00:00Z" });
@@ -115,15 +131,70 @@ describe("dropDuplicateAccountCopies", () => {
     expect(kept(input([unknown, older]))).toEqual(["a1"]);
   });
 
-  it("falls back to when our server received it, then to the smaller account id", () => {
-    const early = acct({ accountId: "a1", fetchedAt: "2026-10-10T11:00:00Z" });
-    const late = acct({ accountId: "a2", connectionKey: "c1", fetchedAt: "2026-10-10T11:30:00Z" });
-    expect(kept(input([early, late]))).toEqual(["a2"]);
+  it("falls back to the connection's last update, then to the smaller account id", () => {
+    // The account ids point the other way, so only the last update can decide.
+    const stale = acct({ accountId: "a1", connectionKey: "c1" });
+    const fresh = acct({ accountId: "a2", connectionKey: "c0" });
+    const connections = [updated("c0", "2026-10-10T06:00:00Z"), updated("c1", "2026-10-09T06:00:00Z")];
+    expect(kept(withConnections([stale, fresh], connections))).toEqual(["a2"]);
+    expect(kept(withConnections([fresh, stale], connections))).toEqual(["a2"]);
 
     const x = acct({ accountId: "b-x" });
     const y = acct({ accountId: "a-y", connectionKey: "c1" });
     expect(kept(input([x, y]))).toEqual(["a-y"]);
     expect(kept(input([y, x]))).toEqual(["a-y"]);
+  });
+
+  it("when our server received a copy does not decide which is kept", () => {
+    const late = acct({ accountId: "b-x", fetchedAt: "2026-10-10T11:30:00Z" });
+    const early = acct({ accountId: "a-y", connectionKey: "c1", fetchedAt: "2026-10-10T11:00:00Z" });
+    expect(kept(input([late, early]))).toEqual(["a-y"]);
+    expect(kept(input([early, late]))).toEqual(["a-y"]);
+  });
+
+  it("keeps the same copy whatever order the connections were read in", () => {
+    const NEW = "2026-10-10T06:00:00Z";
+    const OLD = "2026-10-08T06:00:00Z";
+    // Read one way: the fresher connection is c0.
+    const first = withConnections(
+      [acct({ accountId: "z-fresh", connectionKey: "c0" }), acct({ accountId: "a-stale", connectionKey: "c1" })],
+      [updated("c0", NEW), updated("c1", OLD)]
+    );
+    // Read the other way: the keys follow the read order, so the same
+    // connections swap keys, and both lists come in the opposite order.
+    const second = withConnections(
+      [acct({ accountId: "a-stale", connectionKey: "c0" }), acct({ accountId: "z-fresh", connectionKey: "c1" })],
+      [updated("c1", NEW), updated("c0", OLD)]
+    );
+    expect(kept(first)).toEqual(["z-fresh"]);
+    expect(kept(second)).toEqual(["z-fresh"]);
+
+    // A key listed twice is not taken from whichever entry comes first.
+    const copies = [
+      acct({ accountId: "a-twice", connectionKey: "c0" }),
+      acct({ accountId: "b-once", connectionKey: "c1" }),
+    ];
+    const mid = "2026-10-09T06:00:00Z";
+    const oneWay = withConnections(copies, [updated("c0", NEW), updated("c0", OLD), updated("c1", mid)]);
+    const otherWay = withConnections(copies, [updated("c0", OLD), updated("c0", NEW), updated("c1", mid)]);
+    expect(kept(oneWay)).toEqual(["b-once"]);
+    expect(kept(otherWay)).toEqual(["b-once"]);
+  });
+
+  it("a connection that cannot be found, or a time that is not one, ranks last", () => {
+    const valid = updated("c1", "2026-10-09T06:00:00Z");
+    // Not among the connections at all.
+    const missing = withConnections(
+      [acct({ accountId: "a-missing", connectionKey: "c9" }), acct({ accountId: "b-found", connectionKey: "c1" })],
+      [updated("c0", "2026-10-10T06:00:00Z"), valid]
+    );
+    expect(kept(missing)).toEqual(["b-found"]);
+    // An unreadable time, and an entry that is not a connection, which is skipped.
+    const unreadable = withConnections(
+      [acct({ accountId: "a-bad", connectionKey: "c0" }), acct({ accountId: "b-good", connectionKey: "c1" })],
+      [null, updated("c0", "not-a-time"), valid]
+    );
+    expect(kept(unreadable)).toEqual(["b-good"]);
   });
 
   it("never merges an account without a key", () => {

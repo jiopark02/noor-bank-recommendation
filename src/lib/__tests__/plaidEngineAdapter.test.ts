@@ -32,7 +32,11 @@ import {
   type PlaidReadCalls,
   type StoredConnectionRow,
 } from "../plaidEngineAdapter";
-import { computeCoverage, computeFinancialSummary } from "../financeEngine";
+import {
+  computeCoverage,
+  computeFinancialSummary,
+  dropDuplicateAccountCopies,
+} from "../financeEngine";
 
 /**
  * Plaid -> engine adapter, executed against a fake Plaid client.
@@ -859,6 +863,31 @@ describe("engine input fields", () => {
     // Opaque: no part of the description is readable in it.
     expect(key("a")).not.toMatch(/Bank|Checking|0000|depository/);
     expect(read.accounts.map((a) => a.connectionKey)).toEqual(["c0", "c0", "c1", "c1"]);
+  });
+
+  // Red if: the kept copy of an account reached through two connections
+  // depends on which connection was read first.
+  it("keeps the same copy of a duplicated account whatever order the connections are read in", async () => {
+    const { plaid } = fakePlaid({
+      // The account ids sort the other way, so only the connections' last
+      // updates can decide.
+      TOKEN_1: {
+        accounts: [account({ account_id: "z-fresh" })],
+        item: { lastSuccessfulUpdate: "2026-11-11T03:00:00Z" },
+      },
+      TOKEN_2: {
+        accounts: [account({ account_id: "a-stale" })],
+        item: { lastSuccessfulUpdate: "2026-11-09T03:00:00Z" },
+      },
+    });
+    const one = row(1);
+    const two = { ...row(2), institution_name: "Bank 1" };
+    const keptAfter = async (rows: StoredConnectionRow[]) => {
+      const read = await readBankData(USER, rows, ALL, RANGE, deps(plaid));
+      return dropDuplicateAccountCopies(toEngineInput(read, DATES)).input.accounts.map((a) => a.accountId);
+    };
+    expect(await keptAfter([one, two])).toEqual(["z-fresh"]);
+    expect(await keptAfter([two, one])).toEqual(["z-fresh"]);
   });
 
   it("refuses recurring without accounts before decrypting or calling Plaid", async () => {

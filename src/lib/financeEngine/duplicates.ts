@@ -1,4 +1,9 @@
-import type { EngineAccount, EngineInput, EngineRecurringStream } from "./types";
+import type {
+  EngineAccount,
+  EngineConnection,
+  EngineInput,
+  EngineRecurringStream,
+} from "./types";
 import { parseTimestampMs } from "./dates";
 
 /** How many copies of each kind were left out because their account was a duplicate. */
@@ -30,16 +35,51 @@ function compareNewest(a: string | null, b: string | null): number {
 }
 
 /**
- * Which copy of one bank account to keep: the one whose balance the
- * institution measured most recently, then the one our server received most
- * recently, then the smaller account id, so the choice never depends on the
- * order the connections were read in.
+ * Each connection's last successful update, by connection key. An entry that
+ * is not a connection is skipped. A key listed more than once is recorded as
+ * unknown: taking the first would make the answer depend on list order.
  */
-function compareCopies(a: EngineAccount, b: EngineAccount): number {
+function lastUpdateByConnection(
+  connections: ReadonlyArray<EngineConnection | null | undefined>
+): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  const repeated = new Set<string>();
+  for (let i = 0; i < connections.length; i++) {
+    const c = connections[i];
+    if (!c || typeof c.connectionKey !== "string") continue;
+    if (out.has(c.connectionKey)) {
+      repeated.add(c.connectionKey);
+      continue;
+    }
+    out.set(c.connectionKey, typeof c.lastSuccessfulUpdate === "string" ? c.lastSuccessfulUpdate : null);
+  }
+  repeated.forEach((key) => out.set(key, null));
+  return out;
+}
+
+/**
+ * Which copy of one bank account to keep: the one whose balance the
+ * institution measured most recently, then the one whose connection the
+ * institution last updated most recently, then the smaller account id, so the
+ * choice never depends on the order the connections were read in. A missing
+ * or invalid time, or a connection that cannot be found, ranks last.
+ *
+ * When our server received each copy (fetchedAt) is not compared: the
+ * connections are read in parallel, so it records which answer arrived
+ * first, not which data is fresher.
+ */
+function compareCopies(
+  a: EngineAccount,
+  b: EngineAccount,
+  lastUpdate: ReadonlyMap<string, string | null>
+): number {
   const byAsOf = compareNewest(a.balanceAsOf, b.balanceAsOf);
   if (byAsOf !== 0) return byAsOf;
-  const byFetched = compareNewest(a.fetchedAt, b.fetchedAt);
-  if (byFetched !== 0) return byFetched;
+  const byConnection = compareNewest(
+    lastUpdate.get(a.connectionKey) ?? null,
+    lastUpdate.get(b.connectionKey) ?? null
+  );
+  if (byConnection !== 0) return byConnection;
   return a.accountId < b.accountId ? -1 : a.accountId > b.accountId ? 1 : 0;
 }
 
@@ -77,6 +117,7 @@ export function dropDuplicateAccountCopies(input: EngineInput): {
     else perConnection.set(a.connectionKey, [a]);
   }
 
+  const lastUpdate = lastUpdateByConnection(input.connections);
   const droppedIds = new Set<string>();
   byKey.forEach((perConnection) => {
     if (perConnection.size < 2) return;
@@ -87,7 +128,7 @@ export function dropDuplicateAccountCopies(input: EngineInput): {
       copies.push(list[0]);
     });
     if (ambiguous) return;
-    copies.sort(compareCopies);
+    copies.sort((x, y) => compareCopies(x, y, lastUpdate));
     for (let i = 1; i < copies.length; i++) {
       // A copy sharing the kept copy's id is the same account, not a duplicate.
       if (copies[i].accountId !== copies[0].accountId) droppedIds.add(copies[i].accountId);
