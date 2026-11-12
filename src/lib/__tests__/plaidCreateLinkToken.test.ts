@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
+import { PLAID_TRANSACTIONS_DAYS_REQUESTED } from "../plaid";
 
 /**
  * POST /api/plaid/create-link-token, executed.
@@ -11,6 +12,11 @@ import type { NextRequest } from "next/server";
  * Mutations that turn this file red:
  *   - client_user_id taken from anywhere but the verified token -> "the verified user"
  *   - the auth check removed, or moved after linkTokenCreate    -> "unauthenticated"
+ *   - the transactions field removed, or sent only on some path -> "requests the history days"
+ *   - the history-days constant changed                         -> "is 730"
+ *   - any history-days value read from the request body         -> "cannot be set by the body"
+ *
+ * Whether Plaid accepts the value is a live check; the client is faked here.
  */
 
 const state = {
@@ -89,5 +95,31 @@ describe("create-link-token request", () => {
     const { status } = await post();
     expect(status).toBe(401);
     expect(state.linkTokenCalls).toHaveLength(0);
+  });
+
+  it("requests the history days from the server constant", async () => {
+    // Red if: the transactions field is removed, or sent only when a webhook is set.
+    const { status } = await post();
+    expect(status).toBe(200);
+    expect(state.linkTokenCalls).toHaveLength(1);
+    expect(state.linkTokenCalls[0].transactions).toEqual({
+      days_requested: PLAID_TRANSACTIONS_DAYS_REQUESTED,
+    });
+  });
+
+  it("the history-days constant is 730", () => {
+    // Red if: the value changes. The test above holds whatever value it has.
+    expect(PLAID_TRANSACTIONS_DAYS_REQUESTED).toBe(730);
+  });
+
+  it("the history days cannot be set by the body", async () => {
+    // Red if: any value from the body reaches the request.
+    const { status } = await post({
+      days_requested: 30,
+      transactions: { days_requested: 30 },
+    });
+    expect(status).toBe(200);
+    expect(state.linkTokenCalls).toHaveLength(1);
+    expect(state.linkTokenCalls[0].transactions).toEqual({ days_requested: 730 });
   });
 });

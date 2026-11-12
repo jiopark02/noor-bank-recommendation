@@ -3,6 +3,7 @@ import {
   plaidClient,
   PLAID_PRODUCTS,
   PLAID_COUNTRY_CODES,
+  PLAID_TRANSACTIONS_DAYS_REQUESTED,
   isPlaidConfigured,
 } from "@/lib/plaid";
 import {
@@ -63,6 +64,8 @@ export async function POST(request: NextRequest) {
       products: PLAID_PRODUCTS,
       country_codes: PLAID_COUNTRY_CODES,
       language: "en",
+      // Fixed at Item creation; a server constant, never taken from the request.
+      transactions: { days_requested: PLAID_TRANSACTIONS_DAYS_REQUESTED },
       ...(webhook ? { webhook } : {}),
     });
 
