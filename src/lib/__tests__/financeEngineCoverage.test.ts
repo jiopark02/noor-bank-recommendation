@@ -19,6 +19,7 @@ import type {
  *   - safeToSpendShowable without the all-read check       -> "safe-to-spend may be shown only …"
  *   - safeToSpendShowable without the computed check       -> "safe-to-spend may be shown only …"
  *   - a readWindow / period / today check removed          -> the caller-input case named for it
+ *   - either recurring-list check removed                  -> "refuses recurring lists that are not lists"
  */
 
 const NONE_DROPPED = { accounts: 0, transactions: 0, streams: 0 };
@@ -232,5 +233,24 @@ describe("caller input: dates and lists built by the caller", () => {
     expect(
       run((i) => (i.connections = null as unknown as EngineConnection[]))
     ).toThrow(/invalid connections/);
+  });
+
+  it("refuses recurring lists that are not lists", () => {
+    type Recurring = EngineInput["recurring"];
+    expect(run((i) => (i.recurring = undefined as unknown as Recurring))).toThrow(
+      /^computeFinancialSummary: invalid recurring\.streams$/
+    );
+    for (const bad of [null, {}, "x"]) {
+      expect(
+        run((i) => (i.recurring = { ...i.recurring, streams: bad } as unknown as Recurring)),
+        JSON.stringify(bad)
+      ).toThrow(/^computeFinancialSummary: invalid recurring\.streams$/);
+    }
+    for (const bad of [undefined, null, {}, "x"]) {
+      expect(
+        run((i) => (i.recurring = { ...i.recurring, incomeStreams: bad } as unknown as Recurring)),
+        String(bad)
+      ).toThrow(/^computeFinancialSummary: invalid recurring\.incomeStreams$/);
+    }
   });
 });

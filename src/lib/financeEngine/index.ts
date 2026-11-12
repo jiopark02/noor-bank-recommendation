@@ -137,7 +137,8 @@ function collectDataIssues(input: EngineInput): DataIssue[] {
  *   - a valid `period` lies inside `readWindow`, so the cash flow never
  *     counts days whose transactions were not read. A period that is not a
  *     valid range at all stays data: it is reported as `invalid_period`;
- *   - `connections` is a list.
+ *   - `connections` is a list;
+ *   - `recurring.streams` and `recurring.incomeStreams` are lists.
  */
 function checkCallerInput(input: EngineInput): void {
   const fail = (what: string) => {
@@ -162,6 +163,8 @@ function checkCallerInput(input: EngineInput): void {
   }
 
   if (!Array.isArray(input.connections)) fail("connections");
+  if (!input.recurring || !Array.isArray(input.recurring.streams)) fail("recurring.streams");
+  if (!Array.isArray(input.recurring.incomeStreams)) fail("recurring.incomeStreams");
 }
 
 /**
