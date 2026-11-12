@@ -3,6 +3,11 @@ import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 import { clearPlaidLocalState } from "@/lib/validation";
+import { createRequestGate } from "@/lib/bankSummaryView";
+import {
+  BANK_SCREEN_FETCH_TIMEOUT_MS,
+  withFetchTimeout,
+} from "@/lib/screenFetchTimeout";
 
 export interface PlaidConnection {
   itemId: string;
@@ -40,10 +45,16 @@ export function usePlaidConnections(userId: string | null) {
   // not be read. A failed disconnect or re-link is reported to its caller.
   const [error, setError] = useState<string | null>(null);
 
+  // Only the latest list read writes state. Each read now ends at the latest
+  // when the screen's limit runs out, so without this an earlier read that
+  // timed out could mark the list failed after a later read had loaded it.
+  const [requestGate] = useState(createRequestGate);
+
   // Fetch existing connections from the DB (authoritative source), not
   // localStorage — so connection state survives a localStorage purge
   // (logout / shared-device cleanup / a new device).
   const fetchConnections = useCallback(async () => {
+    const token = requestGate.begin();
     if (!userId) {
       setConnections([]);
       setError(null);
@@ -55,13 +66,24 @@ export function usePlaidConnections(userId: string | null) {
     setError(null);
 
     try {
-      const response = await fetch("/api/plaid/connections", {
-        method: "GET",
-        headers: await getSupabaseBearerHeaders(),
-      });
-
-      const payload = asPlainObject(await response.json());
-      if (!response.ok) {
+      const headers = await getSupabaseBearerHeaders();
+      // The request and its body read run under the screen's limit, so a
+      // list that never answers ends in the error state, not on loading.
+      const { ok, payload } = await withFetchTimeout(
+        BANK_SCREEN_FETCH_TIMEOUT_MS,
+        async (signal) => {
+          const response = await fetch("/api/plaid/connections", {
+            method: "GET",
+            headers,
+            signal,
+          });
+          return {
+            ok: response.ok,
+            payload: asPlainObject(await response.json()),
+          };
+        }
+      );
+      if (!ok) {
         throw new Error(
           readErrorMessage(payload) || "Failed to load bank connections"
         );
@@ -70,8 +92,10 @@ export function usePlaidConnections(userId: string | null) {
       const list = Array.isArray(payload.connections)
         ? (payload.connections as PlaidConnection[])
         : [];
+      if (!requestGate.isCurrent(token)) return;
       setConnections(list);
     } catch (err) {
+      if (!requestGate.isCurrent(token)) return;
       // Distinguish a transient load failure from "no connections": set an
       // error and DO NOT collapse to an empty/disconnected state, so callers
       // don't surface the connect card (which would push the user to re-link and
@@ -81,9 +105,9 @@ export function usePlaidConnections(userId: string | null) {
         err instanceof Error ? err.message : "Failed to load bank connections"
       );
     } finally {
-      setIsLoading(false);
+      if (requestGate.isCurrent(token)) setIsLoading(false);
     }
-  }, [userId]);
+  }, [userId, requestGate]);
 
   // Load connections on mount
   useEffect(() => {
