@@ -117,10 +117,20 @@ const configuration = new Configuration({
 // every `catch` in the app receives an already-safe error, instead of the
 // safety depending on each log site remembering to be careful.
 //
-// create() is deliberately called with NO config object: an empty create()
-// inherits the global axios defaults, so timeout, transformRequest/Response and
-// validateStatus stay exactly as they were when the SDK used the global axios.
-const plaidHttp = axios.create();
+// create() receives exactly one setting, maxRedirects: 0. Everything else is
+// merged from the global axios defaults, so timeout, transformRequest/Response
+// and validateStatus stay exactly as they were when the SDK used the global
+// axios.
+//
+// maxRedirects: 0 makes axios's Node adapter send through the built-in
+// http/https modules instead of follow-redirects, so a 3xx answer is never
+// followed. Following one would resend the PLAID-CLIENT-ID / PLAID-SECRET
+// headers (which follow-redirects does not strip on a cross-origin hop) and,
+// on a 307/308, the request body with the user's access_token, to whatever
+// host the Location header names. A 3xx instead fails validateStatus, rejects
+// as an AxiosError, and goes through the same redacting interceptor below
+// into the callers' existing Plaid error handling.
+const plaidHttp = axios.create({ maxRedirects: 0 });
 
 // One response interceptor, error path only.
 // - The success handler is the identity function: successful responses pass
