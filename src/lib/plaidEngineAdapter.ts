@@ -2,8 +2,9 @@
 // Plaid -> finance engine adapter. SERVER ONLY.
 //
 // The one place where Plaid's account, transaction and recurring-stream
-// responses are read and turned into the engine's input. The routes that serve
-// the dashboard and the money screen call this; the chat path does not.
+// responses are read and turned into the engine's input. The summary route,
+// which serves the dashboard and the money screen, calls this; the chat path
+// does not.
 //
 // Server only: it decrypts stored access tokens and calls Plaid. Client code may
 // import its TYPES (`import type`), never its values; a source probe in the test
@@ -23,13 +24,19 @@
 //     the accounts read on the same connection (see mapStream).
 //   - Logs carry status, error code and counts only: no item id, token,
 //     amount or name.
+//   - The keys handed to the engine (connection key, duplicate key) are
+//     opaque: the duplicate key is a hash, so no name or mask reaches the
+//     engine input. Neither key is part of any response.
 // =============================================================================
 
+import { createHash } from "crypto";
 import {
   PersonalFinanceCategoryVersion,
   type AccountBase,
   type AccountsGetRequest,
   type AccountsGetResponse,
+  type ItemGetRequest,
+  type ItemGetResponse,
   type Transaction,
   type TransactionStream,
   type TransactionStreamAmount,
@@ -41,9 +48,18 @@ import {
 import { plaidClient } from "@/lib/plaid";
 import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
-import { toCents } from "@/lib/financeEngine";
+import {
+  dayNumber,
+  fromDayNumber,
+  isCardPaymentCategory,
+  isIsoDate,
+  toCents,
+} from "@/lib/financeEngine";
 import type {
+  Completeness,
+  DateBasis,
   EngineAccount,
+  EngineConnection,
   EngineInput,
   EngineRecurringStream,
   EngineTransaction,
@@ -52,8 +68,12 @@ import type {
   RecurringStatus,
 } from "@/lib/financeEngine";
 
-/** Days of transactions read, counting today. */
-export const LOOKBACK_DAYS = 90;
+/**
+ * Days of transactions read, counting today: a full year plus the month
+ * before it, inclusive on both ends. The cash flow the screens show covers a
+ * shorter window inside it (DISPLAY_WINDOW_DAYS in bankSummaryView).
+ */
+export const READ_WINDOW_DAYS = 397;
 /** Plaid's documented maximum for /transactions/get `count`. */
 export const TRANSACTIONS_PAGE_SIZE = 500;
 /** Pages read per connection before the window is reported as possibly truncated. */
@@ -110,31 +130,31 @@ export interface BankWindow {
   end: string;
 }
 
-export type BankCompleteness = EngineInput["period"]["completeness"];
+export type BankCompleteness = Completeness;
 
 /** Body of a successful POST /api/finance/summary. */
 export interface FinanceSummaryResponse {
   success: true;
   connections: BankConnectionStatus[];
   accounts: DisplayAccount[];
+  /**
+   * The transactions dated inside the cash-flow period (the screens'
+   * display window), from the same read as the figures. Present only when
+   * the request's `includeTransactions` is exactly `true`; then empty when no
+   * connection could be read.
+   */
+  transactions?: DisplayTransaction[];
   /** null when no connection could be read. */
   summary: FinancialSummary | null;
-}
-
-/** Body of a successful POST /api/plaid/transactions. */
-export interface TransactionsListResponse {
-  success: true;
-  transactions: DisplayTransaction[];
-  connections: BankConnectionStatus[];
-  period: BankWindow & { completeness: BankCompleteness };
 }
 
 // ---- dependencies -------------------------------------------------------------
 
 type CallOptions = { timeout: number };
 
-/** The three Plaid calls, shaped like the SDK client so it can be passed as is. */
+/** The Plaid calls the adapter makes, shaped like the SDK client so it can be passed as is. */
 export interface PlaidReadCalls {
+  itemGet(request: ItemGetRequest, options?: CallOptions): Promise<{ data: ItemGetResponse }>;
   accountsGet(
     request: AccountsGetRequest,
     options?: CallOptions
@@ -170,6 +190,11 @@ export interface StoredConnectionRow {
   institution_name: string | null;
 }
 
+/**
+ * Which reads to make. `recurring` needs `accounts`: a stream that names no
+ * currency takes its account's, from the accounts read on the same
+ * connection, so readBankData refuses recurring without accounts.
+ */
 export interface BankReadRequest {
   accounts: boolean;
   transactions: boolean;
@@ -178,17 +203,76 @@ export interface BankReadRequest {
 
 // ---- dates --------------------------------------------------------------------
 
-function isoDay(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+/** What the request said about the user's calendar, as far as it could be used. */
+export interface UserToday {
+  today: string;
+  dateBasis: DateBasis;
 }
 
-/** The UTC window ending today, LOOKBACK_DAYS long, inclusive on both ends. */
-export function bankWindow(now: Date): BankWindow {
-  const endMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return {
-    start: isoDay(endMs - (LOOKBACK_DAYS - 1) * 86_400_000),
-    end: isoDay(endMs),
-  };
+// Characters an IANA zone name (or Etc/GMT±n) can contain. Anything else is
+// refused before the platform sees it.
+const TIME_ZONE_PATTERN = /^[A-Za-z0-9_+\-/]+$/;
+const TIME_ZONE_MAX_LENGTH = 64;
+
+function utcToday(now: Date): UserToday {
+  return { today: now.toISOString().slice(0, 10), dateBasis: "utc" };
+}
+
+/**
+ * The user's calendar date at `now`, from a time zone the client sent.
+ *
+ * The value must be a string of 1 to 64 characters from TIME_ZONE_PATTERN that
+ * the platform accepts as a time zone (Intl.DateTimeFormat throws a
+ * RangeError otherwise). It is not compared against Intl.supportedValuesOf:
+ * that list names one spelling per zone and differs between ICU versions, so
+ * valid aliases would be refused. An accepted value is normalized through
+ * resolvedOptions(), and the date is taken in the normalized zone.
+ *
+ * Anything else falls back to the UTC date with dateBasis "utc". The value is
+ * never returned, logged or stored.
+ */
+export function resolveToday(raw: unknown, now: Date): UserToday {
+  if (
+    typeof raw !== "string" ||
+    raw.length < 1 ||
+    raw.length > TIME_ZONE_MAX_LENGTH ||
+    !TIME_ZONE_PATTERN.test(raw)
+  ) {
+    return utcToday(now);
+  }
+  try {
+    const zone = new Intl.DateTimeFormat("en-US", { timeZone: raw }).resolvedOptions().timeZone;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    let year = "";
+    let month = "";
+    let day = "";
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].type === "year") year = parts[i].value;
+      else if (parts[i].type === "month") month = parts[i].value;
+      else if (parts[i].type === "day") day = parts[i].value;
+    }
+    const today = `${year}-${month}-${day}`;
+    if (!isIsoDate(today)) return utcToday(now);
+    return { today, dateBasis: "user_time_zone" };
+  } catch {
+    return utcToday(now);
+  }
+}
+
+/**
+ * The `days`-long window ending on `today`, inclusive on both ends. Throws on
+ * an invalid date or length (caller bug).
+ */
+export function bankWindow(today: string, days: number): BankWindow {
+  const end = dayNumber(today);
+  if (end === null) throw new Error("bankWindow: invalid today");
+  if (!(Number.isSafeInteger(days) && days >= 1)) throw new Error("bankWindow: invalid days");
+  return { start: fromDayNumber(end - (days - 1)), end: today };
 }
 
 // ---- mappers ------------------------------------------------------------------
@@ -217,11 +301,47 @@ function accountType(raw: unknown): EngineAccount["type"] {
 export interface ReadAccount extends DisplayAccount {
   balanceAsOf: string | null;
   fetchedAt: string;
+  duplicateKey: string | null;
+  connectionKey: string;
+}
+
+function nonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * An opaque key two connections share for what looks like the same bank
+ * account: a hash of the institution's name, the account type and subtype,
+ * the last four digits and the account name. null when any of them is
+ * missing, so an account is never matched on part of its description.
+ */
+export function duplicateKeyOf(
+  account: AccountBase,
+  institutionName: string | null
+): string | null {
+  const parts: unknown[] = [
+    institutionName,
+    account.type,
+    account.subtype,
+    account.mask,
+    account.name,
+  ];
+  for (let i = 0; i < parts.length; i++) {
+    if (!nonEmpty(parts[i])) return null;
+  }
+  return createHash("sha256")
+    .update(JSON.stringify(["v2"].concat(parts as string[])))
+    .digest("hex");
+}
+
+/** The connection key handed to the engine: its position in this request only. */
+export function connectionKeyOf(index: number): string {
+  return "c" + index;
 }
 
 export function mapAccount(
   account: AccountBase,
-  connection: { itemId: string; institutionName: string | null },
+  connection: { itemId: string; institutionName: string | null; connectionKey: string },
   fetchedAt: string
 ): ReadAccount {
   const b = account.balances;
@@ -240,10 +360,17 @@ export function mapAccount(
     currency: b.iso_currency_code ?? null,
     balanceAsOf: b.last_updated_datetime ?? null,
     fetchedAt,
+    duplicateKey: duplicateKeyOf(account, connection.institutionName),
+    connectionKey: connection.connectionKey,
   };
 }
 
-export function mapTransaction(txn: Transaction): DisplayTransaction {
+/** A transaction as read: what the screens show plus what only the engine needs. */
+export interface ReadTransaction extends DisplayTransaction {
+  merchantEntityId: string | null;
+}
+
+export function mapTransaction(txn: Transaction): ReadTransaction {
   const pfc = txn.personal_finance_category ?? null;
   return {
     transactionId: txn.transaction_id,
@@ -258,6 +385,7 @@ export function mapTransaction(txn: Transaction): DisplayTransaction {
     category: Array.isArray(txn.category) ? txn.category : [],
     pfcPrimary: pfc && pfc.primary ? pfc.primary : null,
     pfcDetailed: pfc && pfc.detailed ? pfc.detailed : null,
+    merchantEntityId: nonEmpty(txn.merchant_entity_id) ? txn.merchant_entity_id : null,
   };
 }
 
@@ -342,8 +470,17 @@ function formatShapeCounts(counts: ShapeCounts): string {
   return parts.join(",");
 }
 
+function stringsOnly(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] === "string") out.push(value[i]);
+  }
+  return out;
+}
+
 /**
- * An outflow stream as Plaid reported it. One gap is filled: when neither
+ * A stream (outflow or inflow) as Plaid reported it. One gap is filled: when neither
  * amount names a currency of any kind, the stream takes the currency of its
  * own account (`account_id`) from `accountCurrencies`, the accounts read on
  * the same connection; with no such account, or an account without an ISO
@@ -357,6 +494,7 @@ export function mapStream(
   const avg = stream.average_amount ?? {};
   const last = stream.last_amount ?? {};
   const { shape, iso } = streamCurrency(stream);
+  const pfc = stream.personal_finance_category ?? null;
   return {
     streamId: stream.stream_id,
     label: stream.merchant_name || stream.description || "Recurring charge",
@@ -368,6 +506,11 @@ export function mapStream(
     predictedNextDate: stream.predicted_next_date ?? null,
     isActive: stream.is_active === true,
     status: oneOf(stream.status, STATUSES) ?? "UNKNOWN",
+    accountId: nonEmpty(stream.account_id) ? stream.account_id : null,
+    pfcPrimary: pfc && pfc.primary ? pfc.primary : null,
+    pfcDetailed: pfc && pfc.detailed ? pfc.detailed : null,
+    legacyCategory: stringsOnly(stream.category),
+    transactionIds: stringsOnly(stream.transaction_ids),
   };
 }
 
@@ -384,11 +527,96 @@ function stateForError(error: unknown): { state: BankConnectionState; code: stri
 
 interface ConnectionRead {
   status: BankConnectionStatus;
+  engine: EngineConnection;
   accounts: ReadAccount[];
-  transactions: DisplayTransaction[];
-  /** null when the recurring call was not made or failed. */
-  streams: EngineRecurringStream[] | null;
-  truncated: boolean;
+  transactions: ReadTransaction[];
+  streams: EngineRecurringStream[];
+  incomeStreams: EngineRecurringStream[];
+}
+
+type ItemStatusRead =
+  | { state: "skipped" }
+  | { state: "ok"; lastSuccessfulUpdate: string | null }
+  | { state: "failed"; code: string };
+
+/**
+ * The Item's last successful transactions update, from /item/get. Started
+ * alongside the other reads and never rejects: a failure, including one
+ * thrown before the call is made, is an answer of its own and does not
+ * change the connection's status.
+ */
+function readItemStatus(
+  plaid: PlaidReadCalls,
+  accessToken: string,
+  options: CallOptions
+): Promise<ItemStatusRead> {
+  return Promise.resolve()
+    .then(() => plaid.itemGet({ access_token: accessToken }, options))
+    .then((response): ItemStatusRead => {
+      const last = response.data.status?.transactions?.last_successful_update;
+      return { state: "ok", lastSuccessfulUpdate: nonEmpty(last) ? last : null };
+    })
+    .catch((error: unknown): ItemStatusRead => ({
+      state: "failed",
+      code: getPlaidErrorCode(error) ?? "none",
+    }));
+}
+
+function itemLogFields(item: ItemStatusRead): string {
+  const lastUpdate =
+    item.state === "ok" && item.lastSuccessfulUpdate !== null ? "present" : "absent";
+  const code = item.state === "failed" ? ` item_code=${item.code}` : "";
+  return `item=${item.state}${code} last_update=${lastUpdate}`;
+}
+
+/** The earliest valid date among the transactions, or null. */
+function earliestDate(transactions: ReadTransaction[]): string | null {
+  let earliest: string | null = null;
+  for (let i = 0; i < transactions.length; i++) {
+    const d = transactions[i].date;
+    if (isIsoDate(d) && (earliest === null || d < earliest)) earliest = d;
+  }
+  return earliest;
+}
+
+/**
+ * The observed history length: days from the earliest transaction received
+ * to the end of the read window (today), inclusive of both ends, or "none"
+ * when no transaction arrived.
+ */
+function historyDays(earliest: string | null, range: BankWindow): string {
+  const from = earliest === null ? null : dayNumber(earliest);
+  const to = dayNumber(range.end);
+  return from === null || to === null ? "none" : String(to - from + 1);
+}
+
+function hasCategory(stream: TransactionStream): boolean {
+  return !!stream.personal_finance_category;
+}
+
+/** Where card-payment streams sit, by the type of the account they name. */
+type CardPaymentCounts = { depository: number; credit: number; other: number; none: number };
+
+function emptyCardPaymentCounts(): CardPaymentCounts {
+  return { depository: 0, credit: 0, other: 0, none: 0 };
+}
+
+function countCardPayment(
+  counts: CardPaymentCounts,
+  stream: EngineRecurringStream,
+  accountTypes: ReadonlyMap<string, EngineAccount["type"]>
+): void {
+  if (!isCardPaymentCategory(stream)) return;
+  const type = stream.accountId === null ? undefined : accountTypes.get(stream.accountId);
+  if (type === undefined) counts.none += 1;
+  else if (type === "depository") counts.depository += 1;
+  else if (type === "credit") counts.credit += 1;
+  else counts.other += 1;
+}
+
+/** `depository:N,credit:N,other:N,none:N` — counts only. */
+function formatCardPaymentCounts(c: CardPaymentCounts): string {
+  return `depository:${c.depository},credit:${c.credit},other:${c.other},none:${c.none}`;
 }
 
 async function readConnection(
@@ -401,13 +629,19 @@ async function readConnection(
 ): Promise<ConnectionRead> {
   const itemId = row.item_id;
   const institutionName = row.institution_name ?? null;
+  const connectionKey = connectionKeyOf(index);
   const options: CallOptions = { timeout: PLAID_CALL_TIMEOUT_MS };
   const accounts: ReadAccount[] = [];
-  const transactions: DisplayTransaction[] = [];
+  const transactions: ReadTransaction[] = [];
   let pages = 0;
   let truncated = false;
   let pfcV2 = 0;
   let pfcOtherVersion = 0;
+  // Read with the accounts: the Item's status belongs to the connection, and
+  // a read that skips accounts has no use for it.
+  const itemStatus: Promise<ItemStatusRead> = want.accounts
+    ? readItemStatus(plaid, accessToken, options)
+    : Promise.resolve({ state: "skipped" });
 
   try {
     if (want.accounts) {
@@ -415,7 +649,9 @@ async function readConnection(
       const fetchedAt = new Date().toISOString();
       const list = response.data.accounts;
       for (let i = 0; i < list.length; i++) {
-        accounts.push(mapAccount(list[i], { itemId, institutionName }, fetchedAt));
+        accounts.push(
+          mapAccount(list[i], { itemId, institutionName, connectionKey }, fetchedAt)
+        );
       }
     }
 
@@ -459,29 +695,48 @@ async function readConnection(
     }
   } catch (error: unknown) {
     const { state, code } = stateForError(error);
+    const item = await itemStatus;
     console.warn(
       `[bank-read] idx=${index} status=${state} code=${code} pages=${pages} ` +
         `truncated=false pfc_v2=0 pfc_other_version=0 recurring=skipped streams=0 ` +
-        `stream_ccy=${formatShapeCounts(emptyShapeCounts())}`
+        `stream_ccy=${formatShapeCounts(emptyShapeCounts())} ` +
+        `${itemLogFields(item)} inflow_streams=0 stream_pfc=0 history_days=none ` +
+        `card_pay_out=${formatCardPaymentCounts(emptyCardPaymentCounts())} ` +
+        `card_pay_in=${formatCardPaymentCounts(emptyCardPaymentCounts())}`
     );
     return {
       status: { itemId, institutionName, status: state },
+      engine: {
+        connectionKey,
+        state,
+        lastSuccessfulUpdate: item.state === "ok" ? item.lastSuccessfulUpdate : null,
+        recurringRead: null,
+        transactionsTruncated: false,
+        earliestTransactionDate: null,
+      },
       accounts: [],
       transactions: [],
-      streams: null,
-      truncated: false,
+      streams: [],
+      incomeStreams: [],
     };
   }
 
+  // null when the recurring call was not made or failed.
   let streams: EngineRecurringStream[] | null = null;
+  let incomeStreams: EngineRecurringStream[] = [];
+  let streamsWithCategory = 0;
+  let cardPayOut = emptyCardPaymentCounts();
+  let cardPayIn = emptyCardPaymentCounts();
   let recurringCode = "none";
   const shapeCounts = emptyShapeCounts();
   if (want.recurring) {
     // Only this connection's accounts: a stream belongs to an account of its own Item.
     const accountCurrencies = new Map<string, string | null>();
+    const accountTypes = new Map<string, EngineAccount["type"]>();
     for (let i = 0; i < accounts.length; i++) {
       if (!accountCurrencies.has(accounts[i].accountId)) {
         accountCurrencies.set(accounts[i].accountId, accounts[i].currency);
+        accountTypes.set(accounts[i].accountId, accounts[i].type);
       }
     }
     try {
@@ -496,47 +751,98 @@ async function readConnection(
         options
       );
       const outflow = response.data.outflow_streams ?? [];
+      const inflow = response.data.inflow_streams ?? [];
       const mapped: EngineRecurringStream[] = [];
+      const mappedIncome: EngineRecurringStream[] = [];
       const counted = emptyShapeCounts();
+      const outCounts = emptyCardPaymentCounts();
+      const inCounts = emptyCardPaymentCounts();
+      let withCategory = 0;
       for (let i = 0; i < outflow.length; i++) {
         counted[streamCurrency(outflow[i]).shape] += 1;
-        mapped.push(mapStream(outflow[i], accountCurrencies));
+        if (hasCategory(outflow[i])) withCategory += 1;
+        const s = mapStream(outflow[i], accountCurrencies);
+        countCardPayment(outCounts, s, accountTypes);
+        mapped.push(s);
+      }
+      for (let i = 0; i < inflow.length; i++) {
+        if (hasCategory(inflow[i])) withCategory += 1;
+        const s = mapStream(inflow[i], accountCurrencies);
+        countCardPayment(inCounts, s, accountTypes);
+        mappedIncome.push(s);
       }
       // Committed only once every stream mapped, so a failure part-way through
       // reports no streams and no counts rather than some of each.
       streams = mapped;
+      incomeStreams = mappedIncome;
+      streamsWithCategory = withCategory;
+      cardPayOut = outCounts;
+      cardPayIn = inCounts;
       for (let i = 0; i < STREAM_CURRENCY_SHAPES.length; i++) {
         shapeCounts[STREAM_CURRENCY_SHAPES[i]] = counted[STREAM_CURRENCY_SHAPES[i]];
       }
     } catch (error: unknown) {
       recurringCode = getPlaidErrorCode(error) ?? "none";
       streams = null;
+      incomeStreams = [];
+      streamsWithCategory = 0;
+      cardPayOut = emptyCardPaymentCounts();
+      cardPayIn = emptyCardPaymentCounts();
     }
   }
 
+  const recurringRead: EngineConnection["recurringRead"] = !want.recurring
+    ? null
+    : streams === null
+      ? "failed"
+      : streams.length === 0
+        ? "empty"
+        : "ok";
+  const earliest = earliestDate(transactions);
+  const item = await itemStatus;
   const recurringLabel = !want.recurring ? "skipped" : streams === null ? "failed" : "ok";
   console.log(
     `[bank-read] idx=${index} status=ok code=${recurringCode} pages=${pages} ` +
       `truncated=${truncated} pfc_v2=${pfcV2} pfc_other_version=${pfcOtherVersion} ` +
       `recurring=${recurringLabel} streams=${streams === null ? 0 : streams.length} ` +
-      `stream_ccy=${formatShapeCounts(shapeCounts)}`
+      `stream_ccy=${formatShapeCounts(shapeCounts)} ` +
+      `${itemLogFields(item)} inflow_streams=${incomeStreams.length} ` +
+      `stream_pfc=${streamsWithCategory} history_days=${historyDays(earliest, range)} ` +
+      `card_pay_out=${formatCardPaymentCounts(cardPayOut)} ` +
+      `card_pay_in=${formatCardPaymentCounts(cardPayIn)}`
   );
 
   return {
     status: { itemId, institutionName, status: "ok" },
+    engine: {
+      connectionKey,
+      state: "ok",
+      lastSuccessfulUpdate: item.state === "ok" ? item.lastSuccessfulUpdate : null,
+      recurringRead,
+      transactionsTruncated: truncated,
+      earliestTransactionDate: earliest,
+    },
     accounts,
     transactions,
-    streams,
-    truncated,
+    streams: streams === null ? [] : streams,
+    incomeStreams,
   };
 }
 
+/**
+ * Every connection's answer, merged. Whether the figures are complete, and
+ * whether recurring charges are known, is not decided here: the engine
+ * decides both from `engineConnections`.
+ */
 export interface BankRead {
+  /** Per connection, for the screens: which bank, and whether it was read. */
   connections: BankConnectionStatus[];
+  /** Per connection, for the engine, in the same order. */
+  engineConnections: EngineConnection[];
   accounts: ReadAccount[];
-  transactions: DisplayTransaction[];
-  recurring: EngineInput["recurring"];
-  completeness: BankCompleteness;
+  transactions: ReadTransaction[];
+  streams: EngineRecurringStream[];
+  incomeStreams: EngineRecurringStream[];
 }
 
 /**
@@ -554,6 +860,11 @@ export async function readBankData(
   range: BankWindow,
   deps: BankAdapterDeps
 ): Promise<BankRead> {
+  // Checked before any token is decrypted or any call made.
+  if (want.recurring && !want.accounts) {
+    throw new Error("readBankData: recurring needs accounts");
+  }
+
   const tokens: string[] = [];
   for (let i = 0; i < rows.length; i++) {
     tokens.push(deps.decrypt(rows[i].access_token, userId));
@@ -564,19 +875,17 @@ export async function readBankData(
   );
 
   const connections: BankConnectionStatus[] = [];
+  const engineConnections: EngineConnection[] = [];
   const accounts: ReadAccount[] = [];
-  const transactions: DisplayTransaction[] = [];
+  const transactions: ReadTransaction[] = [];
   const streams: EngineRecurringStream[] = [];
+  const incomeStreams: EngineRecurringStream[] = [];
   const seenAccounts = new Set<string>();
-  let allOk = true;
-  let allRecurringOk = true;
-  let anyTruncated = false;
 
   for (let i = 0; i < reads.length; i++) {
     const r = reads[i];
     connections.push(r.status);
-    if (r.status.status !== "ok") allOk = false;
-    if (r.truncated) anyTruncated = true;
+    engineConnections.push(r.engine);
     for (let j = 0; j < r.accounts.length; j++) {
       // Distinct Items normally yield distinct account ids; never emit one twice.
       if (seenAccounts.has(r.accounts[j].accountId)) continue;
@@ -584,25 +893,11 @@ export async function readBankData(
       accounts.push(r.accounts[j]);
     }
     for (let j = 0; j < r.transactions.length; j++) transactions.push(r.transactions[j]);
-    if (r.streams === null) allRecurringOk = false;
-    else for (let j = 0; j < r.streams.length; j++) streams.push(r.streams[j]);
+    for (let j = 0; j < r.streams.length; j++) streams.push(r.streams[j]);
+    for (let j = 0; j < r.incomeStreams.length; j++) incomeStreams.push(r.incomeStreams[j]);
   }
 
-  // Recurring charges are known only when every bank answered and at least one
-  // stream came back. An empty answer is treated as unknown, not as "none":
-  // Plaid needs enough history to detect a stream, so empty does not prove absence.
-  const recurring: EngineInput["recurring"] =
-    want.recurring && allOk && allRecurringOk && streams.length > 0
-      ? { source: "plaid_streams", streams }
-      : { source: "unavailable" };
-
-  const completeness: BankCompleteness = !allOk
-    ? "unknown"
-    : anyTruncated
-      ? "possibly_truncated"
-      : "complete";
-
-  return { connections, accounts, transactions, recurring, completeness };
+  return { connections, engineConnections, accounts, transactions, streams, incomeStreams };
 }
 
 // ---- engine input and display -------------------------------------------------
@@ -624,7 +919,41 @@ export function toDisplayAccount(a: ReadAccount): DisplayAccount {
   };
 }
 
-function toEngineTransaction(t: DisplayTransaction): EngineTransaction {
+/** A transaction as the screens receive it: no field only the engine reads. */
+export function toDisplayTransaction(t: ReadTransaction): DisplayTransaction {
+  return {
+    transactionId: t.transactionId,
+    accountId: t.accountId,
+    amountCents: t.amountCents,
+    currency: t.currency,
+    date: t.date,
+    pending: t.pending,
+    name: t.name,
+    merchantName: t.merchantName,
+    logoUrl: t.logoUrl,
+    category: t.category,
+    pfcPrimary: t.pfcPrimary,
+    pfcDetailed: t.pfcDetailed,
+  };
+}
+
+/**
+ * The read's transactions dated inside `window` (inclusive), as the screens
+ * receive them, in the order they were read. A transaction whose date is not
+ * a calendar date is left out.
+ */
+export function displayTransactions(read: BankRead, window: BankWindow): DisplayTransaction[] {
+  const out: DisplayTransaction[] = [];
+  for (let i = 0; i < read.transactions.length; i++) {
+    const t = read.transactions[i];
+    if (!isIsoDate(t.date)) continue;
+    if (t.date < window.start || t.date > window.end) continue;
+    out.push(toDisplayTransaction(t));
+  }
+  return out;
+}
+
+function toEngineTransaction(t: ReadTransaction): EngineTransaction {
   return {
     transactionId: t.transactionId,
     accountId: t.accountId,
@@ -635,13 +964,27 @@ function toEngineTransaction(t: DisplayTransaction): EngineTransaction {
     pfcPrimary: t.pfcPrimary,
     pfcDetailed: t.pfcDetailed,
     legacyCategory: t.category,
+    merchantEntityId: t.merchantEntityId,
   };
 }
 
+/** The request-wide dates an engine input is built from, all from one `today`. */
+export interface EngineInputDates {
+  nowIso: string;
+  today: string;
+  dateBasis: DateBasis;
+  /** The window the transactions were read over. */
+  readWindow: BankWindow;
+  /** The cash-flow period, inside readWindow. */
+  period: BankWindow;
+}
+
 /** Only the fields the engine reads: no names, masks or institution. */
-export function toEngineInput(read: BankRead, nowIso: string, range: BankWindow): EngineInput {
+export function toEngineInput(read: BankRead, dates: EngineInputDates): EngineInput {
   return {
-    now: nowIso,
+    now: dates.nowIso,
+    today: dates.today,
+    dateBasis: dates.dateBasis,
     currency: ENGINE_CURRENCY,
     accounts: read.accounts.map((a) => ({
       accountId: a.accountId,
@@ -653,9 +996,13 @@ export function toEngineInput(read: BankRead, nowIso: string, range: BankWindow)
       currency: a.currency,
       balanceAsOf: a.balanceAsOf,
       fetchedAt: a.fetchedAt,
+      duplicateKey: a.duplicateKey,
+      connectionKey: a.connectionKey,
     })),
     transactions: read.transactions.map(toEngineTransaction),
-    period: { start: range.start, end: range.end, completeness: read.completeness },
-    recurring: read.recurring,
+    readWindow: { start: dates.readWindow.start, end: dates.readWindow.end },
+    period: { start: dates.period.start, end: dates.period.end },
+    connections: read.engineConnections.map((c) => ({ ...c })),
+    recurring: { streams: read.streams, incomeStreams: read.incomeStreams },
   };
 }

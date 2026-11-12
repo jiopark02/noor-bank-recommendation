@@ -1,7 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  DISPLAY_WINDOW_DAYS,
+  DISPLAY_WINDOW_LABEL,
   bankActionLines,
   banksNotRead,
+  browserTimeZone,
+  createRequestGate,
+  formatCalendarDay,
   creditUsedCents,
   decideBankView,
   describeBankAction,
@@ -13,16 +18,18 @@ import {
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
-  parseTransactionsListResponse,
+  parseSummaryTransactions,
   summaryLoadInputs,
   summaryPeriodNote,
   SUMMARY_RESPONSE_FIELDS,
-  TRANSACTIONS_RESPONSE_FIELDS,
+  SUMMARY_TRANSACTIONS_FIELDS,
+  transactionListView,
   utilizationPercent,
+  type BankView,
   type FieldSpec,
 } from "../bankSummaryView";
 import { computeFinancialSummary, DEFAULT_POLICY } from "../financeEngine";
-import type { EngineInput, FinancialSummary } from "../financeEngine";
+import type { EngineConnection, EngineInput, FinancialSummary } from "../financeEngine";
 import type {
   BankConnectionStatus,
   FinanceSummaryResponse,
@@ -33,6 +40,8 @@ import type {
  *
  * Mutations that turn this file red:
  *   - safe-to-spend shown whenever a summary exists               -> incomplete banks
+ *   - safe-to-spend decided from the response's connections
+ *     instead of the engine's coverage                            -> incomplete banks
  *   - the re-link target taken from the first connection          -> action per bank
  *   - an earlier response drawn after a failed load               -> failed load
  *   - an unknown recurring total formatted as 0 (`?? 0`)          -> formatting
@@ -43,6 +52,9 @@ import type {
 function summary(over: Partial<EngineInput> = {}): FinancialSummary {
   return computeFinancialSummary({
     now: "2026-11-11T12:00:00Z",
+    today: "2026-11-11",
+    dateBasis: "utc",
+    readWindow: { start: "2026-08-14", end: "2026-11-11" },
     currency: "USD",
     accounts: [
       {
@@ -55,13 +67,33 @@ function summary(over: Partial<EngineInput> = {}): FinancialSummary {
         currency: "USD",
         balanceAsOf: null,
         fetchedAt: "2026-11-11T11:59:00Z",
+        duplicateKey: null,
+        connectionKey: "c0",
       },
     ],
     transactions: [],
-    period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
-    recurring: { source: "unavailable" },
+    period: { start: "2026-08-14", end: "2026-11-11" },
+    connections: [engineConnection("c0", "ok")],
+    recurring: { streams: [], incomeStreams: [] },
     ...over,
   });
+}
+
+/** The engine's view of one connection, read in full unless `state` says otherwise. */
+function engineConnection(
+  connectionKey: string,
+  state: EngineConnection["state"],
+  over: Partial<EngineConnection> = {}
+): EngineConnection {
+  return {
+    connectionKey,
+    state,
+    lastSuccessfulUpdate: null,
+    recurringRead: state === "ok" ? "empty" : null,
+    transactionsTruncated: false,
+    earliestTransactionDate: null,
+    ...over,
+  };
 }
 
 const ok = (n: number): BankConnectionStatus => ({
@@ -70,11 +102,19 @@ const ok = (n: number): BankConnectionStatus => ({
   status: "ok",
 });
 
+/**
+ * A summary response. Unless a summary is given, it is computed from the
+ * same connections the response lists, as the route does.
+ */
 function response(
   connections: BankConnectionStatus[],
-  s: FinancialSummary | null = summary()
+  s?: FinancialSummary | null
 ): FinanceSummaryResponse {
-  return { success: true, connections, accounts: [], summary: s };
+  const computed =
+    s !== undefined
+      ? s
+      : summary({ connections: connections.map((c, i) => engineConnection("c" + i, c.status)) });
+  return { success: true, connections, accounts: [], transactions: [], summary: computed };
 }
 
 describe("decideBankView — figures", () => {
@@ -144,6 +184,21 @@ describe("decideBankView — banks that could not be read", () => {
     ]);
   });
 
+  // Red if: the screen decides from the response's connection list again
+  // instead of following the engine's decision.
+  it("follows the engine's decision, not its own reading of the connections", () => {
+    const engineSaysNo = summary({
+      connections: [engineConnection("c0", "ok"), engineConnection("c1", "failed")],
+    });
+    expect(engineSaysNo.coverage.safeToSpendShowable).toBe(false);
+    const view = decideBankView({
+      hasActiveConnection: true,
+      fetchState: "loaded",
+      response: response([ok(1), ok(2)], engineSaysNo),
+    });
+    expect(view.showSafeToSpend).toBe(false);
+  });
+
   it("safe-to-spend the engine could not compute is not shown", () => {
     const view = decideBankView({
       hasActiveConnection: true,
@@ -168,6 +223,7 @@ describe("decideBankView — data issues are information, not a task", () => {
           pfcPrimary: "OTHER",
           pfcDetailed: "OTHER_OTHER",
           legacyCategory: [],
+          merchantEntityId: null,
         },
       ],
     });
@@ -180,6 +236,70 @@ describe("decideBankView — data issues are information, not a task", () => {
     });
     expect(view.showSafeToSpend).toBe(true);
     expect(view.actions).toEqual([]);
+  });
+});
+
+describe("browserTimeZone", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names the platform's zone", () => {
+    expect(browserTimeZone()).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  // Red if: a platform that throws or names no zone breaks the request
+  // instead of leaving the server to fall back to UTC.
+  it("is null when the platform throws or names no zone", () => {
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(() => {
+      throw new Error("no Intl");
+    });
+    expect(browserTimeZone()).toBeNull();
+    vi.restoreAllMocks();
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(
+      () => ({ resolvedOptions: () => ({ timeZone: "" }) }) as unknown as Intl.DateTimeFormat
+    );
+    expect(browserTimeZone()).toBeNull();
+  });
+});
+
+/*
+ * Mutations that turn this block red:
+ *   - timeZone "UTC" dropped from formatCalendarDay (west of UTC the day
+ *     before shows)                                      -> "shows the calendar date as given"
+ *   - the gate's token not advanced, or every token current -> "only the latest load is current"
+ *   - the label built apart from DISPLAY_WINDOW_DAYS        -> "the window label"
+ */
+describe("calendar dates, request order and the window label", () => {
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = originalTz;
+  });
+
+  it("shows the calendar date as given, whatever the viewer's zone", () => {
+    for (const tz of ["America/Los_Angeles", "Pacific/Honolulu", "Asia/Tokyo", "UTC"]) {
+      process.env.TZ = tz;
+      expect(formatCalendarDay("2026-11-01"), tz).toBe("Nov 1");
+      expect(formatCalendarDay("2026-12-31"), tz).toBe("Dec 31");
+    }
+    expect(formatCalendarDay("not a date")).toBe("not a date");
+    expect(formatCalendarDay("2026-13-45")).toBe("2026-13-45");
+  });
+
+  it("only the latest load is current", () => {
+    const gate = createRequestGate();
+    const first = gate.begin();
+    expect(gate.isCurrent(first)).toBe(true);
+    const second = gate.begin();
+    expect(gate.isCurrent(first)).toBe(false);
+    expect(gate.isCurrent(second)).toBe(true);
+    // Separate screens do not share a gate.
+    expect(createRequestGate().isCurrent(second)).toBe(false);
+  });
+
+  it("the window label comes from the window length", () => {
+    expect(DISPLAY_WINDOW_DAYS).toBe(90);
+    expect(DISPLAY_WINDOW_LABEL).toBe(`Last ${DISPLAY_WINDOW_DAYS} days`);
   });
 });
 
@@ -277,6 +397,7 @@ describe("decideBankView — banks the figures leave out", () => {
           pfcPrimary: "OTHER",
           pfcDetailed: "OTHER_OTHER",
           legacyCategory: [],
+          merchantEntityId: null,
         },
       ],
     });
@@ -320,11 +441,16 @@ describe("creditUsedCents", () => {
     currency,
     balanceAsOf: null,
     fetchedAt: "2026-11-11T11:59:00Z",
+    duplicateKey: null,
+    connectionKey: "c0",
   });
   const withCards = (cards: Array<ReturnType<typeof card>>, policy = DEFAULT_POLICY) =>
     computeFinancialSummary(
       {
         now: "2026-11-11T12:00:00Z",
+        today: "2026-11-11",
+        dateBasis: "utc",
+        readWindow: { start: "2026-08-14", end: "2026-11-11" },
         currency: "USD",
         accounts: [
           {
@@ -337,12 +463,15 @@ describe("creditUsedCents", () => {
             currency: "USD",
             balanceAsOf: null,
             fetchedAt: "2026-11-11T11:59:00Z",
+            duplicateKey: null,
+            connectionKey: "c0",
           },
           ...cards,
         ],
         transactions: [],
-        period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
-        recurring: { source: "unavailable" },
+        period: { start: "2026-08-14", end: "2026-11-11" },
+        connections: [engineConnection("c0", "ok")],
+        recurring: { streams: [], incomeStreams: [] },
       },
       policy
     );
@@ -491,6 +620,8 @@ describe("utilizationPercent", () => {
           currency: "USD",
           balanceAsOf: null,
           fetchedAt: "2026-11-11T11:59:00Z",
+          duplicateKey: null,
+          connectionKey: "c0",
         },
       ],
     });
@@ -511,9 +642,12 @@ describe("utilizationPercent", () => {
  * as the figures.
  *
  * Mutations that turn this block red:
- *   - an ok connection named           -> "only banks not read"
- *   - the duplicate check removed      -> "each name once"
- *   - a wrong-shaped list read as empty -> "a wrong-shaped list body"
+ *   - an ok connection named                      -> "only banks not read"
+ *   - the duplicate check removed                 -> "each name once"
+ *   - a wrong-shaped list read as empty           -> "a wrong-shaped list …"
+ *   - the list checked with the figures again     -> "a wrong-shaped list …"
+ *   - a list that could not be read drawn as rows,
+ *     or announced while the figures are not shown -> "the list area …"
  */
 describe("banksNotRead and the list body", () => {
   it("only banks not read, each name once, in order", () => {
@@ -528,8 +662,9 @@ describe("banksNotRead and the list body", () => {
     expect(banksNotRead([ok(1), ok(2)])).toEqual([]);
   });
 
-  const goodList = () => ({
-    success: true,
+  // The list arrives in the summary body, next to the figures.
+  const withList = () => ({
+    ...JSON.parse(JSON.stringify(response([ok(1)]))),
     transactions: [
       {
         transactionId: "t1",
@@ -546,24 +681,49 @@ describe("banksNotRead and the list body", () => {
         pfcDetailed: null,
       },
     ],
-    connections: [ok(1)],
-    period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
   });
 
   it("accepts what the route sends", () => {
-    expect(parseTransactionsListResponse(goodList())).not.toBeNull();
+    expect(parseFinanceSummaryResponse(withList())).not.toBeNull();
+    expect(parseSummaryTransactions(withList())).toHaveLength(1);
+    expect(parseSummaryTransactions({ ...withList(), transactions: [] })).toEqual([]);
   });
 
-  it("a wrong-shaped list body is a failed read", () => {
-    const bodies: unknown[] = [
-      null,
-      { ...goodList(), transactions: undefined },
-      { ...goodList(), transactions: [{ transactionId: "t1", amount: 12.5 }] },
-      { ...goodList(), connections: undefined },
-      { ...goodList(), connections: [{ itemId: "x", institutionName: null, status: "nope" }] },
+  it("a wrong-shaped list fails the list only, never the figures, and is never read as empty", () => {
+    const badLists: unknown[] = [
+      { ...withList(), transactions: undefined },
+      { ...withList(), transactions: null },
+      { ...withList(), transactions: [{ transactionId: "t1", amount: 12.5 }] },
     ];
-    for (const bad of bodies) {
-      expect(parseTransactionsListResponse(bad), JSON.stringify(bad)).toBeNull();
+    for (const bad of badLists) {
+      expect(parseFinanceSummaryResponse(bad), JSON.stringify(bad)).not.toBeNull();
+      expect(parseSummaryTransactions(bad), JSON.stringify(bad)).toBeNull();
+    }
+    const withoutList = withList();
+    delete withoutList.transactions;
+    expect(parseFinanceSummaryResponse(withoutList)).not.toBeNull();
+    expect(parseSummaryTransactions(withoutList)).toBeNull();
+    expect(parseSummaryTransactions(null)).toBeNull();
+    expect(parseSummaryTransactions([])).toBeNull();
+
+    // A wrong-shaped figure part is still a failed read of the whole body.
+    const badConnections = {
+      ...withList(),
+      connections: [{ itemId: "x", institutionName: null, status: "nope" }],
+    };
+    expect(parseFinanceSummaryResponse(badConnections)).toBeNull();
+  });
+
+  it("the list area follows the figures and says when the list could not be read", () => {
+    const ready: BankView = { figures: "ready", showSafeToSpend: true, actions: [], missingFrom: [] };
+    const rows = parseSummaryTransactions(withList());
+    expect(transactionListView(ready, rows)).toEqual({ kind: "rows", rows });
+    expect(transactionListView(ready, [])).toEqual({ kind: "rows", rows: [] });
+    expect(transactionListView(ready, null)).toEqual({ kind: "unavailable" });
+    for (const figures of ["loading", "unavailable", "none"] as const) {
+      const view: BankView = { ...ready, figures, showSafeToSpend: false };
+      expect(transactionListView(view, null), figures).toEqual({ kind: "hidden" });
+      expect(transactionListView(view, rows), figures).toEqual({ kind: "hidden" });
     }
   });
 });
@@ -630,6 +790,9 @@ describe("bankActionLines — a failed re-link request", () => {
  *     any value, a list's elements not checked) -> "each listed field, missing
  *     or mistyped"
  *   - unknown fields refused -> "fields that are not listed are ignored"
+ *   - a field that may not be null accepting null (e.g. "string" checked as
+ *     `value === null || typeof value === "string"`) -> "each listed field,
+ *     missing or mistyped"
  */
 type Path = Array<string | number>;
 
@@ -706,6 +869,13 @@ function checksEveryField(spec: FieldSpec, good: unknown, parse: (v: unknown) =>
         p[k] = null;
       });
       expect(parse(asNull), `null at ${label}`).not.toBeNull();
+    } else if ((fieldSpec as { orNull?: unknown }).orNull === undefined) {
+      // A field the list does not allow to be null: an explicit null is a
+      // failed read, the same as a missing field.
+      const asNull = edited(good, path, (p, k) => {
+        p[k] = null;
+      });
+      expect(parse(asNull), `null at non-null ${label}`).toBeNull();
     }
   }
 }
@@ -724,6 +894,8 @@ describe("response bodies — every field the screens read is checked", () => {
           currency: "USD",
           balanceAsOf: null,
           fetchedAt: "2026-11-11T11:59:00Z",
+          duplicateKey: null,
+          connectionKey: "c0",
         },
         {
           accountId: "card",
@@ -735,10 +907,12 @@ describe("response bodies — every field the screens read is checked", () => {
           currency: "USD",
           balanceAsOf: null,
           fetchedAt: "2026-11-11T11:59:00Z",
+          duplicateKey: null,
+          connectionKey: "c0",
         },
       ],
+      connections: [engineConnection("c0", "ok", { recurringRead: "ok" })],
       recurring: {
-        source: "plaid_streams",
         streams: [
           {
             streamId: "s1",
@@ -751,8 +925,14 @@ describe("response bodies — every field the screens read is checked", () => {
             predictedNextDate: "2026-11-20",
             isActive: true,
             status: "MATURE",
+            accountId: "chk",
+            pfcPrimary: null,
+            pfcDetailed: null,
+            legacyCategory: [],
+            transactionIds: [],
           },
         ],
+        incomeStreams: [],
       },
     });
 
@@ -777,50 +957,48 @@ describe("response bodies — every field the screens read is checked", () => {
             currency: "USD",
           },
         ],
+        transactions: [
+          {
+            transactionId: "t1",
+            accountId: "chk",
+            amountCents: 1250,
+            currency: "USD",
+            date: "2026-11-01",
+            pending: false,
+            name: "Grocer",
+            merchantName: null,
+            logoUrl: null,
+            category: ["Shops"],
+            pfcPrimary: "FOOD_AND_DRINK",
+            pfcDetailed: null,
+          },
+        ],
         summary: richSummary(),
       })
     );
-
-  const goodListBody = () => ({
-    success: true,
-    transactions: [
-      {
-        transactionId: "t1",
-        accountId: "a1",
-        amountCents: 1250,
-        currency: "USD",
-        date: "2026-11-01",
-        pending: false,
-        name: "Grocer",
-        merchantName: null,
-        logoUrl: null,
-        category: ["Shops"],
-        pfcPrimary: "FOOD_AND_DRINK",
-        pfcDetailed: null,
-      },
-    ],
-    connections: [ok(1)],
-    period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
-  });
 
   it("summary body: each listed field, missing or mistyped, is a failed read", () => {
     checksEveryField(SUMMARY_RESPONSE_FIELDS, goodSummaryBody(), parseFinanceSummaryResponse);
   });
 
-  it("list body: each listed field, missing or mistyped, is a failed read", () => {
-    checksEveryField(TRANSACTIONS_RESPONSE_FIELDS, goodListBody(), parseTransactionsListResponse);
+  // The list is checked apart from the figures, field by field.
+  it("transaction list: each listed field, missing or mistyped, fails the list", () => {
+    checksEveryField(
+      { transactions: SUMMARY_TRANSACTIONS_FIELDS },
+      goodSummaryBody(),
+      parseSummaryTransactions
+    );
   });
 
   it("fields that are not listed are ignored", () => {
     const body = goodSummaryBody();
     body.extra = 1;
     body.accounts[0].extra = { nested: true };
+    body.transactions[0].extra = { nested: true };
     body.summary.cashFlow.extra = "x";
     body.summary.recurring.items[0].extra = null;
     body.summary.dataIssues = "not read by any screen";
     expect(parseFinanceSummaryResponse(body)).not.toBeNull();
-    const list = { ...goodListBody(), extra: 1 } as Record<string, unknown>;
-    expect(parseTransactionsListResponse(list)).not.toBeNull();
   });
 
   it("a summary of null is still a valid body (no bank read)", () => {
@@ -838,8 +1016,18 @@ describe("response bodies — every field the screens read is checked", () => {
  */
 describe("incomplete period line", () => {
   const LINE = "May not include every transaction from this period.";
-  const withPeriod = (completeness: "complete" | "possibly_truncated" | "unknown") =>
-    response([ok(1)], summary({ period: { start: "2026-08-14", end: "2026-11-11", completeness } }));
+  // The engine decides completeness from the connections: one cut off at the
+  // page limit gives "possibly_truncated", one not read gives "unknown".
+  const ENGINE_CONNECTIONS = {
+    complete: [engineConnection("c0", "ok")],
+    possibly_truncated: [engineConnection("c0", "ok", { transactionsTruncated: true })],
+    unknown: [engineConnection("c0", "ok"), engineConnection("c1", "failed")],
+  };
+  const withPeriod = (completeness: "complete" | "possibly_truncated" | "unknown") => {
+    const s = summary({ connections: ENGINE_CONNECTIONS[completeness] });
+    expect(s.cashFlow.period.completeness).toBe(completeness);
+    return response([ok(1)], s);
+  };
   const readyView = (resp: FinanceSummaryResponse) =>
     decideBankView({ hasActiveConnection: true, fetchState: "loaded", response: resp });
 

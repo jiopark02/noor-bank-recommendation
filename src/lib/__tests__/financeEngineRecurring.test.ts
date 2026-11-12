@@ -34,18 +34,37 @@ function stream(over: Partial<EngineRecurringStream>): EngineRecurringStream {
     predictedNextDate: "2026-10-20",
     isActive: true,
     status: "MATURE",
+    accountId: null,
+    pfcPrimary: null,
+    pfcDetailed: null,
+    legacyCategory: [],
+    transactionIds: [],
     ...over,
   };
 }
 
+/** null: the one connection's recurring read failed. */
 function input(streams: EngineRecurringStream[] | null): EngineInput {
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [],
     transactions: [],
-    period: { start: "2026-09-11", end: "2026-10-10", completeness: "complete" },
-    recurring: streams === null ? { source: "unavailable" } : { source: "plaid_streams", streams },
+    period: { start: "2026-09-11", end: "2026-10-10" },
+    connections: [
+      {
+        connectionKey: "c0",
+        state: "ok",
+        lastSuccessfulUpdate: null,
+        recurringRead: streams === null ? "failed" : streams.length === 0 ? "empty" : "ok",
+        transactionsTruncated: false,
+        earliestTransactionDate: null,
+      },
+    ],
+    recurring: { streams: streams === null ? [] : streams, incomeStreams: [] },
   };
 }
 
@@ -112,8 +131,10 @@ describe("computeRecurring", () => {
     });
   });
 
-  it("an empty stream list is a real zero", () => {
-    expect(computeRecurring(input([])).totalMonthlyCents).toBe(0);
+  // Plaid needs enough history to detect a stream, so an empty answer does
+  // not prove there are no recurring charges.
+  it("an empty answer is unknown, not zero", () => {
+    expect(computeRecurring(input([])).totalMonthlyCents).toBeNull();
   });
 });
 

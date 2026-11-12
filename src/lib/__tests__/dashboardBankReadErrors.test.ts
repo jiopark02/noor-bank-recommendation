@@ -175,6 +175,18 @@ describe("dashboard money figures come only from the summary route", () => {
     ]);
   });
 
+  it("sends the browser's time zone with the summary request", () => {
+    // Red if: the summary request stops naming the browser's time zone.
+    expect(FETCH_LIVE).toContain("body: JSON.stringify({ timeZone: browserTimeZone() }),");
+  });
+
+  it("does not ask for the transaction list it does not draw", () => {
+    // Red if: the dashboard asks for the list, so every visit carries the
+    // user's transactions to a screen that never shows them.
+    expect(PAGE).not.toContain("includeTransactions");
+    expect(PAGE).not.toMatch(/\bbank\.transactions\b/);
+  });
+
   it("keeps no arithmetic of its own over bank data", () => {
     // Red if: a client-side total, net worth or budget comes back.
     expect(PAGE).not.toMatch(/\.reduce\(/);
@@ -275,6 +287,13 @@ describe("dashboard: checked fields and the incomplete-period line", () => {
 
   it("puts the period line next to the 90-day figures", () => {
     expect(PAGE).toContain("const periodNote = summaryPeriodNote(view, bank);");
-    expect(slice(PAGE, "Last 90 days</p>", "Income</p>")).toContain("{periodNote}");
+    expect(slice(PAGE, "{DISPLAY_WINDOW_LABEL}</p>", "Income</p>")).toContain("{periodNote}");
+  });
+
+  // Red if: the window heading is a literal again, apart from the window the
+  // route computes the figures over.
+  it("takes the window heading from the shared constant", () => {
+    expect(PAGE).not.toContain("Last 90 days");
+    expect(PAGE).toContain("{DISPLAY_WINDOW_LABEL}");
   });
 });

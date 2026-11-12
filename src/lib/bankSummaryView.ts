@@ -6,14 +6,18 @@
 // source:
 //   - A figure is shown only for a summary that arrived in this load; while
 //     loading, or after a failed load, no dollar amount is drawn.
-//   - Safe-to-spend is shown only when every bank connection was read. A bank
-//     that could not be read may hold a card balance the number would miss.
+//   - Safe-to-spend is shown only when the engine says it may be: every bank
+//     connection was read (a bank that could not be read may hold a card
+//     balance the number would miss) and the figure was computed.
 //   - Each connection that was not read gets one action: re-link for a login
 //     problem, wait while Plaid is still importing, retry otherwise.
 //   - Unknown recurring charges render as "Unknown", never as $0.00.
 //   - Figures or a transaction list over a period that may be incomplete
 //     carry one line saying so.
 //   - A response body missing a field the screens read is a failed read.
+//   - The transaction list is checked apart from the figures: a missing or
+//     wrong-shaped list fails the list only, never the figures, and is never
+//     drawn as an empty list.
 // Data issues in the summary (for example, transactions in Plaid's catch-all
 // category) are information about the figures, not a connection problem: they
 // create no action and do not hide safe-to-spend.
@@ -22,8 +26,8 @@
 import type {
   BankCompleteness,
   BankConnectionStatus,
+  DisplayTransaction,
   FinanceSummaryResponse,
-  TransactionsListResponse,
 } from "./plaidEngineAdapter";
 
 /**
@@ -55,6 +59,66 @@ export interface BankView {
 }
 
 export const UNNAMED_BANK = "Your bank";
+
+/**
+ * Days of income and spending the screens show, counting today. The summary
+ * route computes the cash flow over exactly this window, so the label the
+ * screens draw and the figures under it cannot disagree.
+ */
+export const DISPLAY_WINDOW_DAYS = 90;
+
+/** The heading over the figures and the list that cover DISPLAY_WINDOW_DAYS. */
+export const DISPLAY_WINDOW_LABEL = `Last ${DISPLAY_WINDOW_DAYS} days`;
+
+const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A calendar date (YYYY-MM-DD) as "Nov 1", exactly as given. It is read and
+ * formatted on the UTC axis: read as local time, a date west of UTC would
+ * show as the day before. Anything that is not such a date is returned as is.
+ */
+export function formatCalendarDay(isoDate: string): string {
+  if (!CALENDAR_DATE.test(isoDate)) return isoDate;
+  const date = new Date(isoDate + "T00:00:00Z");
+  if (isNaN(date.getTime())) return isoDate;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * Tells a screen whether an answer belongs to its latest request. A screen
+ * calls begin() when it starts a load and draws an answer only while
+ * isCurrent(token) holds, so an earlier request that answers late can never
+ * cover a later one.
+ */
+export interface RequestGate {
+  begin(): number;
+  isCurrent(token: number): boolean;
+}
+
+export function createRequestGate(): RequestGate {
+  let latest = 0;
+  return {
+    begin: () => {
+      latest += 1;
+      return latest;
+    },
+    isCurrent: (token) => token === latest,
+  };
+}
+
+/**
+ * The browser's IANA time zone, sent with the summary request so the server
+ * can count dates in the user's calendar. null when the browser does not say;
+ * the server then falls back to UTC.
+ */
+export function browserTimeZone(): string | null {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zone === "string" && zone !== "" ? zone : null;
+  } catch {
+    return null;
+  }
+}
 
 function actionFor(c: BankConnectionStatus): BankAction | null {
   const institutionName = c.institutionName || UNNAMED_BANK;
@@ -149,15 +213,13 @@ export function decideBankView(input: {
     return { figures: "unavailable", showSafeToSpend: false, actions, missingFrom: [] };
   }
 
-  const missingFrom = banksNotRead(connections);
-
-  const everyConnectionRead =
-    connections.length > 0 && connections.every((c) => c.status === "ok");
+  // Whether safe-to-spend may be shown is the engine's decision, made from
+  // the same connections; the screen only follows it.
   return {
     figures: "ready",
-    showSafeToSpend: everyConnectionRead && summary.safeToSpend.status === "computed",
+    showSafeToSpend: summary.coverage.safeToSpendShowable,
     actions,
-    missingFrom,
+    missingFrom: banksNotRead(connections),
   };
 }
 
@@ -315,6 +377,17 @@ const CONNECTION_FIELDS = {
 
 const COMPLETENESS = { oneOf: ["complete", "possibly_truncated", "unknown"] } as const;
 
+const TRANSACTION_FIELDS = {
+  transactionId: "string",
+  accountId: "string",
+  amountCents: "number",
+  date: "string",
+  pending: "boolean",
+  name: "string",
+  merchantName: "string|null",
+  category: { listOf: "string" },
+} as const;
+
 /** What the dashboard, the money screen and this module read from a summary body. */
 export const SUMMARY_RESPONSE_FIELDS = {
   connections: { listOf: CONNECTION_FIELDS },
@@ -332,6 +405,7 @@ export const SUMMARY_RESPONSE_FIELDS = {
   },
   summary: {
     orNull: {
+      coverage: { safeToSpendShowable: "boolean" },
       cashFlow: {
         incomeCents: "number",
         spendingNetCents: "number",
@@ -358,6 +432,7 @@ export const SUMMARY_RESPONSE_FIELDS = {
             label: "string",
             monthlyCents: "number",
             nextDate: "string|null",
+            pastDue: "boolean",
           },
         },
       },
@@ -374,37 +449,25 @@ export const SUMMARY_RESPONSE_FIELDS = {
   },
 } as const;
 
-/** What the money screen reads from a transaction list body. */
-export const TRANSACTIONS_RESPONSE_FIELDS = {
-  transactions: {
-    listOf: {
-      transactionId: "string",
-      accountId: "string",
-      amountCents: "number",
-      date: "string",
-      pending: "boolean",
-      name: "string",
-      merchantName: "string|null",
-      category: { listOf: "string" },
-    },
-  },
-  connections: { listOf: CONNECTION_FIELDS },
-  period: { completeness: COMPLETENESS },
-} as const;
+/**
+ * The money screen's transaction list, the `transactions` field of a summary
+ * body. Checked apart from SUMMARY_RESPONSE_FIELDS: the route sends it only
+ * to a request that asks for it, and a bad list must not fail the figures.
+ */
+export const SUMMARY_TRANSACTIONS_FIELDS = { listOf: TRANSACTION_FIELDS } as const;
 
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
 export type ScreenSummary = NonNullable<ScreenSummaryResponse["summary"]>;
-export type ScreenTransactionsList = FieldsOf<typeof TRANSACTIONS_RESPONSE_FIELDS>;
-export type ScreenTransaction = ScreenTransactionsList["transactions"][number];
+export type ScreenTransaction = FieldsOf<typeof TRANSACTION_FIELDS>;
 
 type Holds<T extends true> = T;
-/** Compile-time only: what the routes declare they send has every listed field. */
+/** Compile-time only: what the route declares it sends has every listed field. */
 export type RouteBodiesSatisfyScreenFields = Holds<
-  [FinanceSummaryResponse] extends [ScreenSummaryResponse]
-    ? [TransactionsListResponse] extends [ScreenTransactionsList]
-      ? true
-      : false
-    : false
+  [FinanceSummaryResponse] extends [ScreenSummaryResponse] ? true : false
+>;
+/** Compile-time only: each transaction the route sends has every listed field. */
+export type RouteTransactionsSatisfyScreenFields = Holds<
+  [DisplayTransaction] extends [ScreenTransaction] ? true : false
 >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -463,14 +526,41 @@ export function parseFinanceSummaryResponse(value: unknown): ScreenSummaryRespon
 }
 
 /**
- * A transaction list response body, or null when it lacks a field the money
- * screen reads or carries one with the wrong type. A wrong-shaped 2xx is a
- * failed read, never an empty list.
+ * The transaction list of a summary body, or null when the body carries none
+ * or carries one with a missing or wrongly typed field. null is never an
+ * empty list: the screen says the list could not be loaded instead.
  */
-export function parseTransactionsListResponse(value: unknown): ScreenTransactionsList | null {
-  return fitsFields(TRANSACTIONS_RESPONSE_FIELDS, value)
-    ? (value as ScreenTransactionsList)
-    : null;
+export function parseSummaryTransactions(body: unknown): ScreenTransaction[] | null {
+  if (!isRecord(body)) return null;
+  const list = body.transactions;
+  return fitsFields(SUMMARY_TRANSACTIONS_FIELDS, list) ? (list as ScreenTransaction[]) : null;
+}
+
+/** Shown in place of the transaction list when the list could not be read. */
+export const TRANSACTIONS_UNAVAILABLE = "We couldn't load your transactions just now.";
+
+/**
+ *   rows        - draw these rows (possibly none)
+ *   unavailable - the figures are shown but the list could not be read; say so
+ *   hidden      - the figures are not shown, so neither is any row
+ */
+export type TransactionListView =
+  | { kind: "rows"; rows: ScreenTransaction[] }
+  | { kind: "unavailable" }
+  | { kind: "hidden" };
+
+/**
+ * What the list area shows. It follows the figures (no rows unless they are
+ * ready) and never feeds back into them: a list that could not be read
+ * changes this area only.
+ */
+export function transactionListView(
+  view: BankView,
+  list: ScreenTransaction[] | null
+): TransactionListView {
+  if (view.figures !== "ready") return { kind: "hidden" };
+  if (list === null) return { kind: "unavailable" };
+  return { kind: "rows", rows: list };
 }
 
 const USD = new Intl.NumberFormat("en-US", {

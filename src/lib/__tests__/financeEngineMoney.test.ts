@@ -8,7 +8,7 @@ import {
 import {
   addCadence,
   dayNumber,
-  endOfMonthUtc,
+  endOfMonth,
   fromDayNumber,
   isIsoDate,
   parseTimestampMs,
@@ -25,6 +25,8 @@ import {
  *   - zone made optional in TIMESTAMP_PATTERN    -> "zone-less timestamps are invalid"
  *   - year bound removed from parseYmd           -> "years before 2000 are not dates"
  *   - instant bound removed from parseTimestampMs -> "years before 2000 are not dates"
+ *   - upper year bound removed from parseYmd     -> "years after 9998 are not dates"
+ *   - isCents back to a finite-integer check     -> "rejects integers beyond the safe range"
  */
 
 describe("toCents / isCents / sumCents", () => {
@@ -46,6 +48,15 @@ describe("toCents / isCents / sumCents", () => {
     expect(isCents(1.5)).toBe(false);
     expect(isCents("100")).toBe(false);
     expect(isCents(null)).toBe(false);
+  });
+
+  // Above 2^53 neighbouring integers collapse, so such a value is not an amount.
+  it("rejects integers beyond the safe range", () => {
+    expect(isCents(Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(isCents(-Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(isCents(2 ** 53)).toBe(false);
+    expect(isCents(-(2 ** 53))).toBe(false);
+    expect(isCents(1e21)).toBe(false);
   });
 
   it("sums", () => {
@@ -77,10 +88,10 @@ describe("monthlyCentsFromCadence", () => {
 
 describe("dates", () => {
   it("February in a common year", () => {
-    expect(endOfMonthUtc("2026-02-10")).toBe("2026-02-28");
+    expect(endOfMonth("2026-02-10")).toBe("2026-02-28");
   });
   it("February in a leap year", () => {
-    expect(endOfMonthUtc("2028-02-10")).toBe("2028-02-29");
+    expect(endOfMonth("2028-02-10")).toBe("2028-02-29");
     expect(isIsoDate("2028-02-29")).toBe(true);
     expect(isIsoDate("2026-02-29")).toBe(false);
   });
@@ -140,5 +151,14 @@ describe("dates", () => {
     // Valid calendar date, but the instant falls on 1999-12-31 in UTC.
     expect(parseTimestampMs("2000-01-01T00:30:00+01:00")).toBeNull();
     expect(parseTimestampMs("2000-01-01T00:00:00Z")).toBe(946684800000);
+  });
+
+  it("years after 9998 are not dates", () => {
+    expect(isIsoDate("9998-12-31")).toBe(true);
+    expect(isIsoDate("9999-01-01")).toBe(false);
+    expect(dayNumber("9999-12-31")).toBeNull();
+    expect(parseTimestampMs("9998-12-31T23:59:59Z")).not.toBeNull();
+    expect(parseTimestampMs("9999-01-01T00:00:00Z")).toBeNull();
+    expect(utcDateOf("9999-06-01T00:00:00Z")).toBeNull();
   });
 });

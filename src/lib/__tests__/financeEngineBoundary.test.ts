@@ -41,6 +41,8 @@ const FORBIDDEN_KEY =
 
 const FETCHED = "2026-10-10T11:59:00Z";
 const SENTINEL = "SENTINEL_INSTITUTION_7c1e";
+const DUPLICATE_KEY_SENTINEL = "DUPLICATE_KEY_SENTINEL_9a3e";
+const CONNECTION_KEY_SENTINEL = "CONNECTION_KEY_SENTINEL_51ae";
 
 function account(over: Partial<EngineAccount>): EngineAccount {
   return {
@@ -53,6 +55,8 @@ function account(over: Partial<EngineAccount>): EngineAccount {
     currency: "USD",
     balanceAsOf: null,
     fetchedAt: FETCHED,
+    duplicateKey: DUPLICATE_KEY_SENTINEL,
+    connectionKey: CONNECTION_KEY_SENTINEL,
     ...over,
   };
 }
@@ -68,6 +72,7 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
     pfcPrimary: "FOOD_AND_DRINK",
     pfcDetailed: null,
     legacyCategory: [],
+    merchantEntityId: "MERCHANT_ENTITY_SENTINEL_0d42",
     ...over,
   };
 }
@@ -83,6 +88,11 @@ const netflix: EngineRecurringStream = {
   predictedNextDate: "2026-10-20",
   isActive: true,
   status: "MATURE",
+  accountId: "chk",
+  pfcPrimary: "ENTERTAINMENT",
+  pfcDetailed: "ENTERTAINMENT_TV_AND_MOVIES",
+  legacyCategory: ["Service"],
+  transactionIds: ["STREAM_TXN_SENTINEL_77c2"],
 };
 
 /** Exercises every output branch that can carry a number or a key. */
@@ -91,6 +101,9 @@ function maximalInput(): EngineInput {
     ({ ...a, institution_name: SENTINEL, official_name: SENTINEL } as EngineAccount);
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [
       withSentinel(account({})),
@@ -105,10 +118,29 @@ function maximalInput(): EngineInput {
       txn("t2", { amountCents: 10.5 }),
       { ...txn("t3", { amountCents: -500 }), merchant_name: SENTINEL } as EngineTransaction,
     ],
-    period: { start: "2026-09-11", end: "2026-10-10", completeness: "complete" },
+    period: { start: "2026-09-11", end: "2026-10-10" },
+    connections: [
+      {
+        connectionKey: CONNECTION_KEY_SENTINEL,
+        state: "ok",
+        lastSuccessfulUpdate: "2026-10-10T06:00:00Z",
+        recurringRead: "ok",
+        transactionsTruncated: false,
+        earliestTransactionDate: "2026-09-11",
+      },
+    ],
     recurring: {
-      source: "plaid_streams",
-      streams: [netflix, { ...netflix, streamId: "unk", frequency: "UNKNOWN" }],
+      streams: [
+        netflix,
+        { ...netflix, streamId: "unk", frequency: "UNKNOWN" },
+        // Card payments from cash and on a card, and a past-due charge on a card.
+        { ...netflix, streamId: "ccpay", pfcPrimary: "LOAN_PAYMENTS", pfcDetailed: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" },
+        { ...netflix, streamId: "ccpay-card", accountId: "card", pfcPrimary: "LOAN_PAYMENTS", pfcDetailed: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" },
+        { ...netflix, streamId: "late-card", accountId: "card", predictedNextDate: "2026-10-05", lastDate: "2026-09-05" },
+      ],
+      incomeStreams: [
+        { ...netflix, streamId: "INCOME_STREAM_SENTINEL_2f81", averageAmountCents: -250000 },
+      ],
     },
   };
 }
@@ -164,6 +196,9 @@ const EXPECTED_NUMERIC_PATHS = [
   "cashFlow.spendingGrossCents",
   "cashFlow.spendingNetCents",
   "cashFlow.unclassifiedInflowCents",
+  "coverage.duplicateCopiesDropped.accounts",
+  "coverage.duplicateCopiesDropped.streams",
+  "coverage.duplicateCopiesDropped.transactions",
   "creditUtilization.accounts[].balanceCents",
   "creditUtilization.accounts[].limitCents",
   "creditUtilization.accounts[].ratioBasisPoints",
@@ -189,19 +224,19 @@ const EXPECTED_NUMERIC_PATHS = [
 ].sort();
 
 const EXPECTED_KEYS = [
-  "accountId", "accounts", "accountsExcluded", "accountsIncluded", "aggregate", "amountCents",
+  "accountId", "accounts", "accountsExcluded", "accountsIncluded", "aggregate", "allConnectionsRead", "amountCents",
   "anyAsOfUnknown", "asOf", "asOfSource", "assumptions", "balanceCents", "balances", "basis",
-  "basisCents", "betweenAccounts", "bufferCents", "cardPayments", "cashFlow", "cents",
-  "classificationSource", "completeness", "computedAt", "count", "creditCardBalances",
-  "creditUtilization", "currency", "dataIssues", "days", "dueDate", "end", "engineVersion",
+  "basisCents", "betweenAccounts", "bufferCents", "cardPayment", "cardPayments", "cashFlow", "cents",
+  "classificationSource", "completeness", "computedAt", "count", "coverage", "creditCardBalances",
+  "creditUtilization", "currency", "dataIssues", "dateBasis", "days", "dueDate", "duplicateCopiesDropped", "end", "engineVersion",
   "excluded", "excludedAccounts", "excludedRecurring", "fetchedAt", "field", "frequency", "freshness", "from",
   "horizon", "id", "incomeCents", "inputs", "invalid", "items", "kind", "label", "legacy",
   "limitCents", "loanDisbursements", "monthlyCents", "netCents", "nextDate", "nonCashAccounts", "none",
   "obligationsExceedCash", "oldestAsOf", "oldestFetchedAt", "otherCurrency", "outsidePeriod",
-  "pastDueGraceDays", "pending", "period", "pfc", "policy", "ratioBasisPoints", "reason", "recurring", "refundsCents",
-  "reserveCreditCardBalances", "reservedCreditCents", "rule", "safeToSpend", "source",
+  "pastDue", "pastDueGraceDays", "pending", "period", "pfc", "policy", "ratioBasisPoints", "reason", "recurring", "refundsCents",
+  "reserveCreditCardBalances", "reservedCreditCents", "rule", "safeToSpend", "safeToSpendShowable", "source",
   "spendableCashCents", "spendableSubtypes", "spendingGrossCents", "spendingNetCents", "start",
-  "state", "status", "streamId", "subtype", "to", "totalMonthlyCents", "totals",
+  "state", "status", "streamId", "streams", "subtype", "to", "totalMonthlyCents", "totals", "transactions",
   "unclassifiedCategory", "unclassifiedInflowCents", "uncoveredObligationsCents", "unknownAccount", "upcomingRecurring",
   "upcomingRecurringCents",
 ].sort();
@@ -245,6 +280,24 @@ describe("finance engine output boundary", () => {
     expect(JSON.stringify(summary)).not.toContain(SENTINEL);
   });
 
+  // Red if: an opaque key, or an input field the engine only carries for
+  // later use, is copied into the output.
+  it("(4) the opaque keys and carried-only inputs never reach the output", () => {
+    const text = JSON.stringify(summary);
+    for (const value of [
+      DUPLICATE_KEY_SENTINEL,
+      CONNECTION_KEY_SENTINEL,
+      "MERCHANT_ENTITY_SENTINEL_0d42",
+      "STREAM_TXN_SENTINEL_77c2",
+      "INCOME_STREAM_SENTINEL_2f81",
+    ]) {
+      expect(text, value).not.toContain(value);
+    }
+    for (const key of ["duplicateKey", "connectionKey", "connections"]) {
+      expect(keys, key).not.toContain(key);
+    }
+  });
+
   it("(2) the maximal fixture reaches the excluded-account lists", () => {
     expect(summary.safeToSpend.inputs.excludedAccounts.length).toBeGreaterThan(0);
     expect(summary.creditUtilization.excludedAccounts.length).toBeGreaterThan(0);
@@ -270,6 +323,8 @@ const ASSUMPTION_CODES = [
   "semi_monthly_spacing_approximated",
   "recurring_due_today_may_already_be_pending",
   "recurring_past_due_assumed_unposted",
+  "recurring_past_due_on_card_may_be_in_balance",
+  "card_payment_recurring_counted",
 ];
 const REASON_VALUES = [
   // DataIssue.reason
@@ -278,7 +333,7 @@ const REASON_VALUES = [
   "invalid_predicted_next_date", "no_balance", "unclassified_category",
   // ExcludedAccount.reason, recurring exclusions, safe-to-spend status reason
   "other_currency", "unknown_frequency", "no_amount", "inactive", "tombstoned",
-  "no_next_date", "no_spendable_balance",
+  "no_next_date", "no_spendable_balance", "card_payment_in_card_balance",
 ];
 
 describe("finance engine closed values", () => {

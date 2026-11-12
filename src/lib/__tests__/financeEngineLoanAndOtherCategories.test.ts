@@ -36,6 +36,8 @@ const checking: EngineAccount = {
   currency: "USD",
   balanceAsOf: null,
   fetchedAt: "2026-10-10T11:59:00Z",
+  duplicateKey: null,
+  connectionKey: "c0",
 };
 
 function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
@@ -49,6 +51,7 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
     pfcPrimary: null,
     pfcDetailed: null,
     legacyCategory: [],
+    merchantEntityId: null,
     ...over,
   };
 }
@@ -56,11 +59,24 @@ function txn(id: string, over: Partial<EngineTransaction>): EngineTransaction {
 function input(transactions: EngineTransaction[]): EngineInput {
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [checking],
     transactions,
-    period: { start: "2026-09-11", end: "2026-10-10", completeness: "complete" },
-    recurring: { source: "unavailable" },
+    period: { start: "2026-09-11", end: "2026-10-10" },
+    connections: [
+      {
+        connectionKey: "c0",
+        state: "ok",
+        lastSuccessfulUpdate: null,
+        recurringRead: "empty",
+        transactionsTruncated: false,
+        earliestTransactionDate: null,
+      },
+    ],
+    recurring: { streams: [], incomeStreams: [] },
   };
 }
 

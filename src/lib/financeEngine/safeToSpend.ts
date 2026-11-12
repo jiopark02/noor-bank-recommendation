@@ -9,13 +9,16 @@ import type {
 import { isCents } from "./money";
 import {
   dayNumber,
-  endOfMonthUtc,
+  endOfMonth,
   freshnessOf,
+  isIsoDate,
   parseTimestampMs,
   utcDateOf,
 } from "./dates";
 import { nextDateOf, uniqueStreams, upcomingOccurrences } from "./recurring";
-import { uniqueAccounts } from "./cashFlow";
+import { indexAccounts, uniqueAccounts } from "./cashFlow";
+import { reservesCardBalance } from "./policy";
+import { isCardPaymentCategory } from "./classify";
 
 /** The earlier of two zoned timestamps; both have already been validated. */
 function olderOf(a: string | null, b: string): string {
@@ -30,8 +33,9 @@ function olderOf(a: string | null, b: string): string {
  *
  *   spendable cash
  *   − recurring charges expected between today and the end of this calendar
- *     month (UTC), plus those expected in the last `pastDueGraceDays` days
- *     that the stream has not recorded yet (policy)
+ *     month (both in the caller's `today` calendar), plus those expected in
+ *     the last `pastDueGraceDays` days that the stream has not recorded yet
+ *     (policy)
  *   − positive credit-card balances, in full (policy)
  *   − buffer (policy)
  *
@@ -45,8 +49,11 @@ export function computeSafeToSpend(
   policy: EnginePolicy,
   recurring: RecurringResult
 ): SafeToSpendResult {
-  const today = utcDateOf(input.now);
-  if (today === null) throw new Error("computeSafeToSpend: invalid now");
+  // `now` is not used for any date here, but an input whose clock does not
+  // parse is a caller bug all the same.
+  if (utcDateOf(input.now) === null) throw new Error("computeSafeToSpend: invalid now");
+  const today = input.today;
+  if (!isIsoDate(today)) throw new Error("computeSafeToSpend: invalid today");
   // A policy is a caller-supplied constant; a broken one is a caller bug, not
   // data. NaN would otherwise make every comparison below false and report a
   // computed figure with no shortfall, and a negative buffer would raise the
@@ -57,12 +64,15 @@ export function computeSafeToSpend(
   if (!isCents(policy.pastDueGraceDays) || policy.pastDueGraceDays < 0) {
     throw new Error("computeSafeToSpend: invalid pastDueGraceDays");
   }
-  const horizonEnd = endOfMonthUtc(today);
+  if (!Array.isArray(policy.spendableSubtypes)) {
+    throw new Error("computeSafeToSpend: invalid spendableSubtypes");
+  }
+  const horizonEnd = endOfMonth(today);
   const fromDay = dayNumber(today) as number;
   const toDay = dayNumber(horizonEnd) as number;
   const graceFromDay = fromDay - policy.pastDueGraceDays;
 
-  const assumptions: AssumptionCode[] = ["dates_utc"];
+  const assumptions: AssumptionCode[] = input.dateBasis === "utc" ? ["dates_utc"] : [];
   const addAssumption = (code: AssumptionCode) => {
     if (assumptions.indexOf(code) === -1) assumptions.push(code);
   };
@@ -73,7 +83,12 @@ export function computeSafeToSpend(
     amountCents: null,
     uncoveredObligationsCents: null,
     obligationsExceedCash: false,
-    horizon: { from: today, to: horizonEnd, rule: "end_of_calendar_month_utc" },
+    horizon: {
+      from: today,
+      to: horizonEnd,
+      rule: "end_of_calendar_month",
+      dateBasis: input.dateBasis,
+    },
     inputs: {
       balances: [],
       upcomingRecurring: [],
@@ -162,16 +177,17 @@ export function computeSafeToSpend(
         excludeForCurrency(a.accountId);
         continue;
       }
-      if (!isCents(a.currentCents) || a.currentCents <= 0) continue;
+      if (!reservesCardBalance(a, policy, input.currency)) continue;
+      const owed = a.currentCents as number;
       const fresh = freshnessOf(a);
       result.inputs.creditCardBalances.push({
         accountId: a.accountId,
-        cents: a.currentCents,
+        cents: owed,
         asOf: fresh.asOf,
         fetchedAt: fresh.fetchedAt,
         asOfSource: fresh.asOfSource,
       });
-      result.totals.reservedCreditCents += a.currentCents;
+      result.totals.reservedCreditCents += owed;
       noteFreshness(fresh.asOf, fresh.fetchedAt);
     }
   }
@@ -180,7 +196,7 @@ export function computeSafeToSpend(
   }
 
   // ---- recurring charges due before the horizon ends
-  if (input.recurring.source !== "plaid_streams") {
+  if (recurring.source !== "plaid_streams") {
     addAssumption("recurring_unavailable");
   } else {
     for (let i = 0; i < recurring.excluded.length; i++) {
@@ -192,6 +208,7 @@ export function computeSafeToSpend(
     // Same dedupe as computeRecurring, so each item finds the copy it came
     // from. A Map, so an id like "__proto__" is an ordinary key.
     const streamsById = new Map<string, EngineRecurringStream>();
+    const accountsById = indexAccounts(input.accounts);
     const streams = uniqueStreams(input.recurring.streams);
     for (let i = 0; i < streams.length; i++) {
       streamsById.set(streams[i].streamId, streams[i]);
@@ -212,6 +229,17 @@ export function computeSafeToSpend(
       if (stream.frequency === "SEMI_MONTHLY") {
         addAssumption("semi_monthly_spacing_approximated");
       }
+      // A card payment that computeRecurring kept is charged to a cash
+      // account, to an account it could not find, or to a card whose balance
+      // is not reserved (reservesCardBalance). While card balances are
+      // reserved in full, it may be the same money as a reserved balance: it
+      // stays subtracted, and the possible overlap is stated.
+      const cardPayment = isCardPaymentCategory(stream);
+      const account =
+        typeof stream.accountId === "string" ? accountsById.get(stream.accountId) : undefined;
+      // Only a card whose balance is reserved can hold a charge that is then
+      // subtracted twice; the same rule decides the reserve itself.
+      const onReservedCard = !!account && reservesCardBalance(account, policy, input.currency);
       // A date already past counts only while it is inside the grace window
       // and the stream has recorded no charge on or after it. Whether such a
       // charge already sits in the balance as pending cannot be told from
@@ -220,15 +248,27 @@ export function computeSafeToSpend(
       const dates = upcomingOccurrences(stream, graceFromDay, toDay);
       for (let j = 0; j < dates.length; j++) {
         const day = dayNumber(dates[j]) as number;
-        if (day < fromDay) {
+        const pastDue = day < fromDay;
+        if (pastDue) {
           if (lastDay !== null && lastDay >= day) continue;
           addAssumption("recurring_past_due_assumed_unposted");
+          // On a card whose balance is reserved in full, the charge may
+          // already be in that balance. It stays subtracted; the overlap is
+          // stated.
+          if (onReservedCard) {
+            addAssumption("recurring_past_due_on_card_may_be_in_balance");
+          }
+        }
+        if (cardPayment && policy.reserveCreditCardBalances) {
+          addAssumption("card_payment_recurring_counted");
         }
         result.inputs.upcomingRecurring.push({
           streamId: item.streamId,
           label: item.label,
           dueDate: dates[j],
           cents: item.basisCents,
+          pastDue,
+          cardPayment,
         });
         result.totals.upcomingRecurringCents += item.basisCents;
       }

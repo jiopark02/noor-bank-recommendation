@@ -25,6 +25,8 @@ const checking: EngineAccount = {
   currency: "USD",
   balanceAsOf: null,
   fetchedAt: "2026-10-10T11:59:00Z",
+  duplicateKey: null,
+  connectionKey: "c0",
 };
 const card: EngineAccount = { ...checking, accountId: "card", type: "credit", subtype: "credit card" };
 const loan: EngineAccount = { ...checking, accountId: "loan", type: "loan", subtype: "student" };
@@ -40,6 +42,7 @@ function txn(over: Partial<EngineTransaction>): EngineTransaction {
     pfcPrimary: null,
     pfcDetailed: null,
     legacyCategory: [],
+    merchantEntityId: null,
     ...over,
   };
 }

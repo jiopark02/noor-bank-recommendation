@@ -27,6 +27,8 @@ function account(type: EngineAccount["type"], subtype: string, cents: number): E
     currency: "USD",
     balanceAsOf: null,
     fetchedAt: "2026-11-11T11:59:00Z",
+    duplicateKey: null,
+    connectionKey: "c0",
   };
 }
 
@@ -34,11 +36,24 @@ function spendableCash(accounts: EngineAccount[], policy = DEFAULT_POLICY): numb
   return computeFinancialSummary(
     {
       now: "2026-11-11T12:00:00Z",
+      today: "2026-11-11",
+      dateBasis: "utc",
+      readWindow: { start: "2026-08-14", end: "2026-11-11" },
       currency: "USD",
       accounts,
       transactions: [],
-      period: { start: "2026-08-14", end: "2026-11-11", completeness: "complete" },
-      recurring: { source: "unavailable" },
+      period: { start: "2026-08-14", end: "2026-11-11" },
+      connections: [
+        {
+          connectionKey: "c0",
+          state: "ok",
+          lastSuccessfulUpdate: null,
+          recurringRead: "empty",
+          transactionsTruncated: false,
+          earliestTransactionDate: null,
+        },
+      ],
+      recurring: { streams: [], incomeStreams: [] },
     },
     policy
   ).safeToSpend.totals.spendableCashCents;

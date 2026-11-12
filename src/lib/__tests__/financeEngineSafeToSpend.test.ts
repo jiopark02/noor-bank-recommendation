@@ -4,6 +4,7 @@ import { computeRecurring } from "../financeEngine/recurring";
 import { DEFAULT_POLICY } from "../financeEngine/index";
 import type {
   EngineAccount,
+  EngineConnection,
   EngineInput,
   EnginePolicy,
   EngineRecurringStream,
@@ -25,6 +26,9 @@ import type {
  *   - grace window bound off by one                 -> "the grace window edges"
  *   - lastDate check on past-due dates removed      -> "a past-due date already recorded …"
  *   - pastDueGraceDays check removed                -> "an invalid grace is a caller bug"
+ *   - spendableSubtypes array check removed         -> "a spendable-subtype list that is not an array …"
+ *   - today taken from utcDateOf(now) again          -> "counts every date from today …"
+ *   - dates_utc stated whatever the date basis       -> "states dates_utc only when …"
  *   - SEMI_MONTHLY assumption push removed          -> "states the SEMI_MONTHLY spacing approximation"
  *   - due-today assumption push removed             -> "a charge due today is flagged"
  */
@@ -42,6 +46,8 @@ function account(over: Partial<EngineAccount>): EngineAccount {
     currency: "USD",
     balanceAsOf: null,
     fetchedAt: FETCHED,
+    duplicateKey: null,
+    connectionKey: "c0",
     ...over,
   };
 }
@@ -57,7 +63,26 @@ const netflix: EngineRecurringStream = {
   predictedNextDate: "2026-10-20",
   isActive: true,
   status: "MATURE",
+  accountId: null,
+  pfcPrimary: null,
+  pfcDetailed: null,
+  legacyCategory: [],
+  transactionIds: [],
 };
+
+/** One connection, read in full: the recurring streams are known. */
+const READ: EngineConnection = {
+  connectionKey: "c0",
+  state: "ok",
+  lastSuccessfulUpdate: null,
+  recurringRead: "ok",
+  transactionsTruncated: false,
+  earliestTransactionDate: null,
+};
+
+function streamsOnly(streams: EngineRecurringStream[]): EngineInput["recurring"] {
+  return { streams, incomeStreams: [] };
+}
 const insurance: EngineRecurringStream = {
   ...netflix,
   streamId: "ins",
@@ -72,6 +97,9 @@ const insurance: EngineRecurringStream = {
 function scenario(): EngineInput {
   return {
     now: "2026-10-10T12:00:00Z",
+    today: "2026-10-10",
+    dateBasis: "utc",
+    readWindow: { start: "2026-09-11", end: "2026-10-10" },
     currency: "USD",
     accounts: [
       account({}),
@@ -79,8 +107,9 @@ function scenario(): EngineInput {
       account({ accountId: "card", type: "credit", subtype: "credit card", currentCents: 60000, availableCents: null, limitCents: 200000 }),
     ],
     transactions: [],
-    period: { start: "2026-09-11", end: "2026-10-10", completeness: "complete" },
-    recurring: { source: "plaid_streams", streams: [netflix, insurance] },
+    period: { start: "2026-09-11", end: "2026-10-10" },
+    connections: [READ],
+    recurring: streamsOnly([netflix, insurance]),
   };
 }
 
@@ -95,12 +124,17 @@ describe("computeSafeToSpend", () => {
     expect(r.amountCents).toBe(118451);
     expect(r.uncoveredObligationsCents).toBe(0);
     expect(r.obligationsExceedCash).toBe(false);
-    expect(r.horizon).toEqual({ from: "2026-10-10", to: "2026-10-31", rule: "end_of_calendar_month_utc" });
+    expect(r.horizon).toEqual({
+      from: "2026-10-10",
+      to: "2026-10-31",
+      rule: "end_of_calendar_month",
+      dateBasis: "utc",
+    });
     expect(r.inputs.balances).toEqual([
       { accountId: "chk", subtype: "checking", field: "available", cents: 180000, asOf: null, fetchedAt: FETCHED, asOfSource: "unknown" },
     ]);
     expect(r.inputs.upcomingRecurring).toEqual([
-      { streamId: "netflix", label: "Netflix", dueDate: "2026-10-20", cents: 1549 },
+      { streamId: "netflix", label: "Netflix", dueDate: "2026-10-20", cents: 1549, pastDue: false, cardPayment: false },
     ]);
     expect(r.inputs.creditCardBalances).toEqual([
       { accountId: "card", cents: 60000, asOf: null, fetchedAt: FETCHED, asOfSource: "unknown" },
@@ -169,7 +203,7 @@ describe("computeSafeToSpend", () => {
 
   it("computes without recurring data and states it", () => {
     const input = scenario();
-    input.recurring = { source: "unavailable" };
+    input.connections = [{ ...READ, recurringRead: "failed" }];
     const r = run(input);
     expect(r.amountCents).toBe(120000);
     expect(r.assumptions).toContain("recurring_unavailable");
@@ -177,14 +211,11 @@ describe("computeSafeToSpend", () => {
 
   it("lists recurring streams it could not date or include", () => {
     const input = scenario();
-    input.recurring = {
-      source: "plaid_streams",
-      streams: [
-        netflix,
-        { ...netflix, streamId: "nodate", predictedNextDate: null, lastDate: null },
-        { ...netflix, streamId: "unk", frequency: "UNKNOWN" },
-      ],
-    };
+    input.recurring = streamsOnly([
+      netflix,
+      { ...netflix, streamId: "nodate", predictedNextDate: null, lastDate: null },
+      { ...netflix, streamId: "unk", frequency: "UNKNOWN" },
+    ]);
     const r = run(input);
     expect(r.inputs.excludedRecurring).toEqual([
       { streamId: "unk", reason: "unknown_frequency" },
@@ -253,12 +284,18 @@ describe("computeSafeToSpend", () => {
     expect(() => run(scenario(), { ...DEFAULT_POLICY, bufferCents: -1 })).toThrow(/invalid bufferCents/);
   });
 
+  it("a spendable-subtype list that is not an array is a caller bug", () => {
+    for (const spendableSubtypes of [null, undefined, "checking", { 0: "checking" }]) {
+      const policy = { ...DEFAULT_POLICY, spendableSubtypes } as unknown as EnginePolicy;
+      expect(() => run(scenario(), policy)).toThrow(/invalid spendableSubtypes/);
+    }
+  });
+
   it("states the SEMI_MONTHLY spacing approximation when such a stream is used", () => {
     const input = scenario();
-    input.recurring = {
-      source: "plaid_streams",
-      streams: [{ ...netflix, streamId: "semi", frequency: "SEMI_MONTHLY", predictedNextDate: "2026-10-15" }],
-    };
+    input.recurring = streamsOnly([
+      { ...netflix, streamId: "semi", frequency: "SEMI_MONTHLY", predictedNextDate: "2026-10-15" },
+    ]);
     const r = run(input);
     expect(r.inputs.upcomingRecurring.map((u) => u.dueDate)).toEqual(["2026-10-15", "2026-10-30"]);
     expect(r.assumptions).toContain("semi_monthly_spacing_approximated");
@@ -267,7 +304,7 @@ describe("computeSafeToSpend", () => {
 
   it("a charge due today is flagged when an available balance is used", () => {
     const input = scenario();
-    input.recurring = { source: "plaid_streams", streams: [{ ...netflix, predictedNextDate: "2026-10-10" }] };
+    input.recurring = streamsOnly([{ ...netflix, predictedNextDate: "2026-10-10" }]);
     const r = run(input);
     // Arithmetic unchanged: the charge is still subtracted.
     expect(r.amountCents).toBe(180000 - 1549 - 60000);
@@ -280,14 +317,14 @@ describe("computeSafeToSpend", () => {
   // now is 2026-10-10, so the default 7-day grace window is [10-03, 10-10).
   function withStream(over: Partial<EngineRecurringStream>): EngineInput {
     const input = scenario();
-    input.recurring = { source: "plaid_streams", streams: [{ ...netflix, streamId: "late", ...over }] };
+    input.recurring = streamsOnly([{ ...netflix, streamId: "late", ...over }]);
     return input;
   }
 
   it("a charge predicted inside the grace window and not yet recorded is an obligation", () => {
     const r = run(withStream({ predictedNextDate: "2026-10-05", lastDate: "2026-09-05" }));
     expect(r.inputs.upcomingRecurring).toEqual([
-      { streamId: "late", label: "Netflix", dueDate: "2026-10-05", cents: 1549 },
+      { streamId: "late", label: "Netflix", dueDate: "2026-10-05", cents: 1549, pastDue: true, cardPayment: false },
     ]);
     expect(r.totals.upcomingRecurringCents).toBe(1549);
     expect(r.amountCents).toBe(180000 - 1549 - 60000);
@@ -329,6 +366,41 @@ describe("computeSafeToSpend", () => {
     for (const pastDueGraceDays of [-1, 1.5, NaN]) {
       expect(() => run(scenario(), { ...DEFAULT_POLICY, pastDueGraceDays })).toThrow(/invalid pastDueGraceDays/);
     }
+  });
+
+  // now is 2026-11-01 in UTC, but the user's calendar still says October 31.
+  it("counts every date from today, not from the UTC date of now", () => {
+    const input = scenario();
+    input.now = "2026-11-01T03:00:00Z";
+    input.today = "2026-10-31";
+    input.dateBasis = "user_time_zone";
+    input.readWindow = { start: "2025-10-01", end: "2026-10-31" };
+    input.recurring = streamsOnly([
+      { ...netflix, streamId: "late", predictedNextDate: "2026-10-24", lastDate: "2026-09-24" },
+    ]);
+    const r = run(input);
+    expect(r.horizon).toEqual({
+      from: "2026-10-31",
+      to: "2026-10-31",
+      rule: "end_of_calendar_month",
+      dateBasis: "user_time_zone",
+    });
+    // The grace window is [10-24, 10-31): the charge on 10-24 is inside it.
+    expect(r.inputs.upcomingRecurring.map((u) => u.dueDate)).toEqual(["2026-10-24"]);
+    expect(r.assumptions).not.toContain("dates_utc");
+  });
+
+  it("states dates_utc only when today was taken in UTC", () => {
+    expect(run(scenario()).assumptions).toContain("dates_utc");
+    const input = scenario();
+    input.dateBasis = "user_time_zone";
+    expect(run(input).assumptions).not.toContain("dates_utc");
+  });
+
+  it("an invalid today is a caller bug", () => {
+    const input = scenario();
+    input.today = "2026-02-30";
+    expect(() => run(input)).toThrow(/invalid today/);
   });
 
   it("throws only on an unparseable now", () => {

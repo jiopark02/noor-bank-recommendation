@@ -6,8 +6,10 @@ import type {
   RecurringFrequency,
 } from "./types";
 
-// All date arithmetic is on UTC calendar days. The engine has no user time
-// zone, and says so through the "dates_utc" assumption code.
+// Date arithmetic is on calendar days, carried as day numbers on the UTC
+// axis. Which calendar "today" belongs to is the caller's decision
+// (EngineInput.today and dateBasis); when the caller had no user time zone,
+// the engine says so through the "dates_utc" assumption code.
 
 const MS_PER_DAY = 86400000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -15,6 +17,9 @@ const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 // 1900-1999, and nothing the engine is given legitimately predates it.
 const MIN_YEAR = 2000;
 const MIN_TIMESTAMP_MS = Date.UTC(MIN_YEAR, 0, 1);
+// Dates after this year are rejected too. A four-digit year must survive one
+// annual cadence step and still format as four digits.
+const MAX_YEAR = 9998;
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function isLeapYear(year: number): boolean {
@@ -44,7 +49,7 @@ function parseYmd(
   const year = Number(m[1]);
   const month = Number(m[2]);
   const day = Number(m[3]);
-  if (year < MIN_YEAR) return null;
+  if (year < MIN_YEAR || year > MAX_YEAR) return null;
   if (month < 1 || month > 12) return null;
   if (day < 1 || day > daysInMonth(year, month)) return null;
   return { year, month, day };
@@ -131,9 +136,9 @@ export function freshnessOf(a: EngineAccount): Freshness {
 }
 
 /** Last day of the month containing `d`. Throws on an invalid date (caller bug). */
-export function endOfMonthUtc(d: IsoDate): IsoDate {
+export function endOfMonth(d: IsoDate): IsoDate {
   const p = parseYmd(d);
-  if (!p) throw new Error("endOfMonthUtc: invalid date");
+  if (!p) throw new Error("endOfMonth: invalid date");
   return formatYmd(p.year, p.month, daysInMonth(p.year, p.month));
 }
 

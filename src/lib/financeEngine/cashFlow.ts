@@ -8,6 +8,7 @@ import type {
 import { isCents } from "./money";
 import { dayNumber, isIsoDate } from "./dates";
 import { classifyTransaction } from "./classify";
+import { coverageOf } from "./coverage";
 
 /** A transaction that cannot be counted at all: no id, a non-integer amount, a bad date. */
 export function isValidTransaction(t: EngineTransaction): boolean {
@@ -89,7 +90,7 @@ export function cashFlowDetail(input: EngineInput): {
       start: input.period.start,
       end: input.period.end,
       days: periodValid ? (endDay as number) - (startDay as number) + 1 : 0,
-      completeness: input.period.completeness,
+      completeness: coverageOf(input).completeness,
     },
     incomeCents: 0,
     spendingGrossCents: 0,
@@ -191,7 +192,7 @@ export function cashFlowDetail(input: EngineInput): {
   result.spendingNetCents = result.spendingGrossCents - result.refundsCents;
   result.netCents = result.incomeCents - result.spendingNetCents;
 
-  const assumptions: AssumptionCode[] = ["dates_utc"];
+  const assumptions: AssumptionCode[] = input.dateBasis === "utc" ? ["dates_utc"] : [];
   if (ex.betweenAccounts.count > 0) {
     assumptions.push("account_to_account_excluded_ownership_unknown");
   }
