@@ -107,8 +107,15 @@ const configuration = new Configuration({
   },
 });
 
-// PLAID-SEC1: every Plaid call goes through this axios instance, whose only job
-// is to strip credentials off rejected requests before they reach any caller.
+/**
+ * Default per-call limit, in milliseconds, for every Plaid call that does not
+ * set its own. The same value as the finance adapter's per-call limit; an
+ * unvalidated default.
+ */
+export const PLAID_HTTP_DEFAULT_TIMEOUT_MS = 10_000;
+
+// PLAID-SEC1: every Plaid call goes through this axios instance, whose job is
+// to strip credentials off rejected requests before they reach any caller.
 //
 // The Configuration above injects PLAID-CLIENT-ID / PLAID-SECRET as request
 // headers, so an AxiosError carries them on `error.config.headers` and carries
@@ -117,10 +124,9 @@ const configuration = new Configuration({
 // every `catch` in the app receives an already-safe error, instead of the
 // safety depending on each log site remembering to be careful.
 //
-// create() receives exactly one setting, maxRedirects: 0. Everything else is
-// merged from the global axios defaults, so timeout, transformRequest/Response
-// and validateStatus stay exactly as they were when the SDK used the global
-// axios.
+// create() receives two settings, maxRedirects and timeout. Everything else is
+// merged from the global axios defaults, so transformRequest/Response and
+// validateStatus stay exactly as they were when the SDK used the global axios.
 //
 // maxRedirects: 0 makes axios's Node adapter send through the built-in
 // http/https modules instead of follow-redirects, so a 3xx answer is never
@@ -130,7 +136,20 @@ const configuration = new Configuration({
 // host the Location header names. A 3xx instead fails validateStatus, rejects
 // as an AxiosError, and goes through the same redacting interceptor below
 // into the callers' existing Plaid error handling.
-const plaidHttp = axios.create({ maxRedirects: 0 });
+//
+// timeout is the default for every call that does not set its own. Without it
+// a Plaid call that never answers holds the function until the platform ends
+// it. A call that must not be cut short passes its own `timeout` as a
+// per-call option, which axios applies over this default; `{ timeout: 0 }`
+// means no limit. On this transport the value bounds the wait for the
+// response headers by wall clock, and after that each idle gap while the body
+// arrives, not the body's total time. A call that runs out rejects as an
+// AxiosError with code ECONNABORTED and no response, through the same
+// redacting interceptor.
+const plaidHttp = axios.create({
+  maxRedirects: 0,
+  timeout: PLAID_HTTP_DEFAULT_TIMEOUT_MS,
+});
 
 // One response interceptor, error path only.
 // - The success handler is the identity function: successful responses pass
@@ -151,7 +170,8 @@ plaidHttp.interceptors.response.use(
  * the third argument as well. The redaction guarantee above is a property of
  * THIS instance, not of the SDK: a client built as `new PlaidApi(configuration)`
  * falls back to the global axios, has no interceptor, and will leak the secret
- * and the user's access_token into the logs on its first failed call.
+ * and the user's access_token into the logs on its first failed call. It also
+ * has no default time limit and no redirect refusal.
  *
  * ⚠️ The third constructor parameter is plaid's public API
  * (`BaseAPI(configuration?, basePath?, axios?)`) and every generated method
