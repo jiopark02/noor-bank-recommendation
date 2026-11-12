@@ -310,20 +310,26 @@ function nonEmpty(value: unknown): value is string {
 
 /**
  * An opaque key two connections share for what looks like the same bank
- * account: a hash of the institution's name, the account type, the last four
- * digits and the account name. null when any of the four is missing, so an
- * account is never matched on part of its description.
+ * account: a hash of the institution's name, the account type and subtype,
+ * the last four digits and the account name. null when any of them is
+ * missing, so an account is never matched on part of its description.
  */
 export function duplicateKeyOf(
   account: AccountBase,
   institutionName: string | null
 ): string | null {
-  const parts: unknown[] = [institutionName, account.type, account.mask, account.name];
+  const parts: unknown[] = [
+    institutionName,
+    account.type,
+    account.subtype,
+    account.mask,
+    account.name,
+  ];
   for (let i = 0; i < parts.length; i++) {
     if (!nonEmpty(parts[i])) return null;
   }
   return createHash("sha256")
-    .update(JSON.stringify(["v1"].concat(parts as string[])))
+    .update(JSON.stringify(["v2"].concat(parts as string[])))
     .digest("hex");
 }
 

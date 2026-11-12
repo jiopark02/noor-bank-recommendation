@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   AccountSubtype,
@@ -861,8 +862,35 @@ describe("engine input fields", () => {
     const unnamed = await readBankData(USER, [{ ...row(1), institution_name: null }], ALL, RANGE, deps(plaid));
     expect(unnamed.accounts.every((a) => a.duplicateKey === null)).toBe(true);
     // Opaque: no part of the description is readable in it.
-    expect(key("a")).not.toMatch(/Bank|Checking|0000|depository/);
+    expect(key("a")).not.toMatch(/Bank|Checking|checking|0000|depository/);
     expect(read.accounts.map((a) => a.connectionKey)).toEqual(["c0", "c0", "c1", "c1"]);
+  });
+
+  // Red if: the subtype is left out of the key, or a missing subtype still
+  // gives one.
+  it("the duplicate key includes the account subtype", async () => {
+    const same = account({ account_id: "a" });
+    const { plaid } = fakePlaid({
+      TOKEN_1: { accounts: [same, account({ account_id: "nosub", subtype: null })] },
+      TOKEN_2: { accounts: [{ ...same, account_id: "savings", subtype: AccountSubtype.Savings }] },
+    });
+    const rows = [row(1), { ...row(2), institution_name: "Bank 1" }];
+    const read = await readBankData(USER, rows, ALL, RANGE, deps(plaid));
+    const key = (id: string) => read.accounts.find((a) => a.accountId === id)?.duplicateKey;
+    expect(key("a")).toMatch(/^[0-9a-f]{64}$/);
+    expect(key("savings")).toMatch(/^[0-9a-f]{64}$/);
+    expect(key("savings")).not.toBe(key("a"));
+    expect(key("nosub")).toBeNull();
+  });
+
+  // Red if: the version tag or the order of the hashed parts changes.
+  it("the duplicate key is the hash of the versioned description", async () => {
+    const { plaid } = fakePlaid({ TOKEN_1: { accounts: [account()] } });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    const expected = createHash("sha256")
+      .update(JSON.stringify(["v2", "Bank 1", "depository", "checking", "0000", "Checking"]))
+      .digest("hex");
+    expect(read.accounts[0].duplicateKey).toBe(expected);
   });
 
   // Red if: the kept copy of an account reached through two connections
