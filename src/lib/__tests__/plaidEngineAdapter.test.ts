@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   AccountSubtype,
   AccountType,
@@ -38,6 +38,7 @@ import {
   computeFinancialSummary,
   dropDuplicateAccountCopies,
 } from "../financeEngine";
+import { PlaidTokenCryptoError } from "../plaidTokenCrypto";
 
 /**
  * Plaid -> engine adapter, executed against a fake Plaid client.
@@ -57,7 +58,11 @@ import {
  *   - recurring frequency or status normalized                     -> streams
  *   - an expired login skipped without a status                    -> login required
  *   - a failed bank's partial data kept                            -> failed
- *   - decrypt moved inside the per-connection catch                -> decrypt
+ *   - some rows failing to decrypt thrown for the whole read       -> decrypt, some rows
+ *   - a row that would not decrypt sent to Plaid, or reported ok   -> decrypt, some rows
+ *   - the throw when every row fails to decrypt removed            -> decrypt, every row
+ *   - the decrypt log line carrying the message or stored value    -> decrypt log
+ *   - the decrypt log line indistinguishable from a Plaid failure  -> decrypt log
  *   - recurring failure or an empty stream list sent as streams    -> recurring
  *   - PRODUCT_NOT_READY reported as failed                         -> syncing
  *   - the account-currency fill for a stream with no code removed  -> stream currency
@@ -657,6 +662,17 @@ describe("stream currency", () => {
 });
 
 describe("connection status", () => {
+  /** console.error silenced for one test, starting with no recorded calls. */
+  function silenceErrors() {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    spy.mockClear();
+    return spy;
+  }
+
+  afterEach(() => {
+    if (vi.isMockFunction(console.error)) vi.mocked(console.error).mockRestore();
+  });
+
   it("an expired login is reported with its item id, and other banks still count", async () => {
     const { plaid } = fakePlaid({
       TOKEN_1: { accounts: plaidError("ITEM_LOGIN_REQUIRED") },
@@ -708,14 +724,122 @@ describe("connection status", () => {
     expect(readCompleteness(read)).toBe("unknown");
   });
 
-  it("a decrypt failure throws before any Plaid call", async () => {
-    const { plaid, calls } = fakePlaid({});
+  it("decrypt, some rows: that connection is failed with no data, the others are read", async () => {
+    silenceErrors();
+    const { plaid, calls } = fakePlaid({
+      TOKEN_1: { accounts: [account({ account_id: "acc-1" })] },
+      TOKEN_3: { accounts: [account({ account_id: "acc-3" })] },
+    });
     const bad = { ...row(2), access_token: "garbage" };
-    await expect(readBankData(USER, [row(1), bad], ALL, RANGE, deps(plaid))).rejects.toThrow(
+    const read = await readBankData(USER, [row(1), bad, row(3)], ALL, RANGE, deps(plaid));
+
+    expect(read.connections).toEqual([
+      { itemId: "item-1", institutionName: "Bank 1", status: "ok" },
+      { itemId: "item-2", institutionName: "Bank 2", status: "failed" },
+      { itemId: "item-3", institutionName: "Bank 3", status: "ok" },
+    ]);
+    expect(read.engineConnections[1]).toEqual({
+      connectionKey: "c1",
+      state: "failed",
+      lastSuccessfulUpdate: null,
+      recurringRead: null,
+      transactionsTruncated: false,
+      earliestTransactionDate: null,
+    });
+    expect(read.engineConnections.map((c) => c.connectionKey)).toEqual(["c0", "c1", "c2"]);
+    expect(read.accounts.map((a) => a.accountId)).toEqual(["acc-1", "acc-3"]);
+    expect(read.accounts.every((a) => a.itemId !== "item-2")).toBe(true);
+
+    // No Plaid call of any kind was made for the row that would not decrypt.
+    const tokensSent = [
+      ...calls.accounts,
+      ...calls.item,
+      ...calls.recurring,
+      ...calls.transactions.map((c: { req: unknown }) => c.req),
+    ].map((req) => (req as { access_token: string }).access_token);
+    expect(new Set(tokensSent)).toEqual(new Set(["TOKEN_1", "TOKEN_3"]));
+
+    // One connection not read keeps the figures from looking complete.
+    expect(readCompleteness(read)).toBe("unknown");
+  });
+
+  it("decrypt, every row: throws before any Plaid call, for one row and for several", async () => {
+    silenceErrors();
+    const { plaid, calls } = fakePlaid({});
+    const bad = (n: number) => ({ ...row(n), access_token: `garbage-${n}` });
+
+    await expect(readBankData(USER, [bad(1)], ALL, RANGE, deps(plaid))).rejects.toThrow(
+      "decrypt failed"
+    );
+    await expect(readBankData(USER, [bad(1), bad(2)], ALL, RANGE, deps(plaid))).rejects.toThrow(
       "decrypt failed"
     );
     expect(calls.accounts).toHaveLength(0);
     expect(calls.transactions).toHaveLength(0);
+    expect(calls.recurring).toHaveLength(0);
+    expect(calls.item).toHaveLength(0);
+  });
+
+  it("decrypt log: the crypto reason only, never the message, stored value, token or item id", async () => {
+    const errors = silenceErrors();
+    const { plaid } = fakePlaid({});
+    const SENTINEL_MESSAGE = "SENTINEL_MESSAGE_decrypt_5be1";
+    const SENTINEL_STORED = "SENTINEL_STORED_decrypt_90ac";
+    const SENTINEL_PLAIN_MESSAGE = "SENTINEL_PLAIN_decrypt_2f7d";
+    const rows: StoredConnectionRow[] = [
+      row(1),
+      { access_token: SENTINEL_STORED, item_id: "item-crypto", institution_name: "Bank 2" },
+      { access_token: "PLAIN_FAIL", item_id: "item-plain", institution_name: "Bank 3" },
+    ];
+    await readBankData(USER, rows, ALL, RANGE, {
+      plaid,
+      decrypt: (stored) => {
+        if (stored === SENTINEL_STORED) {
+          throw new PlaidTokenCryptoError("auth_failed", `${SENTINEL_MESSAGE} ${stored}`);
+        }
+        if (stored === "PLAIN_FAIL") throw new Error(SENTINEL_PLAIN_MESSAGE);
+        return stored.replace("CIPHER_", "TOKEN_");
+      },
+    });
+
+    const lines = errors.mock.calls.map((c) => c.map(String).join(" "));
+    expect(lines).toEqual([
+      "[bank-read] idx=1 status=failed cause=decrypt reason=auth_failed",
+      "[bank-read] idx=2 status=failed cause=decrypt reason=unknown",
+    ]);
+    const all = lines.join("\n");
+    for (const forbidden of [
+      SENTINEL_MESSAGE,
+      SENTINEL_STORED,
+      SENTINEL_PLAIN_MESSAGE,
+      "PLAIN_FAIL",
+      "TOKEN_",
+      "item-crypto",
+      "item-plain",
+    ]) {
+      expect(all).not.toContain(forbidden);
+    }
+  });
+
+  it("decrypt log: a Plaid failure's line never reads as a decrypt failure", async () => {
+    const errors = silenceErrors();
+    vi.mocked(console.warn).mockClear();
+    const { plaid } = fakePlaid({ TOKEN_1: { accounts: plaidError("INSTITUTION_DOWN") } });
+    const bad = { ...row(2), access_token: "garbage" };
+    const read = await readBankData(USER, [row(1), bad], ALL, RANGE, deps(plaid));
+
+    expect(read.connections.map((c) => c.status)).toEqual(["failed", "failed"]);
+    const plaidLines = vi
+      .mocked(console.warn)
+      .mock.calls.map((c) => String(c[0]))
+      .filter((l) => l.startsWith("[bank-read] idx=0 "));
+    expect(plaidLines).toHaveLength(1);
+    expect(plaidLines[0]).toContain("status=failed code=INSTITUTION_DOWN");
+    expect(plaidLines[0]).not.toContain("cause=decrypt");
+    const decryptLines = errors.mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.includes("cause=decrypt"));
+    expect(decryptLines).toEqual(["[bank-read] idx=1 status=failed cause=decrypt reason=unknown"]);
   });
 
   it("decrypts with the caller's user id unmodified", async () => {
