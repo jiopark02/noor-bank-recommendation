@@ -18,6 +18,8 @@ import type { NextRequest } from "next/server";
  *   - a summary computed when no bank was read                      -> nothing read
  *   - the body's timeZone ignored, or today taken twice             -> user's today
  *   - the time zone value written to the log                        -> user's today / fallback
+ *   - the list sent for any truthy includeTransactions, or always   -> "only when … exactly true"
+ *   - the list read a second time                                   -> "the same Plaid calls …"
  */
 
 const PLAINTEXT = "access-sandbox-PLAINTEXT-TOKEN-7f3a";
@@ -355,7 +357,7 @@ describe("POST /api/finance/summary — response", () => {
   });
 
   it("returns the display window's transactions from the same read, for the list", async () => {
-    const res = await post();
+    const res = await post({ includeTransactions: true });
     expect(res.status).toBe(200);
     expect(res.json.transactions.map((t: { transactionId: string }) => t.transactionId)).toEqual([
       "pay-1",
@@ -377,10 +379,44 @@ describe("POST /api/finance/summary — response", () => {
     expect(res.status).toBe(200);
     expect(res.json.summary).toBeNull();
     expect(res.json.accounts).toEqual([]);
-    expect(res.json.transactions).toEqual([]);
+    expect(res.json).not.toHaveProperty("transactions");
     expect(res.json.connections.map((c: { itemId: string }) => c.itemId)).toEqual([
       "item-1",
       "item-2",
     ]);
+
+    // Asked for, the list is there and empty.
+    const asked = await post({ includeTransactions: true });
+    expect(asked.status).toBe(200);
+    expect(asked.json.summary).toBeNull();
+    expect(asked.json.transactions).toEqual([]);
+  });
+
+  it("sends the transaction list only when includeTransactions is exactly true", async () => {
+    for (const body of [
+      {},
+      { includeTransactions: false },
+      { includeTransactions: "true" },
+      { includeTransactions: 1 },
+      { includeTransactions: null },
+    ]) {
+      const res = await post(body);
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(res.json, JSON.stringify(body)).not.toHaveProperty("transactions");
+      // The figures are there either way.
+      expect(res.json.summary.cashFlow.incomeCents, JSON.stringify(body)).toBe(250000);
+    }
+    const asked = await post({ includeTransactions: true });
+    expect(asked.json.transactions).toHaveLength(2);
+  });
+
+  it("makes the same Plaid calls with or without the list", async () => {
+    await post();
+    const without = { calls: state.plaidCalls, windows: state.transactionWindows.slice() };
+    state.plaidCalls = 0;
+    state.transactionWindows = [];
+    await post({ includeTransactions: true });
+    expect(state.plaidCalls).toBe(without.calls);
+    expect(state.transactionWindows).toEqual(without.windows);
   });
 });

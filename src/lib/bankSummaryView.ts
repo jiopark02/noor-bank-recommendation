@@ -15,6 +15,9 @@
 //   - Figures or a transaction list over a period that may be incomplete
 //     carry one line saying so.
 //   - A response body missing a field the screens read is a failed read.
+//   - The transaction list is checked apart from the figures: a missing or
+//     wrong-shaped list fails the list only, never the figures, and is never
+//     drawn as an empty list.
 // Data issues in the summary (for example, transactions in Plaid's catch-all
 // category) are information about the figures, not a connection problem: they
 // create no action and do not hide safe-to-spend.
@@ -23,6 +26,7 @@
 import type {
   BankCompleteness,
   BankConnectionStatus,
+  DisplayTransaction,
   FinanceSummaryResponse,
 } from "./plaidEngineAdapter";
 
@@ -387,7 +391,6 @@ const TRANSACTION_FIELDS = {
 /** What the dashboard, the money screen and this module read from a summary body. */
 export const SUMMARY_RESPONSE_FIELDS = {
   connections: { listOf: CONNECTION_FIELDS },
-  transactions: { listOf: TRANSACTION_FIELDS },
   accounts: {
     listOf: {
       accountId: "string",
@@ -446,14 +449,25 @@ export const SUMMARY_RESPONSE_FIELDS = {
   },
 } as const;
 
+/**
+ * The money screen's transaction list, the `transactions` field of a summary
+ * body. Checked apart from SUMMARY_RESPONSE_FIELDS: the route sends it only
+ * to a request that asks for it, and a bad list must not fail the figures.
+ */
+export const SUMMARY_TRANSACTIONS_FIELDS = { listOf: TRANSACTION_FIELDS } as const;
+
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
 export type ScreenSummary = NonNullable<ScreenSummaryResponse["summary"]>;
-export type ScreenTransaction = ScreenSummaryResponse["transactions"][number];
+export type ScreenTransaction = FieldsOf<typeof TRANSACTION_FIELDS>;
 
 type Holds<T extends true> = T;
 /** Compile-time only: what the route declares it sends has every listed field. */
 export type RouteBodiesSatisfyScreenFields = Holds<
   [FinanceSummaryResponse] extends [ScreenSummaryResponse] ? true : false
+>;
+/** Compile-time only: each transaction the route sends has every listed field. */
+export type RouteTransactionsSatisfyScreenFields = Holds<
+  [DisplayTransaction] extends [ScreenTransaction] ? true : false
 >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -509,6 +523,44 @@ export function fitsFields(spec: FieldSpec, value: unknown): boolean {
  */
 export function parseFinanceSummaryResponse(value: unknown): ScreenSummaryResponse | null {
   return fitsFields(SUMMARY_RESPONSE_FIELDS, value) ? (value as ScreenSummaryResponse) : null;
+}
+
+/**
+ * The transaction list of a summary body, or null when the body carries none
+ * or carries one with a missing or wrongly typed field. null is never an
+ * empty list: the screen says the list could not be loaded instead.
+ */
+export function parseSummaryTransactions(body: unknown): ScreenTransaction[] | null {
+  if (!isRecord(body)) return null;
+  const list = body.transactions;
+  return fitsFields(SUMMARY_TRANSACTIONS_FIELDS, list) ? (list as ScreenTransaction[]) : null;
+}
+
+/** Shown in place of the transaction list when the list could not be read. */
+export const TRANSACTIONS_UNAVAILABLE = "We couldn't load your transactions just now.";
+
+/**
+ *   rows        - draw these rows (possibly none)
+ *   unavailable - the figures are shown but the list could not be read; say so
+ *   hidden      - the figures are not shown, so neither is any row
+ */
+export type TransactionListView =
+  | { kind: "rows"; rows: ScreenTransaction[] }
+  | { kind: "unavailable" }
+  | { kind: "hidden" };
+
+/**
+ * What the list area shows. It follows the figures (no rows unless they are
+ * ready) and never feeds back into them: a list that could not be read
+ * changes this area only.
+ */
+export function transactionListView(
+  view: BankView,
+  list: ScreenTransaction[] | null
+): TransactionListView {
+  if (view.figures !== "ready") return { kind: "hidden" };
+  if (list === null) return { kind: "unavailable" };
+  return { kind: "rows", rows: list };
 }
 
 const USD = new Intl.NumberFormat("en-US", {

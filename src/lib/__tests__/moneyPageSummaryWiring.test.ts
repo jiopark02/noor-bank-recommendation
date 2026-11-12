@@ -60,10 +60,41 @@ describe("money screen reads the finance summary", () => {
   });
 
   // Red if: the summary request stops naming the browser's time zone, so the
-  // server counts dates in UTC for every user.
-  it("sends the browser's time zone with the summary request", () => {
+  // server counts dates in UTC for every user, or stops asking for the list
+  // this screen draws.
+  it("sends the browser's time zone with the summary request, and asks for the list", () => {
     const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
-    expect(loadSummary).toContain("body: JSON.stringify({ timeZone: browserTimeZone() }),");
+    expect(loadSummary).toContain(
+      "body: JSON.stringify({ timeZone: browserTimeZone(), includeTransactions: true }),"
+    );
+  });
+
+  // Red if: a list that does not read fails the whole load, so the figures
+  // are not drawn.
+  it("a list of the wrong shape does not stop the figures", () => {
+    const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
+    const afterRead = loadSummary.slice(loadSummary.indexOf("readJsonOrFail(res, BANK_DATA_LOAD_FAILED)"));
+    expect(afterRead).toMatch(
+      /if \(parsed === null\) \{\s*throw new Error\(BANK_DATA_LOAD_FAILED\);\s*\}/
+    );
+    // That is the only throw between reading the body and drawing it.
+    const upToDraw = afterRead.slice(0, afterRead.indexOf("setHasMoneyData(true);"));
+    expect(upToDraw.match(/\bthrow\b/g) ?? []).toHaveLength(1);
+    expect(upToDraw).not.toMatch(/parseSummaryTransactions\([^)]*\)\s*(?:===|!==|\?\?|\|\|)/);
+    const bankAt = upToDraw.indexOf("setBank(parsed);");
+    const listAt = upToDraw.indexOf("setTransactionList(parseSummaryTransactions(body));");
+    expect(bankAt).toBeGreaterThan(-1);
+    expect(listAt).toBeGreaterThan(bankAt);
+    expect(upToDraw.lastIndexOf("if (!requestGate.isCurrent(token)) return;")).toBeLessThan(bankAt);
+    expect(PAGE).toContain("const list = transactionListView(view, transactionList);");
+  });
+
+  // Red if: a list that could not be read is drawn as no rows, without a word.
+  it("says in the list area when the list could not be read", () => {
+    const tab = slice('key="transactions"', "transactions.map(");
+    expect(tab).toMatch(
+      /\{list\.kind === "unavailable" && \([\s\S]*?\{TRANSACTIONS_UNAVAILABLE\}[\s\S]*?\)\}/
+    );
   });
 
   // Red if: an answer is drawn without asking whether it belongs to the
@@ -250,18 +281,21 @@ describe("money screen: no amount drawn while loading or after a failure", () =>
     expect(PAGE).toContain("const accounts = summary && bank ? bank.accounts : [];");
     expect(PAGE).toContain("recurringItems: summary ? summary.recurring.items : [],");
     // The list comes from the same answer, behind the same ready gate.
-    expect(PAGE).toContain("const transactions = summary && bank ? bank.transactions : [];");
-    expect(PAGE).not.toMatch(/setTransactions\(/);
+    expect(PAGE).toContain('const transactions = list.kind === "rows" ? list.rows : [];');
 
     const fetchData = slice("const fetchData = useCallback(", "useEffect(() => {");
     const firstAwait = fetchData.indexOf("await ");
     const reset = fetchData.slice(fetchData.indexOf("setHasMoneyData(false);"), firstAwait);
     expect(reset).toContain("setBank(null);");
+    expect(reset).toContain("setTransactionList(null);");
 
     const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
     const elsewhere = PAGE.replace(loadSummary, "");
     expect(loadSummary).toContain("setBank(parsed);");
     expect(elsewhere.match(/setBank\((?!null\))/g) ?? []).toEqual([]);
+    // The list is set only from the loader's answer; anywhere else it is cleared.
+    expect(loadSummary.match(/setTransactionList\(/g) ?? []).toHaveLength(1);
+    expect(elsewhere.match(/setTransactionList\((?!null\))/g) ?? []).toEqual([]);
     // The loader runs only from fetchData, after its reset.
     expect(elsewhere.match(/loadSummary\(/g) ?? []).toHaveLength(1);
     expect(fetchData).toContain("loadSummary(plaidHeaders, token)");
@@ -314,7 +348,9 @@ describe("the field lists name only fields that are read", () => {
     code(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8"));
 
   it("each listed field name is read somewhere", async () => {
-    const { SUMMARY_RESPONSE_FIELDS } = await import("../bankSummaryView");
+    const { SUMMARY_RESPONSE_FIELDS, SUMMARY_TRANSACTIONS_FIELDS } = await import(
+      "../bankSummaryView"
+    );
     const view = read("../bankSummaryView.ts");
     const listStart = view.indexOf("const CONNECTION_FIELDS =");
     const listEnd = view.indexOf("export type ScreenSummaryResponse");
@@ -336,6 +372,7 @@ describe("the field lists name only fields that are read", () => {
       }
     };
     walk(SUMMARY_RESPONSE_FIELDS);
+    walk(SUMMARY_TRANSACTIONS_FIELDS);
     expect(names.size).toBeGreaterThan(20);
 
     const unread = Array.from(names).filter((n) => !new RegExp(`\\.${n}\\b`).test(readers));

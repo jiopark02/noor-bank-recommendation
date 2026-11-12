@@ -180,6 +180,13 @@ describe("dashboard money figures come only from the summary route", () => {
     expect(FETCH_LIVE).toContain("body: JSON.stringify({ timeZone: browserTimeZone() }),");
   });
 
+  it("does not ask for the transaction list it does not draw", () => {
+    // Red if: the dashboard asks for the list, so every visit carries the
+    // user's transactions to a screen that never shows them.
+    expect(PAGE).not.toContain("includeTransactions");
+    expect(PAGE).not.toMatch(/\bbank\.transactions\b/);
+  });
+
   it("keeps no arithmetic of its own over bank data", () => {
     // Red if: a client-side total, net worth or budget comes back.
     expect(PAGE).not.toMatch(/\.reduce\(/);

@@ -28,11 +28,15 @@ import {
  * of the display window, and each bank connection's status. Every amount on
  * those screens comes from here; the screens only format it.
  *
- * The user is the verified token's user. The only body field read is
- * `timeZone`, the browser's IANA zone: it decides which calendar date is
- * "today" for every date in the answer, and only for this user's own answer.
- * A missing or unusable value falls back to the UTC date. The value is not
- * logged or stored; the log line says only which basis was used.
+ * The user is the verified token's user. Two body fields are read:
+ *   - `timeZone`, the browser's IANA zone: it decides which calendar date is
+ *     "today" for every date in the answer, and only for this user's own
+ *     answer. A missing or unusable value falls back to the UTC date. The
+ *     value is not logged or stored; the log line says only which basis was
+ *     used.
+ *   - `includeTransactions`: exactly `true` adds the transaction list to the
+ *     answer, for the screen that shows it. Any other value leaves the field
+ *     out. The banks are read the same way either way.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -50,6 +54,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { userId } = auth;
+    const includeTransactions = auth.body.includeTransactions === true;
     const allConnections = await getAllPlaidConnections(userId);
 
     // null means the read failed, not that the user has no banks. Both screens
@@ -97,9 +102,6 @@ export async function POST(request: NextRequest) {
       success: true,
       connections: read.connections,
       accounts: anyRead ? read.accounts.map(toDisplayAccount) : [],
-      // The list the money screen shows, from this same read and window: the
-      // screen makes no second read of the transactions.
-      transactions: anyRead ? displayTransactions(read, period) : [],
       summary: anyRead
         ? computeFinancialSummary(
             toEngineInput(read, {
@@ -112,6 +114,12 @@ export async function POST(request: NextRequest) {
           )
         : null,
     };
+    // The list the money screen shows, from this same read and window: the
+    // screen makes no second read of the transactions. Only a request that
+    // asks for it gets it.
+    if (includeTransactions) {
+      body.transactions = anyRead ? displayTransactions(read, period) : [];
+    }
     return NextResponse.json(body);
   } catch (error: unknown) {
     console.error("Error building finance summary:", error);

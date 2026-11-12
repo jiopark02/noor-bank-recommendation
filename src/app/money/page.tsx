@@ -38,11 +38,15 @@ import {
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
+  parseSummaryTransactions,
   summaryLoadInputs,
   summaryPeriodNote,
+  transactionListView,
+  TRANSACTIONS_UNAVAILABLE,
   utilizationPercent,
   type MoneyDisplayState,
   type ScreenSummaryResponse,
+  type ScreenTransaction,
 } from "@/lib/bankSummaryView";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
@@ -116,6 +120,11 @@ export default function MoneyPage() {
   // Typed by the fields bankSummaryView checks, so a field read here that is
   // not checked there is a type error.
   const [bank, setBank] = useState<ScreenSummaryResponse | null>(null);
+  // The transaction list from the same answer, checked apart from the
+  // figures: null means the list could not be read, never an empty list.
+  const [transactionList, setTransactionList] = useState<
+    ScreenTransaction[] | null
+  >(null);
   // True only once the summary route has answered successfully in this load.
   const [hasMoneyData, setHasMoneyData] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,7 +210,7 @@ export default function MoneyPage() {
           {
             method: "POST",
             headers,
-            body: JSON.stringify({ timeZone: browserTimeZone() }),
+            body: JSON.stringify({ timeZone: browserTimeZone(), includeTransactions: true }),
           },
           BANK_DATA_LOAD_FAILED
         );
@@ -218,14 +227,16 @@ export default function MoneyPage() {
           throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
         }
 
-        const parsed = parseFinanceSummaryResponse(
-          await readJsonOrFail(res, BANK_DATA_LOAD_FAILED)
-        );
+        const body = await readJsonOrFail(res, BANK_DATA_LOAD_FAILED);
+        const parsed = parseFinanceSummaryResponse(body);
         if (!requestGate.isCurrent(token)) return;
         if (parsed === null) {
           throw new Error(BANK_DATA_LOAD_FAILED);
         }
         setBank(parsed);
+        // A list that does not read leaves the figures as they are; only the
+        // list area says it could not be loaded.
+        setTransactionList(parseSummaryTransactions(body));
         setHasMoneyData(true);
       } catch (err) {
         if (!requestGate.isCurrent(token)) return;
@@ -241,6 +252,7 @@ export default function MoneyPage() {
     const token = requestGate.begin();
     if (!userId || !plaidConnections.hasActive) {
       setBank(null);
+      setTransactionList(null);
       setIsLoadingData(false);
       return;
     }
@@ -250,6 +262,7 @@ export default function MoneyPage() {
     setHasMoneyData(false);
     setError(null);
     setBank(null);
+    setTransactionList(null);
     setRelinkFailedItemId(null);
     setIsLoadingData(true);
 
@@ -424,7 +437,10 @@ export default function MoneyPage() {
   const accounts = summary && bank ? bank.accounts : [];
   // The list comes from the same answer as the figures, over the same
   // window, so it carries the same missing-bank and incomplete-period lines.
-  const transactions = summary && bank ? bank.transactions : [];
+  // It is drawn only with ready figures, and a list that could not be read
+  // shows its own line instead of rows.
+  const list = transactionListView(view, transactionList);
+  const transactions = list.kind === "rows" ? list.rows : [];
   const missingNote = missingBanksNote(view.missingFrom);
   const periodNote = summaryPeriodNote(view, bank);
   const loadFailedMessage =
@@ -858,6 +874,11 @@ export default function MoneyPage() {
             )}
             {periodNote && (
               <p className="text-xs text-amber-800 mb-3">{periodNote}</p>
+            )}
+            {list.kind === "unavailable" && (
+              <p className="text-sm text-gray-500 mb-3">
+                {TRANSACTIONS_UNAVAILABLE}
+              </p>
             )}
             <div className="space-y-2">
               {transactions.map((txn) => (

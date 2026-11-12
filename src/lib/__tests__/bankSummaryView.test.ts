@@ -18,10 +18,14 @@ import {
   isNoActiveConnectionMessage,
   missingBanksNote,
   parseFinanceSummaryResponse,
+  parseSummaryTransactions,
   summaryLoadInputs,
   summaryPeriodNote,
   SUMMARY_RESPONSE_FIELDS,
+  SUMMARY_TRANSACTIONS_FIELDS,
+  transactionListView,
   utilizationPercent,
+  type BankView,
   type FieldSpec,
 } from "../bankSummaryView";
 import { computeFinancialSummary, DEFAULT_POLICY } from "../financeEngine";
@@ -638,9 +642,12 @@ describe("utilizationPercent", () => {
  * as the figures.
  *
  * Mutations that turn this block red:
- *   - an ok connection named           -> "only banks not read"
- *   - the duplicate check removed      -> "each name once"
- *   - a wrong-shaped list read as empty -> "a wrong-shaped list body"
+ *   - an ok connection named                      -> "only banks not read"
+ *   - the duplicate check removed                 -> "each name once"
+ *   - a wrong-shaped list read as empty           -> "a wrong-shaped list …"
+ *   - the list checked with the figures again     -> "a wrong-shaped list …"
+ *   - a list that could not be read drawn as rows,
+ *     or announced while the figures are not shown -> "the list area …"
  */
 describe("banksNotRead and the list body", () => {
   it("only banks not read, each name once, in order", () => {
@@ -678,17 +685,45 @@ describe("banksNotRead and the list body", () => {
 
   it("accepts what the route sends", () => {
     expect(parseFinanceSummaryResponse(withList())).not.toBeNull();
+    expect(parseSummaryTransactions(withList())).toHaveLength(1);
+    expect(parseSummaryTransactions({ ...withList(), transactions: [] })).toEqual([]);
   });
 
-  it("a wrong-shaped list body is a failed read", () => {
-    const bodies: unknown[] = [
+  it("a wrong-shaped list fails the list only, never the figures, and is never read as empty", () => {
+    const badLists: unknown[] = [
       { ...withList(), transactions: undefined },
       { ...withList(), transactions: null },
       { ...withList(), transactions: [{ transactionId: "t1", amount: 12.5 }] },
-      { ...withList(), connections: [{ itemId: "x", institutionName: null, status: "nope" }] },
     ];
-    for (const bad of bodies) {
-      expect(parseFinanceSummaryResponse(bad), JSON.stringify(bad)).toBeNull();
+    for (const bad of badLists) {
+      expect(parseFinanceSummaryResponse(bad), JSON.stringify(bad)).not.toBeNull();
+      expect(parseSummaryTransactions(bad), JSON.stringify(bad)).toBeNull();
+    }
+    const withoutList = withList();
+    delete withoutList.transactions;
+    expect(parseFinanceSummaryResponse(withoutList)).not.toBeNull();
+    expect(parseSummaryTransactions(withoutList)).toBeNull();
+    expect(parseSummaryTransactions(null)).toBeNull();
+    expect(parseSummaryTransactions([])).toBeNull();
+
+    // A wrong-shaped figure part is still a failed read of the whole body.
+    const badConnections = {
+      ...withList(),
+      connections: [{ itemId: "x", institutionName: null, status: "nope" }],
+    };
+    expect(parseFinanceSummaryResponse(badConnections)).toBeNull();
+  });
+
+  it("the list area follows the figures and says when the list could not be read", () => {
+    const ready: BankView = { figures: "ready", showSafeToSpend: true, actions: [], missingFrom: [] };
+    const rows = parseSummaryTransactions(withList());
+    expect(transactionListView(ready, rows)).toEqual({ kind: "rows", rows });
+    expect(transactionListView(ready, [])).toEqual({ kind: "rows", rows: [] });
+    expect(transactionListView(ready, null)).toEqual({ kind: "unavailable" });
+    for (const figures of ["loading", "unavailable", "none"] as const) {
+      const view: BankView = { ...ready, figures, showSafeToSpend: false };
+      expect(transactionListView(view, null), figures).toEqual({ kind: "hidden" });
+      expect(transactionListView(view, rows), figures).toEqual({ kind: "hidden" });
     }
   });
 });
@@ -942,10 +977,17 @@ describe("response bodies — every field the screens read is checked", () => {
       })
     );
 
-  // The transaction list is part of this body, so this walk checks its
-  // fields too.
   it("summary body: each listed field, missing or mistyped, is a failed read", () => {
     checksEveryField(SUMMARY_RESPONSE_FIELDS, goodSummaryBody(), parseFinanceSummaryResponse);
+  });
+
+  // The list is checked apart from the figures, field by field.
+  it("transaction list: each listed field, missing or mistyped, fails the list", () => {
+    checksEveryField(
+      { transactions: SUMMARY_TRANSACTIONS_FIELDS },
+      goodSummaryBody(),
+      parseSummaryTransactions
+    );
   });
 
   it("fields that are not listed are ignored", () => {

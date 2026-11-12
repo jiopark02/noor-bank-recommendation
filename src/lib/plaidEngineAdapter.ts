@@ -139,10 +139,11 @@ export interface FinanceSummaryResponse {
   accounts: DisplayAccount[];
   /**
    * The transactions dated inside the cash-flow period (the screens'
-   * display window), from the same read as the figures. Empty when no
+   * display window), from the same read as the figures. Present only when
+   * the request's `includeTransactions` is exactly `true`; then empty when no
    * connection could be read.
    */
-  transactions: DisplayTransaction[];
+  transactions?: DisplayTransaction[];
   /** null when no connection could be read. */
   summary: FinancialSummary | null;
 }
