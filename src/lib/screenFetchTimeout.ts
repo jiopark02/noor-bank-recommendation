@@ -13,15 +13,17 @@
  * The limit for the bank screens' requests to the finance summary and the
  * connection list, in milliseconds.
  *
- * It must be longer than the summary route's longest wait the code allows, so
- * a slow answer the server would still deliver is never cut off here. That
- * wait is the Plaid calls one connection makes one after another (the
- * accounts, every transactions page up to the adapter's page limit, and the
- * recurring streams), each under the adapter's per-call limit; connections
- * are read side by side, so their number does not add to it. The value here
- * adds a margin for the route's own reads on top of that bound. A test holds
- * the relation, so raising the page limit or the per-call limit without
- * raising this turns it red.
+ * It must be longer than the sum of the summary route's per-call waits for
+ * Plaid's response headers. One connection makes its Plaid calls one after
+ * another (the accounts, every transactions page up to the adapter's page
+ * limit, and the recurring streams), and the adapter's per-call limit bounds
+ * each call's wait for the response headers; connections are read side by
+ * side, so their number does not add to it. That sum does not bound the route:
+ * after the headers a call is limited only per idle gap while its body
+ * arrives, and the route's own authentication and database reads have no limit
+ * in code, so the margin this value adds over the sum leaves room for them
+ * without bounding them. A test holds the relation, so raising the page limit
+ * or the per-call limit without raising this turns it red.
  *
  * The connection list makes no Plaid call and has no wait bounded in code, so
  * it uses the same limit rather than a figure of its own.

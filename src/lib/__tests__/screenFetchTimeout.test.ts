@@ -20,9 +20,9 @@ import { MAX_TRANSACTION_PAGES, PLAID_CALL_TIMEOUT_MS } from "../plaidEngineAdap
  * Mutations that turn this file red:
  *   - the timer or the abort removed from withFetchTimeout     -> "aborts …"
  *   - clearTimeout removed                                     -> "leaves no timer …"
- *   - the limit set at or below the summary route's longest
- *     in-code wait, or the adapter's page or per-call limit
- *     raised without it                                        -> "outlasts …"
+ *   - the limit set at or below the sum of one connection's
+ *     per-call Plaid header waits, or the adapter's page or
+ *     per-call limit raised without it                         -> "outlasts …"
  *   - a second screen timeout constant, or a request given
  *     its own figure                                           -> "one limit …"
  *   - `signal` dropped from a request, a request moved out of
@@ -80,10 +80,13 @@ describe("withFetchTimeout", () => {
 });
 
 describe("the screens' limit", () => {
-  it("outlasts the summary route's longest in-code wait for one connection", () => {
+  it("outlasts the sum of one connection's per-call Plaid header waits", () => {
     // One connection's calls run one after another: the accounts, up to the
-    // page limit of transactions pages, and the recurring streams, each under
-    // the adapter's per-call limit. Connections run side by side.
+    // page limit of transactions pages, and the recurring streams, each with
+    // its wait for the response headers under the adapter's per-call limit.
+    // Connections run side by side. The sum leaves out each body's time after
+    // its headers, limited only per idle gap, and the route's own reads, which
+    // have no limit in code.
     const longestPlaidWait = (MAX_TRANSACTION_PAGES + 2) * PLAID_CALL_TIMEOUT_MS;
     expect(BANK_SCREEN_FETCH_TIMEOUT_MS).toBeGreaterThan(longestPlaidWait);
   });
