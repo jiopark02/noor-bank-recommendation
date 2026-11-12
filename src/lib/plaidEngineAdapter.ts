@@ -578,11 +578,15 @@ function earliestDate(transactions: ReadTransaction[]): string | null {
   return earliest;
 }
 
-/** Days from the window's start to the earliest transaction, or "none". */
+/**
+ * The observed history length: days from the earliest transaction received
+ * to the end of the read window (today), inclusive of both ends, or "none"
+ * when no transaction arrived.
+ */
 function historyDays(earliest: string | null, range: BankWindow): string {
-  const from = dayNumber(range.start);
-  const to = earliest === null ? null : dayNumber(earliest);
-  return from === null || to === null ? "none" : String(to - from);
+  const from = earliest === null ? null : dayNumber(earliest);
+  const to = dayNumber(range.end);
+  return from === null || to === null ? "none" : String(to - from + 1);
 }
 
 function hasCategory(stream: TransactionStream): boolean {

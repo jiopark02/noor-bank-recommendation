@@ -986,8 +986,30 @@ describe("engine input fields", () => {
     const line = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .map((c) => String(c[0]))
       .filter((l) => l.startsWith("[bank-read]"))[0];
-    expect(line).toContain("item=ok last_update=present inflow_streams=1 stream_pfc=2 history_days=6");
+    // From the earliest transaction to the window's end, both ends counted.
+    expect(line).toContain("item=ok last_update=present inflow_streams=1 stream_pfc=2 history_days=84");
     expect(line).not.toMatch(/2026-|ENTERTAINMENT|Netflix|TOKEN|item-1|acc-1/);
+  });
+
+  // Red if: one end of the range is not counted, or the length is counted
+  // from the window's start instead of from the earliest transaction.
+  it("logs history_days as the days from the earliest transaction to today, inclusive", async () => {
+    const bankReadLine = () =>
+      (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map((c) => String(c[0]))
+        .filter((l) => l.startsWith("[bank-read]"))[0];
+
+    vi.mocked(console.log).mockClear();
+    const today = fakePlaid({
+      TOKEN_1: { pages: [{ transactions: [txn("t", { date: RANGE.end })], total: 1 }] },
+    });
+    await readBankData(USER, [row(1)], ALL, RANGE, deps(today.plaid));
+    expect(bankReadLine()).toMatch(/ history_days=1 /);
+
+    vi.mocked(console.log).mockClear();
+    const none = fakePlaid({ TOKEN_1: { pages: [{ transactions: [], total: 0 }] } });
+    await readBankData(USER, [row(1)], ALL, RANGE, deps(none.plaid));
+    expect(bankReadLine()).toMatch(/ history_days=none /);
   });
 });
 
