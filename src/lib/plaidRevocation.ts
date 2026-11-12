@@ -638,9 +638,13 @@ export function liveRevocationDeps(): RevocationDeps {
   return {
     decrypt: (stored, userId) => decryptPlaidAccessToken(stored, userId),
     itemRemove: async (accessToken) => {
-      const response = await plaidClient.itemRemove({
-        access_token: accessToken,
-      });
+      // No time limit, stated per call so the client's default does not apply:
+      // a revocation cut short on our side may still complete at Plaid, and
+      // the caller would then keep a row for an Item that no longer exists.
+      const response = await plaidClient.itemRemove(
+        { access_token: accessToken },
+        { timeout: 0 }
+      );
       // Read as if request_id were optional, though the SDK types it as required
       // and as the only field on the response. A response that does not match
       // its own type is not a reason to report a completed revocation as a

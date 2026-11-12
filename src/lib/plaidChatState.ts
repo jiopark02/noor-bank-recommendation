@@ -89,8 +89,9 @@ async function fetchShallowAccounts(
     if (signal?.aborted) break;
     try {
       // The signal is a per-call request option; the client's own
-      // configuration is not touched. Without one the call is made exactly
-      // as before.
+      // configuration is not touched. With or without one, the call is also
+      // bound by the Plaid client's default time limit, since it sets no
+      // timeout of its own.
       const res = signal
         ? await plaidClient.accountsGet(
             { access_token: accessToken },

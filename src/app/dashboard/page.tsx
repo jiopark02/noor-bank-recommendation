@@ -22,6 +22,10 @@ import {
 } from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 import {
+  BANK_SCREEN_FETCH_TIMEOUT_MS,
+  withFetchTimeout,
+} from "@/lib/screenFetchTimeout";
+import {
   DISPLAY_WINDOW_LABEL,
   browserTimeZone,
   creditUsedCents,
@@ -211,24 +215,34 @@ export default function HomePage() {
           setUserName("there");
         }
 
-        const res = await fetchOrFail(
-          "/api/plaid/connections",
-          {
-            method: "GET",
-            headers: await getSupabaseBearerHeaders(),
-          },
-          CONNECTIONS_LOAD_FAILED
-        );
-        if (!res.ok) {
-          const data = asPlainObject(await res.json().catch(() => ({})));
-          throw new Error(
-            readErrorMessage(data) || CONNECTIONS_LOAD_FAILED
-          );
-        }
-        // A 200 whose body does not parse is a failed read, not an empty list,
-        // and the parser's own wording is not for the screen.
-        const payload = asPlainObject(
-          await readJsonOrFail(res, CONNECTIONS_LOAD_FAILED)
+        const connectionsHeaders = await getSupabaseBearerHeaders();
+        // The request and its body read run under the screen's limit: an
+        // answer that never comes ends in the error state below, not on the
+        // loading state.
+        const payload = await withFetchTimeout(
+          BANK_SCREEN_FETCH_TIMEOUT_MS,
+          async (signal) => {
+            const res = await fetchOrFail(
+              "/api/plaid/connections",
+              {
+                method: "GET",
+                headers: connectionsHeaders,
+                signal,
+              },
+              CONNECTIONS_LOAD_FAILED
+            );
+            if (!res.ok) {
+              const data = asPlainObject(await res.json().catch(() => ({})));
+              throw new Error(
+                readErrorMessage(data) || CONNECTIONS_LOAD_FAILED
+              );
+            }
+            // A 200 whose body does not parse is a failed read, not an empty
+            // list, and the parser's own wording is not for the screen.
+            return asPlainObject(
+              await readJsonOrFail(res, CONNECTIONS_LOAD_FAILED)
+            );
+          }
         );
         if (cancelled) return;
 
@@ -285,32 +299,39 @@ export default function HomePage() {
         await getSupabaseBearerHeaders()
       );
 
-      const summaryRes = await fetchOrFail(
-        "/api/finance/summary",
-        {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({ timeZone: browserTimeZone() }),
-        },
-        BANK_DATA_LOAD_FAILED
-      );
+      // The request and its body read run under the screen's limit, so a
+      // summary that never answers ends as a failed load, not on the loading
+      // state.
+      await withFetchTimeout(BANK_SCREEN_FETCH_TIMEOUT_MS, async (signal) => {
+        const summaryRes = await fetchOrFail(
+          "/api/finance/summary",
+          {
+            method: "POST",
+            headers: plaidHeaders,
+            body: JSON.stringify({ timeZone: browserTimeZone() }),
+            signal,
+          },
+          BANK_DATA_LOAD_FAILED
+        );
 
-      if (!summaryRes.ok) {
-        const data = asPlainObject(await summaryRes.json().catch(() => ({})));
-        throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
-      }
+        if (!summaryRes.ok) {
+          const data = asPlainObject(await summaryRes.json().catch(() => ({})));
+          throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
+        }
 
-      // A 2xx body of the wrong shape is a failed read, never an empty one:
-      // read as empty it would show $0.00 as if it were the user's real figure.
-      const parsed = parseFinanceSummaryResponse(
-        await readJsonOrFail(summaryRes, BANK_DATA_LOAD_FAILED)
-      );
-      if (parsed === null) {
-        throw new Error(BANK_DATA_LOAD_FAILED);
-      }
+        // A 2xx body of the wrong shape is a failed read, never an empty one:
+        // read as empty it would show $0.00 as if it were the user's real
+        // figure.
+        const parsed = parseFinanceSummaryResponse(
+          await readJsonOrFail(summaryRes, BANK_DATA_LOAD_FAILED)
+        );
+        if (parsed === null) {
+          throw new Error(BANK_DATA_LOAD_FAILED);
+        }
 
-      setBank(parsed);
-      setHasMoneyData(true);
+        setBank(parsed);
+        setHasMoneyData(true);
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to sync bank data";

@@ -14,16 +14,19 @@
 //   - Money is integer cents (toCents). A balance Plaid did not report stays
 //     null; it is never read as 0.
 //   - Account type is Plaid's own type, not the app's collapsed mapping.
-//   - Every stored token is decrypted before any Plaid call. A decrypt failure
-//     throws: it means the key is wrong or a row is corrupt, which is not a
-//     per-connection condition and must not be reported as one.
+//   - Every stored token is decrypted before any Plaid call. When every row
+//     fails to decrypt, the read throws with nothing sent: that is the key's
+//     fault, not any one connection's. When only some rows fail, each of
+//     those connections is reported `failed` with no data and no Plaid call
+//     is made with it; the others are read as usual. The log line for such a
+//     row carries `cause=decrypt` and the crypto module's reason only.
 //   - Each connection answers with a status. A connection that is not `ok`
 //     contributes no data at all, so a half-read bank never looks complete.
 //   - A recurring stream keeps the currency code Plaid sent with its amounts.
 //     Only a stream that names none at all takes its account's currency, from
 //     the accounts read on the same connection (see mapStream).
-//   - Logs carry status, error code and counts only: no item id, token,
-//     amount or name.
+//   - Logs carry status, error code (or crypto reason) and counts only: no
+//     item id, token, ciphertext, error message, amount or name.
 //   - The keys handed to the engine (connection key, duplicate key) are
 //     opaque: the duplicate key is a hash, so no name or mask reaches the
 //     engine input. Neither key is part of any response.
@@ -46,7 +49,10 @@ import {
   type TransactionsRecurringGetResponse,
 } from "plaid";
 import { plaidClient } from "@/lib/plaid";
-import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
+import {
+  decryptPlaidAccessToken,
+  isPlaidTokenCryptoError,
+} from "@/lib/plaidTokenCrypto";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
 import {
   dayNumber,
@@ -830,6 +836,46 @@ async function readConnection(
 }
 
 /**
+ * The crypto module's reason for a failed decrypt, for the log line only.
+ * Never the error's message, which is not ours to vouch for, and never any
+ * part of the stored value.
+ */
+function decryptFailureReason(error: unknown): string {
+  return isPlaidTokenCryptoError(error) ? error.reason : "unknown";
+}
+
+/**
+ * The answer for a connection whose stored token would not decrypt: failed,
+ * with no data. No Plaid call is made for it.
+ */
+function decryptFailedRead(
+  index: number,
+  row: StoredConnectionRow,
+  reason: string
+): ConnectionRead {
+  const itemId = row.item_id;
+  const institutionName = row.institution_name ?? null;
+  console.error(`[bank-read] idx=${index} status=failed cause=decrypt reason=${reason}`);
+  return {
+    status: { itemId, institutionName, status: "failed" },
+    engine: {
+      connectionKey: connectionKeyOf(index),
+      state: "failed",
+      lastSuccessfulUpdate: null,
+      recurringRead: null,
+      transactionsTruncated: false,
+      earliestTransactionDate: null,
+    },
+    accounts: [],
+    transactions: [],
+    streams: [],
+    incomeStreams: [],
+  };
+}
+
+type DecryptedToken = { ok: true; token: string } | { ok: false; error: unknown };
+
+/**
  * Every connection's answer, merged. Whether the figures are complete, and
  * whether recurring charges are known, is not decided here: the engine
  * decides both from `engineConnections`.
@@ -850,8 +896,13 @@ export interface BankRead {
  *
  * `rows` are the caller's own active connections, read with the verified
  * token's user id; `userId` is that same id, used unmodified as the decrypt
- * AAD. All tokens are decrypted before the first Plaid call, so a decrypt
- * failure throws with nothing sent.
+ * AAD. All tokens are decrypted before the first Plaid call.
+ *
+ * When every row fails to decrypt, this throws the first row's error with
+ * nothing sent: a fault shared by every row is the key's, and must not be
+ * reported as each bank failing. When only some rows fail, each of those
+ * connections is answered `failed` with no data, no Plaid call is made with
+ * it, and the remaining connections are read as usual.
  */
 export async function readBankData(
   userId: string,
@@ -865,13 +916,29 @@ export async function readBankData(
     throw new Error("readBankData: recurring needs accounts");
   }
 
-  const tokens: string[] = [];
+  const tokens: DecryptedToken[] = [];
+  let decryptFailures = 0;
+  let firstDecryptError: unknown = null;
   for (let i = 0; i < rows.length; i++) {
-    tokens.push(deps.decrypt(rows[i].access_token, userId));
+    try {
+      tokens.push({ ok: true, token: deps.decrypt(rows[i].access_token, userId) });
+    } catch (error: unknown) {
+      if (decryptFailures === 0) firstDecryptError = error;
+      decryptFailures += 1;
+      tokens.push({ ok: false, error });
+    }
+  }
+  if (decryptFailures > 0 && decryptFailures === rows.length) {
+    throw firstDecryptError;
   }
 
   const reads = await Promise.all(
-    rows.map((row, i) => readConnection(i, row, tokens[i], want, range, deps.plaid))
+    rows.map((row, i) => {
+      const t = tokens[i];
+      return t.ok
+        ? readConnection(i, row, t.token, want, range, deps.plaid)
+        : Promise.resolve(decryptFailedRead(i, row, decryptFailureReason(t.error)));
+    })
   );
 
   const connections: BankConnectionStatus[] = [];

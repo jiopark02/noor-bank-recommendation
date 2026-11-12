@@ -64,9 +64,14 @@ export async function POST(request: NextRequest) {
         findActiveByInstitution: (id, institutionId, excludeItemId) =>
           getActivePlaidConnectionByInstitution(id, institutionId, excludeItemId),
         exchange: async (token) => {
-          const response = await plaidClient.itemPublicTokenExchange({
-            public_token: token,
-          });
+          // No time limit, stated per call so the client's default does not
+          // apply. The Item already exists at Plaid when Link hands over the
+          // public token; giving up on this call while Plaid is still answering
+          // would lose the only access token that can read or revoke it.
+          const response = await plaidClient.itemPublicTokenExchange(
+            { public_token: token },
+            { timeout: 0 }
+          );
           return {
             accessToken: response.data.access_token,
             itemId: response.data.item_id,

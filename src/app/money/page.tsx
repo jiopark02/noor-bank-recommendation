@@ -23,6 +23,10 @@ import {
   readString,
 } from "@/lib/requestJson";
 import {
+  BANK_SCREEN_FETCH_TIMEOUT_MS,
+  withFetchTimeout,
+} from "@/lib/screenFetchTimeout";
+import {
   DISPLAY_WINDOW_LABEL,
   bankActionLines,
   browserTimeZone,
@@ -205,29 +209,41 @@ export default function MoneyPage() {
   const loadSummary = useCallback(
     async (headers: HeadersInit, token: number) => {
       try {
-        const res = await fetchOrFail(
-          "/api/finance/summary",
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ timeZone: browserTimeZone(), includeTransactions: true }),
-          },
-          BANK_DATA_LOAD_FAILED
+        // The request and its body read run under the screen's limit, so a
+        // summary that never answers ends as a failed load (dashes), not on
+        // the loading state.
+        // A stale load's error answer returns nothing from here; the check
+        // after the parse then drops it.
+        const body = await withFetchTimeout(
+          BANK_SCREEN_FETCH_TIMEOUT_MS,
+          async (signal) => {
+            const res = await fetchOrFail(
+              "/api/finance/summary",
+              {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ timeZone: browserTimeZone(), includeTransactions: true }),
+                signal,
+              },
+              BANK_DATA_LOAD_FAILED
+            );
+
+            if (!res.ok) {
+              const data = asPlainObject(await res.json().catch(() => ({})));
+              if (!requestGate.isCurrent(token)) return;
+              const errText = readString(data, "error") ?? null;
+              if (isNoActiveConnectionMessage(errText)) {
+                // Re-pull authoritative connection state from the DB, which is
+                // the only place connection state lives.
+                refetchConnections();
+              }
+              throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
+            }
+
+            return readJsonOrFail(res, BANK_DATA_LOAD_FAILED);
+          }
         );
 
-        if (!res.ok) {
-          const data = asPlainObject(await res.json().catch(() => ({})));
-          if (!requestGate.isCurrent(token)) return;
-          const errText = readString(data, "error") ?? null;
-          if (isNoActiveConnectionMessage(errText)) {
-            // Re-pull authoritative connection state from the DB, which is the
-            // only place connection state lives.
-            refetchConnections();
-          }
-          throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
-        }
-
-        const body = await readJsonOrFail(res, BANK_DATA_LOAD_FAILED);
         const parsed = parseFinanceSummaryResponse(body);
         if (!requestGate.isCurrent(token)) return;
         if (parsed === null) {

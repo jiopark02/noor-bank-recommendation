@@ -13,6 +13,8 @@ import type { NextRequest } from "next/server";
  *   - the auth check removed, or moved after the configuration check -> unauthenticated
  *   - a connection row (or its token) spread into the response      -> no token in body
  *   - a failed connection read answered as "no connections"         -> failed read
+ *   - one row failing to decrypt answered 500 for every bank        -> "a row that will not decrypt"
+ *   - every row failing to decrypt answered as banks failing        -> "every row failing to decrypt"
  *   - the empty-case wording changed                                -> no active connection
  *   - completeness not taken from the connection statuses           -> partial failure
  *   - a summary computed when no bank was read                      -> nothing read
@@ -250,8 +252,28 @@ describe("POST /api/finance/summary — connection reads", () => {
     expect(res.json.error).toBe(EMPTY_CASE);
   });
 
-  it("a decrypt failure is a 500 for the whole request", async () => {
+  it("a row that will not decrypt is that bank failing; the other banks are still answered", async () => {
     state.connections = [conn(1), { ...conn(2), access_token: "not-ciphertext" }];
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(res.json.connections).toEqual([
+      { itemId: "item-1", institutionName: "Bank 1", status: "ok" },
+      { itemId: "item-2", institutionName: "Bank 2", status: "failed" },
+    ]);
+    expect(res.json.accounts.map((a: { accountId: string }) => a.accountId)).toEqual(["chk-1"]);
+    expect(res.json.summary).not.toBeNull();
+    expect(res.json.summary.coverage.allConnectionsRead).toBe(false);
+    expect(res.json.summary.coverage.safeToSpendShowable).toBe(false);
+    // itemGet, accountsGet, one transactions page and recurring: the first bank only.
+    expect(state.plaidCalls).toBe(4);
+    expect(res.text).not.toContain("not-ciphertext");
+  });
+
+  it("every row failing to decrypt is a 500 for the whole request, with nothing sent to Plaid", async () => {
+    state.connections = [
+      { ...conn(1), access_token: "not-ciphertext-1" },
+      { ...conn(2), access_token: "not-ciphertext-2" },
+    ];
     const res = await post();
     expect(res.status).toBe(500);
     expect(state.plaidCalls).toBe(0);
