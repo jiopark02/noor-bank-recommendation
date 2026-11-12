@@ -165,6 +165,14 @@ export const PLAID_PRODUCTS: Products[] = [
   //Products.Liabilities,
 ];
 
+/**
+ * Days of transaction history requested when a new Item is created. Plaid fixes
+ * this when Transactions is added to an Item and it cannot be changed later;
+ * update mode carries no such field, so existing Items keep what they were
+ * created with.
+ */
+export const PLAID_TRANSACTIONS_DAYS_REQUESTED = 730;
+
 // Country codes we support
 export const PLAID_COUNTRY_CODES: CountryCode[] = [CountryCode.Us];
 
