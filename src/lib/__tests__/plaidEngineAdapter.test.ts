@@ -24,6 +24,7 @@ import {
   TRANSACTIONS_PAGE_SIZE,
   bankWindow,
   displayTransactions,
+  isUsableTransaction,
   readBankData,
   resolveToday,
   toDisplayTransaction,
@@ -68,6 +69,15 @@ import { PlaidTokenCryptoError } from "../plaidTokenCrypto";
  *   - the account-currency fill for a stream with no code removed  -> stream currency
  *   - the fill applied over a code Plaid sent                      -> stream currency
  *   - a stream currency shape miscounted in the log                -> stream currency log
+ *   - any usability condition dropped (a numeric-string or null
+ *     amount accepted included)                                    -> transaction filter
+ *   - a field read before the element is known to be an object     -> transaction filter
+ *   - a later copy of a transaction id kept, or the repeat check
+ *     made per connection                                          -> transaction filter
+ *   - the same id on another account counted as a duplicate        -> transaction filter
+ *   - counts moved between connections, or logged with an id       -> transaction filter
+ *   - the earliest date taken before the repeat check              -> transaction filter
+ *   - the page offset advanced by the elements kept                -> transaction filter
  */
 
 const RANGE = { start: "2026-08-14", end: "2026-11-11" };
@@ -745,6 +755,7 @@ describe("connection status", () => {
       recurringRead: null,
       transactionsTruncated: false,
       earliestTransactionDate: null,
+      invalidTransactions: { duplicate: 0, invalid: 0 },
     });
     expect(read.engineConnections.map((c) => c.connectionKey)).toEqual(["c0", "c1", "c2"]);
     expect(read.accounts.map((a) => a.accountId)).toEqual(["acc-1", "acc-3"]);
@@ -1178,5 +1189,276 @@ describe("engine input", () => {
     expect(input.readWindow).toEqual(RANGE);
     expect(input.connections).toEqual(read.engineConnections);
     expect(input.currency).toBe("USD");
+  });
+});
+
+describe("transaction filter", () => {
+  /** An element as Plaid might send it when it breaks the SDK's own types. */
+  function raw(value: unknown): Transaction {
+    return value as Transaction;
+  }
+
+  function onePage(transactions: Transaction[]): Script {
+    return { pages: [{ transactions, total: transactions.length }] };
+  }
+
+  /** The same fake, with one token's transaction pages answered after a delay. */
+  function slowTransactions(plaid: PlaidReadCalls, token: string, ms: number): PlaidReadCalls {
+    return {
+      ...plaid,
+      transactionsGet: (req, options) =>
+        req.access_token === token
+          ? new Promise((resolve, reject) =>
+              setTimeout(() => plaid.transactionsGet(req, options).then(resolve, reject), ms)
+            )
+          : plaid.transactionsGet(req, options),
+    };
+  }
+
+  function filterLines(): string[] {
+    return (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.startsWith("[bank-filter]"));
+  }
+
+  const withoutId: Partial<Transaction> = { ...txn("x") };
+  delete withoutId.transaction_id;
+  const CASES: Array<[string, unknown]> = [
+    ["null element", null],
+    ["undefined element", undefined],
+    ["number element", 5],
+    ["string element", "x"],
+    ["missing transaction_id", withoutId],
+    ["empty transaction_id", txn("")],
+    ["numeric transaction_id", { ...txn("x"), transaction_id: 7 }],
+    ["empty account_id", txn("x", { account_id: "" })],
+    ["null account_id", { ...txn("x"), account_id: null }],
+    ["numeric account_id", { ...txn("x"), account_id: 7 }],
+    ["null amount", { ...txn("x"), amount: null }],
+    ["missing amount", { ...txn("x"), amount: undefined }],
+    ["numeric-string amount", { ...txn("x"), amount: "12.34" }],
+    ["NaN amount", txn("x", { amount: Number.NaN })],
+    ["Infinity amount", txn("x", { amount: Number.POSITIVE_INFINITY })],
+    ["amount beyond safe cents", txn("x", { amount: 1e17 })],
+    ["slash date", txn("x", { date: "11/01/2026" })],
+    ["impossible date", txn("x", { date: "2026-02-30" })],
+    ["null date", { ...txn("x"), date: null }],
+    ["null pending", { ...txn("x"), pending: null }],
+    ["string pending", { ...txn("x"), pending: "false" }],
+    ["numeric pending", { ...txn("x"), pending: 0 }],
+  ];
+
+  it.each(CASES)("%s is counted invalid and left out; its neighbour is kept", async (_label, bad) => {
+    expect(isUsableTransaction(bad)).toBe(false);
+    const { plaid } = fakePlaid({ TOKEN_1: onePage([raw(bad), txn("ok")]) });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(read.connections[0].status).toBe("ok");
+    expect(read.transactions.map((t) => t.transactionId)).toEqual(["ok"]);
+    expect(read.engineConnections[0].invalidTransactions).toEqual({ duplicate: 0, invalid: 1 });
+  });
+
+  it("a well-formed transaction is usable", () => {
+    expect(isUsableTransaction(txn("x"))).toBe(true);
+    expect(isUsableTransaction(txn("x", { amount: -0.01, pending: true }))).toBe(true);
+  });
+
+  it("an element that is not an object does not fail its connection", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: onePage([raw(null), txn("a"), raw(undefined)]),
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(read.connections[0].status).toBe("ok");
+    expect(read.engineConnections[0].state).toBe("ok");
+    expect(read.accounts.map((a) => a.accountId)).toEqual(["acc-1"]);
+    expect(read.transactions.map((t) => t.transactionId)).toEqual(["a"]);
+    expect(read.engineConnections[0].invalidTransactions).toEqual({ duplicate: 0, invalid: 2 });
+  });
+
+  it("a null amount is invalid, never 0 cents", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: onePage([raw({ ...txn("nil"), amount: null, date: "2026-08-20" }), txn("a")]),
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(read.transactions.some((t) => t.transactionId === "nil")).toBe(false);
+    expect(read.transactions.some((t) => t.amountCents === 0)).toBe(false);
+    expect(read.engineConnections[0].invalidTransactions).toEqual({ duplicate: 0, invalid: 1 });
+    // Its date is not the connection's earliest either.
+    expect(read.engineConnections[0].earliestTransactionDate).toBe("2026-11-01");
+  });
+
+  it("a repeated transaction keeps the first copy, on one page and across pages", async () => {
+    const samePage = fakePlaid({
+      TOKEN_1: onePage([txn("d", { amount: 1 }), txn("d", { amount: 2 }), txn("e")]),
+    });
+    const a = await readBankData(USER, [row(1)], ALL, RANGE, deps(samePage.plaid));
+    expect(a.transactions.map((t) => [t.transactionId, t.amountCents])).toEqual([
+      ["d", 100],
+      ["e", 1234],
+    ]);
+    expect(a.engineConnections[0].invalidTransactions).toEqual({ duplicate: 1, invalid: 0 });
+
+    const twoPages = fakePlaid({
+      TOKEN_1: {
+        pages: [
+          { transactions: [txn("d", { amount: 1 })], total: 2 },
+          { transactions: [txn("d", { amount: 2 })], total: 2 },
+        ],
+      },
+    });
+    const b = await readBankData(USER, [row(1)], ALL, RANGE, deps(twoPages.plaid));
+    expect(b.transactions.map((t) => t.amountCents)).toEqual([100]);
+    expect(b.engineConnections[0].invalidTransactions).toEqual({ duplicate: 1, invalid: 0 });
+  });
+
+  it("a repeat on a later connection is counted there, whichever bank answers first", async () => {
+    for (const slow of ["TOKEN_1", "TOKEN_2"]) {
+      const { plaid } = fakePlaid({
+        TOKEN_1: onePage([txn("d", { amount: 1 })]),
+        TOKEN_2: onePage([txn("d", { amount: 2 }), txn("f")]),
+      });
+      const read = await readBankData(
+        USER,
+        [row(1), row(2)],
+        ALL,
+        RANGE,
+        deps(slowTransactions(plaid, slow, 20))
+      );
+      expect(read.transactions.map((t) => [t.transactionId, t.amountCents])).toEqual([
+        ["d", 100],
+        ["f", 1234],
+      ]);
+      expect(read.engineConnections.map((c) => c.invalidTransactions)).toEqual([
+        { duplicate: 0, invalid: 0 },
+        { duplicate: 1, invalid: 0 },
+      ]);
+    }
+  });
+
+  it("the same id on another account keeps the first and counts the later one invalid", async () => {
+    const oneConnection = fakePlaid({
+      TOKEN_1: onePage([txn("d", { account_id: "acc-1" }), txn("d", { account_id: "acc-2" })]),
+    });
+    const a = await readBankData(USER, [row(1)], ALL, RANGE, deps(oneConnection.plaid));
+    expect(a.transactions.map((t) => [t.transactionId, t.accountId])).toEqual([["d", "acc-1"]]);
+    expect(a.engineConnections[0].invalidTransactions).toEqual({ duplicate: 0, invalid: 1 });
+
+    const twoConnections = fakePlaid({
+      TOKEN_1: onePage([txn("d", { account_id: "acc-1" })]),
+      TOKEN_2: onePage([txn("d", { account_id: "acc-2" })]),
+    });
+    const b = await readBankData(USER, [row(1), row(2)], ALL, RANGE, deps(twoConnections.plaid));
+    expect(b.transactions.map((t) => [t.transactionId, t.accountId])).toEqual([["d", "acc-1"]]);
+    expect(b.engineConnections.map((c) => c.invalidTransactions)).toEqual([
+      { duplicate: 0, invalid: 0 },
+      { duplicate: 0, invalid: 1 },
+    ]);
+    const list = displayTransactions(b, RANGE);
+    expect(list.filter((t) => t.transactionId === "d")).toHaveLength(1);
+  });
+
+  it("counts belong to their own connection, and a connection not read counts none", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: onePage([raw(null), txn("a"), txn("a")]),
+      TOKEN_2: onePage([txn("b"), raw({ ...txn("c"), pending: null }), raw({ ...txn("e"), amount: "1" })]),
+      TOKEN_3: {
+        pages: [
+          { transactions: [raw(null), txn("g")], total: 4 },
+          plaidError("INTERNAL_SERVER_ERROR"),
+        ],
+      },
+    });
+    const read = await readBankData(USER, [row(1), row(2), row(3)], ALL, RANGE, deps(plaid));
+    expect(read.connections.map((c) => c.status)).toEqual(["ok", "ok", "failed"]);
+    expect(read.engineConnections.map((c) => c.invalidTransactions)).toEqual([
+      { duplicate: 1, invalid: 1 },
+      { duplicate: 0, invalid: 2 },
+      { duplicate: 0, invalid: 0 },
+    ]);
+  });
+
+  it("the earliest date is taken from the transactions kept", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: onePage([
+        txn("d", { date: "2026-09-10" }),
+        txn("d", { date: "2026-08-20" }),
+        raw({ ...txn("p"), date: "2026-08-15", pending: null }),
+      ]),
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(read.engineConnections[0].earliestTransactionDate).toBe("2026-09-10");
+  });
+
+  it("pages by every element Plaid sent, kept or not", async () => {
+    const { plaid, calls } = fakePlaid({
+      TOKEN_1: {
+        pages: [
+          { transactions: [raw(null), txn("a"), txn("a")], total: 3 },
+          { transactions: [txn("late")], total: 3 },
+        ],
+      },
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    expect(calls.transactions).toHaveLength(1);
+    expect(read.engineConnections[0].transactionsTruncated).toBe(false);
+    expect(read.transactions.map((t) => t.transactionId)).toEqual(["a"]);
+  });
+
+  it("logs counts per connection only, and nothing when none were left out", async () => {
+    vi.mocked(console.log).mockClear();
+    const { plaid } = fakePlaid({
+      TOKEN_1: onePage([txn("clean")]),
+      TOKEN_2: onePage([raw({ ...txn("secret-id"), amount: null }), txn("dup"), txn("dup")]),
+    });
+    await readBankData(USER, [row(1), row(2)], ALL, RANGE, deps(plaid));
+    expect(filterLines()).toEqual(["[bank-filter] idx=1 invalid=1 duplicate=1"]);
+
+    vi.mocked(console.log).mockClear();
+    const clean = fakePlaid({ TOKEN_1: onePage([txn("a"), txn("b")]) });
+    await readBankData(USER, [row(1)], ALL, RANGE, deps(clean.plaid));
+    expect(filterLines()).toEqual([]);
+  });
+
+  it("the screens' list leaves out what the engine is not given, with unique row keys", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: onePage([
+        txn("a"),
+        txn("a"),
+        raw({ ...txn("nil"), amount: null }),
+        raw({ ...txn("str"), amount: "12.34" }),
+        raw(null),
+        txn("b"),
+      ]),
+      TOKEN_2: onePage([txn("b"), txn("c")]),
+    });
+    const read = await readBankData(USER, [row(1), row(2)], ALL, RANGE, deps(plaid));
+    const list = displayTransactions(read, RANGE);
+    expect(list.map((t) => t.transactionId)).toEqual(["a", "b", "c"]);
+    const keys = list.map((t) => t.accountId + ":" + t.transactionId);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(list.map((t) => t.transactionId)).toEqual(
+      toEngineInput(read, DATES).transactions.map((t) => t.transactionId)
+    );
+  });
+
+  it("the engine's invalid count is what the adapter left out, and its figures use the rest", async () => {
+    const { plaid } = fakePlaid({
+      TOKEN_1: onePage([
+        txn("a"),
+        txn("a"),
+        raw({ ...txn("str"), amount: "12.34" }),
+        raw(null),
+        txn("b", { amount: 5 }),
+      ]),
+    });
+    const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
+    const summary = computeFinancialSummary(toEngineInput(read, DATES));
+    expect(summary.cashFlow.excluded.invalid.count).toBe(3);
+
+    const clean = fakePlaid({ TOKEN_1: onePage([txn("a"), txn("b", { amount: 5 })]) });
+    const cleanRead = await readBankData(USER, [row(1)], ALL, RANGE, deps(clean.plaid));
+    const cleanSummary = computeFinancialSummary(toEngineInput(cleanRead, DATES));
+    expect(summary.cashFlow.spendingNetCents).toBe(cleanSummary.cashFlow.spendingNetCents);
+    expect(summary.cashFlow.spendingNetCents).toBe(1234 + 500);
+    expect(cleanSummary.cashFlow.excluded.invalid.count).toBe(0);
   });
 });
