@@ -140,9 +140,13 @@ export function PlaidLinkButton({
     })
   );
 
-  // Nothing is requested here: the token is asked for on a press only. This
-  // effect only drops answers that arrive after the button is gone.
+  // Nothing is requested here: the token is asked for on a press only. The
+  // effect attaches the session and its cleanup detaches it, so answers that
+  // arrive while the button is gone are dropped. Attaching in the body (not
+  // only creating the session once) is what lets the session work again when
+  // React runs the cleanup and then the effect on the same button.
   useEffect(() => {
+    session.attach();
     return () => session.dispose();
   }, [session]);
 

@@ -15,6 +15,8 @@ import { describe, it, expect } from "vitest";
  *   - the Link runner not keyed on the token                  -> "keyed"
  *   - the error sentence shown in place of the button again   -> "stays pressable"
  *   - the re-link button's exit no longer drops the token     -> "re-link exit"
+ *   - the effect body no longer attaches the session, or the
+ *     cleanup no longer detaches it                           -> "attaches in the effect body"
  */
 
 function read(relativePath: string): string {
@@ -91,6 +93,17 @@ describe("PlaidLinkButton wiring", () => {
     const button = buttonSource();
     expect(button).toMatch(/const handleSuccess = [\s\S]*?session\.finished\(\);\s*onSuccess\(/);
     expect(button).toMatch(/const handleExit = useCallback\(\(\) => \{\s*session\.finished\(\);\s*onExit\?\.\(\);/);
+  });
+
+  it("attaches in the effect body and detaches in the cleanup, so a cleanup followed by the effect again leaves it working", () => {
+    const button = buttonSource();
+    const attaching = effects(button).filter((effect) => effect.includes("session.attach()"));
+    expect(attaching).toHaveLength(1);
+    expect(attaching[0]).toMatch(
+      /^useEffect\(\(\) => \{\s*session\.attach\(\);\s*return \(\) => session\.dispose\(\);\s*\}, \[session\]\);$/
+    );
+    // The session is created once per button; only the effect re-attaches it.
+    expect(button.split("session.attach()").length - 1).toBe(1);
   });
 
   it("an error sentence leaves the button on screen, so it stays pressable", () => {

@@ -20,6 +20,10 @@ import {
  *   - the server's sentence replaced, or the fallback dropped  -> "a failed request", "a refusal with no sentence"
  *   - the override path asks the server                        -> "a re-link token"
  *   - an answer after dispose() or after finished() applied    -> "late answers"
+ *   - attach() does not undo dispose()                         -> "re-attached"
+ *   - dispose() leaves an abandoned request requesting         -> "abandoned while detached"
+ *   - an answer from before dispose() applied after attach()   -> "abandoned while detached"
+ *   - a press while detached asks the server                   -> "a press while detached"
  */
 
 function deferred<T>() {
@@ -187,5 +191,60 @@ describe("link session", () => {
     endedCase.pending[0].resolve({ ok: true, token: "link-late" });
     await settle();
     expect(endedCase.session.getState()).toEqual({ phase: "idle", token: null, error: null });
+  });
+});
+
+describe("link session: detach and attach again (effect cleanup, then the effect again)", () => {
+  it("re-attached after cleanup: one request per press, and its answer opens Link", async () => {
+    const { session, requestToken, pending } = setup();
+    session.attach();
+    session.dispose();
+    session.attach();
+
+    session.click();
+    expect(requestToken).toHaveBeenCalledTimes(1);
+    session.click();
+    expect(requestToken).toHaveBeenCalledTimes(1);
+
+    pending[0].resolve({ ok: true, token: "link-1" });
+    await settle();
+    expect(session.getState()).toEqual({ phase: "open", token: "link-1", error: null });
+  });
+
+  it("a press while detached asks for nothing", () => {
+    const { session, requestToken, changes } = setup();
+    session.dispose();
+    session.click();
+    expect(requestToken).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+  });
+
+  it("abandoned while detached: the answer is dropped, and the button is pressable once attached", async () => {
+    const { session, requestToken, pending, changes } = setup();
+    session.click();
+    session.dispose();
+
+    // The answer arrives while detached: nothing changes, nothing is reported.
+    const before = changes.length;
+    pending[0].resolve({ ok: true, token: "link-late" });
+    await settle();
+    expect(changes.length).toBe(before);
+
+    // Attached again: the button is told the session is idle.
+    session.attach();
+    expect(changes[changes.length - 1]).toEqual({ phase: "idle", token: null, error: null });
+    session.click();
+    expect(requestToken).toHaveBeenCalledTimes(2);
+  });
+
+  it("abandoned while detached: an answer that arrives after attach() is dropped too", async () => {
+    const { session, pending } = setup();
+    session.click();
+    session.dispose();
+    session.attach();
+
+    pending[0].resolve({ ok: true, token: "link-late" });
+    await settle();
+    expect(session.getState()).toEqual({ phase: "idle", token: null, error: null });
   });
 });

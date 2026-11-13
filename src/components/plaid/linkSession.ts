@@ -8,6 +8,11 @@
 // succeeds the token is dropped, and the next press asks for a new one. A
 // request that fails leaves the session idle with the error sentence, so the
 // next press asks again.
+//
+// The button's effect attaches the session and its cleanup detaches it. React
+// may run that cleanup and then the effect again on the same button (in
+// development it always does once on mount), so a detached session can be
+// attached again. While detached it changes nothing and reports nothing.
 // =============================================================================
 
 /** What asking the server for a link token produced. */
@@ -44,8 +49,18 @@ export type LinkSession = {
   finished: () => void;
   /** Link could not start with the token: the token is dropped. */
   failed: (message: string) => void;
-  /** The button unmounted: anything that answers later is dropped. */
+  /**
+   * The button's effect was cleaned up: the session is detached. A request in
+   * flight is abandoned (its answer is dropped, whenever it arrives) and the
+   * session returns to idle, so it is pressable once attached again. A press
+   * while detached does nothing.
+   */
   dispose: () => void;
+  /**
+   * The button's effect ran: the session is attached and reports its current
+   * state. A new session starts attached.
+   */
+  attach: () => void;
 };
 
 export const LINK_TOKEN_FALLBACK_MESSAGE = "Failed to create link token";
@@ -59,13 +74,13 @@ export const IDLE_LINK_SESSION: LinkSessionState = {
 
 export function createLinkSession(deps: LinkSessionDeps): LinkSession {
   let state: LinkSessionState = IDLE_LINK_SESSION;
-  let disposed = false;
+  let attached = true;
   // Each request carries the attempt it belongs to, so an answer that arrives
-  // after the session moved on is dropped.
+  // after the session moved on (or was detached) is dropped.
   let attempt = 0;
 
   function set(next: LinkSessionState): void {
-    if (disposed) return;
+    if (!attached) return;
     state = next;
     deps.onChange(state);
   }
@@ -79,7 +94,7 @@ export function createLinkSession(deps: LinkSessionDeps): LinkSession {
     getState: () => state,
 
     click() {
-      if (disposed || state.phase !== "idle") return;
+      if (!attached || state.phase !== "idle") return;
 
       const override = deps.overrideToken();
       if (override) {
@@ -99,7 +114,7 @@ export function createLinkSession(deps: LinkSessionDeps): LinkSession {
       }
       pending.then(
         (result) => {
-          if (disposed || mine !== attempt) return;
+          if (!attached || mine !== attempt) return;
           if (result.ok && result.token) {
             set({ phase: "open", token: result.token, error: null });
           } else {
@@ -109,7 +124,7 @@ export function createLinkSession(deps: LinkSessionDeps): LinkSession {
           }
         },
         () => {
-          if (disposed || mine !== attempt) return;
+          if (!attached || mine !== attempt) return;
           toIdle(LINK_START_FAILED_MESSAGE);
         }
       );
@@ -124,7 +139,19 @@ export function createLinkSession(deps: LinkSessionDeps): LinkSession {
     },
 
     dispose() {
-      disposed = true;
+      attached = false;
+      // Without this, an abandoned request would leave the session requesting
+      // with no answer to come, and the button disabled once attached again.
+      if (state.phase === "requesting") {
+        attempt += 1;
+        state = IDLE_LINK_SESSION;
+      }
+    },
+
+    attach() {
+      attached = true;
+      // The button's copy of the state may be stale after a detach.
+      deps.onChange(state);
     },
   };
 }
