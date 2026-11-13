@@ -2,6 +2,7 @@ import type {
   AssumptionCode,
   CashFlowResult,
   EngineAccount,
+  EngineConnection,
   EngineInput,
   EngineTransaction,
 } from "./types";
@@ -60,6 +61,29 @@ export function indexAccounts(
   const unique = uniqueAccounts(accounts).accounts;
   for (let i = 0; i < unique.length; i++) byId.set(unique[i].accountId, unique[i]);
   return byId;
+}
+
+function filteredCount(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+/**
+ * How many transactions the caller left out before the engine saw them, over
+ * every connection: each connection's `invalidTransactions.duplicate` plus
+ * `invalidTransactions.invalid`. A missing entry, a missing field, or a
+ * count that is not a non-negative safe integer adds nothing.
+ */
+export function callerFilteredCount(
+  connections: ReadonlyArray<EngineConnection | null | undefined>
+): number {
+  let total = 0;
+  for (let i = 0; i < connections.length; i++) {
+    const c = connections[i];
+    const counts = c ? c.invalidTransactions : undefined;
+    if (!counts || typeof counts !== "object") continue;
+    total += filteredCount(counts.duplicate) + filteredCount(counts.invalid);
+  }
+  return total;
 }
 
 /**
@@ -188,6 +212,10 @@ export function cashFlowDetail(input: EngineInput): {
         break;
     }
   }
+
+  // Transactions the caller already left out count as invalid too, so the
+  // bucket means the same whichever side found the problem.
+  ex.invalid.count += callerFilteredCount(input.connections);
 
   result.spendingNetCents = result.spendingGrossCents - result.refundsCents;
   result.netCents = result.incomeCents - result.spendingNetCents;

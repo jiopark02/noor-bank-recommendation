@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeCashFlow } from "../financeEngine/cashFlow";
+import { computeFinancialSummary } from "../financeEngine";
 import type {
   EngineAccount,
   EngineInput,
@@ -13,6 +14,10 @@ import type {
  *   - pending check removed from classifyTransaction -> "the §6 scenario" (gross 160500)
  *   - refund counted as income                       -> "the §6 scenario"
  *   - ownership assumption code no longer emitted    -> "exposes the ownership assumption"
+ *   - a connection's duplicate or invalid count not added,
+ *     or only the first connection's added            -> "transactions the caller left out"
+ *   - a missing or malformed count added as is         -> "transactions the caller left out"
+ *   - safe-to-spend or coverage reading the counts     -> "leaves every total ... as they were"
  */
 
 const FETCHED = "2026-10-10T11:59:00Z";
@@ -178,5 +183,65 @@ describe("computeCashFlow", () => {
     const r = computeCashFlow(input);
     expect(r.period.days).toBe(0);
     expect(r.excluded.outsidePeriod.count).toBe(9);
+  });
+});
+
+describe("transactions the caller left out", () => {
+  function withCounts(
+    counts: Array<{ duplicate: unknown; invalid: unknown } | undefined>
+  ): EngineInput {
+    const input = scenario();
+    const base = input.connections[0];
+    input.connections = counts.map((c, i) => {
+      const conn = { ...base, connectionKey: "c" + i };
+      if (c !== undefined) {
+        (conn as { invalidTransactions?: unknown }).invalidTransactions = c;
+      }
+      return conn;
+    });
+    return input;
+  }
+
+  it("adds every connection's duplicate and invalid counts to the invalid bucket", () => {
+    const input = withCounts([
+      { duplicate: 1, invalid: 2 },
+      { duplicate: 0, invalid: 3 },
+    ]);
+    input.transactions.push(
+      txn("frac", { amountCents: 9.5 }),
+      txn("baddate", { amountCents: 999, date: "2026-10-32" })
+    );
+    expect(computeCashFlow(input).excluded.invalid.count).toBe(8);
+  });
+
+  it("a connection without counts adds nothing", () => {
+    const r = computeCashFlow(withCounts([undefined, undefined]));
+    expect(r.excluded.invalid.count).toBe(0);
+  });
+
+  it("a count that is not a non-negative safe integer adds nothing", () => {
+    const input = withCounts([
+      { duplicate: -1, invalid: Number.NaN },
+      { duplicate: "2", invalid: 1.5 },
+      { duplicate: Number.POSITIVE_INFINITY, invalid: null },
+    ]);
+    expect(computeCashFlow(input).excluded.invalid.count).toBe(0);
+  });
+
+  it("leaves every total, safe-to-spend and coverage as they were", () => {
+    const without = computeFinancialSummary(withCounts([undefined]));
+    const withThem = computeFinancialSummary(withCounts([{ duplicate: 2, invalid: 5 }]));
+    expect(withThem.cashFlow.excluded.invalid.count).toBe(
+      without.cashFlow.excluded.invalid.count + 7
+    );
+    expect(withThem.safeToSpend).toEqual(without.safeToSpend);
+    expect(withThem.coverage).toEqual(without.coverage);
+    expect(withThem.recurring).toEqual(without.recurring);
+    expect(withThem.creditUtilization).toEqual(without.creditUtilization);
+    expect(withThem.dataIssues).toEqual(without.dataIssues);
+    const { excluded: exA, ...restA } = withThem.cashFlow;
+    const { excluded: exB, ...restB } = without.cashFlow;
+    expect(restA).toEqual(restB);
+    expect({ ...exA, invalid: null }).toEqual({ ...exB, invalid: null });
   });
 });

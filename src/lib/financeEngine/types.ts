@@ -137,6 +137,14 @@ export interface EngineConnection {
    * of how much history the institution has sent; null when none arrived.
    */
   earliestTransactionDate: IsoDate | null;
+  /**
+   * Transactions the caller received on this connection but left out of
+   * `transactions`: `duplicate` repeats a transaction already kept for the
+   * same account, `invalid` could not be used at all. Optional; a missing or
+   * malformed count is read as 0. The cash flow adds both to its `invalid`
+   * exclusion count.
+   */
+  invalidTransactions?: { duplicate: number; invalid: number };
 }
 
 /**
