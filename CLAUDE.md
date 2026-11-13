@@ -124,7 +124,7 @@ Migration `20261108120000_create_households_and_goals.sql`: `households`, `house
 
 ### Other API surfaces
 - `src/app/api/admin/cron-runs` is operator tooling behind `requireAdmin()`. The catalog and bank-recommendation routes are removed; migration `20261104130000_drop_unused_legacy_tables.sql` drops their tables.
-- **Account export** (`src/lib/accountExport.ts`) reads every section in keyset pages of `EXPORT_PAGE_SIZE`; that must not exceed the project's PostgREST Max rows, or sections truncate silently. It reads columns and tables added by the households, users-integrity and cron-retry migrations, so each must be applied before this code is deployed against a database, or every export answers 500.
+- **Account export** (`src/lib/accountExport.ts`) reads every section in keyset pages of `EXPORT_PAGE_SIZE`; that must not exceed the project's PostgREST Max rows, or sections truncate silently. It reads columns and tables added by the households, users-integrity and cron-retry migrations, and the table that migration `20261113120000_plaid_link_token_issues.sql` creates, so each must be applied before this code is deployed against a database, or every export answers 500 (whether each is applied is live state).
 
 ### Demo surface (`src/app/demo/`)
 Its own code touches no Supabase or database; state is `sessionStorage` only. `ClientLayout`'s auth listener still runs there. Keep real auth out of the demo. `docs/demo-mode.md` (`signInAnonymously()`) is stale.
