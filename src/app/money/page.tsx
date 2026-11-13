@@ -344,6 +344,12 @@ export default function MoneyPage() {
     await fetchData();
   }, [handleBankConnected, fetchData]);
 
+  // A re-link token serves one Link session. Closing Link drops it, so the
+  // re-link button comes back and the next press asks for a new token.
+  const handleRelinkExit = useCallback(() => {
+    setRelinkToken(null);
+  }, []);
+
   // Remove a single connection. The route now revokes the Plaid Item first and
   // deletes the row only if that succeeded, so a failure means the bank is still
   // connected — the list will still show it after the refetch, and the notice
@@ -592,6 +598,7 @@ export default function MoneyPage() {
                       userId={userId}
                       linkTokenOverride={relinkToken}
                       onSuccess={handleRelinkSuccess}
+                      onExit={handleRelinkExit}
                       className="rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white"
                     >
                       Complete bank re-link
@@ -774,10 +781,10 @@ export default function MoneyPage() {
 
                 {userId && (
                   <div className="mt-4">
-                    {/* Keyed on the count so the button remounts and asks for
-                        a fresh link token when a bank is added or removed:
-                        otherwise a limit refusal fetched at the limit stays on
-                        screen after a removal frees a slot. */}
+                    {/* Keyed on the count so the button remounts when a bank
+                        is added or removed, which clears an error sentence
+                        left from an earlier attempt (a limit refusal, say).
+                        The button asks for a link token only when pressed. */}
                     <PlaidLinkButton
                       key={plaidConnections.connections.length}
                       userId={userId}

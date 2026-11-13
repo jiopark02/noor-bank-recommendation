@@ -1,22 +1,117 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
+import {
+  BANK_SCREEN_FETCH_TIMEOUT_MS,
+  withFetchTimeout,
+} from "@/lib/screenFetchTimeout";
 import {
   usePlaidLink,
   PlaidLinkOptions,
   PlaidLinkOnSuccess,
 } from "react-plaid-link";
 import { motion } from "framer-motion";
+import {
+  createLinkSession,
+  IDLE_LINK_SESSION,
+  LINK_START_FAILED_MESSAGE,
+  LINK_TOKEN_FALLBACK_MESSAGE,
+  LinkSessionState,
+  LinkTokenResult,
+} from "./linkSession";
+
+type LinkInstitutionMetadata = {
+  institution: { name: string; institution_id: string };
+};
+
+/**
+ * Asks the server for a link token for a new connection. Never throws: every
+ * failure, a time-out included, comes back as a sentence to show.
+ */
+async function requestNewLinkToken(): Promise<LinkTokenResult> {
+  try {
+    const plaidHeaders = buildJsonAuthorizedHeaders(
+      await getSupabaseBearerHeaders()
+    );
+    // The request and its body read run under the bank screens' limit, so a
+    // request that never answers ends as a failed attempt, not a button that
+    // stays busy.
+    const data = await withFetchTimeout(
+      BANK_SCREEN_FETCH_TIMEOUT_MS,
+      async (signal) => {
+        const response = await fetch("/api/plaid/create-link-token", {
+          method: "POST",
+          headers: plaidHeaders,
+          body: JSON.stringify({}),
+          signal,
+        });
+        return asPlainObject(await response.json());
+      }
+    );
+
+    if (data.success === true) {
+      const token = readString(data, "linkToken");
+      if (token) return { ok: true, token };
+    }
+    return {
+      ok: false,
+      message: readErrorMessage(data) || LINK_TOKEN_FALLBACK_MESSAGE,
+    };
+  } catch (err) {
+    console.error("Error fetching link token:", err);
+    return { ok: false, message: LINK_START_FAILED_MESSAGE };
+  }
+}
+
+interface LinkSessionRunnerProps {
+  token: string;
+  onSuccess: PlaidLinkOnSuccess;
+  onExit: () => void;
+  onStartFailed: () => void;
+}
+
+/**
+ * Opens Link once with one token. The button mounts a new one per token (it is
+ * keyed on the token): usePlaidLink keeps its previous handler in state after
+ * that handler is destroyed, so reusing one instance across tokens can report
+ * `ready` with an `open` that does nothing.
+ */
+function LinkSessionRunner({
+  token,
+  onSuccess,
+  onExit,
+  onStartFailed,
+}: LinkSessionRunnerProps) {
+  const opened = useRef(false);
+  const config: PlaidLinkOptions = {
+    token,
+    onSuccess,
+    onExit: () => {
+      onExit();
+    },
+  };
+  const { open, ready, error } = usePlaidLink(config);
+
+  useEffect(() => {
+    if (error) {
+      onStartFailed();
+      return;
+    }
+    if (ready && !opened.current) {
+      opened.current = true;
+      open();
+    }
+  }, [ready, error, open, onStartFailed]);
+
+  return null;
+}
 
 interface PlaidLinkButtonProps {
   userId: string;
-  onSuccess: (
-    publicToken: string,
-    metadata: { institution: { name: string; institution_id: string } }
-  ) => void;
+  onSuccess: (publicToken: string, metadata: LinkInstitutionMetadata) => void;
   onExit?: () => void;
   className?: string;
   children?: React.ReactNode;
@@ -31,59 +126,29 @@ export function PlaidLinkButton({
   children,
   linkTokenOverride,
 }: PlaidLinkButtonProps) {
-  const [linkToken, setLinkToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [sessionState, setSessionState] =
+    useState<LinkSessionState>(IDLE_LINK_SESSION);
+  // Read at press time, so a re-link token handed in after mount is the one used.
+  const overrideRef = useRef<string | null>(linkTokenOverride ?? null);
+  overrideRef.current = linkTokenOverride ?? null;
 
-  // Fetch link token on mount
+  const [session] = useState(() =>
+    createLinkSession({
+      requestToken: requestNewLinkToken,
+      overrideToken: () => overrideRef.current,
+      onChange: setSessionState,
+    })
+  );
+
+  // Nothing is requested here: the token is asked for on a press only. This
+  // effect only drops answers that arrive after the button is gone.
   useEffect(() => {
-    if (linkTokenOverride) {
-      setLinkToken(linkTokenOverride);
-      setError(null);
-      return;
-    }
-
-    const fetchLinkToken = async () => {
-      try {
-        setIsLoading(true);
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
-        );
-        const response = await fetch("/api/plaid/create-link-token", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({}),
-        });
-
-        const data = asPlainObject(await response.json());
-
-        if (data.success === true) {
-          const token = readString(data, "linkToken");
-          if (token) {
-            setLinkToken(token);
-          } else {
-            setError(
-              readErrorMessage(data) || "Failed to create link token"
-            );
-          }
-        } else {
-          setError(readErrorMessage(data) || "Failed to create link token");
-        }
-      } catch (err) {
-        setError("Failed to initialize Plaid");
-        console.error("Error fetching link token:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (userId) {
-      fetchLinkToken();
-    }
-  }, [userId, linkTokenOverride]);
+    return () => session.dispose();
+  }, [session]);
 
   const handleSuccess = useCallback<PlaidLinkOnSuccess>(
     (publicToken, metadata) => {
+      session.finished();
       onSuccess(publicToken, {
         institution: {
           name: metadata.institution?.name || "Unknown Bank",
@@ -91,61 +156,75 @@ export function PlaidLinkButton({
         },
       });
     },
-    [onSuccess]
+    [session, onSuccess]
   );
 
-  const config: PlaidLinkOptions = {
-    token: linkToken,
-    onSuccess: handleSuccess,
-    onExit: () => {
-      onExit?.();
-    },
-  };
+  const handleExit = useCallback(() => {
+    session.finished();
+    onExit?.();
+  }, [session, onExit]);
 
-  const { open, ready } = usePlaidLink(config);
+  const handleStartFailed = useCallback(() => {
+    session.failed(LINK_START_FAILED_MESSAGE);
+  }, [session]);
 
-  if (error) {
-    return (
-      <div className="text-center p-4">
-        <p className="text-red-500 text-sm">{error}</p>
-      </div>
-    );
-  }
+  const { phase, token, error } = sessionState;
+  const isLoading = phase === "requesting";
 
   return (
-    <motion.button
-      onClick={() => open()}
-      disabled={!ready || isLoading}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-      className={
-        className ||
-        "w-full py-4 bg-black text-white font-medium rounded-xl disabled:opacity-50 transition-all"
-      }
-    >
-      {isLoading ? (
-        <span className="flex items-center justify-center gap-2">
-          <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="opacity-25"
-            />
-            <path
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              fill="currentColor"
-              className="opacity-75"
-            />
-          </svg>
-          Loading...
-        </span>
-      ) : (
-        children || "Connect Bank Account"
+    <>
+      <motion.button
+        onClick={() => session.click()}
+        disabled={!userId || phase !== "idle"}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        className={
+          className ||
+          "w-full py-4 bg-black text-white font-medium rounded-xl disabled:opacity-50 transition-all"
+        }
+      >
+          {isLoading ? (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="opacity-25"
+              />
+              <path
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                fill="currentColor"
+                className="opacity-75"
+              />
+            </svg>
+            Loading...
+          </span>
+        ) : (
+          children || "Connect Bank Account"
+        )}
+      </motion.button>
+
+      {/* The button stays, so a failed attempt can be retried by pressing
+          it again. */}
+      {error && (
+        <p className="text-red-500 text-sm text-center mt-2" role="alert">
+          {error}
+        </p>
       )}
-    </motion.button>
+
+      {phase === "open" && token && (
+        <LinkSessionRunner
+          key={token}
+          token={token}
+          onSuccess={handleSuccess}
+          onExit={handleExit}
+          onStartFailed={handleStartFailed}
+        />
+      )}
+    </>
   );
 }
 
