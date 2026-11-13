@@ -159,6 +159,7 @@ Purposes only. **Values, and whether a variable is set, are live state.**
 | `AI_SUPABASE_READ_ENABLED` | `"true"` loads the profile; **also gates memory and conversation history** |
 | `AI_PLAID_STATE` | `off` / `connection` / `balances` |
 | `CHAT_USAGE_LIMIT_MODE` | Exactly `off` or `observe` opts out; anything else enforces |
+| `PLAID_LINK_TOKEN_LIMIT_MODE` | Per-user issue limit on new-connection link tokens (`plaidLinkTokenLimit.ts`). Exactly `off` skips it; anything else (unset included) enforces and fails closed with 503, so migration `20261113120000_plaid_link_token_issues.sql` must be applied before that code is deployed against a database (whether it is applied is live state) |
 | `SIGNUP_DISABLED` | Exactly `"true"` blocks email signups; reverse polarity, fail-open |
 | `PLAID_CLIENT_ID` / `PLAID_SECRET` / `PLAID_ENV` | Plaid credentials + environment |
 | `PLAID_TOKEN_ENCRYPTION_KEY` | AES-256-GCM key for access tokens; same value wherever the same table is written; keep a copy outside Vercel |
