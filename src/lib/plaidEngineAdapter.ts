@@ -30,6 +30,10 @@
 //   - The keys handed to the engine (connection key, duplicate key) are
 //     opaque: the duplicate key is a hash, so no name or mask reaches the
 //     engine input. Neither key is part of any response.
+//   - A transaction that cannot be used (isUsableTransaction) or repeats one
+//     already kept is left out of the engine input and the screens' list
+//     alike, and counted on its connection (invalidTransactions). One such
+//     element never fails its connection.
 // =============================================================================
 
 import { createHash } from "crypto";
@@ -58,6 +62,7 @@ import {
   dayNumber,
   fromDayNumber,
   isCardPaymentCategory,
+  isCents,
   isIsoDate,
   toCents,
 } from "@/lib/financeEngine";
@@ -376,6 +381,31 @@ export interface ReadTransaction extends DisplayTransaction {
   merchantEntityId: string | null;
 }
 
+/**
+ * Whether one element of a /transactions/get page can be used at all. It
+ * cannot when it is not an object, or when any of these fails, checked in
+ * this order:
+ *   - transaction_id is a non-empty string;
+ *   - account_id is a non-empty string;
+ *   - amount is a number (null and numeric strings are not), and its value in
+ *     cents is a safe integer (NaN and Infinity are not);
+ *   - date is a calendar date (isIsoDate, the engine's own rule);
+ *   - pending is a boolean.
+ * The SDK's types promise all of these, so every well-formed answer passes.
+ */
+export function isUsableTransaction(raw: unknown): raw is Transaction {
+  if (typeof raw !== "object" || raw === null) return false;
+  const t = raw as Record<string, unknown>;
+  if (typeof t.transaction_id !== "string" || t.transaction_id === "") return false;
+  if (typeof t.account_id !== "string" || t.account_id === "") return false;
+  if (typeof t.amount !== "number") return false;
+  if (!isCents(toCents(t.amount))) return false;
+  if (typeof t.date !== "string" || !isIsoDate(t.date)) return false;
+  if (typeof t.pending !== "boolean") return false;
+  return true;
+}
+
+/** Maps a transaction that passed isUsableTransaction. */
 export function mapTransaction(txn: Transaction): ReadTransaction {
   const pfc = txn.personal_finance_category ?? null;
   return {
@@ -536,6 +566,8 @@ interface ConnectionRead {
   engine: EngineConnection;
   accounts: ReadAccount[];
   transactions: ReadTransaction[];
+  /** Elements isUsableTransaction refused; 0 when the connection was not read. */
+  invalidTransactions: number;
   streams: EngineRecurringStream[];
   incomeStreams: EngineRecurringStream[];
 }
@@ -639,6 +671,7 @@ async function readConnection(
   const options: CallOptions = { timeout: PLAID_CALL_TIMEOUT_MS };
   const accounts: ReadAccount[] = [];
   const transactions: ReadTransaction[] = [];
+  let invalidTransactions = 0;
   let pages = 0;
   let truncated = false;
   let pfcV2 = 0;
@@ -685,11 +718,19 @@ async function readConnection(
         pages += 1;
         const page = response.data.transactions;
         for (let i = 0; i < page.length; i++) {
-          const version = page[i].personal_finance_category?.version;
+          // Checked before any field is read, so an element that is not a
+          // transaction is counted rather than failing the connection.
+          const raw: unknown = page[i];
+          if (!isUsableTransaction(raw)) {
+            invalidTransactions += 1;
+            continue;
+          }
+          const version = raw.personal_finance_category?.version;
           if (version === PersonalFinanceCategoryVersion.V2) pfcV2 += 1;
           else pfcOtherVersion += 1;
-          transactions.push(mapTransaction(page[i]));
+          transactions.push(mapTransaction(raw));
         }
+        // Every element Plaid sent, kept or not: the offset follows its count.
         offset += page.length;
         if (offset >= response.data.total_transactions) break;
         // More are reported but none arrived: stop rather than ask again.
@@ -722,6 +763,7 @@ async function readConnection(
       },
       accounts: [],
       transactions: [],
+      invalidTransactions: 0,
       streams: [],
       incomeStreams: [],
     };
@@ -804,6 +846,9 @@ async function readConnection(
       : streams.length === 0
         ? "empty"
         : "ok";
+  // After the usability check, before the duplicate check in readBankData,
+  // which sets the engine's earliest date again from what it keeps. The log's
+  // history_days uses this one.
   const earliest = earliestDate(transactions);
   const item = await itemStatus;
   const recurringLabel = !want.recurring ? "skipped" : streams === null ? "failed" : "ok";
@@ -830,6 +875,7 @@ async function readConnection(
     },
     accounts,
     transactions,
+    invalidTransactions,
     streams: streams === null ? [] : streams,
     incomeStreams,
   };
@@ -868,6 +914,7 @@ function decryptFailedRead(
     },
     accounts: [],
     transactions: [],
+    invalidTransactions: 0,
     streams: [],
     incomeStreams: [],
   };
@@ -948,18 +995,49 @@ export async function readBankData(
   const streams: EngineRecurringStream[] = [];
   const incomeStreams: EngineRecurringStream[] = [];
   const seenAccounts = new Set<string>();
+  // transaction id -> the account of the copy kept. A Map, so an id such as
+  // "constructor" is not read as already seen.
+  const keptTransactions = new Map<string, string>();
 
+  // In connection order, so which copy is kept never depends on which bank
+  // answered first.
   for (let i = 0; i < reads.length; i++) {
     const r = reads[i];
     connections.push(r.status);
-    engineConnections.push(r.engine);
     for (let j = 0; j < r.accounts.length; j++) {
       // Distinct Items normally yield distinct account ids; never emit one twice.
       if (seenAccounts.has(r.accounts[j].accountId)) continue;
       seenAccounts.add(r.accounts[j].accountId);
       accounts.push(r.accounts[j]);
     }
-    for (let j = 0; j < r.transactions.length; j++) transactions.push(r.transactions[j]);
+    // The first copy of a transaction id is kept. A later copy on the same
+    // account is a duplicate; one on another account is invalid, since an id
+    // names a single transaction.
+    let duplicate = 0;
+    let invalid = r.invalidTransactions;
+    const kept: ReadTransaction[] = [];
+    for (let j = 0; j < r.transactions.length; j++) {
+      const t = r.transactions[j];
+      const keptAccount = keptTransactions.get(t.transactionId);
+      if (keptAccount === undefined) {
+        keptTransactions.set(t.transactionId, t.accountId);
+        kept.push(t);
+        transactions.push(t);
+      } else if (keptAccount === t.accountId) {
+        duplicate += 1;
+      } else {
+        invalid += 1;
+      }
+    }
+    engineConnections.push({
+      ...r.engine,
+      earliestTransactionDate: earliestDate(kept),
+      invalidTransactions: { duplicate, invalid },
+    });
+    if (duplicate > 0 || invalid > 0) {
+      // Counts only: no id, amount or account.
+      console.log(`[bank-filter] idx=${i} invalid=${invalid} duplicate=${duplicate}`);
+    }
     for (let j = 0; j < r.streams.length; j++) streams.push(r.streams[j]);
     for (let j = 0; j < r.incomeStreams.length; j++) incomeStreams.push(r.incomeStreams[j]);
   }
@@ -1006,8 +1084,11 @@ export function toDisplayTransaction(t: ReadTransaction): DisplayTransaction {
 
 /**
  * The read's transactions dated inside `window` (inclusive), as the screens
- * receive them, in the order they were read. A transaction whose date is not
- * a calendar date is left out.
+ * receive them, in the order they were read. `read.transactions` already
+ * holds only the transactions the engine is given (usable, one copy per
+ * transaction id), so the list and the figures leave out the same ones and
+ * no two rows share an account and transaction id. The date check below is
+ * kept as a guard.
  */
 export function displayTransactions(read: BankRead, window: BankWindow): DisplayTransaction[] {
   const out: DisplayTransaction[] = [];

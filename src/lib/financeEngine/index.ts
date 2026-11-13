@@ -169,10 +169,13 @@ function checkCallerInput(input: EngineInput): void {
 
 /**
  * Computes every v1 metric from one input. Throws only on a caller bug (see
- * checkCallerInput) or an invalid policy; bad data is skipped and reported in
- * `dataIssues` and in each metric's exclusion counts. Copies of one bank
- * account reached through two connections are left out first, so every
- * metric sees each account once.
+ * checkCallerInput) or an invalid policy; bad data in the input is skipped and
+ * reported in `dataIssues` and in each metric's exclusion counts.
+ * Transactions the caller left out before the call, passed only as each
+ * connection's `invalidTransactions` counts, are not listed in `dataIssues`;
+ * they are added only to the cash flow's `invalid` exclusion count. Copies of
+ * one bank account reached through two connections are left out first, so
+ * every metric sees each account once.
  */
 export function computeFinancialSummary(
   rawInput: EngineInput,
