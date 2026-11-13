@@ -16,14 +16,28 @@ import { PLAID_TRANSACTIONS_DAYS_REQUESTED } from "../plaid";
  *   - the transactions field sent only when no webhook is set   -> "with a webhook set"
  *   - the history-days constant changed                         -> "is 730"
  *   - any history-days value read from the request body         -> "cannot be set by the body"
+ *   - the issue claim moved after linkTokenCreate, or removed   -> "claims before Plaid"
+ *   - a failed claim lets the request through (fail-open)       -> "a claim that cannot be made"
+ *   - a held claim lets the request through                     -> "over the limit"
+ *   - the claim moved before the connection-limit check         -> "at the connection limit"
+ *   - the claim keyed on anything but the verified user         -> "claims before Plaid"
+ *   - the off switch ignored, or matched loosely                -> "the switch"
+ *   - the failed-claim line without its cause, with the wrong
+ *     cause, or with the error's message, details or hint       -> "the failed-claim log line"
  *
  * Whether Plaid accepts the value is a live check; the client is faked here.
+ * The database function is faked too; its decision is checked with SQL.
  */
 
 const state = {
   userId: "user-1" as string | null,
   count: 0 as number | null,
   linkTokenCalls: [] as Array<Record<string, any>>,
+  // What the fake plaid_link_token_claim answers, or a throw.
+  claim: { data: true, error: null } as { data: unknown; error: unknown } | "throw",
+  adminThrows: false,
+  claimCalls: [] as Array<{ fn: string; args: Record<string, unknown> }>,
+  order: [] as string[],
 };
 
 vi.mock("@/lib/apiAuth", () => ({
@@ -34,8 +48,22 @@ vi.mock("@/lib/supabase", () => ({
   createServerClient: () => {
     throw new Error("server client must not be used in this test");
   },
+  // Only the issue claim's rpc is answered; anything else fails the test.
   createAdminClient: () => {
-    throw new Error("admin client must not be used in this test");
+    if (state.adminThrows) {
+      throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
+    }
+    return {
+      async rpc(fn: string, args: Record<string, unknown>) {
+        if (fn !== "plaid_link_token_claim") {
+          throw new Error(`unexpected rpc ${fn}`);
+        }
+        state.order.push("claim");
+        state.claimCalls.push({ fn, args });
+        if (state.claim === "throw") throw new Error("network");
+        return state.claim;
+      },
+    };
   },
   isSupabaseConfigured: () => false,
   isSupabaseAdminConfigured: () => false,
@@ -43,7 +71,10 @@ vi.mock("@/lib/supabase", () => ({
 
 vi.mock("@/lib/plaidApiUtils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../plaidApiUtils")>()),
-  countPlaidConnections: async () => state.count,
+  countPlaidConnections: async () => {
+    state.order.push("count");
+    return state.count;
+  },
 }));
 
 vi.mock("@/lib/plaid", async (importOriginal) => ({
@@ -51,6 +82,7 @@ vi.mock("@/lib/plaid", async (importOriginal) => ({
   isPlaidConfigured: () => true,
   plaidClient: {
     async linkTokenCreate(request: Record<string, any>) {
+      state.order.push("plaid");
       state.linkTokenCalls.push(request);
       return {
         data: { link_token: "link-sandbox-test", expiration: "2026-11-12T01:00:00Z" },
@@ -77,7 +109,12 @@ beforeEach(() => {
   state.userId = "user-1";
   state.count = 0;
   state.linkTokenCalls = [];
+  state.claim = { data: true, error: null };
+  state.adminThrows = false;
+  state.claimCalls = [];
+  state.order = [];
   delete process.env.PLAID_WEBHOOK_URL;
+  delete process.env.PLAID_LINK_TOKEN_LIMIT_MODE;
 });
 
 describe("create-link-token request", () => {
@@ -142,5 +179,162 @@ describe("create-link-token request", () => {
     expect(status).toBe(200);
     expect(state.linkTokenCalls).toHaveLength(1);
     expect(state.linkTokenCalls[0].transactions).toEqual({ days_requested: 730 });
+  });
+});
+
+describe("create-link-token issue limit", () => {
+  it("claims before Plaid, after the connection count, for the verified user", async () => {
+    const { status } = await post({ userId: "someone-else" });
+    expect(status).toBe(200);
+    expect(state.order).toEqual(["count", "claim", "plaid"]);
+    expect(state.claimCalls).toEqual([
+      {
+        fn: "plaid_link_token_claim",
+        args: { p_user_id: "user-1", p_max_count: 10, p_window_seconds: 86_400 },
+      },
+    ]);
+  });
+
+  it("over the limit: 429 with its code, and Plaid is never asked", async () => {
+    state.claim = { data: false, error: null };
+    const { status, json } = await post();
+    expect(status).toBe(429);
+    expect(json.code).toBe("LINK_TOKEN_LIMIT_REACHED");
+    expect(typeof json.error).toBe("string");
+    expect(state.linkTokenCalls).toHaveLength(0);
+  });
+
+  it("a claim that cannot be made: 503, and Plaid is never asked", async () => {
+    const failures: Array<() => void> = [
+      () => {
+        state.claim = { data: null, error: { code: "42883", message: "function does not exist" } };
+      },
+      () => {
+        state.claim = "throw";
+      },
+      () => {
+        state.claim = { data: null, error: null };
+      },
+      () => {
+        state.adminThrows = true;
+      },
+    ];
+    for (const arrange of failures) {
+      state.claim = { data: true, error: null };
+      state.adminThrows = false;
+      state.linkTokenCalls = [];
+      arrange();
+      const { status, json } = await post();
+      expect(status).toBe(503);
+      expect(json.code).toBe("LINK_TOKEN_CHECK_UNAVAILABLE");
+      expect(state.linkTokenCalls).toHaveLength(0);
+    }
+  });
+
+  it("the failed-claim log line carries the cause, and never the error's text", async () => {
+    const cases: Array<[() => void, string]> = [
+      [
+        () => {
+          state.claim = {
+            data: null,
+            error: {
+              code: "42883",
+              message: "secret-message user@example.com",
+              details: "secret-details",
+              hint: "secret-hint",
+            },
+          };
+        },
+        "42883",
+      ],
+      [
+        () => {
+          state.claim = { data: null, error: { code: "", message: "secret-message fetch failed" } };
+        },
+        "rpc_error",
+      ],
+      [
+        () => {
+          state.claim = "throw";
+        },
+        "throw",
+      ],
+      [
+        () => {
+          state.adminThrows = true;
+        },
+        "throw",
+      ],
+      [
+        () => {
+          state.claim = { data: "secret-answer", error: null };
+        },
+        "bad_answer",
+      ],
+    ];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      for (const [arrange, cause] of cases) {
+        state.claim = { data: true, error: null };
+        state.adminThrows = false;
+        for (const spy of [errorSpy, infoSpy, warnSpy, logSpy]) spy.mockClear();
+        arrange();
+        const { status } = await post();
+        expect(status).toBe(503);
+
+        const lines = errorSpy.mock.calls.filter((args) =>
+          String(args[0]).includes("refused=issue_check_failed")
+        );
+        expect(lines, cause).toHaveLength(1);
+        expect(lines[0], cause).toEqual([
+          `[plaid-link-token] user_id=user-1 refused=issue_check_failed cause=${cause}`,
+        ]);
+
+        const everything = [errorSpy, infoSpy, warnSpy, logSpy]
+          .flatMap((spy) => spy.mock.calls)
+          .map((args) => args.map((a) => (a instanceof Error ? a.message : String(a))).join(" "))
+          .join("\n");
+        expect(everything, cause).not.toMatch(/secret|example\.com|SUPABASE_SERVICE_ROLE_KEY|network/);
+      }
+    } finally {
+      errorSpy.mockRestore();
+      infoSpy.mockRestore();
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  it("at the connection limit: 422, and no issue is claimed", async () => {
+    state.count = 5;
+    const { status } = await post();
+    expect(status).toBe(422);
+    expect(state.claimCalls).toHaveLength(0);
+    expect(state.linkTokenCalls).toHaveLength(0);
+  });
+
+  it("unauthenticated: no issue is claimed", async () => {
+    state.userId = null;
+    const { status } = await post();
+    expect(status).toBe(401);
+    expect(state.claimCalls).toHaveLength(0);
+  });
+
+  it("the switch: exactly off skips the claim; anything else enforces", async () => {
+    process.env.PLAID_LINK_TOKEN_LIMIT_MODE = "off";
+    state.claim = { data: false, error: null };
+    const off = await post();
+    expect(off.status).toBe(200);
+    expect(state.claimCalls).toHaveLength(0);
+    expect(state.linkTokenCalls).toHaveLength(1);
+
+    process.env.PLAID_LINK_TOKEN_LIMIT_MODE = "OFF";
+    state.linkTokenCalls = [];
+    const loose = await post();
+    expect(loose.status).toBe(429);
+    expect(state.claimCalls).toHaveLength(1);
+    expect(state.linkTokenCalls).toHaveLength(0);
   });
 });

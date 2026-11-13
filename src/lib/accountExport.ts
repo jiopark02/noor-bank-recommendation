@@ -100,6 +100,15 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     orderColumn: "user_id",
     orderKeyType: "uuid",
   },
+  // One row per user, keyed by user_id, which the output leaves out.
+  {
+    key: "plaid_link_token_issues",
+    table: "plaid_link_token_issues",
+    columns: "window_start, window_count",
+    filterColumn: "user_id",
+    orderColumn: "user_id",
+    orderKeyType: "uuid",
+  },
   // The user's memberships, read by user_id. households itself is not
   // exported: it holds no user data, only its id (household_id here) and a
   // creation time.

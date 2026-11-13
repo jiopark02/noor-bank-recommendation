@@ -2,16 +2,17 @@
 // How long the bank screens wait for the server. Client-safe: no server
 // module is imported here.
 //
-// The dashboard and the money screen wait on two routes: the finance summary
-// and the bank connection list. A request that never answers used to leave
+// The dashboard and the money screen wait on the finance summary and the bank
+// connection list, and the bank-link buttons wait on a link token (a new
+// connection's or a re-link's). A request that never answers used to leave
 // the screen on its loading state for good. Each of those requests now runs
 // under one limit, after which it is aborted and the screen shows the error
-// state it already has for a failed load.
+// state it already has for a failed request.
 // =============================================================================
 
 /**
- * The limit for the bank screens' requests to the finance summary and the
- * connection list, in milliseconds.
+ * The limit for the bank screens' requests to the finance summary, the
+ * connection list and the two link-token routes, in milliseconds.
  *
  * It must be longer than the sum of the summary route's per-call waits for
  * Plaid's response headers. One connection makes its Plaid calls one after
@@ -26,7 +27,9 @@
  * or the per-call limit without raising this turns it red.
  *
  * The connection list makes no Plaid call and has no wait bounded in code, so
- * it uses the same limit rather than a figure of its own.
+ * it uses the same limit rather than a figure of its own. Each link-token route
+ * makes one Plaid call, under the Plaid client's default limit, after its own
+ * authentication and database reads; it uses the same limit too.
  */
 export const BANK_SCREEN_FETCH_TIMEOUT_MS = 150_000;
 

@@ -6,12 +6,12 @@ import { BANK_SCREEN_FETCH_TIMEOUT_MS, withFetchTimeout } from "../screenFetchTi
 import { MAX_TRANSACTION_PAGES, PLAID_CALL_TIMEOUT_MS } from "../plaidEngineAdapter";
 
 /**
- * How long the bank screens wait for the finance summary and the connection
- * list.
+ * How long the bank screens wait for the finance summary, the connection list
+ * and a link token (a new connection's or a re-link's).
  *
  * The helper is executed with fake timers. The pages are client pages with no
  * DOM environment here, so their wiring is checked by source probe, as in
- * moneyPageSummaryWiring.test.ts: each request to either route runs inside
+ * moneyPageSummaryWiring.test.ts: each request to any of these routes runs inside
  * withFetchTimeout with the one shared limit, passes the signal to fetch, and
  * reads its body inside the same call, so a body that stops arriving is cut
  * too. That an aborted request ends in each screen's existing error state
@@ -91,7 +91,7 @@ describe("the screens' limit", () => {
     expect(BANK_SCREEN_FETCH_TIMEOUT_MS).toBeGreaterThan(longestPlaidWait);
   });
 
-  it("one limit serves both requests: the module exports no other timeout", () => {
+  it("one limit serves every request: the module exports no other timeout", () => {
     const timeouts = Object.keys(screenFetch).filter((name) => /TIMEOUT/.test(name));
     expect(timeouts).toEqual(["BANK_SCREEN_FETCH_TIMEOUT_MS"]);
   });
@@ -149,6 +149,34 @@ describe("the screens' requests run under the limit", () => {
   const dashboard = read("../../app/dashboard/page.tsx");
   const money = read("../../app/money/page.tsx");
   const hook = read("../../hooks/usePlaidConnections.ts");
+  const plaidLink = read("../../components/plaid/PlaidLink.tsx");
+
+  it("bank-link button: a new connection's link token", () => {
+    const request = slice(
+      plaidLink,
+      "PlaidLink",
+      "async function requestNewLinkToken(",
+      "function LinkSessionRunner("
+    );
+    expectTimedRequest(
+      request,
+      "link token",
+      "/api/plaid/create-link-token",
+      "await response.json()",
+      "if (data.success === true)"
+    );
+  });
+
+  it("connections hook: a re-link's link token", () => {
+    const relink = slice(hook, "hook", "const relink =", "return {\n    connections,");
+    expectTimedRequest(
+      relink,
+      "hook relink",
+      "/api/plaid/relink",
+      "await response.json()",
+      "if (!ok)"
+    );
+  });
 
   it("dashboard: the connection list", () => {
     const mount = slice(dashboard, "dashboard", "useEffect(() => {", "const fetchLiveMoneyData =");
@@ -209,6 +237,7 @@ describe("the screens' requests run under the limit", () => {
       ["dashboard", dashboard],
       ["money", money],
       ["hook", hook],
+      ["PlaidLink", plaidLink],
     ] as const) {
       expect(source, file).not.toContain("new AbortController(");
       const calls = source.match(/withFetchTimeout\(\s*[^,]+,/g) ?? [];

@@ -15,7 +15,20 @@ import {
 } from "@/lib/plaidApiUtils";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import { liveRevocationDeps } from "@/lib/plaidRevocation";
-import { exchangeForUser } from "@/lib/plaidExchange";
+import { exchangeForUser, INSTITUTION_NAME_MAX } from "@/lib/plaidExchange";
+
+/**
+ * The body's institution id, cut to the institution name's cap in code points
+ * (never splitting a character outside the BMP). It is read only for the
+ * duplicate check before the exchange, which fails open; the stored id is
+ * Plaid's own, read after the exchange. Cutting rather than refusing: by the
+ * time this request arrives Link has already created the Item, and refusing
+ * before the exchange would leave nothing to revoke it with.
+ */
+function capInstitutionId(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return Array.from(value).slice(0, INSTITUTION_NAME_MAX).join("");
+}
 
 /**
  * Exchange a Link public token and store the new connection.
@@ -56,7 +69,7 @@ export async function POST(request: NextRequest) {
       userId,
       {
         publicToken,
-        institutionId: readString(body, "institutionId"),
+        institutionId: capInstitutionId(readString(body, "institutionId")),
         institutionName: readString(body, "institutionName"),
       },
       {

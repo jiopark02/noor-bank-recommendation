@@ -193,14 +193,25 @@ export function usePlaidConnections(userId: string | null) {
       const plaidHeaders = buildJsonAuthorizedHeaders(
         await getSupabaseBearerHeaders()
       );
-      const response = await fetch("/api/plaid/relink", {
-        method: "POST",
-        headers: plaidHeaders,
-        body: JSON.stringify({ itemId }),
-      });
-
-      const payload = asPlainObject(await response.json());
-      if (!response.ok) {
+      // The request and its body read run under the screen's limit, so a
+      // re-link request that never answers ends as a failed re-link for that
+      // bank, not a button left on "Preparing re-link...".
+      const { ok, payload } = await withFetchTimeout(
+        BANK_SCREEN_FETCH_TIMEOUT_MS,
+        async (signal) => {
+          const response = await fetch("/api/plaid/relink", {
+            method: "POST",
+            headers: plaidHeaders,
+            body: JSON.stringify({ itemId }),
+            signal,
+          });
+          return {
+            ok: response.ok,
+            payload: asPlainObject(await response.json()),
+          };
+        }
+      );
+      if (!ok) {
         throw new Error(
           readErrorMessage(payload) || "Failed to create relink token"
         );
