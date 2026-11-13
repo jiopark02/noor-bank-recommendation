@@ -63,18 +63,20 @@ export async function POST(request: NextRequest) {
     // not called. PLAID_LINK_TOKEN_LIMIT_MODE set to exactly "off" skips it.
     if (resolveLinkTokenLimitMode(process.env.PLAID_LINK_TOKEN_LIMIT_MODE) !== "off") {
       // createAdminClient() runs inside the claim, so a client that cannot be
-      // built is a failed claim (503) rather than a 500.
-      const claim = await claimLinkTokenIssue(
+      // built is a failed claim (503, cause=throw) rather than a 500.
+      const result = await claimLinkTokenIssue(
         (fn, args) => createAdminClient().rpc(fn, args),
         userId
       );
-      const claimRefusal = linkTokenClaimRefusal(claim);
+      const claimRefusal = linkTokenClaimRefusal(result.claim);
       if (claimRefusal) {
-        if (claim === "held") {
+        if (result.claim === "held") {
           console.info(`[plaid-link-token] user_id=${userId} refused=issue_limit`);
-        } else {
+        } else if (result.claim === "error") {
+          // The cause is a fixed label or the error's code only (see
+          // claimLinkTokenIssue); the error's text is never logged.
           console.error(
-            `[plaid-link-token] user_id=${userId} refused=issue_check_failed`
+            `[plaid-link-token] user_id=${userId} refused=issue_check_failed cause=${result.cause}`
           );
         }
         return NextResponse.json(claimRefusal.body, {

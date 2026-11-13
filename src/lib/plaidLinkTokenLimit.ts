@@ -15,6 +15,16 @@
  * What counts is an issue that passed the claim: one that Plaid then refuses
  * still counts. Re-link tokens (/api/plaid/relink) are not claimed here.
  *
+ * An "error" outcome carries its cause, for the caller's log line:
+ *   <code>      the rpc answered an error whose code is 1-16 upper-case letters
+ *               or digits (a SQLSTATE or PostgREST code), copied as is
+ *   rpc_error   the rpc answered an error with any other code, or none
+ *   throw       the rpc call threw (a client that cannot be built lands here)
+ *   bad_answer  no error, but the answer is not a boolean
+ * The error's message, details and hint are never read: they can carry
+ * values. The code is copied only in that shape, so it cannot bring text into
+ * the log, and it cannot collide with the lower-case labels.
+ *
  * The rpc is injected so this module holds no client. It never logs; the
  * caller logs the outcome with its own context.
  */
@@ -45,27 +55,52 @@ export function resolveLinkTokenLimitMode(
 
 export type LinkTokenClaim = "claimed" | "held" | "error";
 
+export type LinkTokenClaimResult =
+  | { claim: "claimed" }
+  | { claim: "held" }
+  | { claim: "error"; cause: string };
+
 export type LinkTokenClaimRpc = (
   fn: "plaid_link_token_claim",
   args: { p_user_id: string; p_max_count: number; p_window_seconds: number }
 ) => PromiseLike<{ data: unknown; error: unknown }>;
 
+const RPC_ERROR_CODE_SHAPE = /^[A-Z0-9]{1,16}$/;
+
+/** The cause for an rpc error: its code when it has the safe shape. */
+function rpcErrorCause(error: unknown): string {
+  const code =
+    typeof error === "object" && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+  return typeof code === "string" && RPC_ERROR_CODE_SHAPE.test(code)
+    ? code
+    : "rpc_error";
+}
+
 export async function claimLinkTokenIssue(
   rpc: LinkTokenClaimRpc,
   userId: string
-): Promise<LinkTokenClaim> {
+): Promise<LinkTokenClaimResult> {
+  let answer: { data: unknown; error: unknown };
   try {
-    const { data, error } = await rpc("plaid_link_token_claim", {
+    answer = await rpc("plaid_link_token_claim", {
       p_user_id: userId,
       p_max_count: LINK_TOKEN_ISSUE_LIMIT,
       p_window_seconds: LINK_TOKEN_ISSUE_WINDOW_SECONDS,
     });
-    if (error) return "error";
-    if (data === true) return "claimed";
-    if (data === false) return "held";
-    return "error";
   } catch {
-    return "error";
+    return { claim: "error", cause: "throw" };
+  }
+  try {
+    const { data, error } = answer;
+    if (error) return { claim: "error", cause: rpcErrorCause(error) };
+    if (data === true) return { claim: "claimed" };
+    if (data === false) return { claim: "held" };
+    return { claim: "error", cause: "bad_answer" };
+  } catch {
+    // An answer that is not an object at all (or throws when read).
+    return { claim: "error", cause: "bad_answer" };
   }
 }
 

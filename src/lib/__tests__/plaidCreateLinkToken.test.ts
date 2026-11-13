@@ -22,6 +22,8 @@ import { PLAID_TRANSACTIONS_DAYS_REQUESTED } from "../plaid";
  *   - the claim moved before the connection-limit check         -> "at the connection limit"
  *   - the claim keyed on anything but the verified user         -> "claims before Plaid"
  *   - the off switch ignored, or matched loosely                -> "the switch"
+ *   - the failed-claim line without its cause, with the wrong
+ *     cause, or with the error's message, details or hint       -> "the failed-claim log line"
  *
  * Whether Plaid accepts the value is a live check; the client is faked here.
  * The database function is faked too; its decision is checked with SQL.
@@ -226,6 +228,82 @@ describe("create-link-token issue limit", () => {
       expect(status).toBe(503);
       expect(json.code).toBe("LINK_TOKEN_CHECK_UNAVAILABLE");
       expect(state.linkTokenCalls).toHaveLength(0);
+    }
+  });
+
+  it("the failed-claim log line carries the cause, and never the error's text", async () => {
+    const cases: Array<[() => void, string]> = [
+      [
+        () => {
+          state.claim = {
+            data: null,
+            error: {
+              code: "42883",
+              message: "secret-message user@example.com",
+              details: "secret-details",
+              hint: "secret-hint",
+            },
+          };
+        },
+        "42883",
+      ],
+      [
+        () => {
+          state.claim = { data: null, error: { code: "", message: "secret-message fetch failed" } };
+        },
+        "rpc_error",
+      ],
+      [
+        () => {
+          state.claim = "throw";
+        },
+        "throw",
+      ],
+      [
+        () => {
+          state.adminThrows = true;
+        },
+        "throw",
+      ],
+      [
+        () => {
+          state.claim = { data: "secret-answer", error: null };
+        },
+        "bad_answer",
+      ],
+    ];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      for (const [arrange, cause] of cases) {
+        state.claim = { data: true, error: null };
+        state.adminThrows = false;
+        for (const spy of [errorSpy, infoSpy, warnSpy, logSpy]) spy.mockClear();
+        arrange();
+        const { status } = await post();
+        expect(status).toBe(503);
+
+        const lines = errorSpy.mock.calls.filter((args) =>
+          String(args[0]).includes("refused=issue_check_failed")
+        );
+        expect(lines, cause).toHaveLength(1);
+        expect(lines[0], cause).toEqual([
+          `[plaid-link-token] user_id=user-1 refused=issue_check_failed cause=${cause}`,
+        ]);
+
+        const everything = [errorSpy, infoSpy, warnSpy, logSpy]
+          .flatMap((spy) => spy.mock.calls)
+          .map((args) => args.map((a) => (a instanceof Error ? a.message : String(a))).join(" "))
+          .join("\n");
+        expect(everything, cause).not.toMatch(/secret|example\.com|SUPABASE_SERVICE_ROLE_KEY|network/);
+      }
+    } finally {
+      errorSpy.mockRestore();
+      infoSpy.mockRestore();
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
     }
   });
 
