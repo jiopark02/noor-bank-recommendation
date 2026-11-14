@@ -373,12 +373,13 @@ export function connectionRowsOrNull<T>(result: {
  * type, so a caller that ignores it does not compile; a throw is invisible to the
  * compiler and gets absorbed by whatever outer catch happens to be in scope.
  *
- * The fail direction now differs across the three callers, and it did not
- * always. Both data routes convert the null straight back into a throw and land
- * in their own outer catch, so a failed read is answered with the 500 and the
- * generic "There was a problem reaching your bank" that handlePlaidError
- * produces for any error carrying no Plaid error_code — which is also what
- * throwing from here would produce.
+ * Its callers are the bank-data route (/api/finance/summary) and the
+ * account-deletion route, and they answer the null differently. The bank-data
+ * route converts it straight back into a throw and lands in its own outer
+ * catch, so a failed read is answered with the 500 and the generic "There was
+ * a problem reaching your bank" that handlePlaidError produces for any error
+ * carrying no Plaid error_code — which is also what throwing from here would
+ * produce.
  *
  * /api/account/delete used to catch and carry on either way, because its Plaid
  * revocation was best-effort. It no longer does: a row is now deleted only after
@@ -389,8 +390,8 @@ export function connectionRowsOrNull<T>(result: {
  * bank connections were never revoked — with the tokens that could have revoked
  * them.
  *
- * What the null does buy at the routes is not the 500 — it is not emitting the
- * 404. That 404's wording is string-matched by the money and dashboard screens;
+ * What the null does buy at the bank-data route is not the 500 — it is not
+ * emitting the 404. That 404's wording is string-matched by the money and dashboard screens;
  * a generic 500 matches nothing, so the connect-a-bank card stays hidden and the
  * cached data survives.
  *

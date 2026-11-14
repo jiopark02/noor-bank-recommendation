@@ -65,7 +65,6 @@ const IDENTIFIER = ["access", "token"].join("_");
  * token — every one of these must decrypt before use.
  */
 const CONSUMING_SITES = [
-  "app/api/plaid/accounts/route.ts",
   "app/api/plaid/relink/route.ts",
   // liveRevocationDeps() decrypts a stored token and hands the plaintext
   // straight to plaidClient.itemRemove. The revocation logic above it takes
