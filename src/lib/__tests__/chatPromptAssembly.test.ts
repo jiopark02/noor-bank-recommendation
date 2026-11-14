@@ -11,10 +11,13 @@ import type { NextRequest } from "next/server";
  *
  * HOW
  * Authentication, the admin client, AI memory, the chat usage ledger and LLM
- * call logging are mocked. The route, the prompt builder, the Plaid egress
- * policy and the OpenRouter request builder run for real. fetch is stubbed and
- * records the OpenRouter request body; any other fetch (the balance read)
- * fails, which the route treats as no snapshot.
+ * call logging are mocked. The server client answers the bank-connection read
+ * with one connected bank, so under "connection" and "balances" the turn goes
+ * through the connected-bank block rather than the read-error fallback. Plaid
+ * is left unconfigured, so no Plaid call is made. The route, the prompt
+ * builder, the Plaid egress policy and the OpenRouter request builder run for
+ * real. fetch is stubbed and records the OpenRouter request body; any other
+ * fetch (the balance read) fails, which the route treats as no snapshot.
  *
  * The route is imported once for the file. Every value a case changes is read
  * when a request is handled, not when the module loads (AI_PLAID_STATE, the
@@ -35,10 +38,41 @@ vi.mock("@/lib/apiAuth", () => ({
   getAuthenticatedUserIdFromRequest: async () => "00000000-0000-4000-8000-000000000001",
 }));
 
+/** One connected bank, whatever columns or filters the read asks for. */
+const CONNECTION_ROWS = [
+  {
+    institution_name: "Test Bank",
+    status: "active",
+    access_token: "v1:not-decrypted-in-this-test",
+    item_id: "item-1",
+  },
+];
+
+function resolvingChain(result: { data: unknown; error: null }): unknown {
+  const builder: unknown = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === "then") {
+          return (
+            onFulfilled: (value: unknown) => unknown,
+            onRejected: (reason: unknown) => unknown
+          ) => Promise.resolve(result).then(onFulfilled, onRejected);
+        }
+        return () => builder;
+      },
+    }
+  );
+  return builder;
+}
+
 vi.mock("@/lib/supabase", () => ({
   createAdminClient: () => {
     throw new Error("admin client must not be used in this test");
   },
+  createServerClient: () => ({
+    from: () => resolvingChain({ data: CONNECTION_ROWS, error: null }),
+  }),
   isSupabaseAdminConfigured: () => false,
   isSupabaseConfigured: () => false,
 }));
@@ -90,6 +124,8 @@ beforeEach(() => {
   vi.stubEnv("AI_PLAID_STATE", "");
   vi.stubEnv("AI_SUPABASE_READ_ENABLED", "");
   vi.stubEnv("CHAT_USAGE_LIMIT_MODE", "");
+  vi.stubEnv("PLAID_CLIENT_ID", "");
+  vi.stubEnv("PLAID_SECRET", "");
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -150,6 +186,10 @@ describe("every assembled system message keeps identity, safety first and bounda
       expect(await post(text)).toBe(200);
       expect(systemMessages).toHaveLength(1);
       expectFixedRules(systemMessages[0]);
+      if (mode !== "off") {
+        expect(systemMessages[0]).toContain("## What you can see this turn");
+        expect(systemMessages[0]).not.toContain("could not be read this turn");
+      }
     });
   }
 
