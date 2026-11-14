@@ -22,6 +22,11 @@ import type { NextRequest } from "next/server";
  *   - the time zone value written to the log                        -> user's today / fallback
  *   - the list sent for any truthy includeTransactions, or always   -> "only when … exactly true"
  *   - the list read a second time                                   -> "the same Plaid calls …"
+ *   - the engine's answer sent as is (input hash and other fields
+ *     reaching the browser)                                         -> "returns accounts …"
+ *   - an engine refusal answered through the generic error path, or
+ *     its message (with the input value in it) logged               -> "the engine refuses …"
+ *   - an engine answer missing a screen field sent as a summary     -> "the engine refuses …"
  */
 
 const PLAINTEXT = "access-sandbox-PLAINTEXT-TOKEN-7f3a";
@@ -38,7 +43,28 @@ const state = {
   plaidCalls: 0,
   decryptUserIds: [] as string[],
   transactionWindows: [] as Array<{ start: string; end: string }>,
+  /** Every input the engine package was called with, in order. */
+  engineInputs: [] as Array<Record<string, any>>,
+  /** When set, the engine refuses the input with this EngineInputError message. */
+  engineRefuses: null as string | null,
+  /** When set, the engine answers this instead of computing. */
+  engineAnswer: undefined as unknown,
 };
+
+// The real engine runs; the wrapper records its input, and can make it refuse
+// or answer something else.
+vi.mock("@sungwon0162/cf-engine", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@sungwon0162/cf-engine")>();
+  return {
+    ...real,
+    analyzeCashFlow: (input: Record<string, any>, profile: Record<string, unknown>) => {
+      state.engineInputs.push(input);
+      if (state.engineRefuses !== null) throw new real.EngineInputError(state.engineRefuses);
+      if (state.engineAnswer !== undefined) return state.engineAnswer;
+      return real.analyzeCashFlow(input as never, profile as never);
+    },
+  };
+});
 
 function plaidError(code: string): Error {
   const e = new Error("Request failed with status code 400") as Error & Record<string, unknown>;
@@ -200,6 +226,9 @@ beforeEach(() => {
   state.plaidCalls = 0;
   state.decryptUserIds = [];
   state.transactionWindows = [];
+  state.engineInputs = [];
+  state.engineRefuses = null;
+  state.engineAnswer = undefined;
   vi.useRealTimers();
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -262,7 +291,11 @@ describe("POST /api/finance/summary — connection reads", () => {
     ]);
     expect(res.json.accounts.map((a: { accountId: string }) => a.accountId)).toEqual(["chk-1"]);
     expect(res.json.summary).not.toBeNull();
-    expect(res.json.summary.coverage.allConnectionsRead).toBe(false);
+    // The engine is told the second bank was not read.
+    expect(state.engineInputs[0].connections.map((c: { state: string }) => c.state)).toEqual([
+      "ok",
+      "failed",
+    ]);
     expect(res.json.summary.coverage.safeToSpendShowable).toBe(false);
     // itemGet, accountsGet, one transactions page and recurring: the first bank only.
     expect(state.plaidCalls).toBe(4);
@@ -289,12 +322,15 @@ describe("POST /api/finance/summary — response", () => {
     expect(res.text).not.toContain("access_token");
     // The engine's opaque keys stay on the server.
     expect(res.text).not.toMatch(/duplicateKey|connectionKey|[0-9a-f]{64}/);
-    expect(res.json.summary.coverage).toEqual({
-      completeness: "complete",
-      allConnectionsRead: true,
-      safeToSpendShowable: true,
-      duplicateCopiesDropped: { accounts: 0, transactions: 0, streams: 0 },
-    });
+    // Only the fields the screens read: nothing else the engine returns (its
+    // input hash included) reaches the browser.
+    expect(res.text).not.toMatch(/inputHash|schemaVersion|movableAmount|dataIssues/);
+    expect(Object.keys(res.json.summary).sort()).toEqual(
+      ["cashFlow", "coverage", "creditUtilization", "recurring", "safeToSpend"]
+    );
+    // Every bank's recurring read came back empty: recurring charges are
+    // unknown, so safe-to-spend is not shown.
+    expect(res.json.summary.coverage).toEqual({ safeToSpendShowable: false });
     expect(res.json.connections).toEqual([
       { itemId: "item-1", institutionName: "Bank 1", status: "ok" },
     ]);
@@ -329,16 +365,17 @@ describe("POST /api/finance/summary — response", () => {
     vi.setSystemTime(new Date("2026-11-11T05:00:00Z"));
     const res = await post({ timeZone: "America/Los_Angeles" });
     expect(res.status).toBe(200);
-    // One today for the read window, the cash-flow period and the horizon.
+    // One today for the read window, the cash-flow period and every date the
+    // engine works out.
     expect(state.transactionWindows).toEqual([{ start: "2025-10-10", end: "2026-11-10" }]);
-    expect(res.json.summary.cashFlow.period).toMatchObject({ start: "2026-08-13", end: "2026-11-10" });
-    expect(res.json.summary.safeToSpend.horizon).toEqual({
-      from: "2026-11-10",
-      to: "2026-11-30",
-      rule: "end_of_calendar_month",
+    expect(state.engineInputs).toHaveLength(1);
+    expect(state.engineInputs[0]).toMatchObject({
+      now: "2026-11-11T05:00:00.000Z",
+      today: "2026-11-10",
       dateBasis: "user_time_zone",
+      readWindow: { start: "2025-10-10", end: "2026-11-10" },
+      period: { start: "2026-08-13", end: "2026-11-10" },
     });
-    expect(res.json.summary.safeToSpend.assumptions).not.toContain("dates_utc");
 
     const logged = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .map((c) => c.map(String).join(" "))
@@ -352,12 +389,16 @@ describe("POST /api/finance/summary — response", () => {
     vi.setSystemTime(new Date("2026-11-11T05:00:00Z"));
     for (const body of [{}, { timeZone: "Mars/Base" }, { timeZone: 42 }]) {
       state.transactionWindows = [];
+      state.engineInputs = [];
       (console.log as unknown as { mockClear: () => void }).mockClear();
       const res = await post(body);
       expect(res.status).toBe(200);
       expect(state.transactionWindows).toEqual([{ start: "2025-10-11", end: "2026-11-11" }]);
-      expect(res.json.summary.safeToSpend.horizon.dateBasis).toBe("utc");
-      expect(res.json.summary.safeToSpend.assumptions).toContain("dates_utc");
+      expect(state.engineInputs[0]).toMatchObject({
+        today: "2026-11-11",
+        dateBasis: "utc",
+        readWindow: { start: "2025-10-11", end: "2026-11-11" },
+      });
       const logged = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
         .map((c) => c.map(String).join(" "))
         .join("\n");
@@ -440,5 +481,50 @@ describe("POST /api/finance/summary — response", () => {
     await post({ includeTransactions: true });
     expect(state.plaidCalls).toBe(without.calls);
     expect(state.transactionWindows).toEqual(without.windows);
+  });
+});
+
+describe("POST /api/finance/summary — the engine refuses or answers oddly", () => {
+  beforeEach(() => {
+    (console.error as unknown as { mockClear: () => void }).mockClear();
+  });
+
+  function errorLines(): string[] {
+    return (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) =>
+      c.map((v) => (v instanceof Error ? `<Error ${v.message}>` : String(v))).join(" ")
+    );
+  }
+
+  it("a refused input is a fixed 500, logged as a code with no value from the input", async () => {
+    state.engineRefuses = "date 2026-99-99";
+    const res = await post();
+    expect(res.status).toBe(500);
+    expect(res.json).toEqual({
+      error: "We couldn't compute your summary right now.",
+      errorCode: "ENGINE_INPUT_REJECTED",
+    });
+    const lines = errorLines();
+    expect(lines).toEqual(["[finance-summary] engine_input_error code=date"]);
+    expect(res.text).not.toContain("2026-99-99");
+  });
+
+  it("a refusal naming a field keeps the field name, never a value", async () => {
+    state.engineRefuses = "missing balanceAsOf";
+    await post();
+    expect(errorLines()).toEqual(["[finance-summary] engine_input_error code=missing_balanceAsOf"]);
+  });
+
+  it("a refusal message outside the known list is logged as unknown", async () => {
+    state.engineRefuses = "acct 12345 owes 678.90";
+    await post();
+    expect(errorLines()).toEqual(["[finance-summary] engine_input_error code=unknown"]);
+  });
+
+  it("an answer without a field the screens read is a fixed 500, not a partial summary", async () => {
+    state.engineAnswer = { dataIssues: [] };
+    const res = await post();
+    expect(res.status).toBe(500);
+    expect(res.json.errorCode).toBe("ENGINE_OUTPUT_UNEXPECTED");
+    expect(errorLines()).toEqual(["[finance-summary] engine_output_unexpected"]);
   });
 });

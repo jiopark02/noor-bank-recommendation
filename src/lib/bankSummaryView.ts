@@ -388,6 +388,74 @@ const TRANSACTION_FIELDS = {
   category: { listOf: "string" },
 } as const;
 
+/**
+ * The part of a summary that comes from the cash-flow engine. The route builds
+ * a summary by picking exactly these fields from the engine's answer
+ * (pickFields), so a field the engine adds never reaches the browser.
+ */
+export const ENGINE_SUMMARY_FIELDS = {
+  coverage: { safeToSpendShowable: "boolean" },
+  cashFlow: {
+    incomeCents: "number",
+    spendingNetCents: "number",
+    period: { completeness: COMPLETENESS },
+  },
+  safeToSpend: {
+    status: { oneOf: ["computed", "unavailable"] },
+    reason: "string|null",
+    amountCents: "number|null",
+    // Both are null when the figure could not be computed. Of the totals, only
+    // the cash the figure starts from is read: the figure also sets money
+    // aside that the totals do not itemize, so the screens never list a
+    // breakdown that would not add up to it.
+    horizon: {
+      orNull: {
+        to: "string",
+        rule: { oneOf: ["next_income_date", "end_of_calendar_month"] },
+      },
+    },
+    totals: {
+      orNull: {
+        spendableCashCents: "number",
+      },
+    },
+  },
+  recurring: {
+    totalMonthlyCents: "number|null",
+    items: {
+      listOf: {
+        streamId: "string",
+        label: "string",
+        // null when the charge's amount or frequency is not known.
+        monthlyCents: "number|null",
+        nextDate: "string|null",
+        // The engine had no expected date and used today's.
+        nextDateAssumedToday: "boolean",
+        pastDue: "boolean",
+        // The charge posted on or after its expected date, which has passed.
+        paidSincePredicted: "boolean",
+      },
+    },
+  },
+} as const;
+
+/** The part of a summary the app computes itself. */
+export const CREDIT_UTILIZATION_FIELDS = {
+  accounts: {
+    listOf: {
+      accountId: "string",
+      balanceCents: "number|null",
+      ratioBasisPoints: "number|null",
+    },
+  },
+} as const;
+
+/** Every summary field the dashboard, the money screen and this module read. */
+export const SCREEN_SUMMARY_FIELDS = {
+  ...ENGINE_SUMMARY_FIELDS,
+  creditUtilization: CREDIT_UTILIZATION_FIELDS,
+} as const;
+
 /** What the dashboard, the money screen and this module read from a summary body. */
 export const SUMMARY_RESPONSE_FIELDS = {
   connections: { listOf: CONNECTION_FIELDS },
@@ -403,50 +471,7 @@ export const SUMMARY_RESPONSE_FIELDS = {
       limitCents: "number|null",
     },
   },
-  summary: {
-    orNull: {
-      coverage: { safeToSpendShowable: "boolean" },
-      cashFlow: {
-        incomeCents: "number",
-        spendingNetCents: "number",
-        period: { completeness: COMPLETENESS },
-      },
-      safeToSpend: {
-        status: { oneOf: ["computed", "unavailable"] },
-        amountCents: "number|null",
-        uncoveredObligationsCents: "number|null",
-        horizon: { to: "string" },
-        totals: {
-          spendableCashCents: "number",
-          upcomingRecurringCents: "number",
-          reservedCreditCents: "number",
-          bufferCents: "number",
-        },
-        assumptions: { listOf: "string" },
-      },
-      recurring: {
-        totalMonthlyCents: "number|null",
-        items: {
-          listOf: {
-            streamId: "string",
-            label: "string",
-            monthlyCents: "number",
-            nextDate: "string|null",
-            pastDue: "boolean",
-          },
-        },
-      },
-      creditUtilization: {
-        accounts: {
-          listOf: {
-            accountId: "string",
-            balanceCents: "number|null",
-            ratioBasisPoints: "number|null",
-          },
-        },
-      },
-    },
-  },
+  summary: { orNull: SCREEN_SUMMARY_FIELDS },
 } as const;
 
 /**
@@ -457,6 +482,8 @@ export const SUMMARY_RESPONSE_FIELDS = {
 export const SUMMARY_TRANSACTIONS_FIELDS = { listOf: TRANSACTION_FIELDS } as const;
 
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
+/** The engine's part of a summary, as the screens read it. */
+export type EngineSummaryFields = FieldsOf<typeof ENGINE_SUMMARY_FIELDS>;
 export type ScreenSummary = NonNullable<ScreenSummaryResponse["summary"]>;
 export type ScreenTransaction = FieldsOf<typeof TRANSACTION_FIELDS>;
 
@@ -469,6 +496,29 @@ export type RouteBodiesSatisfyScreenFields = Holds<
 export type RouteTransactionsSatisfyScreenFields = Holds<
   [DisplayTransaction] extends [ScreenTransaction] ? true : false
 >;
+
+/** True only for `any`. */
+export type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/**
+ * True when no part of T, at any depth, is `any`. RouteBodiesSatisfyScreenFields
+ * holds trivially for a field typed `any`, so this guard keeps the route's
+ * declared body free of it: a body typed from an untyped source fails to
+ * compile here instead of passing every check above.
+ */
+export type NoAnyDeep<T> =
+  IsAny<T> extends true
+    ? false
+    : T extends readonly (infer E)[]
+      ? NoAnyDeep<E>
+      : T extends object
+        ? false extends { [K in keyof T]-?: NoAnyDeep<T[K]> }[keyof T]
+          ? false
+          : true
+        : true;
+
+/** Compile-time only: no part of the summary body the route declares is `any`. */
+export type RouteBodyHasNoAny = Holds<NoAnyDeep<FinanceSummaryResponse>>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -515,6 +565,45 @@ export function fitsFields(spec: FieldSpec, value: unknown): boolean {
   return Object.keys(fields).every((key) => fitsFields(fields[key], value[key]));
 }
 
+/** The outcome of pickFields: the copy, or a value that did not fit the list. */
+export type Picked = { ok: true; value: unknown } | { ok: false };
+
+/**
+ * A copy of `value` holding only the fields `spec` lists, each checked as
+ * fitsFields checks it. Fields the list does not name are left out at every
+ * depth, so whatever else a source carries never travels further. A value
+ * that does not fit the list gives `{ ok: false }`.
+ */
+export function pickFields(spec: FieldSpec, value: unknown): Picked {
+  if (typeof spec === "string" || (spec as { oneOf?: unknown }).oneOf !== undefined) {
+    return fitsFields(spec, value) ? { ok: true, value } : { ok: false };
+  }
+  const node = spec as { listOf?: FieldSpec; orNull?: FieldSpec };
+  if (node.listOf !== undefined) {
+    if (!Array.isArray(value)) return { ok: false };
+    const out: unknown[] = [];
+    for (let i = 0; i < value.length; i++) {
+      const element = pickFields(node.listOf, value[i]);
+      if (!element.ok) return { ok: false };
+      out.push(element.value);
+    }
+    return { ok: true, value: out };
+  }
+  if (node.orNull !== undefined) {
+    return value === null ? { ok: true, value: null } : pickFields(node.orNull, value);
+  }
+  if (!isRecord(value)) return { ok: false };
+  const fields = spec as { readonly [field: string]: FieldSpec };
+  const out: Record<string, unknown> = {};
+  const keys = Object.keys(fields);
+  for (let i = 0; i < keys.length; i++) {
+    const field = pickFields(fields[keys[i]], value[keys[i]]);
+    if (!field.ok) return { ok: false };
+    out[keys[i]] = field.value;
+  }
+  return { ok: true, value: out };
+}
+
 /**
  * A summary response body, or null when it lacks a field the screens read or
  * carries one with the wrong type. A wrong-shaped 2xx is a failed read, never
@@ -522,7 +611,21 @@ export function fitsFields(spec: FieldSpec, value: unknown): boolean {
  * real figure.
  */
 export function parseFinanceSummaryResponse(value: unknown): ScreenSummaryResponse | null {
-  return fitsFields(SUMMARY_RESPONSE_FIELDS, value) ? (value as ScreenSummaryResponse) : null;
+  if (!fitsFields(SUMMARY_RESPONSE_FIELDS, value)) return null;
+  const body = value as ScreenSummaryResponse;
+  if (body.summary === null) return body;
+  // Every screen draws recurring charges from this body, so ordering them
+  // here (orderRecurringItems) puts every list on the screens in that order.
+  return {
+    ...body,
+    summary: {
+      ...body.summary,
+      recurring: {
+        ...body.summary.recurring,
+        items: orderRecurringItems(body.summary.recurring.items),
+      },
+    },
+  };
 }
 
 /**
@@ -591,4 +694,191 @@ export function formatCentsOrDash(cents: number | null): string {
 /** Monthly recurring total: null (unknown) renders as "Unknown", never as $0.00. */
 export function formatMonthlyOrUnknown(cents: number | null): string {
   return cents === null ? "Unknown" : formatCents(cents);
+}
+
+// ---- spendable cash and safe-to-spend -----------------------------------------
+
+/**
+ *   amount          - the spendable cash safe-to-spend was computed from
+ *   no_cash_account - no checking-type account is linked
+ *   unknown         - safe-to-spend could not be computed for another reason,
+ *                     so the cash behind it is not drawn as a value
+ */
+export type SpendableCashTile =
+  | { kind: "amount"; cents: number }
+  | { kind: "no_cash_account" }
+  | { kind: "unknown" };
+
+/**
+ * What the "Spendable cash" tile shows. With no summary (no connection) the
+ * zero is true. A summary whose safe-to-spend was not computed shows no
+ * amount: the cash it would have used is not known to be complete or fresh.
+ */
+export function spendableCashTile(summary: ScreenSummary | null): SpendableCashTile {
+  if (summary === null) return { kind: "amount", cents: 0 };
+  const s = summary.safeToSpend;
+  if (s.status === "computed" && s.totals !== null) {
+    return { kind: "amount", cents: s.totals.spendableCashCents };
+  }
+  if (s.reason === "no_cash_account") return { kind: "no_cash_account" };
+  return { kind: "unknown" };
+}
+
+export const NO_CASH_ACCOUNT_LABEL = "No checking account linked";
+export const NO_CASH_ACCOUNT_HINT = "Link a checking account to see your cash balance.";
+
+/**
+ * The tile's amount, or null when it has none to show: formatted with
+ * formatCentsOrDash, an unknown amount is a dash. A tile with no checking
+ * account shows NO_CASH_ACCOUNT_LABEL in its place.
+ */
+export function spendableCashCents(tile: SpendableCashTile): number | null {
+  return tile.kind === "amount" ? tile.cents : null;
+}
+
+/**
+ * Why a safe-to-spend figure is not shown, or null when it is.
+ *   banks_not_read     - a connection was not read
+ *   no_cash_account    - no cash account, or none with a balance
+ *   balance_unknown    - a balance is missing or has not updated recently
+ *   recurring_unknown  - recurring charges could not be read or are unknown
+ *   history_incomplete - the transaction history is not complete yet
+ *   other              - any other reason
+ */
+export type SafeToSpendHidden =
+  | "banks_not_read"
+  | "no_cash_account"
+  | "balance_unknown"
+  | "recurring_unknown"
+  | "history_incomplete"
+  | "other";
+
+export function safeToSpendHiddenReason(
+  view: BankView,
+  summary: ScreenSummary
+): SafeToSpendHidden | null {
+  const s = summary.safeToSpend;
+  if (view.showSafeToSpend && s.status === "computed" && s.horizon !== null && s.totals !== null) {
+    return null;
+  }
+  if (view.actions.length > 0) return "banks_not_read";
+  if (s.status === "computed") {
+    return summary.recurring.totalMonthlyCents === null ? "recurring_unknown" : "other";
+  }
+  switch (s.reason) {
+    case "no_cash_account":
+    case "no_spendable_balance":
+      return "no_cash_account";
+    case "null_balance":
+    case "stale_balance":
+      return "balance_unknown";
+    case "recurring_unavailable":
+    case "recurring_amount_unknown":
+      return "recurring_unknown";
+    case "history_incomplete":
+      return "history_incomplete";
+    default:
+      return "other";
+  }
+}
+
+/**
+ * What the dashboard says when it gives no safe-to-spend figure, by reason.
+ * A bank that was not read has its own message on the dashboard, naming
+ * what to do for each bank, so it has no entry here.
+ */
+export const HIDDEN_SAFE_TO_SPEND_ANSWER: Readonly<
+  Record<Exclude<SafeToSpendHidden, "banks_not_read">, string>
+> = {
+  no_cash_account:
+    "I don't see a checking balance to work from yet, so I can't give a spending number.",
+  balance_unknown:
+    "I can't see an up-to-date balance for your account yet, so I'm not giving a spending number.",
+  recurring_unknown:
+    "I can't tell what recurring charges you have yet, so I'm not giving a spending number.",
+  history_incomplete:
+    "I don't have your full transaction history yet, so I'm not giving a spending number.",
+  other: "I can't work out a spending number from these accounts yet.",
+};
+
+/** Plain code-unit order, the same on every platform and in every locale. */
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * The order recurring charges are drawn in: the largest monthly amount
+ * first, charges with no known amount after every charge with one, then by
+ * label, then by stream id, so the order is the same for the same charges
+ * whatever order they arrived in.
+ */
+export function compareRecurringItems(
+  a: { streamId: string; label: string; monthlyCents: number | null },
+  b: { streamId: string; label: string; monthlyCents: number | null }
+): number {
+  if (a.monthlyCents !== b.monthlyCents) {
+    if (a.monthlyCents === null) return 1;
+    if (b.monthlyCents === null) return -1;
+    return b.monthlyCents - a.monthlyCents;
+  }
+  return compareText(a.label, b.label) || compareText(a.streamId, b.streamId);
+}
+
+/** A copy of `items` in the order the screens draw recurring charges in. */
+export function orderRecurringItems<
+  T extends { streamId: string; label: string; monthlyCents: number | null },
+>(items: readonly T[]): T[] {
+  return items.slice().sort(compareRecurringItems);
+}
+
+/**
+ * Whether a recurring charge's expected date is drawn: only a date the engine
+ * expected, for a charge not yet paid. A date it filled in with today because
+ * it had none is not shown, and neither is a passed date the charge has
+ * already been paid on or after.
+ */
+export function showsRecurringDate(item: {
+  nextDate: string | null;
+  nextDateAssumedToday: boolean;
+  paidSincePredicted: boolean;
+}): boolean {
+  return item.nextDate !== null && !item.nextDateAssumedToday && !item.paidSincePredicted;
+}
+
+/**
+ * The dashboard's safe-to-spend lines, after its greeting. The figure is the
+ * only amount in them: what it sets aside is named in words, never itemized,
+ * because the parts the summary carries do not add up to it. A negative
+ * figure is the shortfall, stated as its absolute value.
+ */
+export function safeToSpendLines(
+  amountCents: number,
+  horizon: { to: string; rule: string }
+): { statement: string; answer: string } {
+  const reach = safeToSpendHorizonPhrase(horizon);
+  if (amountCents >= 0) {
+    return {
+      statement: `You have about ${formatCents(amountCents)} to spend ${reach}.`,
+      answer:
+        "That's what's left after setting aside upcoming bills, card payments, your usual spending and other expected costs.",
+    };
+  }
+  return {
+    statement: `What I'd set aside ${reach} comes to about ${formatCents(
+      -amountCents
+    )} more than your cash.`,
+    answer: "That covers upcoming bills, card payments, your usual spending and other expected costs.",
+  };
+}
+
+/**
+ * How far the safe-to-spend figure reaches, for a sentence: "through Nov 30"
+ * when it runs to the end of the month, and "until your next income on
+ * Nov 21" when it runs to the next income date, which it does not include.
+ */
+export function safeToSpendHorizonPhrase(horizon: { to: string; rule: string }): string {
+  const day = formatCalendarDay(horizon.to);
+  return horizon.rule === "next_income_date"
+    ? `until your next income on ${day}`
+    : `through ${day}`;
 }

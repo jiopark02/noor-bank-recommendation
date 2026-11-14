@@ -33,11 +33,18 @@ import {
   describeBankAction,
   formatCents,
   formatCentsOrDash,
+  HIDDEN_SAFE_TO_SPEND_ANSWER,
   formatMonthlyOrUnknown,
   formatSpending,
   missingBanksNote,
   parseFinanceSummaryResponse,
+  safeToSpendHiddenReason,
+  safeToSpendLines,
+  spendableCashCents,
+  spendableCashTile,
   summaryPeriodNote,
+  NO_CASH_ACCOUNT_HINT,
+  NO_CASH_ACCOUNT_LABEL,
   type MoneyDisplayState,
   type ScreenSummaryResponse,
 } from "@/lib/bankSummaryView";
@@ -79,17 +86,6 @@ const QUICK_PROMPTS = [
   "Am I on track this month?",
 ];
 
-/**
- * A calendar date (YYYY-MM-DD) as "Nov 30", exactly as given: it is read and
- * formatted on the UTC axis so the viewer's own zone cannot move it a day.
- */
-function formatDay(isoDate: string): string {
-  return new Date(isoDate + "T00:00:00Z").toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
 
 // What the money figures can honestly show right now is decided by
 // decideBankView (bankSummaryView.ts). Only "ready" and "none" may render a
@@ -367,8 +363,12 @@ export default function HomePage() {
   const periodNote = summaryPeriodNote(view, bank);
 
   // Engine figures as they arrived. With no connection the zeros are true.
+  // The spendable-cash amount is null (a dash) when safe-to-spend was not
+  // computed; with no checking account the tile names that instead.
+  const cashTile = spendableCashTile(summary);
+  const noCashAccount = cashTile.kind === "no_cash_account";
   const figures = {
-    cash: summary ? summary.safeToSpend.totals.spendableCashCents : 0,
+    cash: spendableCashCents(cashTile),
     creditUsed: summary ? creditUsedCents(summary) : 0,
     income: summary ? summary.cashFlow.incomeCents : 0,
     spending: summary ? summary.cashFlow.spendingNetCents : 0,
@@ -421,8 +421,9 @@ export default function HomePage() {
       };
     }
 
+    const hidden = safeToSpendHiddenReason(view, summary);
     if (!view.showSafeToSpend) {
-      if (view.actions.length > 0) {
+      if (hidden === "banks_not_read") {
         return {
           opening: `Good day, ${userName}. Not every bank synced, so I'm not giving a spending number yet: it could miss a card balance.`,
           question,
@@ -432,36 +433,27 @@ export default function HomePage() {
       return {
         opening: `Good day, ${userName}.`,
         question,
-        answer:
-          "I don't see a checking balance to work from yet, so I can't give a spending number.",
+        answer: HIDDEN_SAFE_TO_SPEND_ANSWER[hidden ?? "other"],
       };
     }
 
     const s = summary.safeToSpend;
-    const amount = s.amountCents ?? 0;
-    const through = formatDay(s.horizon.to);
-    const parts = [
-      `your spendable cash of ${formatCents(s.totals.spendableCashCents)}`,
-      `less ${formatCents(s.totals.upcomingRecurringCents)} in recurring charges due by ${through}`,
-      `and ${formatCents(s.totals.reservedCreditCents)} in card balances`,
-    ];
-    if (s.totals.bufferCents > 0) {
-      parts.push(`and a ${formatCents(s.totals.bufferCents)} buffer`);
+    if (hidden !== null || s.horizon === null || s.totals === null) {
+      return {
+        opening: `Good day, ${userName}.`,
+        question,
+        answer:
+          HIDDEN_SAFE_TO_SPEND_ANSWER[
+            hidden === null || hidden === "banks_not_read" ? "other" : hidden
+          ],
+      };
     }
-    const noRecurring =
-      s.assumptions.indexOf("recurring_unavailable") >= 0
-        ? " This doesn't include recurring charges, which I couldn't read yet."
-        : "";
 
+    const lines = safeToSpendLines(s.amountCents ?? 0, s.horizon);
     return {
-      opening:
-        amount >= 0
-          ? `Good day, ${userName}. After upcoming recurring charges and your card balances, you have about ${formatCents(amount)} to spend through ${through}.`
-          : `Good day, ${userName}. Your upcoming charges and card balances are ${formatCents(
-              s.uncoveredObligationsCents ?? -amount
-            )} more than your spendable cash through ${through}.`,
+      opening: `Good day, ${userName}. ${lines.statement}`,
       question,
-      answer: `That's ${parts.join(", ")}.${noRecurring}`,
+      answer: lines.answer,
     };
   }, [moneyDisplay, moneyError, hasBankConnection, summary, view, userName]);
 
@@ -708,13 +700,22 @@ export default function HomePage() {
                 <div>
                   <p className="text-gray-500 text-xs">Spendable cash</p>
                   <p
-                    className="text-2xl font-semibold"
+                    className={
+                      noCashAccount && moneyDisplay === "ready"
+                        ? "text-base font-semibold"
+                        : "text-2xl font-semibold"
+                    }
                     style={{ color: accentColor }}
                   >
                     <MoneyFigure state={moneyDisplay}>
-                      {formatCents(figures.cash)}
+                      {noCashAccount ? NO_CASH_ACCOUNT_LABEL : formatCentsOrDash(figures.cash)}
                     </MoneyFigure>
                   </p>
+                  {noCashAccount && moneyDisplay === "ready" && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {NO_CASH_ACCOUNT_HINT}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-gray-500 text-xs">Credit card balances</p>
@@ -779,7 +780,7 @@ export default function HomePage() {
                       key={item.streamId}
                       className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
                     >
-                      {item.label} · {formatCents(item.monthlyCents)}/mo
+                      {item.label} · {formatCentsOrDash(item.monthlyCents)}/mo
                     </span>
                   ))
                 ) : (

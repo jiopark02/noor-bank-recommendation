@@ -1,5 +1,3 @@
-import type { RecurringFrequency } from "./types";
-
 /**
  * Rounds half away from zero, so a negative amount rounds the same way as its
  * positive mirror (Math.round alone sends -0.5 to -0, not -1).
@@ -24,35 +22,4 @@ export function toCents(dollars: number): number {
  */
 export function isCents(x: unknown): x is number {
   return typeof x === "number" && Number.isSafeInteger(x);
-}
-
-export function sumCents(xs: number[]): number {
-  let total = 0;
-  for (let i = 0; i < xs.length; i++) total += xs[i];
-  return total;
-}
-
-/**
- * One occurrence's amount expressed per month. Exact ratios (52/12, 26/12),
- * rounded once at the end. UNKNOWN has no defensible ratio and returns null —
- * callers list it rather than guess.
- */
-export function monthlyCentsFromCadence(
-  cents: number,
-  frequency: RecurringFrequency
-): number | null {
-  switch (frequency) {
-    case "WEEKLY":
-      return roundHalfAwayFromZero((cents * 52) / 12);
-    case "BIWEEKLY":
-      return roundHalfAwayFromZero((cents * 26) / 12);
-    case "SEMI_MONTHLY":
-      return cents * 2;
-    case "MONTHLY":
-      return cents;
-    case "ANNUALLY":
-      return roundHalfAwayFromZero(cents / 12);
-    default:
-      return null;
-  }
 }

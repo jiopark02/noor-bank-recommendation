@@ -73,6 +73,99 @@ describe("the Plaid -> engine adapter stays on the server", () => {
 });
 
 /*
+ * The cash-flow engine package is server only: it uses node:crypto. A value
+ * import from a page, a component or a client-safe helper would pull it
+ * toward the browser bundle, where node:crypto does not exist.
+ *
+ * Rule: a value import of the package is allowed in the adapter and in route
+ * handlers under app/api; anywhere else only `import type` may name it.
+ *
+ * Mutations that turn this block red:
+ *   - a page or a client-safe helper (bankSummaryView, say) imports a value
+ *     from the package
+ *   - the package is reached through `require(` or a dynamic `import(`
+ *     outside the allowed files
+ *   - the summary route stops declaring the Node.js runtime, or names "edge"
+ *   - the engine called a second time anywhere, or its answer not bound as
+ *     `unknown` where it is called
+ *
+ * Limits: the same as above — one import statement at a time, no re-exports.
+ */
+const ENGINE_PACKAGE = /["']@sungwon0162\/cf-engine["']/;
+
+function enginePackageImports(source: string): string[] {
+  const statements = source.match(/(?:^|\n)\s*(?:import|export)\b[\s\S]*?from\s*["'][^"']+["']/g) ?? [];
+  const calls = source.match(/\b(?:require|import)\s*\(\s*["'][^"']+["']\s*\)/g) ?? [];
+  return statements.concat(calls).filter((s) => ENGINE_PACKAGE.test(s)).map((s) => s.trim());
+}
+
+function mayImportEngineValues(relPath: string): boolean {
+  if (relPath === "lib/plaidEngineAdapter.ts") return true;
+  return relPath.startsWith("app/api/") && /\/route\.(ts|js)$/.test(relPath);
+}
+
+describe("the cash-flow engine package stays on the server", () => {
+  const files = walk(SRC);
+
+  it("finds the known importers (the probe is pointed at real code)", () => {
+    const importers = files
+      .filter((f) => enginePackageImports(readFileSync(f, "utf8")).length > 0)
+      .map(rel);
+    expect(importers).toContain("app/api/finance/summary/route.ts");
+  });
+
+  it("outside the adapter and app/api route handlers, only `import type` reaches the package", () => {
+    const offenders: string[] = [];
+    for (const file of files) {
+      const r = rel(file);
+      if (mayImportEngineValues(r)) continue;
+      for (const statement of enginePackageImports(readFileSync(file, "utf8"))) {
+        if (!/^(?:import|export)\s+type\b/.test(statement)) offenders.push(`${r}: ${statement}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("no \"use client\" file names the package, even for types", () => {
+    const offenders = files
+      .filter((f) => {
+        const source = readFileSync(f, "utf8");
+        return /^\s*["']use client["']/.test(source) && enginePackageImports(source).length > 0;
+      })
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the pattern matches the package and not a look-alike", () => {
+    expect(ENGINE_PACKAGE.test(`from "@sungwon0162/cf-engine"`)).toBe(true);
+    expect(ENGINE_PACKAGE.test(`from "@sungwon0162/cf-engine-extra"`)).toBe(false);
+  });
+
+  // Red if: the engine is called in a second place, or its answer is kept or
+  // returned under its declared type instead of being checked as unknown.
+  it("the engine is called in one place, and its answer is bound as unknown", () => {
+    const calls: string[] = [];
+    for (const file of files) {
+      const lines = readFileSync(file, "utf8").split(/\r?\n/);
+      for (const line of lines) {
+        if (/\banalyzeCashFlow\s*\(/.test(line) && !/^\s*(?:\/\/|\*)/.test(line)) {
+          calls.push(`${rel(file)}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(calls).toEqual([
+      "lib/plaidEngineAdapter.ts: const answer: unknown = analyzeCashFlow(input, ENGINE_PROFILE);",
+    ]);
+  });
+
+  it("the summary route declares the Node.js runtime", () => {
+    const route = readFileSync(path.join(SRC, "app/api/finance/summary/route.ts"), "utf8");
+    expect(route).toMatch(/^export const runtime = "nodejs";$/m);
+    expect(route).not.toMatch(/runtime\s*=\s*["']edge["']/);
+  });
+});
+
+/*
  * "@/lib/plaid" builds the Plaid API client when it is evaluated, so a client
  * page that imports a value from it pulls that module into the browser
  * bundle. Display-only data it used to hold lives in client-safe modules.

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ENGINE_VERSION } from "@sungwon0162/cf-engine";
 import { isPlaidConfigured } from "@/lib/plaid";
 import {
   authenticate,
@@ -6,19 +7,23 @@ import {
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
-import { computeFinancialSummary } from "@/lib/financeEngine";
 import { DISPLAY_WINDOW_DAYS } from "@/lib/bankSummaryView";
 import {
+  EngineContractBreach,
+  EngineOutputUnexpected,
   READ_WINDOW_DAYS,
   bankWindow,
   displayTransactions,
   liveAdapterDeps,
   readBankData,
   resolveToday,
+  runCashFlowEngine,
   toDisplayAccount,
-  toEngineInput,
   type FinanceSummaryResponse,
 } from "@/lib/plaidEngineAdapter";
+
+/** Shown when the figures could not be computed from what the banks sent. */
+const SUMMARY_NOT_COMPUTED = "We couldn't compute your summary right now.";
 
 /**
  * POST /api/finance/summary
@@ -38,6 +43,11 @@ import {
  *     answer, for the screen that shows it. Any other value leaves the field
  *     out. The banks are read the same way either way.
  */
+
+// The cash-flow engine package uses node:crypto, so this handler runs on the
+// Node.js runtime, never the edge runtime.
+export const runtime = "nodejs";
+
 export async function POST(request: NextRequest) {
   try {
     // Authentication first, before anything about configuration is revealed.
@@ -82,7 +92,8 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     const { today, dateBasis } = resolveToday(auth.body.timeZone, now);
     console.log(
-      `[finance-summary] date_basis=${dateBasis === "user_time_zone" ? "user" : "utc_fallback"}`
+      `[finance-summary] date_basis=${dateBasis === "user_time_zone" ? "user" : "utc_fallback"} ` +
+        `engine_pkg=${ENGINE_VERSION}`
     );
     const readWindow = bankWindow(today, READ_WINDOW_DAYS);
     const period = bankWindow(today, DISPLAY_WINDOW_DAYS);
@@ -103,15 +114,13 @@ export async function POST(request: NextRequest) {
       connections: read.connections,
       accounts: anyRead ? read.accounts.map(toDisplayAccount) : [],
       summary: anyRead
-        ? computeFinancialSummary(
-            toEngineInput(read, {
-              nowIso: now.toISOString(),
-              today,
-              dateBasis,
-              readWindow,
-              period,
-            })
-          )
+        ? runCashFlowEngine(read, {
+            nowIso: now.toISOString(),
+            today,
+            dateBasis,
+            readWindow,
+            period,
+          })
         : null,
     };
     // The list the money screen shows, from this same read and window: the
@@ -122,6 +131,23 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(body);
   } catch (error: unknown) {
+    // The engine refusing the adapter's input is the adapter's bug; its
+    // answer lacking a field the screens read is a contract change. Either
+    // way only a fixed code is logged: no input value, amount or id.
+    if (error instanceof EngineContractBreach) {
+      console.error(`[finance-summary] engine_input_error code=${error.code}`);
+      return NextResponse.json(
+        { error: SUMMARY_NOT_COMPUTED, errorCode: "ENGINE_INPUT_REJECTED" },
+        { status: 500 }
+      );
+    }
+    if (error instanceof EngineOutputUnexpected) {
+      console.error("[finance-summary] engine_output_unexpected");
+      return NextResponse.json(
+        { error: SUMMARY_NOT_COMPUTED, errorCode: "ENGINE_OUTPUT_UNEXPECTED" },
+        { status: 500 }
+      );
+    }
     console.error("Error building finance summary:", error);
     return handlePlaidError(error);
   }

@@ -59,6 +59,21 @@ import {
 } from "@/lib/plaidTokenCrypto";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
 import {
+  analyzeCashFlow,
+  EngineInputError,
+  type CfInput,
+  type CfResult,
+  type UserProfile,
+} from "@sungwon0162/cf-engine";
+import {
+  ENGINE_SUMMARY_FIELDS,
+  SCREEN_SUMMARY_FIELDS,
+  pickFields,
+  type FieldsOf,
+  type ScreenSummary,
+} from "@/lib/bankSummaryView";
+import {
+  creditUtilizationOf,
   dayNumber,
   fromDayNumber,
   isCardPaymentCategory,
@@ -71,10 +86,7 @@ import type {
   DateBasis,
   EngineAccount,
   EngineConnection,
-  EngineInput,
   EngineRecurringStream,
-  EngineTransaction,
-  FinancialSummary,
   RecurringFrequency,
   RecurringStatus,
 } from "@/lib/financeEngine";
@@ -155,8 +167,12 @@ export interface FinanceSummaryResponse {
    * connection could be read.
    */
   transactions?: DisplayTransaction[];
-  /** null when no connection could be read. */
-  summary: FinancialSummary | null;
+  /**
+   * null when no connection could be read. Exactly the fields the screens
+   * read (SCREEN_SUMMARY_FIELDS), picked from the engine's answer plus the
+   * app's credit utilization; nothing else the engine returns is sent.
+   */
+  summary: ScreenSummary | null;
 }
 
 // ---- dependencies -------------------------------------------------------------
@@ -320,6 +336,16 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
 
+/** A string as sent (empty included becomes null), anything else null. */
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+/** A string as sent, or null for anything that is not a string. */
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
 /**
  * An opaque key two connections share for what looks like the same bank
  * account: a hash of the institution's name, the account type and subtype,
@@ -364,11 +390,11 @@ export function mapAccount(
     officialName: account.official_name ?? null,
     mask: account.mask ?? null,
     type: accountType(account.type),
-    subtype: account.subtype ?? null,
+    subtype: stringOrNull(account.subtype),
     currentCents: centsOrNull(b.current),
     availableCents: centsOrNull(b.available),
     limitCents: centsOrNull(b.limit),
-    currency: b.iso_currency_code ?? null,
+    currency: stringOrNull(b.iso_currency_code),
     balanceAsOf: b.last_updated_datetime ?? null,
     fetchedAt,
     duplicateKey: duplicateKeyOf(account, connection.institutionName),
@@ -412,15 +438,15 @@ export function mapTransaction(txn: Transaction): ReadTransaction {
     transactionId: txn.transaction_id,
     accountId: txn.account_id,
     amountCents: toCents(txn.amount),
-    currency: txn.iso_currency_code ?? null,
+    currency: stringOrNull(txn.iso_currency_code),
     date: txn.date,
     pending: txn.pending,
     name: txn.name,
     merchantName: txn.merchant_name ?? null,
     logoUrl: txn.logo_url ?? null,
-    category: Array.isArray(txn.category) ? txn.category : [],
-    pfcPrimary: pfc && pfc.primary ? pfc.primary : null,
-    pfcDetailed: pfc && pfc.detailed ? pfc.detailed : null,
+    category: stringsOnly(txn.category),
+    pfcPrimary: pfc ? textOrNull(pfc.primary) : null,
+    pfcDetailed: pfc ? textOrNull(pfc.detailed) : null,
     merchantEntityId: nonEmpty(txn.merchant_entity_id) ? txn.merchant_entity_id : null,
   };
 }
@@ -532,8 +558,9 @@ export function mapStream(
   const { shape, iso } = streamCurrency(stream);
   const pfc = stream.personal_finance_category ?? null;
   return {
+    // Checked, not repaired, by the engine contract below (streamFieldFault).
     streamId: stream.stream_id,
-    label: stream.merchant_name || stream.description || "Recurring charge",
+    label: textOrNull(stream.merchant_name) ?? textOrNull(stream.description) ?? "Recurring charge",
     frequency: oneOf(stream.frequency, FREQUENCIES) ?? "UNKNOWN",
     averageAmountCents: centsOrNull(avg.amount),
     lastAmountCents: centsOrNull(last.amount),
@@ -543,8 +570,8 @@ export function mapStream(
     isActive: stream.is_active === true,
     status: oneOf(stream.status, STATUSES) ?? "UNKNOWN",
     accountId: nonEmpty(stream.account_id) ? stream.account_id : null,
-    pfcPrimary: pfc && pfc.primary ? pfc.primary : null,
-    pfcDetailed: pfc && pfc.detailed ? pfc.detailed : null,
+    pfcPrimary: pfc ? textOrNull(pfc.primary) : null,
+    pfcDetailed: pfc ? textOrNull(pfc.detailed) : null,
     legacyCategory: stringsOnly(stream.category),
     transactionIds: stringsOnly(stream.transaction_ids),
   };
@@ -688,6 +715,19 @@ async function readConnection(
       const fetchedAt = new Date().toISOString();
       const list = response.data.accounts;
       for (let i = 0; i < list.length; i++) {
+        // An account with no id cannot be told apart from another one, and a
+        // card left out would understate what is owed: the whole read fails
+        // rather than continue without it.
+        const raw: unknown = list[i];
+        if (
+          typeof raw !== "object" ||
+          raw === null ||
+          !nonEmpty((raw as Record<string, unknown>).account_id) ||
+          typeof (raw as Record<string, unknown>).balances !== "object" ||
+          (raw as Record<string, unknown>).balances === null
+        ) {
+          throw new Error("account without a usable id or balances");
+        }
         accounts.push(
           mapAccount(list[i], { itemId, institutionName, connectionKey }, fetchedAt)
         );
@@ -922,6 +962,251 @@ function decryptFailedRead(
 
 type DecryptedToken = { ok: true; token: string } | { ok: false; error: unknown };
 
+// ---- engine contract ----------------------------------------------------------
+//
+// The engine refuses a whole request when one value breaks its input contract.
+// Values Plaid sent that would break it are dealt with here, before the call,
+// so one odd value never fails every figure. What happens depends on what the
+// value is for. Nothing that is owed (an outflow stream, a card) is dropped:
+// dropping it would understate what is owed and overstate what can be spent.
+//
+//   account balanceAsOf not a valid instant     -> null, counted
+//   account amount not a safe integer of cents  -> null, counted
+//   cash (depository) account whose available
+//   amount was nulled above                     -> its current amount null too,
+//                                                  counted
+//   connection lastSuccessfulUpdate not valid   -> null, counted
+//   outflow stream lastDate / predictedNextDate -> null, counted
+//   outflow stream amount not a safe integer,
+//   or any stream id empty or not a string      -> that connection's recurring
+//                                                  read is "failed"
+//   income stream date or amount not valid      -> recurring read "failed"
+//   one stream id on two streams (every connection's outflow and income lists
+//   together): identical copies keep the first, counted in the log only;
+//   copies that differ, or that sit in both lists -> every connection holding
+//   one has its recurring read "failed"
+//
+// A connection whose recurring read is "failed" sends no streams at all: the
+// engine checks every stream it is given, used or not. Transactions are
+// filtered earlier (isUsableTransaction, invalidTransactions). The counts go
+// to the log only, never into the engine input.
+
+/** A calendar date the engine accepts: YYYY-MM-DD, a real day, 2000-01-01 to 9998-12-31. */
+export function isEngineDate(value: unknown): value is string {
+  return typeof value === "string" && isIsoDate(value);
+}
+
+// The engine's instant: seconds required, a fraction of any length, and a
+// zone of "Z" or ±hh:mm.
+const ENGINE_INSTANT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** An instant the engine accepts. Its date part follows isEngineDate. */
+export function isEngineInstant(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const m = ENGINE_INSTANT.exec(value);
+  if (!m || !isIsoDate(m[1])) return false;
+  if (Number(m[2]) > 23 || Number(m[3]) > 59 || Number(m[4]) > 59) return false;
+  if (m[6] !== "Z" && (Number(m[6].slice(1, 3)) > 23 || Number(m[6].slice(4, 6)) > 59)) {
+    return false;
+  }
+  return true;
+}
+
+function nullableCents(value: number | null): number | null {
+  return value === null || isCents(value) ? value : null;
+}
+
+/** What the contract changed on one connection. Counts only. */
+export interface ContractCounts {
+  balanceAsOfNulled: number;
+  amountsNulled: number;
+  streamDatesNulled: number;
+  lastUpdateNulled: number;
+  identicalStreamsDropped: number;
+  /** Why the recurring read was set to "failed" here, or "none". */
+  recurringFailed: "none" | "stream_field" | "stream_id_conflict";
+}
+
+/** One connection's share of a read, before or after the contract. */
+export interface ContractConnection {
+  engine: EngineConnection;
+  accounts: ReadAccount[];
+  streams: EngineRecurringStream[];
+  incomeStreams: EngineRecurringStream[];
+}
+
+function emptyCounts(): ContractCounts {
+  return {
+    balanceAsOfNulled: 0,
+    amountsNulled: 0,
+    streamDatesNulled: 0,
+    lastUpdateNulled: 0,
+    identicalStreamsDropped: 0,
+    recurringFailed: "none",
+  };
+}
+
+/** Whether a stream's own fields fail it outright (see the table above). */
+function streamFieldFault(s: EngineRecurringStream, income: boolean): boolean {
+  if (typeof s.streamId !== "string" || s.streamId === "") return true;
+  if (!(s.averageAmountCents === null || isCents(s.averageAmountCents))) return true;
+  if (!(s.lastAmountCents === null || isCents(s.lastAmountCents))) return true;
+  if (income) {
+    if (!(s.lastDate === null || isEngineDate(s.lastDate))) return true;
+    if (!(s.predictedNextDate === null || isEngineDate(s.predictedNextDate))) return true;
+  }
+  return false;
+}
+
+/** The same JSON whatever order an object's keys were written in. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return (
+      "{" +
+      Object.keys(record)
+        .filter((k) => record[k] !== undefined)
+        .sort()
+        .map((k) => JSON.stringify(k) + ":" + canonicalJson(record[k]))
+        .join(",")
+    ) + "}";
+  }
+  return JSON.stringify(value);
+}
+
+function recurringWasAnswered(c: EngineConnection): boolean {
+  return c.recurringRead === "ok" || c.recurringRead === "empty";
+}
+
+/**
+ * Applies the engine contract to every connection of one read, in connection
+ * order. Pure: the input is not changed.
+ */
+export function applyEngineContract(connections: ContractConnection[]): {
+  connections: ContractConnection[];
+  counts: ContractCounts[];
+} {
+  const counts = connections.map(() => emptyCounts());
+  const failed = connections.map(() => false);
+
+  // ---- fields of each connection, account and outflow stream
+  const fixed: ContractConnection[] = connections.map((c, i) => {
+    const n = counts[i];
+    let lastSuccessfulUpdate = c.engine.lastSuccessfulUpdate;
+    if (lastSuccessfulUpdate !== null && !isEngineInstant(lastSuccessfulUpdate)) {
+      lastSuccessfulUpdate = null;
+      n.lastUpdateNulled += 1;
+    }
+    const accounts = c.accounts.map((a) => {
+      let balanceAsOf = a.balanceAsOf;
+      if (balanceAsOf !== null && !isEngineInstant(balanceAsOf)) {
+        balanceAsOf = null;
+        n.balanceAsOfNulled += 1;
+      }
+      const availableCents = nullableCents(a.availableCents);
+      // A cash account whose available balance was dropped must not fall back
+      // to its current balance, which leaves out pending withdrawals and can
+      // be higher: both go null, so the engine treats the balance as unknown.
+      const cashAvailableDropped =
+        a.type === "depository" && a.availableCents !== null && availableCents === null;
+      const currentCents = cashAvailableDropped ? null : nullableCents(a.currentCents);
+      const limitCents = nullableCents(a.limitCents);
+      n.amountsNulled +=
+        Number(currentCents !== a.currentCents) +
+        Number(availableCents !== a.availableCents) +
+        Number(limitCents !== a.limitCents);
+      return { ...a, balanceAsOf, currentCents, availableCents, limitCents };
+    });
+    const streams = c.streams.map((s) => {
+      let lastDate = s.lastDate;
+      let predictedNextDate = s.predictedNextDate;
+      if (lastDate !== null && !isEngineDate(lastDate)) {
+        lastDate = null;
+        n.streamDatesNulled += 1;
+      }
+      if (predictedNextDate !== null && !isEngineDate(predictedNextDate)) {
+        predictedNextDate = null;
+        n.streamDatesNulled += 1;
+      }
+      return { ...s, lastDate, predictedNextDate };
+    });
+    if (
+      recurringWasAnswered(c.engine) &&
+      (streams.some((s) => streamFieldFault(s, false)) ||
+        c.incomeStreams.some((s) => streamFieldFault(s, true)))
+    ) {
+      failed[i] = true;
+      n.recurringFailed = "stream_field";
+    }
+    return {
+      engine: { ...c.engine, lastSuccessfulUpdate },
+      accounts,
+      streams,
+      incomeStreams: c.incomeStreams.slice(),
+    };
+  });
+
+  // ---- one stream id on two streams, across every connection still sending
+  // streams. Failing a connection only removes copies, so it never turns an
+  // id that agreed into one that conflicts: one pass is enough.
+  type Copy = { at: number; income: boolean; key: string };
+  const copiesById = new Map<string, Copy[]>();
+  for (let i = 0; i < fixed.length; i++) {
+    if (failed[i]) continue;
+    const lists: Array<[EngineRecurringStream[], boolean]> = [
+      [fixed[i].streams, false],
+      [fixed[i].incomeStreams, true],
+    ];
+    for (const [list, income] of lists) {
+      for (let j = 0; j < list.length; j++) {
+        const copy = { at: i, income, key: canonicalJson(list[j]) };
+        const known = copiesById.get(list[j].streamId);
+        if (known) known.push(copy);
+        else copiesById.set(list[j].streamId, [copy]);
+      }
+    }
+  }
+  copiesById.forEach((copies) => {
+    if (copies.length < 2) return;
+    const conflict = copies.some((c) => c.key !== copies[0].key || c.income !== copies[0].income);
+    if (!conflict) return;
+    for (let k = 0; k < copies.length; k++) {
+      failed[copies[k].at] = true;
+      counts[copies[k].at].recurringFailed = "stream_id_conflict";
+    }
+  });
+
+  // ---- identical copies: the first, in connection order, is kept. Decided
+  // after every failure above, so a copy is never dropped in favour of one on
+  // a connection that then sends no streams.
+  const kept = new Set<string>();
+  const out: ContractConnection[] = fixed.map((c, i) => {
+    if (failed[i]) {
+      return {
+        engine: { ...c.engine, recurringRead: "failed" },
+        accounts: c.accounts,
+        streams: [],
+        incomeStreams: [],
+      };
+    }
+    const keepFirst = (list: EngineRecurringStream[]) =>
+      list.filter((s) => {
+        if (kept.has(s.streamId)) {
+          counts[i].identicalStreamsDropped += 1;
+          return false;
+        }
+        kept.add(s.streamId);
+        return true;
+      });
+    const streams = keepFirst(c.streams);
+    const incomeStreams = keepFirst(c.incomeStreams);
+    return { engine: c.engine, accounts: c.accounts, streams, incomeStreams };
+  });
+
+  return { connections: out, counts };
+}
+
 /**
  * Every connection's answer, merged. Whether the figures are complete, and
  * whether recurring charges are known, is not decided here: the engine
@@ -999,16 +1284,26 @@ export async function readBankData(
   // "constructor" is not read as already seen.
   const keptTransactions = new Map<string, string>();
 
+  const contract = applyEngineContract(
+    reads.map((r) => ({
+      engine: r.engine,
+      accounts: r.accounts,
+      streams: r.streams,
+      incomeStreams: r.incomeStreams,
+    }))
+  );
+
   // In connection order, so which copy is kept never depends on which bank
   // answered first.
   for (let i = 0; i < reads.length; i++) {
     const r = reads[i];
+    const c = contract.connections[i];
     connections.push(r.status);
-    for (let j = 0; j < r.accounts.length; j++) {
+    for (let j = 0; j < c.accounts.length; j++) {
       // Distinct Items normally yield distinct account ids; never emit one twice.
-      if (seenAccounts.has(r.accounts[j].accountId)) continue;
-      seenAccounts.add(r.accounts[j].accountId);
-      accounts.push(r.accounts[j]);
+      if (seenAccounts.has(c.accounts[j].accountId)) continue;
+      seenAccounts.add(c.accounts[j].accountId);
+      accounts.push(c.accounts[j]);
     }
     // The first copy of a transaction id is kept. A later copy on the same
     // account is a duplicate; one on another account is invalid, since an id
@@ -1030,7 +1325,7 @@ export async function readBankData(
       }
     }
     engineConnections.push({
-      ...r.engine,
+      ...c.engine,
       earliestTransactionDate: earliestDate(kept),
       invalidTransactions: { duplicate, invalid },
     });
@@ -1038,8 +1333,17 @@ export async function readBankData(
       // Counts only: no id, amount or account.
       console.log(`[bank-filter] idx=${i} invalid=${invalid} duplicate=${duplicate}`);
     }
-    for (let j = 0; j < r.streams.length; j++) streams.push(r.streams[j]);
-    for (let j = 0; j < r.incomeStreams.length; j++) incomeStreams.push(r.incomeStreams[j]);
+    // One line per connection, zeros included, so how often each case
+    // happens can be read from the log. Counts only.
+    const n = contract.counts[i];
+    console.log(
+      `[bank-contract] idx=${i} invalid_txn=${invalid} duplicate_txn=${duplicate} ` +
+        `balance_as_of_nulled=${n.balanceAsOfNulled} amounts_nulled=${n.amountsNulled} ` +
+        `stream_dates_nulled=${n.streamDatesNulled} last_update_nulled=${n.lastUpdateNulled} ` +
+        `identical_streams_dropped=${n.identicalStreamsDropped} recurring_failed=${n.recurringFailed}`
+    );
+    for (let j = 0; j < c.streams.length; j++) streams.push(c.streams[j]);
+    for (let j = 0; j < c.incomeStreams.length; j++) incomeStreams.push(c.incomeStreams[j]);
   }
 
   return { connections, engineConnections, accounts, transactions, streams, incomeStreams };
@@ -1101,21 +1405,6 @@ export function displayTransactions(read: BankRead, window: BankWindow): Display
   return out;
 }
 
-function toEngineTransaction(t: ReadTransaction): EngineTransaction {
-  return {
-    transactionId: t.transactionId,
-    accountId: t.accountId,
-    amountCents: t.amountCents,
-    currency: t.currency,
-    date: t.date,
-    pending: t.pending,
-    pfcPrimary: t.pfcPrimary,
-    pfcDetailed: t.pfcDetailed,
-    legacyCategory: t.category,
-    merchantEntityId: t.merchantEntityId,
-  };
-}
-
 /** The request-wide dates an engine input is built from, all from one `today`. */
 export interface EngineInputDates {
   nowIso: string;
@@ -1127,14 +1416,250 @@ export interface EngineInputDates {
   period: BankWindow;
 }
 
-/** Only the fields the engine reads: no names, masks or institution. */
-export function toEngineInput(read: BankRead, dates: EngineInputDates): EngineInput {
+// ---- the cash-flow engine package ---------------------------------------------
+
+/** The input schema this adapter writes. The package refuses any other. */
+export const ENGINE_INPUT_SCHEMA_VERSION = 1;
+
+/** No per-user settings are kept yet, so the engine runs on its defaults. */
+export const ENGINE_PROFILE: UserProfile = {};
+
+/**
+ * When every connection's recurring read answered with no streams, recurring
+ * charges are shown as unknown, never as $0: Plaid needs history to detect a
+ * stream, so an empty answer does not prove there are none. "hide" also keeps
+ * the safe-to-spend figure off the screens in that case, since it would count
+ * no recurring charges at all.
+ */
+export const SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY: "hide" | "show" = "hide";
+
+/** The read as the engine package takes it: only the fields its contract names. */
+export function toPackageInput(read: BankRead, dates: EngineInputDates): CfInput {
+  const stream = (s: EngineRecurringStream) => ({
+    streamId: s.streamId,
+    label: s.label,
+    frequency: s.frequency,
+    averageAmountCents: s.averageAmountCents,
+    lastAmountCents: s.lastAmountCents,
+    currency: s.currency,
+    lastDate: s.lastDate,
+    predictedNextDate: s.predictedNextDate,
+    isActive: s.isActive,
+    status: s.status,
+    accountId: s.accountId,
+    pfcPrimary: s.pfcPrimary,
+    pfcDetailed: s.pfcDetailed,
+    transactionIds: s.transactionIds.slice(),
+  });
   return {
+    schemaVersion: ENGINE_INPUT_SCHEMA_VERSION,
     now: dates.nowIso,
     today: dates.today,
     dateBasis: dates.dateBasis,
-    currency: ENGINE_CURRENCY,
+    currency: "USD",
+    readWindow: { start: dates.readWindow.start, end: dates.readWindow.end },
+    period: { start: dates.period.start, end: dates.period.end },
     accounts: read.accounts.map((a) => ({
+      accountId: a.accountId,
+      type: a.type,
+      subtype: a.subtype,
+      currentCents: a.currentCents,
+      availableCents: a.availableCents,
+      limitCents: a.limitCents,
+      currency: a.currency,
+      balanceAsOf: a.balanceAsOf,
+      duplicateKey: a.duplicateKey,
+      connectionKey: a.connectionKey,
+    })),
+    connections: read.engineConnections.map((c) => ({
+      connectionKey: c.connectionKey,
+      state: c.state,
+      lastSuccessfulUpdate: c.lastSuccessfulUpdate,
+      recurringRead: c.recurringRead,
+      transactionsTruncated: c.transactionsTruncated,
+      earliestTransactionDate: c.earliestTransactionDate,
+      ...(c.invalidTransactions
+        ? {
+            invalidTransactions: {
+              duplicate: c.invalidTransactions.duplicate,
+              invalid: c.invalidTransactions.invalid,
+            },
+          }
+        : {}),
+    })),
+    transactions: read.transactions.map((t) => ({
+      transactionId: t.transactionId,
+      accountId: t.accountId,
+      amountCents: t.amountCents,
+      currency: t.currency,
+      date: t.date,
+      pending: t.pending,
+      pfcPrimary: t.pfcPrimary,
+      pfcDetailed: t.pfcDetailed,
+      legacyCategory: t.category.slice(),
+      merchantEntityId: t.merchantEntityId,
+    })),
+    recurring: {
+      streams: read.streams.map(stream),
+      incomeStreams: read.incomeStreams.map(stream),
+    },
+  };
+}
+
+// Messages the engine refuses an input with, as fixed codes. Some messages
+// end with the offending value; only the fixed part is ever kept.
+const ENGINE_ERROR_EXACT: ReadonlyArray<string> = [
+  "input",
+  "schemaVersion",
+  "date",
+  "datetime",
+  "tz",
+  "currency",
+  "windows",
+  "readWindow.end != today",
+  "dup account",
+  "invalidTransactions",
+  "legacyCategory",
+  "dup txn",
+  "pendingMove",
+  "pendingMove amount",
+  "pendingMove approvedAt",
+  "ownTransferTransactionIds",
+  "transactionIds",
+  "dup stream",
+  "profile",
+  "dup override",
+  "both targets",
+  "targetCents",
+  "targetMonths",
+  "planned",
+  "planned createdAt",
+  "output integer out of safe range",
+];
+const ENGINE_ERROR_WITH_VALUE: ReadonlyArray<string> = ["date range ", "datetime ", "date "];
+const ENGINE_ERROR_WITH_KEY: ReadonlyArray<string> = ["missing ", "type "];
+const FIELD_NAME = /^[A-Za-z]{1,40}$/;
+
+function codeOf(text: string): string {
+  return text.trim().replace(/[^A-Za-z0-9]+/g, "_");
+}
+
+/**
+ * A fixed code for an EngineInputError message, safe to log: one of the
+ * engine's own fixed messages, the fixed part of a message that ends with a
+ * value, or "missing_<field>" / "type_<field>" for a field name. Anything
+ * else is "unknown". The message itself is never returned.
+ */
+export function engineInputErrorCode(message: unknown): string {
+  if (typeof message !== "string") return "unknown";
+  if (ENGINE_ERROR_EXACT.indexOf(message) >= 0) return codeOf(message);
+  for (let i = 0; i < ENGINE_ERROR_WITH_KEY.length; i++) {
+    const prefix = ENGINE_ERROR_WITH_KEY[i];
+    if (message.indexOf(prefix) === 0 && FIELD_NAME.test(message.slice(prefix.length))) {
+      return codeOf(prefix) + "_" + message.slice(prefix.length);
+    }
+  }
+  for (let i = 0; i < ENGINE_ERROR_WITH_VALUE.length; i++) {
+    if (message.indexOf(ENGINE_ERROR_WITH_VALUE[i]) === 0) return codeOf(ENGINE_ERROR_WITH_VALUE[i]);
+  }
+  return "unknown";
+}
+
+/** The engine refused the input this adapter built: an adapter bug. */
+export class EngineContractBreach extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super("engine input refused: " + code);
+    this.name = "EngineContractBreach";
+    this.code = code;
+  }
+}
+
+/** The engine's answer lacked a field the screens read, or had it with the wrong type. */
+export class EngineOutputUnexpected extends Error {
+  constructor(what: string) {
+    super("engine output unexpected: " + what);
+    this.name = "EngineOutputUnexpected";
+  }
+}
+
+type Holds<T extends true> = T;
+/**
+ * Compile-time only: every field the screens read from the engine is in the
+ * package's declared result, with a type the field list accepts. A field the
+ * package renames or retypes fails here. The runtime check (pickFields) still
+ * runs: the declaration is not a guarantee about what the code returns.
+ */
+export type EngineResultSatisfiesScreenFields = Holds<
+  [CfResult] extends [FieldsOf<typeof ENGINE_SUMMARY_FIELDS>] ? true : false
+>;
+
+/** The one place the engine is called. Its answer is unknown until checked. */
+function callEngine(input: CfInput): unknown {
+  try {
+    const answer: unknown = analyzeCashFlow(input, ENGINE_PROFILE);
+    return answer;
+  } catch (error: unknown) {
+    if (error instanceof EngineInputError) {
+      throw new EngineContractBreach(engineInputErrorCode(error.message));
+    }
+    throw error;
+  }
+}
+
+/**
+ * Account ids the engine left out as copies of an account reached through
+ * another connection (its "duplicate_account_collapsed" issues), or null when
+ * the answer's dataIssues cannot be read.
+ */
+export function collapsedAccountIds(answer: unknown): Set<string> | null {
+  if (answer === null || typeof answer !== "object") return null;
+  const issues = (answer as Record<string, unknown>).dataIssues;
+  if (!Array.isArray(issues)) return null;
+  const ids = new Set<string>();
+  for (let i = 0; i < issues.length; i++) {
+    const issue: unknown = issues[i];
+    if (issue === null || typeof issue !== "object") return null;
+    const record = issue as Record<string, unknown>;
+    if (typeof record.reason !== "string") return null;
+    if (record.reason !== "duplicate_account_collapsed") continue;
+    if (typeof record.accountKey !== "string") return null;
+    ids.add(record.accountKey);
+  }
+  return ids;
+}
+
+/** Every connection answered its recurring read, and none returned a stream. */
+export function recurringAllEmpty(connections: EngineConnection[]): boolean {
+  return connections.length > 0 && connections.every((c) => c.recurringRead === "empty");
+}
+
+/**
+ * Runs the engine package over a read and returns the summary the screens
+ * receive: the fields they read, picked from the engine's answer, with two
+ * decisions of the app's own on top:
+ *   - recurring charges are unknown (null, no items) when every connection's
+ *     recurring read was empty, and safe-to-spend follows
+ *     SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY;
+ *   - credit utilization is the app's, over the read's accounts less those
+ *     the engine left out as copies.
+ * Throws EngineContractBreach when the engine refuses the input, and
+ * EngineOutputUnexpected when its answer lacks a field the screens read.
+ */
+export function runCashFlowEngine(read: BankRead, dates: EngineInputDates): ScreenSummary {
+  const answer = callEngine(toPackageInput(read, dates));
+  const picked = pickFields(ENGINE_SUMMARY_FIELDS, answer);
+  if (!picked.ok) throw new EngineOutputUnexpected("summary fields");
+  const collapsed = collapsedAccountIds(answer);
+  if (collapsed === null) throw new EngineOutputUnexpected("dataIssues");
+  const engine = picked.value as FieldsOf<typeof ENGINE_SUMMARY_FIELDS>;
+
+  const allEmpty = recurringAllEmpty(read.engineConnections);
+  const creditAccounts: EngineAccount[] = [];
+  for (let i = 0; i < read.accounts.length; i++) {
+    const a = read.accounts[i];
+    if (collapsed.has(a.accountId)) continue;
+    creditAccounts.push({
       accountId: a.accountId,
       type: a.type,
       subtype: a.subtype,
@@ -1146,11 +1671,23 @@ export function toEngineInput(read: BankRead, dates: EngineInputDates): EngineIn
       fetchedAt: a.fetchedAt,
       duplicateKey: a.duplicateKey,
       connectionKey: a.connectionKey,
-    })),
-    transactions: read.transactions.map(toEngineTransaction),
-    readWindow: { start: dates.readWindow.start, end: dates.readWindow.end },
-    period: { start: dates.period.start, end: dates.period.end },
-    connections: read.engineConnections.map((c) => ({ ...c })),
-    recurring: { streams: read.streams, incomeStreams: read.incomeStreams },
+    });
+  }
+
+  const summary = {
+    coverage: {
+      safeToSpendShowable:
+        engine.coverage.safeToSpendShowable &&
+        !(allEmpty && SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY === "hide"),
+    },
+    cashFlow: engine.cashFlow,
+    safeToSpend: engine.safeToSpend,
+    recurring: allEmpty ? { totalMonthlyCents: null, items: [] } : engine.recurring,
+    creditUtilization: creditUtilizationOf(creditAccounts, ENGINE_CURRENCY),
   };
+  // Picked once more, as a whole, so the app's own parts carry nothing the
+  // screens do not read either.
+  const checked = pickFields(SCREEN_SUMMARY_FIELDS, summary);
+  if (!checked.ok) throw new EngineOutputUnexpected("screen summary");
+  return checked.value as ScreenSummary;
 }
