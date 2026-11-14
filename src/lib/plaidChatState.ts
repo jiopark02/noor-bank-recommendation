@@ -110,6 +110,7 @@ async function fetchShallowAccounts(
           label: a.name || a.official_name || "Account",
           kind: mapAccountKind(a.type, a.subtype),
           balanceStatus: known ? "known" : "unavailable",
+          owed: a.type === "credit" || a.type === "loan",
           current: known ? (current as number) : undefined,
           available: typeof available === "number" ? available : undefined,
           currency: a.balances?.iso_currency_code || undefined,
