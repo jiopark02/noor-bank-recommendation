@@ -1628,3 +1628,36 @@ describe("read options", () => {
     for (const line of bankLogLines()) expect(line.endsWith(" origin=chat")).toBe(true);
   });
 });
+
+describe("an accounts-only read and its window", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // The chat reads accounts only and passes a one-day window ending today in
+  // UTC. Red if a later change lets the window reach the answer or the log of
+  // such a read: the chat would then need the user's own calendar date.
+  it("gives the same answer and the same log lines whatever the window", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const want = { accounts: true, transactions: false, recurring: false };
+    const runWith = async (range: { start: string; end: string }) => {
+      vi.mocked(console.log).mockClear();
+      vi.mocked(console.warn).mockClear();
+      vi.mocked(console.error).mockClear();
+      const { plaid, recorded } = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+      const read = await readBankData(USER, OPTION_ROWS, want, range, deps(plaid), {
+        itemStatus: false,
+        logOrigin: "chat",
+      });
+      // fetchedAt is the clock at the read, not the window.
+      const accounts = read.accounts.map((a) => ({ ...a, fetchedAt: "" }));
+      return { read: { ...read, accounts }, recorded, lines: bankLogLines() };
+    };
+
+    const a = await runWith({ start: "2026-11-11", end: "2026-11-11" });
+    const b = await runWith({ start: "2025-01-01", end: "2025-12-31" });
+
+    expect(b).toStrictEqual(a);
+    expect(a.lines.some((l) => l.includes("history_days=none"))).toBe(true);
+  });
+});

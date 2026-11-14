@@ -5,20 +5,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 /**
  * getPlaidChatState takes an optional AbortSignal and hands it to the two
  * kinds of call it makes: the plaid_connections read and each Plaid accounts
- * call. The chat route passes one so that a read it has stopped waiting for is
- * cancelled, not left running.
+ * call, which it makes through the shared bank adapter. The chat route passes
+ * one so that a read it has stopped waiting for is cancelled, not left
+ * running.
  *
- * The signal is a per-call option. Without one, both calls are made exactly
- * as they were before the option existed.
+ * The signal is a per-call option next to the adapter's own timeout. Without
+ * one, each call takes the timeout alone.
+ *
+ * The connections are read at once, not one after another, so a cancel
+ * reaches every call still in flight through the same signal. A signal that
+ * was aborted before the accounts read means no Plaid call at all.
  *
  * Only the server-client factory, the Plaid client and the token decrypt are
  * faked. vi.mock replaces each module for every importer in this file's graph.
  *
- * After the signal is aborted, the connections not yet read are left alone,
- * and the one cancelled call is logged by its message only: the request
- * config a cancel error carries, with the Plaid secret and the access token
- * in it, never reaches a log line. That holds here without the Plaid client's
- * own redaction, which this file replaces with a fake.
+ * A cancelled call is logged by the adapter with its status and code only: the
+ * request config a cancel error carries, with the Plaid secret and the access
+ * token in it, never reaches a log line. That holds here without the Plaid
+ * client's own redaction, which this file replaces with a fake.
  *
  * WHAT THIS FILE DOES NOT PROVE
  * That PostgREST or the Plaid SDK stops the request when the signal aborts.
@@ -28,9 +32,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * that interceptor).
  */
 
-const { createServerClientMock, accountsGetMock } = vi.hoisted(() => ({
+const { createServerClientMock, accountsGetMock, itemGetMock } = vi.hoisted(() => ({
   createServerClientMock: vi.fn(),
   accountsGetMock: vi.fn(),
+  itemGetMock: vi.fn(),
 }));
 
 vi.mock("../supabase", () => ({
@@ -38,19 +43,22 @@ vi.mock("../supabase", () => ({
 }));
 
 vi.mock("../plaid", () => ({
-  plaidClient: { accountsGet: accountsGetMock },
+  plaidClient: { accountsGet: accountsGetMock, itemGet: itemGetMock },
   isPlaidConfigured: () => true,
 }));
 
 vi.mock("../plaidTokenCrypto", () => ({
   decryptPlaidAccessToken: (stored: string) => `plain:${stored}`,
+  isPlaidTokenCryptoError: () => false,
 }));
 
 import { getPlaidChatState } from "../plaidChatState";
 
+const TIMEOUT = { timeout: 10_000 };
+
 const ROWS = [
-  { institution_name: "Test Bank", status: "active", access_token: "v1:a" },
-  { institution_name: "Second Bank", status: "active", access_token: "v1:b" },
+  { institution_name: "Test Bank", status: "active", access_token: "v1:a", item_id: "item-a" },
+  { institution_name: "Second Bank", status: "active", access_token: "v1:b", item_id: "item-b" },
 ];
 
 /**
@@ -67,43 +75,51 @@ function clientResolving(result: { data: unknown; error: unknown }) {
   return { client: { from: vi.fn(() => builder) }, abortSignal };
 }
 
-function accountsResponse() {
+function accountsResponse(id = "acc-1") {
   return {
     data: {
       accounts: [
         {
+          account_id: id,
           name: "Everyday Checking",
+          official_name: null,
+          mask: "0000",
           type: "depository",
           subtype: "checking",
-          balances: { current: 812.34, available: 790.12, iso_currency_code: "USD" },
+          balances: { current: 812.34, available: 790.12, limit: null, iso_currency_code: "USD" },
         },
       ],
     },
   };
 }
 
+beforeEach(() => {
+  createServerClientMock.mockReset();
+  accountsGetMock.mockReset();
+  itemGetMock.mockReset();
+  for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+    vi.spyOn(console, method).mockImplementation(() => undefined);
+  }
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("getPlaidChatState — the optional signal", () => {
-  beforeEach(() => {
-    createServerClientMock.mockReset();
-    accountsGetMock.mockReset();
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("without a signal, the connection read and the accounts calls take no extra option", async () => {
+  it("without a signal, the connection read takes none and each accounts call takes the timeout alone", async () => {
     const stub = clientResolving({ data: ROWS, error: null });
     createServerClientMock.mockReturnValue(stub.client);
-    accountsGetMock.mockResolvedValue(accountsResponse());
+    accountsGetMock.mockImplementation(async (req: { access_token: string }) =>
+      accountsResponse(`acc-${req.access_token}`)
+    );
 
     const state = await getPlaidChatState("user_1", { depth: "balances" });
 
     expect(stub.abortSignal).not.toHaveBeenCalled();
-    expect(accountsGetMock.mock.calls).toEqual([
-      [{ access_token: "plain:v1:a" }],
-      [{ access_token: "plain:v1:b" }],
+    expect(accountsGetMock.mock.calls).toStrictEqual([
+      [{ access_token: "plain:v1:a" }, TIMEOUT],
+      [{ access_token: "plain:v1:b" }, TIMEOUT],
     ]);
     expect(state.accounts).toHaveLength(2);
   });
@@ -119,18 +135,32 @@ describe("getPlaidChatState — the optional signal", () => {
     expect(accountsGetMock).not.toHaveBeenCalled();
   });
 
-  it("with a signal, every accounts call is given it as a request option", async () => {
+  it("with a signal, every accounts call is given it next to the timeout", async () => {
     const stub = clientResolving({ data: ROWS, error: null });
     createServerClientMock.mockReturnValue(stub.client);
-    accountsGetMock.mockResolvedValue(accountsResponse());
+    accountsGetMock.mockImplementation(async (req: { access_token: string }) =>
+      accountsResponse(`acc-${req.access_token}`)
+    );
     const { signal } = new AbortController();
 
     await getPlaidChatState("user_1", { depth: "balances", signal });
 
-    expect(accountsGetMock.mock.calls).toEqual([
-      [{ access_token: "plain:v1:a" }, { signal }],
-      [{ access_token: "plain:v1:b" }, { signal }],
+    expect(accountsGetMock.mock.calls).toStrictEqual([
+      [{ access_token: "plain:v1:a" }, { ...TIMEOUT, signal }],
+      [{ access_token: "plain:v1:b" }, { ...TIMEOUT, signal }],
     ]);
+  });
+
+  it("the Item is not read: the chat has no use for its last update", async () => {
+    const stub = clientResolving({ data: ROWS, error: null });
+    createServerClientMock.mockReturnValue(stub.client);
+    accountsGetMock.mockImplementation(async (req: { access_token: string }) =>
+      accountsResponse(`acc-${req.access_token}`)
+    );
+
+    await getPlaidChatState("user_1", { depth: "balances" });
+
+    expect(itemGetMock).not.toHaveBeenCalled();
   });
 
   it("a cancelled connection read throws, like any other failed read", async () => {
@@ -145,7 +175,6 @@ describe("getPlaidChatState — the optional signal", () => {
       getPlaidChatState("user_1", { depth: "connection", signal })
     ).rejects.toThrow("failed to read plaid_connections");
   });
-
 });
 
 describe("getPlaidChatState — after the signal is aborted", () => {
@@ -184,17 +213,16 @@ describe("getPlaidChatState — after the signal is aborted", () => {
     return parts.join("\n");
   }
 
-  beforeEach(() => {
-    createServerClientMock.mockReset();
-    accountsGetMock.mockReset();
+  /** Every console call's arguments, joined, across every method. */
+  function allLines(): string[] {
+    const lines: string[] = [];
     for (const method of ["log", "info", "warn", "error", "debug"] as const) {
-      vi.spyOn(console, method).mockImplementation(() => undefined);
+      for (const args of vi.mocked(console[method]).mock.calls) {
+        lines.push(args.map(String).join(" "));
+      }
     }
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+    return lines;
+  }
 
   it("the fixture carries both markers, so their absence below means something", () => {
     const rendered = inspect(cancelError(), { depth: 20 });
@@ -202,7 +230,7 @@ describe("getPlaidChatState — after the signal is aborted", () => {
     expect(rendered).toContain(TOKEN_MARKER);
   });
 
-  it("a cancelled accounts call logs one line, with no request config, secret or access token", async () => {
+  it("a cancelled accounts call logs its status and code only, with no request config, secret or access token", async () => {
     const stub = clientResolving({ data: ROWS, error: null });
     createServerClientMock.mockReturnValue(stub.client);
     const controller = new AbortController();
@@ -216,16 +244,19 @@ describe("getPlaidChatState — after the signal is aborted", () => {
       signal: controller.signal,
     });
 
-    expect(vi.mocked(console.warn).mock.calls).toEqual([
-      ["[plaid-state] accountsGet failed for a connection; skipping it:", "canceled"],
-    ]);
+    const warned = vi.mocked(console.warn).mock.calls.map((args) => args.map(String).join(" "));
+    expect(warned).toHaveLength(2);
+    for (const line of warned) {
+      expect(line).toMatch(/^\[bank-read\] idx=\d status=failed code=none /);
+      expect(line.endsWith(" origin=chat")).toBe(true);
+    }
     const logged = consoleText();
     expect(logged).not.toContain(SECRET_MARKER);
     expect(logged).not.toContain(TOKEN_MARKER);
     expect(logged).not.toContain("headers");
   });
 
-  it("the connections after the cancelled one are not read", async () => {
+  it("every call in flight is given the same signal, and the result is not to be used", async () => {
     const stub = clientResolving({ data: ROWS, error: null });
     createServerClientMock.mockReturnValue(stub.client);
     const controller = new AbortController();
@@ -239,15 +270,19 @@ describe("getPlaidChatState — after the signal is aborted", () => {
       signal: controller.signal,
     });
 
-    expect(accountsGetMock).toHaveBeenCalledTimes(1);
+    expect(accountsGetMock).toHaveBeenCalledTimes(2);
+    for (const [, options] of accountsGetMock.mock.calls) {
+      expect((options as { signal: AbortSignal }).signal).toBe(controller.signal);
+    }
     // Why a caller that cancels must not use the result: the state says
-    // "connected" with no accounts. The chat route has already left through
-    // the deadline by then (chatRouteDeadline.test.ts).
+    // "connected" with every bank unread. The chat route has already left
+    // through the deadline by then (chatRouteDeadline.test.ts).
     expect(state.connected).toBe(true);
     expect(state.accounts).toEqual([]);
+    expect(state.connections.map((c) => c.read)).toEqual(["not_read", "not_read"]);
   });
 
-  it("a signal aborted before the accounts read makes no accounts call and logs nothing", async () => {
+  it("a signal aborted before the accounts read makes no Plaid call and logs nothing", async () => {
     const stub = clientResolving({ data: ROWS, error: null });
     createServerClientMock.mockReturnValue(stub.client);
     const controller = new AbortController();
@@ -259,10 +294,11 @@ describe("getPlaidChatState — after the signal is aborted", () => {
     });
 
     expect(accountsGetMock).not.toHaveBeenCalled();
-    expect(vi.mocked(console.warn)).not.toHaveBeenCalled();
+    expect(itemGetMock).not.toHaveBeenCalled();
+    expect(allLines()).toEqual([]);
   });
 
-  it("without a signal, a failed connection is still skipped and the next one read", async () => {
+  it("without a signal, a failed connection is marked not read and the other one is read", async () => {
     const stub = clientResolving({ data: ROWS, error: null });
     createServerClientMock.mockReturnValue(stub.client);
     accountsGetMock
@@ -273,6 +309,7 @@ describe("getPlaidChatState — after the signal is aborted", () => {
 
     expect(accountsGetMock).toHaveBeenCalledTimes(2);
     expect(state.accounts).toHaveLength(1);
+    expect(state.connections.map((c) => c.read)).toEqual(["not_read", "read"]);
     expect(consoleText()).not.toContain(SECRET_MARKER);
     expect(consoleText()).not.toContain(TOKEN_MARKER);
   });

@@ -3,8 +3,9 @@
 //
 // The one place where Plaid's account, transaction and recurring-stream
 // responses are read and turned into the engine's input. The summary route,
-// which serves the dashboard and the money screen, calls this; the chat path
-// does not.
+// which serves the dashboard and the money screen, calls this for every read.
+// The chat's bank-state read (plaidChatState.ts) calls it for accounts only,
+// with no Item read and its own log origin (BankReadOptions).
 //
 // Server only: it decrypts stored access tokens and calls Plaid. Client code may
 // import its TYPES (`import type`), never its values; a source probe in the test

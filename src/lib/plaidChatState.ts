@@ -3,43 +3,48 @@
 //
 // Populates a PlaidChatState (see plaidChatContext.ts) for the chat route:
 //   L1 (always): connection state from the plaid_connections DB table.
-//   L2 (depth "balances"): a live, multi-connection-safe shallow accounts read.
+//   L2 (depth "balances"): the accounts of every active connection, read
+//       through the shared bank adapter (readBankData, plaidEngineAdapter.ts),
+//       accounts only.
 //
 // Kept separate from plaidChatContext.ts so the pure prompt-assembly helpers
 // stay importable with zero side effects (and unit-testable without the SDK).
 //
-// Constraints (see docs/design/B-1-plaid-chat-capability-scaffold.md):
+// Constraints:
 //  - No storage, no cache — live fetch only.
 //  - Multi-connection safe: reads plaid_connections directly (never .single());
-//    a single broken item must not sink the turn.
+//    a single broken connection does not sink the turn. It is reported as
+//    needing reconnection or as not read this turn, and the others are read.
 //  - DB error on the connection read THROWS (so the route emits an explicit
 //    "state unknown" block) — distinct from an empty result ("no connections").
-//    This does not use the shared getAllPlaidConnections helper. The reason
-//    originally recorded here — that the helper swallows DB errors into [] — is
-//    no longer true: it now reports a failed read by returning null. What
-//    remains are two differences, neither of them decisive: this path needs a
-//    throw rather than a returned null, so it would have to convert; and it
-//    reads three columns where the helper selects the whole row. Treat the
-//    separation as unsettled rather than as a rule.
+//    This does not use the shared getAllPlaidConnections helper: that helper
+//    reports a failed read by returning null, where this path needs a throw,
+//    and it selects the whole row where this path reads four columns.
 //  - Null/undefined Plaid balances are preserved as "unavailable", never 0.
-//  - Does NOT touch the shared /api/plaid/accounts route (dashboard regression
-//    avoidance) — this is a dedicated in-process read.
 //  - userId comes only from the verified token (passed in by the caller).
 // =============================================================================
 
-import { plaidClient, isPlaidConfigured } from "@/lib/plaid";
+import { isPlaidConfigured } from "@/lib/plaid";
 import { createServerClient } from "@/lib/supabase";
-import { decryptPlaidAccessToken } from "@/lib/plaidTokenCrypto";
+import {
+  bankWindow,
+  liveAdapterDeps,
+  readBankData,
+  type BankConnectionState,
+  type ReadAccount,
+  type StoredConnectionRow,
+} from "@/lib/plaidEngineAdapter";
 import type {
   PlaidChatAccount,
   PlaidChatConnection,
+  PlaidChatConnectionRead,
   PlaidChatDepth,
   PlaidChatState,
 } from "@/lib/plaidChatContext";
 
 /**
  * Maps Plaid account type + subtype to a human "kind" label. Subtype-aware so a
- * savings account is not mislabeled "checking" (fixes §6 #2 for the chat path).
+ * savings account is not mislabeled "checking".
  * Returns a raw label; it is sanitized at render time in the pure builder.
  */
 function mapAccountKind(
@@ -61,101 +66,58 @@ function mapAccountKind(
   }
 }
 
-/**
- * Shallow accounts across all active connections. Multi-connection safe: a
- * failing item (e.g. ITEM_LOGIN_REQUIRED, expired token) is skipped, not fatal.
- * Balances are preserved exactly — a null/undefined current balance becomes
- * balanceStatus "unavailable" (never coerced to 0).
- *
- * ⚠️ Takes PLAINTEXT access tokens, already decrypted by the caller. The
- * parameter is deliberately `string[]` rather than the connection rows: the
- * per-connection catch below swallows anything thrown inside the loop into a
- * warn-and-skip, so decrypting in here would turn a wrong-key fault into a
- * silent "no accounts" — exactly the kind of false negative this file's header
- * commits to avoiding. Keeping the rows out of this function makes that mistake
- * impossible to make locally. See getPlaidChatState for where the decrypt
- * happens instead.
- */
-async function fetchShallowAccounts(
-  accessTokens: string[],
-  signal?: AbortSignal
-): Promise<PlaidChatAccount[]> {
-  const accounts: PlaidChatAccount[] = [];
+/** One account as the chat block shows it. Cents become dollars; null stays unknown. */
+function toChatAccount(a: ReadAccount): PlaidChatAccount {
+  const known = a.currentCents !== null;
+  return {
+    label: a.name || a.officialName || "Account",
+    kind: mapAccountKind(a.type, a.subtype),
+    balanceStatus: known ? "known" : "unavailable",
+    owed: a.type === "credit" || a.type === "loan",
+    current: known ? (a.currentCents as number) / 100 : undefined,
+    available: a.availableCents !== null ? a.availableCents / 100 : undefined,
+    currency: a.currency || undefined,
+  };
+}
 
-  for (const accessToken of accessTokens) {
-    // Once the caller has cancelled, the connections not yet read are left
-    // alone: each call would only be refused at once and logged as a failed
-    // connection. Without a signal this is never true.
-    if (signal?.aborted) break;
-    try {
-      // The signal is a per-call request option; the client's own
-      // configuration is not touched. With or without one, the call is also
-      // bound by the Plaid client's default time limit, since it sets no
-      // timeout of its own.
-      const res = signal
-        ? await plaidClient.accountsGet(
-            { access_token: accessToken },
-            { signal }
-          )
-        : await plaidClient.accountsGet({
-            access_token: accessToken,
-          });
+function readOf(status: BankConnectionState): PlaidChatConnectionRead {
+  if (status === "ok") return "read";
+  if (status === "login_required") return "needs_reconnect";
+  return "not_read";
+}
 
-      for (const a of res.data.accounts) {
-        const current = a.balances?.current;
-        const available = a.balances?.available;
-        const known = typeof current === "number";
-
-        accounts.push({
-          label: a.name || a.official_name || "Account",
-          kind: mapAccountKind(a.type, a.subtype),
-          balanceStatus: known ? "known" : "unavailable",
-          owed: a.type === "credit" || a.type === "loan",
-          current: known ? (current as number) : undefined,
-          available: typeof available === "number" ? available : undefined,
-          currency: a.balances?.iso_currency_code || undefined,
-        });
-      }
-    } catch (err) {
-      // One broken connection must not sink the whole turn.
-      console.warn(
-        "[plaid-state] accountsGet failed for a connection; skipping it:",
-        err instanceof Error ? err.message : err
-      );
-      continue;
-    }
-  }
-
-  return accounts;
+interface ConnectionRow {
+  institution_name: unknown;
+  status: unknown;
+  access_token: unknown;
+  item_id: unknown;
 }
 
 /**
  * Builds the per-turn Plaid state for the chat prompt.
  *
  * @param userId  Authenticated user id (from the verified token — never a body).
- * @param opts.depth  "connection" = DB read only; "balances" = also live-fetch
- *   shallow accounts (when connected and Plaid is configured).
- *
- * The connection read is in-process (DB) and the accounts read uses the stored
- * access tokens (decrypted here — see below), so no request/headers need to be
- * threaded in.
+ *   Also the additional authenticated data for decrypting the stored tokens,
+ *   so it must be passed through unmodified.
+ * @param opts.depth  "connection" = DB read only; "balances" = also read the
+ *   accounts of every active connection, live.
  *
  * A DB error on the connection read throws; the route wraps this call in
  * try/catch and falls back to an explicit "state unknown" (readError) block.
- * An empty result is NOT an error — it is a genuine "no connections". A decrypt
- * failure throws the same way, and for the same reason: an explicit unknown
- * beats a confident wrong answer.
+ * An empty result is NOT an error — it is a genuine "no connections".
  *
- * @param userId  Also the additional authenticated data for decryption, so it
- *   must be the verified-token value passed through unmodified.
+ * At depth "balances" each active connection is marked with what its read came
+ * to (read / needs_reconnect / not_read). A token that does not decrypt marks
+ * only its own connection not_read; when no token decrypts, the adapter
+ * throws, and that throw reaches the route like the DB error does: a fault
+ * shared by every row is the key's, not any one bank's. When Plaid is not
+ * configured, nothing is read and every active connection is not_read.
  *
- * @param opts.signal  Optional. Passed to the connection read and to each
- *   accounts call so a caller that has stopped waiting can cancel them. It
- *   does not decide what this function returns: a cancelled connection read
- *   comes back as a read error and throws like any other, but a cancelled
- *   accounts call is skipped by the per-connection catch like any other
- *   failed one, and the connections after it are not read at all. A caller
- *   that cancels must therefore not use the result.
+ * @param opts.signal  Optional. Passed to the connection read and to every
+ *   Plaid call so a caller that has stopped waiting can cancel them. When it
+ *   has already been aborted after the connection read, no Plaid call is made.
+ *   A cancelled call marks its connection not_read like any other failure, so
+ *   a caller that cancels must not use the result.
  */
 export async function getPlaidChatState(
   userId: string,
@@ -168,7 +130,7 @@ export async function getPlaidChatState(
   const supabase = createServerClient();
   const connectionsQuery = supabase
     .from("plaid_connections")
-    .select("institution_name,status,access_token")
+    .select("institution_name,status,access_token,item_id")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   const { data, error } = await (opts.signal
@@ -182,15 +144,19 @@ export async function getPlaidChatState(
     );
   }
 
-  const rows = data ?? [];
+  const rows: ConnectionRow[] = data ?? [];
 
   const connections: PlaidChatConnection[] = rows.map((r) => ({
     institution: typeof r.institution_name === "string" ? r.institution_name : "",
     status: r.status === "active" ? "active" : "error",
   }));
 
-  const activeRows = rows.filter((r) => r.status === "active");
-  const connected = activeRows.length > 0;
+  // Indexes into rows/connections of the active connections, in row order.
+  const activeIndexes: number[] = [];
+  rows.forEach((r, i) => {
+    if (r.status === "active") activeIndexes.push(i);
+  });
+  const connected = activeIndexes.length > 0;
 
   const state: PlaidChatState = {
     depth: opts.depth,
@@ -198,23 +164,45 @@ export async function getPlaidChatState(
     connections,
   };
 
-  // L2 — shallow balances. Only when explicitly at depth "balances", connected,
-  // and Plaid is configured. Live fetch, no storage, no cache.
-  if (opts.depth === "balances" && connected && isPlaidConfigured()) {
-    // Decrypt HERE, outside fetchShallowAccounts, so a crypto failure cannot be
-    // absorbed by its per-connection catch and reported as "this user has no
-    // accounts". A throw from this map propagates out of getPlaidChatState, and
-    // the chat route's existing wrapper turns it into the explicit "state
-    // unknown" block — the same direction the DB-error throw above takes, and
-    // the reason both are throws rather than empty results.
-    //
-    // userId is the caller's verified-token value, unmodified: it is the AAD
-    // each ciphertext was bound to at write time.
-    const accessTokens = activeRows.map((r) =>
-      decryptPlaidAccessToken(r.access_token, userId)
-    );
-    state.accounts = await fetchShallowAccounts(accessTokens, opts.signal);
+  // L2 — accounts. Only at depth "balances" and when connected. Live read, no
+  // storage, no cache.
+  if (opts.depth !== "balances" || !connected) return state;
+
+  if (!isPlaidConfigured()) {
+    for (const i of activeIndexes) connections[i].read = "not_read";
+    state.accounts = [];
+    return state;
   }
 
+  // Cancelled while the connection read was answering: make no Plaid call.
+  if (opts.signal?.aborted) return state;
+
+  const adapterRows: StoredConnectionRow[] = activeIndexes.map((i) => ({
+    access_token: rows[i].access_token as string,
+    item_id: rows[i].item_id as string,
+    institution_name:
+      typeof rows[i].institution_name === "string"
+        ? (rows[i].institution_name as string)
+        : null,
+  }));
+
+  // An accounts-only read makes no use of the window: it bounds transaction
+  // reads, which are not made here. One day ending today (UTC) satisfies the
+  // signature.
+  const today = new Date().toISOString().slice(0, 10);
+  const read = await readBankData(
+    userId,
+    adapterRows,
+    { accounts: true, transactions: false, recurring: false },
+    bankWindow(today, 1),
+    liveAdapterDeps(),
+    { itemStatus: false, signal: opts.signal, logOrigin: "chat" }
+  );
+
+  // read.connections is in the order of adapterRows.
+  activeIndexes.forEach((rowIndex, k) => {
+    connections[rowIndex].read = readOf(read.connections[k].status);
+  });
+  state.accounts = read.accounts.map(toChatAccount);
   return state;
 }

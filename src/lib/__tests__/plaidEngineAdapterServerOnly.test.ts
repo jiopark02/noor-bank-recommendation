@@ -50,8 +50,48 @@ function adapterImports(source: string): string[] {
   return statements.concat(calls).filter((s) => ADAPTER.test(s)).map((s) => s.trim());
 }
 
+/**
+ * Server modules outside app/api that may import adapter values, each with
+ * why, and the module pattern that finds their own importers. Such a module
+ * is held to the rule one step out instead: only app/api route handlers may
+ * import a value from it, so it cannot carry the adapter to a page.
+ *
+ * Mutation that turns the block below red: a file that is not an app/api
+ * route handler imports a value from one of these modules.
+ */
+const SERVER_MODULE_IMPORTERS: Record<string, { why: string; pattern: RegExp }> = {
+  "lib/plaidChatState.ts": {
+    why: "the chat's bank-state read: reads accounts through the adapter; already imports the Plaid client and the service-role server client",
+    pattern: /["'](?:@\/lib\/|\.\.?\/(?:[^"']*\/)?)plaidChatState["']/,
+  },
+};
+
 describe("the Plaid -> engine adapter stays on the server", () => {
   const files = walk(SRC).filter((f) => !rel(f).startsWith("lib/plaidEngineAdapter."));
+
+  it("a server module allowed to import adapter values is itself imported by value only from app/api route handlers", () => {
+    const offenders: string[] = [];
+    const seen: string[] = [];
+    for (const [allowed, { pattern }] of Object.entries(SERVER_MODULE_IMPORTERS)) {
+      for (const file of files) {
+        const r = rel(file);
+        if (r === allowed) continue;
+        const source = readFileSync(file, "utf8");
+        const statements = (
+          source.match(/(?:^|\n)\s*(?:import|export)\b[\s\S]*?from\s*["'][^"']+["']/g) ?? []
+        ).concat(source.match(/\b(?:require|import)\s*\(\s*["'][^"']+["']\s*\)/g) ?? []);
+        for (const statement of statements.filter((s) => pattern.test(s)).map((s) => s.trim())) {
+          seen.push(r);
+          if (/^(?:import|export)\s+type\b/.test(statement)) continue;
+          if (r.startsWith("app/api/") && /\/route\.(ts|js)$/.test(r)) continue;
+          offenders.push(`${r}: ${statement}`);
+        }
+      }
+    }
+    // Pointed at real code: the chat route is a known importer.
+    expect(seen).toContain("app/api/chat/route.ts");
+    expect(offenders).toEqual([]);
+  });
 
   it("finds the known importers (the probe is pointed at real code)", () => {
     const importers = files.filter((f) => adapterImports(readFileSync(f, "utf8")).length > 0).map(rel);
@@ -64,6 +104,7 @@ describe("the Plaid -> engine adapter stays on the server", () => {
     for (const file of files) {
       const r = rel(file);
       if (r.startsWith("app/api/") && /\/route\.(ts|js)$/.test(r)) continue;
+      if (Object.prototype.hasOwnProperty.call(SERVER_MODULE_IMPORTERS, r)) continue;
       for (const statement of adapterImports(readFileSync(file, "utf8"))) {
         if (!/^(?:import|export)\s+type\b/.test(statement)) offenders.push(`${r}: ${statement}`);
       }
