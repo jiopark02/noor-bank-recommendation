@@ -17,7 +17,8 @@ import type { NextRequest } from "next/server";
  * is left unconfigured, so no Plaid call is made. The route, the prompt
  * builder, the Plaid egress policy and the OpenRouter request builder run for
  * real. fetch is stubbed and records the OpenRouter request body; any other
- * fetch (the balance read) fails, which the route treats as no snapshot.
+ * fetch throws. A balance question under "connection" or "balances" reads at
+ * depth "balances", and with Plaid unconfigured its bank is marked not read.
  *
  * The route is imported once for the file. Every value a case changes is read
  * when a request is handled, not when the module loads (AI_PLAID_STATE, the

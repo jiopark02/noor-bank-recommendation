@@ -12,9 +12,12 @@
 //
 // Constraints:
 //  - No storage, no cache — live fetch only.
-//  - Multi-connection safe: reads plaid_connections directly (never .single());
-//    a single broken connection does not sink the turn. It is reported as
-//    needing reconnection or as not read this turn, and the others are read.
+//  - Multi-connection safe: reads plaid_connections directly (never .single()).
+//    At depth "balances", a connection whose read fails is reported as needing
+//    reconnection or as not read this turn, and the others are read. The
+//    exception is a token that does not decrypt: when no active connection's
+//    token decrypts (one active connection included), the adapter throws and
+//    the turn gets the "state unknown" block, as for a DB error.
 //  - DB error on the connection read THROWS (so the route emits an explicit
 //    "state unknown" block) — distinct from an empty result ("no connections").
 //    This does not use the shared getAllPlaidConnections helper: that helper

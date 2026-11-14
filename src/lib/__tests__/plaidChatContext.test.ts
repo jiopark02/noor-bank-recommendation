@@ -21,7 +21,7 @@ function bankDataInner(block: string): string {
   return m ? m[1] : "";
 }
 
-describe("sanitizePlaidLabel (mirrors sanitizeNameField)", () => {
+describe("sanitizePlaidLabel (follows sanitizeNameField, and also removes < and >)", () => {
   it("returns empty string for non-strings", () => {
     expect(sanitizePlaidLabel(undefined)).toBe("");
     expect(sanitizePlaidLabel(null)).toBe("");
@@ -511,6 +511,94 @@ describe("maskPlaidBlockForLog with read states", () => {
     expect(masked).not.toContain("Ally");
     expect(masked).toContain("(active, balances read)");
     expect(masked).toContain("(active, needs reconnecting in Noor)");
+  });
+});
+
+describe("maskPlaidBlockForLog with commas and parentheses in names", () => {
+  // Every name holds commas, parentheses or a state word. None of these
+  // fragments appears in the block's fixed text.
+  const CONNECTIONS: PlaidChatConnection[] = [
+    { institution: "Wells Fargo, N.A.", status: "active", read: "read" },
+    { institution: "Zebra (active) of Sam", status: "active", read: "needs_reconnect" },
+    { institution: "Quokka (Union), Inc (error)x", status: "active", read: "not_read" },
+    { institution: "Heron, LLC", status: "error" },
+  ];
+  const ACCOUNTS: PlaidChatAccount[] = [
+    { ...CHECKING, label: "Checking(1234)" },
+    { ...CHECKING, label: "Joint (Sam)", kind: "savings" },
+    {
+      label: "Card (active), Gold",
+      kind: "credit card",
+      balanceStatus: "known",
+      owed: true,
+      current: 450.5,
+      currency: "USD",
+    },
+    { label: "Loan): Ally (auto)", kind: "auto", balanceStatus: "unavailable", owed: true },
+    { label: "Plain 2", kind: "checking", balanceStatus: "known", current: 5, currency: "USD" },
+  ];
+  const FRAGMENTS = [
+    "Wells", "Fargo", "N.A.", "Zebra", "Sam", "Quokka", "Union", "Inc", "Heron",
+    "LLC", "Checking(", "1234", "Joint", "Gold", "Ally", "Loan", "Plain",
+  ];
+
+  function maskedInner(state: PlaidChatState): string {
+    const block = buildPlaidCapabilityBlock(state);
+    // The model's block carries the names; the log's does not.
+    expect(bankDataInner(block)).toContain("Wells Fargo, N.A.");
+    return bankDataInner(maskPlaidBlockForLog(block));
+  }
+
+  it("the Connections line keeps each bank's state, in order, and no part of any name", () => {
+    for (const depth of ["connection", "balances"] as const) {
+      const inner = maskedInner({
+        depth,
+        connected: true,
+        connections:
+          depth === "balances"
+            ? CONNECTIONS
+            : CONNECTIONS.map(({ institution, status }) => ({ institution, status })),
+        accounts: ACCOUNTS,
+      });
+      const connLine = inner.split("\n")[0];
+      expect(connLine).toBe(
+        depth === "balances"
+          ? "Connections: *** (active, balances read), *** (active, needs reconnecting in Noor), *** (active, not read this turn), *** (error)"
+          : "Connections: *** (active), *** (active), *** (active), *** (error)"
+      );
+      for (const fragment of FRAGMENTS) expect(inner).not.toContain(fragment);
+    }
+  });
+
+  it("each account line keeps its kind and the form of its figure, and no part of its label", () => {
+    const inner = maskedInner({
+      depth: "balances",
+      connected: true,
+      connections: CONNECTIONS,
+      accounts: ACCOUNTS,
+    });
+    expect(inner.split("\n").slice(1)).toEqual([
+      "Accounts:",
+      "- *** (checking): available ***, current *** USD",
+      "- *** (savings): available ***, current *** USD",
+      "- *** (credit card): amount owed *** USD",
+      "- *** (auto): amount owed unavailable",
+      "- *** (checking): balance *** USD",
+    ]);
+    for (const fragment of FRAGMENTS) expect(inner).not.toContain(fragment);
+  });
+
+  it("a name holding a state token followed by a comma still leaves no part of itself", () => {
+    const inner = maskedInner({
+      depth: "connection",
+      connected: true,
+      connections: [
+        { institution: "Wells Fargo, N.A.", status: "active" },
+        { institution: "Heron (active), Quokka", status: "active" },
+      ],
+    });
+    expect(inner.indexOf("Connections: *** (active)")).toBe(0);
+    for (const fragment of FRAGMENTS) expect(inner).not.toContain(fragment);
   });
 });
 

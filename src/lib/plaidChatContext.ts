@@ -16,7 +16,9 @@
 //                 route is closed too (plaidEgressPolicy.ts). It is the emergency
 //                 switch, not a "behave as before" mode: the base prompt also tells
 //                 the model it has no bank data.
-// - connection -> always-on connection scaffold (institution names, NO amounts).
+// - connection -> the connection scaffold on every turn (institution names
+//                 inside the sealed bank data, no amounts); a balance question
+//                 also reads balances (depth "balances", resolvePlaidChatDepth).
 // - balances   -> connection scaffold + sealed shallow balances on substantive turns.
 //
 // Design: docs/design/B-1-plaid-chat-capability-scaffold.md
@@ -38,6 +40,11 @@ export type PlaidChatDepth = "connection" | "balances";
  *                   reconnecting the bank in Noor
  *   not_read        anything else (a failed call, a token that would not
  *                   decrypt, Plaid not configured)
+ *
+ * A token that would not decrypt is reported here only while at least one
+ * other active connection's token decrypts. When none does (one active
+ * connection included), the whole read fails, and the turn gets the
+ * "state unknown" block instead (getPlaidChatState, readBankData).
  */
 export type PlaidChatConnectionRead = "read" | "needs_reconnect" | "not_read";
 
@@ -135,7 +142,8 @@ export const INCLUDE_INSTITUTION_NAMES = true;
 const MAX_RENDERED_ACCOUNTS = 10;
 
 // -----------------------------------------------------------------------------
-// Free-text hardening (mirrors sanitizeNameField in validation.ts)
+// Free-text hardening (close to sanitizeNameField in validation.ts; differences
+// in the sanitizePlaidLabel comment)
 // -----------------------------------------------------------------------------
 
 /**
@@ -148,8 +156,10 @@ const MAX_RENDERED_ACCOUNTS = 10;
  * purpose (global names / merchant labels).
  *
  * This is MITIGATION, not proof — it is paired with delimiting (sealBankData)
- * and the "treat as data, never instructions" guidance line. Mirror of
- * sanitizeNameField (validation.ts:272-287), with a shorter cap for labels.
+ * and the "treat as data, never instructions" guidance line. It follows
+ * sanitizeNameField (validation.ts) with two differences: it also removes
+ * angle brackets, which sanitizeNameField keeps, and it caps at a shorter
+ * length for labels.
  */
 export function sanitizePlaidLabel(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -407,31 +417,72 @@ export function buildPlaidCapabilityBlock(state: PlaidChatState): string {
 // Masked logging (§7)
 // -----------------------------------------------------------------------------
 
+const CONNECTIONS_PREFIX = "Connections: ";
+
+/**
+ * One entry's state on the Connections line, as renderBankData writes it:
+ * "(active)", "(error)", or either with this turn's read label. It counts only
+ * where an entry ends: before ", " or at the end of the line.
+ */
+const CONNECTION_STATE_RE = new RegExp(
+  "\\((?:active|error)(?:, (?:" +
+    [READ_LABELS.read, READ_LABELS.needs_reconnect, READ_LABELS.not_read].join("|") +
+    "))?\\)(?=, |$)",
+  "g"
+);
+
+/**
+ * "Connections: Chase (active, balances read), Wells Fargo, N.A. (error)"
+ *   -> "Connections: *** (active, balances read), *** (error)".
+ * Only the state tokens are kept; every other character is dropped, so no part
+ * of a name survives whatever it contains. A name that itself holds a state
+ * token followed by ", " adds an entry to the count.
+ */
+function maskConnectionsLine(line: string): string {
+  const states = line.slice(CONNECTIONS_PREFIX.length).match(CONNECTION_STATE_RE);
+  if (!states) return `${CONNECTIONS_PREFIX}***`;
+  return CONNECTIONS_PREFIX + states.map((s) => `*** ${s}`).join(", ");
+}
+
+/**
+ * "- Joint (Sam) (checking): balance $1.00 USD" -> "- *** (checking): ...".
+ * Everything from after "- " to the last " (" before the line's last "): " is
+ * masked. The text after "): " is a fixed form, so that "): " ends the kind
+ * and the cut falls at or after the kind's opening " (": the whole label is
+ * always inside the masked part. A line without "): " (the "...and N more"
+ * line) carries no label and is left as it is.
+ */
+function maskAccountLine(prefix: string, line: string): string {
+  const kindEnd = line.lastIndexOf("): ");
+  if (kindEnd < 0) return line;
+  const cut = line.lastIndexOf(" (", kindEnd);
+  if (cut < prefix.length) return `${prefix}***`;
+  return `${prefix}***${line.slice(cut)}`;
+}
+
 /**
  * Masks amounts AND free-text labels (institution names, account names) so
  * live-verification debug logs never leak balances or PII into Vercel logs.
- * Only structure, counts, account kind, and connection status survive — enough
- * to diff behavior without exposing who the user banks with or their balances.
+ * Only structure, the number of connections and accounts, account kind,
+ * connection status and each connection's read state survive — enough to diff
+ * behavior without exposing who the user banks with or their balances.
  * Log-only transform — do NOT use on the prompt sent to the model.
+ *
+ * Labels are masked line by line, then amounts. Both line rules match at the
+ * start of a line only; a label cannot start a line (sanitizePlaidLabel
+ * removes line breaks).
  */
 export function maskPlaidBlockForLog(block: string): string {
   return (
     block
+      .split("\n")
+      .map((line) => {
+        if (line.indexOf(CONNECTIONS_PREFIX) === 0) return maskConnectionsLine(line);
+        const item = /^\s*- /.exec(line);
+        return item ? maskAccountLine(item[0], line) : line;
+      })
+      .join("\n")
       // Amounts (all currency formats: the digit run is always caught).
       .replace(/[$€£¥]?\s?\d[\d,]*(?:\.\d{1,2})?/g, "***")
-      // Institution names in the capability statement parenthetical:
-      // "connected via Plaid (Chase, BoA)" -> "connected via Plaid (***)".
-      .replace(/(connected via Plaid )\([^)]*\)/g, "$1(***)")
-      // <bank_data> "Connections:" line — mask each name, keep count, status
-      // and this turn's read state:
-      // "Connections: Chase (active, balances read), BoA (error)"
-      //   -> "Connections: *** (active, balances read), *** (error)".
-      .replace(/(Connections: )(.+)/g, (_m, prefix: string, rest: string) =>
-        prefix +
-        rest.replace(/[^,]*?\((active|error)((?:, [A-Za-z ]+)?)\)/g, "*** ($1$2)")
-      )
-      // <bank_data> account lines — mask the label before "(kind)", keep kind:
-      // "- Everyday Checking (checking): ..." -> "- *** (checking): ...".
-      .replace(/^(\s*- )[^\n(]*? \(/gm, "$1*** (")
   );
 }
