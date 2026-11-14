@@ -84,7 +84,6 @@ function summary(
             reservedCreditCents: 25000,
             bufferCents: 0,
           },
-          assumptions: [],
         }
       : {
           status: "unavailable",
@@ -93,7 +92,6 @@ function summary(
           uncoveredObligationsCents: null,
           horizon: null,
           totals: null,
-          assumptions: [],
         },
     recurring: { totalMonthlyCents: null, items: [] },
     creditUtilization: creditUtilizationOf(over.accounts ?? [], "USD"),
@@ -865,7 +863,6 @@ describe("response bodies — every field the screens read is checked", () => {
         reservedCreditCents: 25000,
         bufferCents: 0,
       },
-      assumptions: ["dates_utc"],
     },
     recurring: {
       totalMonthlyCents: 1500,

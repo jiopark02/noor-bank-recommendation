@@ -443,7 +443,10 @@ export default function HomePage() {
       return {
         opening: `Good day, ${userName}.`,
         question,
-        answer: HIDDEN_SAFE_TO_SPEND_ANSWER[hidden ?? "other"],
+        answer:
+          HIDDEN_SAFE_TO_SPEND_ANSWER[
+            hidden === null || hidden === "banks_not_read" ? "other" : hidden
+          ],
       };
     }
 
@@ -459,10 +462,6 @@ export default function HomePage() {
     if (s.totals.bufferCents > 0) {
       parts.push(`and a ${formatCents(s.totals.bufferCents)} buffer`);
     }
-    const noRecurring =
-      s.assumptions.indexOf("recurring_unavailable") >= 0
-        ? " This doesn't include recurring charges, which I couldn't read yet."
-        : "";
 
     return {
       opening:
@@ -472,7 +471,7 @@ export default function HomePage() {
               s.uncoveredObligationsCents ?? -amount
             )} more than your spendable cash ${reach}.`,
       question,
-      answer: `That's ${parts.join(", ")}.${noRecurring}`,
+      answer: `That's ${parts.join(", ")}.`,
     };
   }, [moneyDisplay, moneyError, hasBankConnection, summary, view, userName]);
 

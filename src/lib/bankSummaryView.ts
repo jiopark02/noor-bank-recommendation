@@ -420,7 +420,6 @@ export const ENGINE_SUMMARY_FIELDS = {
         bufferCents: "number",
       },
     },
-    assumptions: { listOf: "string" },
   },
   recurring: {
     totalMonthlyCents: "number|null",
@@ -611,7 +610,21 @@ export function pickFields(spec: FieldSpec, value: unknown): Picked {
  * real figure.
  */
 export function parseFinanceSummaryResponse(value: unknown): ScreenSummaryResponse | null {
-  return fitsFields(SUMMARY_RESPONSE_FIELDS, value) ? (value as ScreenSummaryResponse) : null;
+  if (!fitsFields(SUMMARY_RESPONSE_FIELDS, value)) return null;
+  const body = value as ScreenSummaryResponse;
+  if (body.summary === null) return body;
+  // Every screen draws recurring charges from this body, so ordering them
+  // here (orderRecurringItems) puts every list on the screens in that order.
+  return {
+    ...body,
+    summary: {
+      ...body.summary,
+      recurring: {
+        ...body.summary.recurring,
+        items: orderRecurringItems(body.summary.recurring.items),
+      },
+    },
+  };
 }
 
 /**
@@ -711,7 +724,7 @@ export function spendableCashTile(summary: ScreenSummary | null): SpendableCashT
 }
 
 export const NO_CASH_ACCOUNT_LABEL = "No checking account linked";
-export const NO_CASH_ACCOUNT_HINT = "Link a checking account to see what you can spend.";
+export const NO_CASH_ACCOUNT_HINT = "Link a checking account to see your cash balance.";
 
 /**
  * The tile's amount, or null when it has none to show: formatted with
@@ -768,19 +781,54 @@ export function safeToSpendHiddenReason(
   }
 }
 
-/** What the dashboard says when it gives no safe-to-spend figure, by reason. */
-export const HIDDEN_SAFE_TO_SPEND_ANSWER: Readonly<Record<SafeToSpendHidden, string>> = {
-  banks_not_read: "Not every bank synced, so I'm not giving a spending number yet.",
+/**
+ * What the dashboard says when it gives no safe-to-spend figure, by reason.
+ * A bank that was not read has its own message on the dashboard, naming
+ * what to do for each bank, so it has no entry here.
+ */
+export const HIDDEN_SAFE_TO_SPEND_ANSWER: Readonly<
+  Record<Exclude<SafeToSpendHidden, "banks_not_read">, string>
+> = {
   no_cash_account:
     "I don't see a checking balance to work from yet, so I can't give a spending number.",
   balance_unknown:
-    "Your bank balance hasn't updated recently, so I'm not giving a spending number yet.",
+    "I can't see an up-to-date balance for your account yet, so I'm not giving a spending number.",
   recurring_unknown:
-    "I couldn't read your recurring charges yet, so I'm not giving a spending number.",
+    "I can't tell what recurring charges you have yet, so I'm not giving a spending number.",
   history_incomplete:
-    "Your bank is still sending your transaction history, so I'm not giving a spending number yet.",
+    "I don't have your full transaction history yet, so I'm not giving a spending number.",
   other: "I can't work out a spending number from these accounts yet.",
 };
+
+/** Plain code-unit order, the same on every platform and in every locale. */
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * The order recurring charges are drawn in: the largest monthly amount
+ * first, charges with no known amount after every charge with one, then by
+ * label, then by stream id, so the order is the same for the same charges
+ * whatever order they arrived in.
+ */
+export function compareRecurringItems(
+  a: { streamId: string; label: string; monthlyCents: number | null },
+  b: { streamId: string; label: string; monthlyCents: number | null }
+): number {
+  if (a.monthlyCents !== b.monthlyCents) {
+    if (a.monthlyCents === null) return 1;
+    if (b.monthlyCents === null) return -1;
+    return b.monthlyCents - a.monthlyCents;
+  }
+  return compareText(a.label, b.label) || compareText(a.streamId, b.streamId);
+}
+
+/** A copy of `items` in the order the screens draw recurring charges in. */
+export function orderRecurringItems<
+  T extends { streamId: string; label: string; monthlyCents: number | null },
+>(items: readonly T[]): T[] {
+  return items.slice().sort(compareRecurringItems);
+}
 
 /**
  * Whether a recurring charge's expected date is drawn: only a date the engine

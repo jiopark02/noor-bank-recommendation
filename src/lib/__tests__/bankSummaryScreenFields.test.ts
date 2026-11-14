@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatCentsOrDash,
   HIDDEN_SAFE_TO_SPEND_ANSWER,
+  orderRecurringItems,
   NO_CASH_ACCOUNT_HINT,
   NO_CASH_ACCOUNT_LABEL,
   parseFinanceSummaryResponse,
@@ -37,6 +38,12 @@ import {
  *   - pickFields passing a field the list does not name, or passing a value
  *     that does not fit                                          -> pickFields
  *   - a hidden figure explained with the wrong reason             -> hidden
+ *   - recurring charges drawn unsorted, in the order they arrived, or with
+ *     an unknown amount sorted as 0                              -> order
+ *   - the order decided by locale, or without a final tie-break  -> order
+ *   - a screen drawing recurring charges from anything but the parsed
+ *     body, or reordering them itself                            -> order
+ *   - a dashboard answer kept for a bank not read, or one missing -> hidden
  *   - a date the engine filled in with today drawn as "Next expected",
  *     or the money screen drawing a date without showsRecurringDate -> items
  */
@@ -60,7 +67,6 @@ function screenSummary(over: {
         reservedCreditCents: 25000,
         bufferCents: 0,
       },
-      assumptions: [],
       ...over.safeToSpend,
     },
     recurring: { totalMonthlyCents: 1500, items: [], ...over.recurring },
@@ -77,7 +83,6 @@ function unavailable(reason: string): ScreenSummary {
       uncoveredObligationsCents: null,
       horizon: null,
       totals: null,
-      assumptions: [],
     },
   });
 }
@@ -233,9 +238,83 @@ describe("why safe-to-spend is not shown", () => {
     expect(safeToSpendHiddenReason(hidden, s)).toBe("recurring_unknown");
   });
 
-  it("every reason has an answer", () => {
+  it("every reason the dashboard answers from the table has an answer; a bank not read is not one", () => {
+    expect(Object.keys(HIDDEN_SAFE_TO_SPEND_ANSWER).sort()).toEqual(
+      ["balance_unknown", "history_incomplete", "no_cash_account", "other", "recurring_unknown"]
+    );
     for (const key of Object.keys(HIDDEN_SAFE_TO_SPEND_ANSWER)) {
       expect(HIDDEN_SAFE_TO_SPEND_ANSWER[key as keyof typeof HIDDEN_SAFE_TO_SPEND_ANSWER]).not.toBe("");
+    }
+  });
+});
+
+describe("the order recurring charges are drawn in", () => {
+  type Item = ScreenSummary["recurring"]["items"][number];
+  const item = (streamId: string, label: string, monthlyCents: number | null): Item => ({
+    streamId,
+    label,
+    monthlyCents,
+    nextDate: "2026-11-20",
+    nextDateAssumedToday: false,
+    pastDue: false,
+  });
+  // The engine sends its items by stream id; none of these is in the drawn order.
+  const fromEngine = [
+    item("a-gym", "Gym", 4000),
+    item("b-unknown", "Alarm", null),
+    item("c-zero", "Zero plan", 0),
+    item("d-tv", "Streaming", 1549),
+    item("e-tv2", "Streaming", 1549),
+    item("f-big", "Rent share", 90000),
+    item("g-unknown", "Alarm", null),
+    item("h-cloud", "Cloud", 1549),
+  ];
+  const drawn = [
+    "f-big", // largest amount first
+    "a-gym",
+    "h-cloud", // equal amounts: by label, "Cloud" before "Streaming"
+    "d-tv", // equal amount and label: by stream id
+    "e-tv2",
+    "c-zero", // a known 0 is still a known amount
+    "b-unknown", // no known amount: after every known one, then label, then id
+    "g-unknown",
+  ];
+
+  it("largest monthly amount first, unknown amounts last, then label, then stream id", () => {
+    expect(orderRecurringItems(fromEngine).map((i) => i.streamId)).toEqual(drawn);
+  });
+
+  it("the same charges in any arrival order are drawn in the same order", () => {
+    expect(orderRecurringItems(fromEngine.slice().reverse()).map((i) => i.streamId)).toEqual(drawn);
+  });
+
+  it("labels compare by code unit, not by locale", () => {
+    const order = orderRecurringItems([item("1", "b", 100), item("2", "B", 100), item("3", "a", 100)]);
+    expect(order.map((i) => i.label)).toEqual(["B", "a", "b"]);
+  });
+
+  it("does not change the list it is given", () => {
+    const input = fromEngine.slice();
+    orderRecurringItems(input);
+    expect(input).toEqual(fromEngine);
+  });
+
+  it("a parsed summary carries its recurring charges in that order", () => {
+    const s = screenSummary({ recurring: { totalMonthlyCents: null, items: fromEngine } });
+    const parsed = parseFinanceSummaryResponse(JSON.parse(JSON.stringify(body(s))));
+    expect(parsed?.summary?.recurring.items.map((i) => i.streamId)).toEqual(drawn);
+  });
+
+  // Red if: a screen draws recurring charges from anything but the parsed
+  // body, or puts them in another order on its own.
+  it("both screens draw recurring charges only from the parsed body, in its order", () => {
+    for (const page of ["../../app/dashboard/page.tsx", "../../app/money/page.tsx"]) {
+      const source = readFileSync(fileURLToPath(new URL(page, import.meta.url)), "utf8");
+      expect(source, page).toContain("parseFinanceSummaryResponse(");
+      expect(source, page).toContain("recurringItems: summary ? summary.recurring.items : [],");
+      expect(source, page).not.toMatch(/recurringItems[^\n]*\.(?:sort|reverse)\(/);
+      const draws = source.match(/figures\.recurringItems(?:\.slice\([^)]*\))?\.map\(/g) ?? [];
+      expect(draws.length, page).toBeGreaterThan(0);
     }
   });
 });
