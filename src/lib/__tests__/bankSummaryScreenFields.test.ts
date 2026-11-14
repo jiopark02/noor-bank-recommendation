@@ -262,7 +262,8 @@ describe("the dashboard's safe-to-spend lines", () => {
   it("a figure of 0 or more, through the month's end", () => {
     expect(linesFor(12345, monthEnd)).toEqual({
       statement: "You have about $123.45 to spend through Nov 30.",
-      answer: "That's what's left after upcoming bills, card payments and your usual spending.",
+      answer:
+        "That's what's left after setting aside upcoming bills, card payments, your usual spending and other expected costs.",
     });
     expect(linesFor(0, monthEnd).statement).toBe("You have about $0.00 to spend through Nov 30.");
   });
@@ -270,23 +271,24 @@ describe("the dashboard's safe-to-spend lines", () => {
   it("a figure of 0 or more, until the next income", () => {
     expect(linesFor(12345, nextIncome)).toEqual({
       statement: "You have about $123.45 to spend until your next income on Nov 21.",
-      answer: "That's what's left after upcoming bills, card payments and your usual spending.",
+      answer:
+        "That's what's left after setting aside upcoming bills, card payments, your usual spending and other expected costs.",
     });
   });
 
   it("a negative figure, through the month's end, states its absolute value", () => {
     expect(linesFor(-12345, monthEnd)).toEqual({
       statement:
-        "Your upcoming bills and usual spending through Nov 30 come to about $123.45 more than your cash.",
-      answer: "That's counting upcoming bills, card payments and your usual spending.",
+        "What I'd set aside through Nov 30 comes to about $123.45 more than your cash.",
+      answer: "That covers upcoming bills, card payments, your usual spending and other expected costs.",
     });
   });
 
   it("a negative figure, until the next income, states its absolute value", () => {
     expect(linesFor(-12345, nextIncome)).toEqual({
       statement:
-        "Your upcoming bills and usual spending until your next income on Nov 21 come to about $123.45 more than your cash.",
-      answer: "That's counting upcoming bills, card payments and your usual spending.",
+        "What I'd set aside until your next income on Nov 21 comes to about $123.45 more than your cash.",
+      answer: "That covers upcoming bills, card payments, your usual spending and other expected costs.",
     });
   });
 

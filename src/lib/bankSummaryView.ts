@@ -859,14 +859,15 @@ export function safeToSpendLines(
   if (amountCents >= 0) {
     return {
       statement: `You have about ${formatCents(amountCents)} to spend ${reach}.`,
-      answer: "That's what's left after upcoming bills, card payments and your usual spending.",
+      answer:
+        "That's what's left after setting aside upcoming bills, card payments, your usual spending and other expected costs.",
     };
   }
   return {
-    statement: `Your upcoming bills and usual spending ${reach} come to about ${formatCents(
+    statement: `What I'd set aside ${reach} comes to about ${formatCents(
       -amountCents
     )} more than your cash.`,
-    answer: "That's counting upcoming bills, card payments and your usual spending.",
+    answer: "That covers upcoming bills, card payments, your usual spending and other expected costs.",
   };
 }
 
