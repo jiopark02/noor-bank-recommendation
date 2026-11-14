@@ -43,6 +43,23 @@ import type {
 } from "@/lib/plaidChatContext";
 
 /**
+ * The plaid_connections read failed. Thrown so the caller can tell this case
+ * from any other failure; the message names the read, and `code` is the
+ * database's error code when it sent one (never a row or a message).
+ */
+export class PlaidConnectionReadError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null, cause: unknown) {
+    super(message, { cause });
+    this.name = "PlaidConnectionReadError";
+    this.code = code;
+    // ES5 target: keep instanceof working on the subclass.
+    Object.setPrototypeOf(this, PlaidConnectionReadError.prototype);
+  }
+}
+
+/**
  * Maps Plaid account type + subtype to a human "kind" label. Subtype-aware so a
  * savings account is not mislabeled "checking".
  * Returns a raw label; it is sanitized at render time in the pure builder.
@@ -138,9 +155,11 @@ export async function getPlaidChatState(
     : connectionsQuery);
 
   if (error) {
-    throw new Error(
+    const code = (error as { code?: unknown }).code;
+    throw new PlaidConnectionReadError(
       `getPlaidChatState: failed to read plaid_connections: ${error.message}`,
-      { cause: error }
+      typeof code === "string" && code !== "" ? code : null,
+      error
     );
   }
 

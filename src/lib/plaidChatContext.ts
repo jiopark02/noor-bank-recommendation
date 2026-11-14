@@ -101,6 +101,25 @@ export function resolvePlaidStateMode(): PlaidStateMode {
   return "off";
 }
 
+/**
+ * The depth of this turn's bank-state read, for a mode other than "off" (the
+ * caller reads nothing under "off").
+ *
+ * "balances" when the mode is "balances" and the turn is not a greeting, or
+ * when the balance-keyword channel allowed this turn (mode "connection" and a
+ * balance question: plaidEgressPolicy.ts). Anything else reads connections
+ * only, so a greeting never triggers a live balance read.
+ */
+export function resolvePlaidChatDepth(input: {
+  mode: PlaidStateMode;
+  isGreeting: boolean;
+  balanceKeywordAllowed: boolean;
+}): PlaidChatDepth {
+  if (input.mode === "balances" && !input.isGreeting) return "balances";
+  if (input.balanceKeywordAllowed) return "balances";
+  return "connection";
+}
+
 // -----------------------------------------------------------------------------
 // Local toggles (NOT env flags — YAGNI, see §9.2)
 // -----------------------------------------------------------------------------

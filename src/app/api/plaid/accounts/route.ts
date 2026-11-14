@@ -130,8 +130,11 @@ export async function POST(request: NextRequest) {
             item_id: itemResponse.data.item.item_id,
             name: account.name,
             official_name: account.official_name || null,
-            // NOTE: account type mapping and null-balance handling are
-            // intentionally unchanged here (separate track).
+            // NOTE: this route keeps its own mapping, which the shared bank
+            // adapter (plaidEngineAdapter.ts) does not share: every
+            // depository account becomes "checking", and a missing current
+            // balance becomes 0. Nothing in this app calls this route; the
+            // screens and the chat read accounts through the adapter.
             type: mapAccountType(account.type),
             subtype: account.subtype || null,
             mask: account.mask || null,

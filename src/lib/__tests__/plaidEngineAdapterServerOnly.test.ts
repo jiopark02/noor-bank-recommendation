@@ -204,6 +204,14 @@ describe("the cash-flow engine package stays on the server", () => {
     expect(route).toMatch(/^export const runtime = "nodejs";$/m);
     expect(route).not.toMatch(/runtime\s*=\s*["']edge["']/);
   });
+
+  // The chat route reaches the adapter, and so the package, through
+  // plaidChatState.ts. Red if it stops declaring the Node.js runtime.
+  it("the chat route declares the Node.js runtime", () => {
+    const route = readFileSync(path.join(SRC, "app/api/chat/route.ts"), "utf8");
+    expect(route).toMatch(/^export const runtime = "nodejs";$/m);
+    expect(route).not.toMatch(/runtime\s*=\s*["']edge["']/);
+  });
 });
 
 /*

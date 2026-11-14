@@ -513,3 +513,100 @@ describe("maskPlaidBlockForLog with read states", () => {
     expect(masked).toContain("(active, needs reconnecting in Noor)");
   });
 });
+
+// ---- depth of the read, and connected vs. connect ------------------------------
+
+import { resolvePlaidChatDepth } from "../plaidChatContext";
+
+describe("resolvePlaidChatDepth", () => {
+  it.each([
+    ["connection", false, false, "connection"],
+    ["connection", false, true, "balances"],
+    ["connection", true, false, "connection"],
+    ["balances", false, false, "balances"],
+    ["balances", true, false, "connection"],
+  ] as const)(
+    "mode %s, greeting %s, balance keyword allowed %s -> %s",
+    (mode, isGreeting, balanceKeywordAllowed, depth) => {
+      expect(resolvePlaidChatDepth({ mode, isGreeting, balanceKeywordAllowed })).toBe(depth);
+    }
+  );
+});
+
+describe("a connected bank is never also a bank to connect", () => {
+  const CONNECTED_STATES: Array<[string, PlaidChatState]> = [
+    [
+      "depth connection",
+      { depth: "connection", connected: true, connections: [{ institution: "A", status: "active" }] },
+    ],
+    [
+      "every bank read",
+      {
+        depth: "balances",
+        connected: true,
+        connections: [{ institution: "A", status: "active", read: "read" }],
+        accounts: [CHECKING],
+      },
+    ],
+    [
+      "one read, one needs reconnecting, one not read",
+      {
+        depth: "balances",
+        connected: true,
+        connections: [
+          { institution: "A", status: "active", read: "read" },
+          { institution: "B", status: "active", read: "needs_reconnect" },
+          { institution: "C", status: "active", read: "not_read" },
+        ],
+        accounts: [CHECKING],
+      },
+    ],
+    [
+      "every bank needs reconnecting",
+      {
+        depth: "balances",
+        connected: true,
+        connections: [{ institution: "B", status: "active", read: "needs_reconnect" }],
+        accounts: [],
+      },
+    ],
+    [
+      "none read",
+      {
+        depth: "balances",
+        connected: true,
+        connections: [
+          { institution: "B", status: "active", read: "needs_reconnect" },
+          { institution: "C", status: "active", read: "not_read" },
+        ],
+        accounts: [],
+      },
+    ],
+    [
+      "every bank read, no accounts",
+      {
+        depth: "balances",
+        connected: true,
+        connections: [{ institution: "A", status: "active", read: "read" }],
+        accounts: [],
+      },
+    ],
+  ];
+
+  it.each(CONNECTED_STATES)("%s", (_name, state) => {
+    const block = buildPlaidCapabilityBlock(state);
+    expect(block).toContain("A bank account is connected via Plaid");
+    expect(block).not.toContain("connect a bank in Noor");
+    expect(block).not.toContain("bank connection is required");
+    expect(block).not.toContain("No bank account is connected");
+  });
+
+  it("the not-connected and read-error blocks never say a bank is connected", () => {
+    for (const state of [
+      { depth: "balances", connected: false, connections: [] },
+      { depth: "balances", connected: false, connections: [], readError: true },
+    ] as PlaidChatState[]) {
+      expect(buildPlaidCapabilityBlock(state)).not.toContain("connected via Plaid");
+    }
+  });
+});
