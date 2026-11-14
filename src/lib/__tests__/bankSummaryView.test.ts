@@ -27,9 +27,10 @@ import {
   utilizationPercent,
   type BankView,
   type FieldSpec,
+  type ScreenSummary,
 } from "../bankSummaryView";
-import { computeFinancialSummary, DEFAULT_POLICY } from "../financeEngine";
-import type { EngineConnection, EngineInput, FinancialSummary } from "../financeEngine";
+import { creditUtilizationOf } from "../financeEngine";
+import type { EngineAccount } from "../financeEngine";
 import type {
   BankConnectionStatus,
   FinanceSummaryResponse,
@@ -49,50 +50,44 @@ import type {
  *     safe-to-spend hidden because dataIssues is non-empty)       -> data issues
  */
 
-function summary(over: Partial<EngineInput> = {}): FinancialSummary {
-  return computeFinancialSummary({
-    now: "2026-11-11T12:00:00Z",
-    today: "2026-11-11",
-    dateBasis: "utc",
-    readWindow: { start: "2026-08-14", end: "2026-11-11" },
-    currency: "USD",
-    accounts: [
-      {
-        accountId: "chk",
-        type: "depository",
-        subtype: "checking",
-        currentCents: 100000,
-        availableCents: 100000,
-        limitCents: null,
-        currency: "USD",
-        balanceAsOf: null,
-        fetchedAt: "2026-11-11T11:59:00Z",
-        duplicateKey: null,
-        connectionKey: "c0",
-      },
-    ],
-    transactions: [],
-    period: { start: "2026-08-14", end: "2026-11-11" },
-    connections: [engineConnection("c0", "ok")],
-    recurring: { streams: [], incomeStreams: [] },
-    ...over,
-  });
-}
-
-/** The engine's view of one connection, read in full unless `state` says otherwise. */
-function engineConnection(
-  connectionKey: string,
-  state: EngineConnection["state"],
-  over: Partial<EngineConnection> = {}
-): EngineConnection {
+/**
+ * A summary as the route sends it, written out by hand: these tests are about
+ * what the screens do with a summary, whatever engine computed it. Each knob
+ * sets what an engine would have decided.
+ */
+function summary(
+  over: {
+    showable?: boolean;
+    completeness?: "complete" | "possibly_truncated" | "unknown";
+    computed?: boolean;
+    accounts?: EngineAccount[];
+  } = {}
+): ScreenSummary {
+  const computed = over.computed ?? true;
   return {
-    connectionKey,
-    state,
-    lastSuccessfulUpdate: null,
-    recurringRead: state === "ok" ? "empty" : null,
-    transactionsTruncated: false,
-    earliestTransactionDate: null,
-    ...over,
+    coverage: { safeToSpendShowable: over.showable ?? computed },
+    cashFlow: {
+      incomeCents: 250000,
+      spendingNetCents: 4000,
+      period: { completeness: over.completeness ?? "complete" },
+    },
+    safeToSpend: computed
+      ? {
+          status: "computed",
+          reason: null,
+          amountCents: 75000,
+          horizon: { to: "2026-11-30", rule: "end_of_calendar_month" },
+          totals: { spendableCashCents: 100000 },
+        }
+      : {
+          status: "unavailable",
+          reason: "no_cash_account",
+          amountCents: null,
+          horizon: null,
+          totals: null,
+        },
+    recurring: { totalMonthlyCents: null, items: [] },
+    creditUtilization: creditUtilizationOf(over.accounts ?? [], "USD"),
   };
 }
 
@@ -103,18 +98,25 @@ const ok = (n: number): BankConnectionStatus => ({
 });
 
 /**
- * A summary response. Unless a summary is given, it is computed from the
- * same connections the response lists, as the route does.
+ * A summary response. Unless a summary is given, it is the one an engine
+ * gives for these connections: shown only when every one was read, and a
+ * period that is complete only then.
  */
 function response(
   connections: BankConnectionStatus[],
-  s?: FinancialSummary | null
+  s?: ScreenSummary | null
 ): FinanceSummaryResponse {
+  const allRead = connections.every((c) => c.status === "ok");
   const computed =
     s !== undefined
       ? s
-      : summary({ connections: connections.map((c, i) => engineConnection("c" + i, c.status)) });
+      : summary({ showable: allRead, completeness: allRead ? "complete" : "unknown" });
   return { success: true, connections, accounts: [], transactions: [], summary: computed };
+}
+
+/** A summary that also carries data issues, as an engine reports them. The screens read none. */
+function withDataIssues(s: ScreenSummary): ScreenSummary {
+  return Object.assign({}, s, { dataIssues: [{ reason: "unclassified_category" }] });
 }
 
 describe("decideBankView — figures", () => {
@@ -187,9 +189,7 @@ describe("decideBankView — banks that could not be read", () => {
   // Red if: the screen decides from the response's connection list again
   // instead of following the engine's decision.
   it("follows the engine's decision, not its own reading of the connections", () => {
-    const engineSaysNo = summary({
-      connections: [engineConnection("c0", "ok"), engineConnection("c1", "failed")],
-    });
+    const engineSaysNo = summary({ showable: false, completeness: "unknown" });
     expect(engineSaysNo.coverage.safeToSpendShowable).toBe(false);
     const view = decideBankView({
       hasActiveConnection: true,
@@ -203,7 +203,7 @@ describe("decideBankView — banks that could not be read", () => {
     const view = decideBankView({
       hasActiveConnection: true,
       fetchState: "loaded",
-      response: response([ok(1)], summary({ accounts: [] })),
+      response: response([ok(1)], summary({ computed: false })),
     });
     expect(view.showSafeToSpend).toBe(false);
   });
@@ -211,23 +211,7 @@ describe("decideBankView — banks that could not be read", () => {
 
 describe("decideBankView — data issues are information, not a task", () => {
   it("catch-all transactions neither hide safe-to-spend nor create an action", () => {
-    const s = summary({
-      transactions: [
-        {
-          transactionId: "o1",
-          accountId: "chk",
-          amountCents: 1200,
-          currency: "USD",
-          date: "2026-11-01",
-          pending: false,
-          pfcPrimary: "OTHER",
-          pfcDetailed: "OTHER_OTHER",
-          legacyCategory: [],
-          merchantEntityId: null,
-        },
-      ],
-    });
-    expect(s.dataIssues.some((d) => d.reason === "unclassified_category")).toBe(true);
+    const s = withDataIssues(summary());
 
     const view = decideBankView({
       hasActiveConnection: true,
@@ -385,22 +369,7 @@ describe("decideBankView — banks the figures leave out", () => {
   });
 
   it("data issues alone leave the list empty and the line absent", () => {
-    const s = summary({
-      transactions: [
-        {
-          transactionId: "o1",
-          accountId: "chk",
-          amountCents: 1200,
-          currency: "USD",
-          date: "2026-11-01",
-          pending: false,
-          pfcPrimary: "OTHER",
-          pfcDetailed: "OTHER_OTHER",
-          legacyCategory: [],
-          merchantEntityId: null,
-        },
-      ],
-    });
+    const s = withDataIssues(summary());
     const view = decideBankView({
       hasActiveConnection: true,
       fetchState: "loaded",
@@ -421,13 +390,13 @@ describe("decideBankView — banks the figures leave out", () => {
 });
 
 /*
- * Credit used comes from the engine's per-account credit entries.
+ * Credit used comes from the per-account credit entries the app computes.
  *
  * Mutations that turn this block red:
- *   - the engine aggregate used instead (it leaves out cards with no limit)
- *     -> "includes a card with no limit"
- *   - safe-to-spend's reserved card total used instead (0 when the policy
- *     does not reserve card balances) -> "is the same whatever the policy"
+ *   - the utilization aggregate used instead (it leaves out cards with no
+ *     limit) -> "includes a card with no limit"
+ *   - safe-to-spend's reserved card total used instead (absent when the
+ *     figure was not computed) -> "is the same whether or not safe-to-spend"
  *   - a missing balance counted as 0 -> "an unknown card balance"
  */
 describe("creditUsedCents", () => {
@@ -444,51 +413,39 @@ describe("creditUsedCents", () => {
     duplicateKey: null,
     connectionKey: "c0",
   });
-  const withCards = (cards: Array<ReturnType<typeof card>>, policy = DEFAULT_POLICY) =>
-    computeFinancialSummary(
-      {
-        now: "2026-11-11T12:00:00Z",
-        today: "2026-11-11",
-        dateBasis: "utc",
-        readWindow: { start: "2026-08-14", end: "2026-11-11" },
-        currency: "USD",
-        accounts: [
-          {
-            accountId: "chk",
-            type: "depository",
-            subtype: "checking",
-            currentCents: 100000,
-            availableCents: 100000,
-            limitCents: null,
-            currency: "USD",
-            balanceAsOf: null,
-            fetchedAt: "2026-11-11T11:59:00Z",
-            duplicateKey: null,
-            connectionKey: "c0",
-          },
-          ...cards,
-        ],
-        transactions: [],
-        period: { start: "2026-08-14", end: "2026-11-11" },
-        connections: [engineConnection("c0", "ok")],
-        recurring: { streams: [], incomeStreams: [] },
-      },
-      policy
-    );
+  const checking: EngineAccount = {
+    accountId: "chk",
+    type: "depository",
+    subtype: "checking",
+    currentCents: 100000,
+    availableCents: 100000,
+    limitCents: null,
+    currency: "USD",
+    balanceAsOf: null,
+    fetchedAt: "2026-11-11T11:59:00Z",
+    duplicateKey: null,
+    connectionKey: "c0",
+  };
+  // The app computes credit utilization itself (creditUtilizationOf), so the
+  // summary carries its per-card entries whatever the engine decided.
+  const withCards = (cards: Array<ReturnType<typeof card>>, computed = true) =>
+    summary({ accounts: [checking, ...cards], computed });
 
   it("includes a card with no limit", () => {
-    const s = withCards([card("a", 30000, 100000), card("b", 12000, null)]);
-    expect(s.creditUtilization.aggregate.balanceCents).toBe(30000);
-    expect(creditUsedCents(s)).toBe(42000);
+    const cards = [card("a", 30000, 100000), card("b", 12000, null)];
+    // The utilization aggregate leaves out the card with no limit; the
+    // amount owed does not.
+    expect(creditUtilizationOf([checking, ...cards], "USD").aggregate.balanceCents).toBe(30000);
+    expect(creditUsedCents(withCards(cards))).toBe(42000);
   });
 
-  it("is the same whatever the policy says about reserving card balances", () => {
+  it("is the same whether or not safe-to-spend was computed", () => {
     const cards = [card("a", 30000, 100000), card("b", 12000, null)];
-    const reserved = withCards(cards, { ...DEFAULT_POLICY, reserveCreditCardBalances: true });
-    const notReserved = withCards(cards, { ...DEFAULT_POLICY, reserveCreditCardBalances: false });
-    expect(notReserved.safeToSpend.totals.reservedCreditCents).toBe(0);
-    expect(creditUsedCents(reserved)).toBe(42000);
-    expect(creditUsedCents(notReserved)).toBe(42000);
+    const computed = withCards(cards, true);
+    const notComputed = withCards(cards, false);
+    expect(notComputed.safeToSpend.totals).toBeNull();
+    expect(creditUsedCents(computed)).toBe(42000);
+    expect(creditUsedCents(notComputed)).toBe(42000);
   });
 
   it("a credit balance counts as 0, and another currency is left out", () => {
@@ -881,60 +838,37 @@ function checksEveryField(spec: FieldSpec, good: unknown, parse: (v: unknown) =>
 }
 
 describe("response bodies — every field the screens read is checked", () => {
-  const richSummary = () =>
-    summary({
-      accounts: [
+  // Written out field by field, so every listed field is present with a
+  // non-null value wherever the list allows one: a summary as the route sends
+  // it, whatever engine computed the figures.
+  const richSummary = () => ({
+    coverage: { safeToSpendShowable: true },
+    cashFlow: { incomeCents: 250000, spendingNetCents: 4000, period: { completeness: "complete" } },
+    safeToSpend: {
+      status: "computed",
+      reason: null,
+      amountCents: 73500,
+      horizon: { to: "2026-11-30", rule: "end_of_calendar_month" },
+      totals: { spendableCashCents: 100000 },
+    },
+    recurring: {
+      totalMonthlyCents: 1500,
+      items: [
         {
-          accountId: "chk",
-          type: "depository",
-          subtype: "checking",
-          currentCents: 100000,
-          availableCents: 100000,
-          limitCents: null,
-          currency: "USD",
-          balanceAsOf: null,
-          fetchedAt: "2026-11-11T11:59:00Z",
-          duplicateKey: null,
-          connectionKey: "c0",
-        },
-        {
-          accountId: "card",
-          type: "credit",
-          subtype: "credit card",
-          currentCents: 25000,
-          availableCents: null,
-          limitCents: 100000,
-          currency: "USD",
-          balanceAsOf: null,
-          fetchedAt: "2026-11-11T11:59:00Z",
-          duplicateKey: null,
-          connectionKey: "c0",
+          streamId: "s1",
+          label: "Streaming",
+          monthlyCents: 1500,
+          nextDate: "2026-11-20",
+          nextDateAssumedToday: false,
+          pastDue: false,
+          paidSincePredicted: false,
         },
       ],
-      connections: [engineConnection("c0", "ok", { recurringRead: "ok" })],
-      recurring: {
-        streams: [
-          {
-            streamId: "s1",
-            label: "Streaming",
-            frequency: "MONTHLY",
-            averageAmountCents: 1500,
-            lastAmountCents: 1500,
-            currency: "USD",
-            lastDate: "2026-10-20",
-            predictedNextDate: "2026-11-20",
-            isActive: true,
-            status: "MATURE",
-            accountId: "chk",
-            pfcPrimary: null,
-            pfcDetailed: null,
-            legacyCategory: [],
-            transactionIds: [],
-          },
-        ],
-        incomeStreams: [],
-      },
-    });
+    },
+    creditUtilization: {
+      accounts: [{ accountId: "card", balanceCents: 25000, ratioBasisPoints: 2500 }],
+    },
+  });
 
   const goodSummaryBody = () =>
     JSON.parse(
@@ -1016,15 +950,9 @@ describe("response bodies — every field the screens read is checked", () => {
  */
 describe("incomplete period line", () => {
   const LINE = "May not include every transaction from this period.";
-  // The engine decides completeness from the connections: one cut off at the
-  // page limit gives "possibly_truncated", one not read gives "unknown".
-  const ENGINE_CONNECTIONS = {
-    complete: [engineConnection("c0", "ok")],
-    possibly_truncated: [engineConnection("c0", "ok", { transactionsTruncated: true })],
-    unknown: [engineConnection("c0", "ok"), engineConnection("c1", "failed")],
-  };
+  // The engine decides completeness; the screens only follow it.
   const withPeriod = (completeness: "complete" | "possibly_truncated" | "unknown") => {
-    const s = summary({ connections: ENGINE_CONNECTIONS[completeness] });
+    const s = summary({ completeness });
     expect(s.cashFlow.period.completeness).toBe(completeness);
     return response([ok(1)], s);
   };

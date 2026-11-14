@@ -27,18 +27,15 @@ import {
   isUsableTransaction,
   readBankData,
   resolveToday,
+  collapsedAccountIds,
   toDisplayTransaction,
-  toEngineInput,
+  toPackageInput,
   type EngineInputDates,
   type BankAdapterDeps,
   type PlaidReadCalls,
   type StoredConnectionRow,
 } from "../plaidEngineAdapter";
-import {
-  computeCoverage,
-  computeFinancialSummary,
-  dropDuplicateAccountCopies,
-} from "../financeEngine";
+import { analyzeCashFlow } from "@sungwon0162/cf-engine";
 import { PlaidTokenCryptoError } from "../plaidTokenCrypto";
 
 /**
@@ -91,14 +88,19 @@ const DATES: EngineInputDates = {
 const ALL ={ accounts: true, transactions: true, recurring: true };
 const USER = "user-1";
 
+/** The engine package's whole answer for a read, with DATES. */
+function packageAnswer(read: Awaited<ReturnType<typeof readBankData>>): any {
+  return analyzeCashFlow(toPackageInput(read, DATES), {});
+}
+
 /** How complete the engine finds a read, from its connections. */
 function readCompleteness(read: Awaited<ReturnType<typeof readBankData>>) {
-  return computeCoverage(read.engineConnections, read.streams.length).completeness;
+  return packageAnswer(read).period.completeness;
 }
 
 /** The engine's recurring answer for a read, with DATES. */
 function engineRecurringOf(read: Awaited<ReturnType<typeof readBankData>>) {
-  return computeFinancialSummary(toEngineInput(read, DATES)).recurring;
+  return packageAnswer(read).recurring;
 }
 
 function row(n: number): StoredConnectionRow {
@@ -559,7 +561,7 @@ describe("stream currency", () => {
   });
   const streamsOf = (read: Awaited<ReturnType<typeof readBankData>>) => read.streams;
   const engineRecurring = (read: Awaited<ReturnType<typeof readBankData>>) =>
-    computeFinancialSummary(toEngineInput(read, DATES)).recurring;
+    packageAnswer(read).recurring;
   const bankReadLine = (spy: unknown) =>
     (spy as { mock: { calls: unknown[][] } }).mock.calls
       .map((c) => String(c[0]))
@@ -579,8 +581,7 @@ describe("stream currency", () => {
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(streamsOf(read)[0].currency).toBe("USD");
     const recurring = engineRecurring(read);
-    expect(recurring.items.map((i) => i.streamId)).toEqual(["s-none"]);
-    expect(recurring.excluded).toEqual([]);
+    expect(recurring.items.map((i: any) => [i.streamId, i.monthlyCents])).toEqual([["s-none", 1549]]);
     expect(recurring.totalMonthlyCents).toBe(1549);
   });
 
@@ -599,12 +600,14 @@ describe("stream currency", () => {
     });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(streamsOf(read).map((s) => s.currency)).toEqual([null, null]);
+    // A stream not in US dollars has no amount the engine can use, so the
+    // monthly total is unknown rather than counted without it.
     const recurring = engineRecurring(read);
-    expect(recurring.items).toEqual([]);
-    expect(recurring.excluded).toEqual([
-      { streamId: "s-orphan", reason: "other_currency" },
-      { streamId: "s-btc", reason: "other_currency" },
+    expect(recurring.items.map((i: any) => [i.streamId, i.monthlyCents])).toEqual([
+      ["s-btc", null],
+      ["s-orphan", null],
     ]);
+    expect(recurring.totalMonthlyCents).toBeNull();
   });
 
   it("does not take a currency from another connection's account", async () => {
@@ -630,11 +633,11 @@ describe("stream currency", () => {
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(streamsOf(read).map((s) => s.currency)).toEqual([null, "usd"]);
     const recurring = engineRecurring(read);
-    expect(recurring.items).toEqual([]);
-    expect(recurring.excluded).toEqual([
-      { streamId: "s-btc", reason: "other_currency" },
-      { streamId: "s-lower", reason: "other_currency" },
+    expect(recurring.items.map((i: any) => [i.streamId, i.monthlyCents])).toEqual([
+      ["s-btc", null],
+      ["s-lower", null],
     ]);
+    expect(recurring.totalMonthlyCents).toBeNull();
   });
 
   it("logs a count per currency shape, judged by the first amount that carries a code", async () => {
@@ -905,10 +908,10 @@ describe("engine input fields", () => {
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
     expect(read.streams.map((s) => s.streamId)).toEqual(["out"]);
     expect(read.incomeStreams.map((s) => [s.streamId, s.averageAmountCents])).toEqual([["pay", -250000]]);
-    const input = toEngineInput(read, DATES);
-    expect(input.recurring.incomeStreams.map((s) => s.streamId)).toEqual(["pay"]);
+    const input = toPackageInput(read, DATES);
+    expect(input.recurring.incomeStreams.map((s: any) => s.streamId)).toEqual(["pay"]);
     // Income streams are not charges.
-    expect(computeFinancialSummary(input).recurring.items.map((i) => i.streamId)).toEqual(["out"]);
+    expect(packageAnswer(read).recurring.items.map((i: any) => i.streamId)).toEqual(["out"]);
   });
 
   it("a stream carries its category, account and transaction ids", async () => {
@@ -941,7 +944,7 @@ describe("engine input fields", () => {
       TOKEN_1: { pages: [{ transactions: [txn("t1", { merchant_entity_id: "m-1" }), txn("t2")], total: 2 }] },
     });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
-    expect(toEngineInput(read, DATES).transactions.map((t) => t.merchantEntityId)).toEqual(["m-1", null]);
+    expect(toPackageInput(read, DATES).transactions.map((t: any) => t.merchantEntityId)).toEqual(["m-1", null]);
     expect(toDisplayTransaction(read.transactions[0])).not.toHaveProperty("merchantEntityId");
   });
 
@@ -1047,7 +1050,9 @@ describe("engine input fields", () => {
     const two = { ...row(2), institution_name: "Bank 1" };
     const keptAfter = async (rows: StoredConnectionRow[]) => {
       const read = await readBankData(USER, rows, ALL, RANGE, deps(plaid));
-      return dropDuplicateAccountCopies(toEngineInput(read, DATES)).input.accounts.map((a) => a.accountId);
+      // The accounts the engine keeps: those it did not leave out as copies.
+      const dropped = collapsedAccountIds(packageAnswer(read)) as Set<string>;
+      return read.accounts.map((a) => a.accountId).filter((id) => !dropped.has(id));
     };
     expect(await keptAfter([one, two])).toEqual(["z-fresh"]);
     expect(await keptAfter([two, one])).toEqual(["z-fresh"]);
@@ -1179,7 +1184,7 @@ describe("engine input", () => {
   it("carries no display fields into the engine", async () => {
     const { plaid } = fakePlaid({});
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
-    const input = toEngineInput(read, DATES);
+    const input = toPackageInput(read, DATES);
     const text = JSON.stringify(input);
     expect(text).not.toContain("Bank 1");
     expect(text).not.toContain("item-1");
@@ -1436,7 +1441,7 @@ describe("transaction filter", () => {
     const keys = list.map((t) => t.accountId + ":" + t.transactionId);
     expect(new Set(keys).size).toBe(keys.length);
     expect(list.map((t) => t.transactionId)).toEqual(
-      toEngineInput(read, DATES).transactions.map((t) => t.transactionId)
+      toPackageInput(read, DATES).transactions.map((t: any) => t.transactionId)
     );
   });
 
@@ -1451,12 +1456,12 @@ describe("transaction filter", () => {
       ]),
     });
     const read = await readBankData(USER, [row(1)], ALL, RANGE, deps(plaid));
-    const summary = computeFinancialSummary(toEngineInput(read, DATES));
+    const summary = packageAnswer(read);
     expect(summary.cashFlow.excluded.invalid.count).toBe(3);
 
     const clean = fakePlaid({ TOKEN_1: onePage([txn("a"), txn("b", { amount: 5 })]) });
     const cleanRead = await readBankData(USER, [row(1)], ALL, RANGE, deps(clean.plaid));
-    const cleanSummary = computeFinancialSummary(toEngineInput(cleanRead, DATES));
+    const cleanSummary = packageAnswer(cleanRead);
     expect(summary.cashFlow.spendingNetCents).toBe(cleanSummary.cashFlow.spendingNetCents);
     expect(summary.cashFlow.spendingNetCents).toBe(1234 + 500);
     expect(cleanSummary.cashFlow.excluded.invalid.count).toBe(0);

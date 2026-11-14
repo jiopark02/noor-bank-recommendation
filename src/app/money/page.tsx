@@ -43,11 +43,16 @@ import {
   missingBanksNote,
   parseFinanceSummaryResponse,
   parseSummaryTransactions,
+  showsRecurringDate,
+  spendableCashCents,
+  spendableCashTile,
   summaryLoadInputs,
   summaryPeriodNote,
   transactionListView,
   TRANSACTIONS_UNAVAILABLE,
   utilizationPercent,
+  NO_CASH_ACCOUNT_HINT,
+  NO_CASH_ACCOUNT_LABEL,
   type MoneyDisplayState,
   type ScreenSummaryResponse,
   type ScreenTransaction,
@@ -471,8 +476,12 @@ export default function MoneyPage() {
       : null;
 
   // Engine figures as they arrived. With no connection the zeros are true.
+  // The spendable-cash amount is null (a dash) when safe-to-spend was not
+  // computed; with no checking account the tile names that instead.
+  const cashTile = spendableCashTile(summary);
+  const noCashAccount = cashTile.kind === "no_cash_account";
   const figures = {
-    cash: summary ? summary.safeToSpend.totals.spendableCashCents : 0,
+    cash: spendableCashCents(cashTile),
     creditUsed: summary ? creditUsedCents(summary) : 0,
     income: summary ? summary.cashFlow.incomeCents : 0,
     spending: summary ? summary.cashFlow.spendingNetCents : 0,
@@ -637,11 +646,22 @@ export default function MoneyPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-gray-600 text-xs">Spendable cash</p>
-                  <p className="text-2xl font-semibold text-green-700">
+                  <p
+                    className={
+                      noCashAccount && moneyDisplay === "ready"
+                        ? "text-base font-semibold text-green-700"
+                        : "text-2xl font-semibold text-green-700"
+                    }
+                  >
                     <MoneyFigure state={moneyDisplay}>
-                      {formatCents(figures.cash)}
+                      {noCashAccount ? NO_CASH_ACCOUNT_LABEL : formatCentsOrDash(figures.cash)}
                     </MoneyFigure>
                   </p>
+                  {noCashAccount && moneyDisplay === "ready" && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {NO_CASH_ACCOUNT_HINT}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-gray-600 text-xs">Credit card balances</p>
@@ -697,7 +717,7 @@ export default function MoneyPage() {
                       key={item.streamId}
                       className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
                     >
-                      {item.label} · {formatCents(item.monthlyCents)}/mo
+                      {item.label} · {formatCentsOrDash(item.monthlyCents)}/mo
                     </span>
                   ))}
                 </div>
@@ -987,7 +1007,7 @@ export default function MoneyPage() {
                         <p className="font-medium text-black">{item.label}</p>
                         {/* A date already past is not "next": the charge
                             was expected then and has not been recorded. */}
-                        {item.nextDate && (
+                        {item.nextDate && showsRecurringDate(item) && (
                           <p className="text-xs text-gray-500">
                             {item.pastDue ? "Was expected " : "Next expected "}
                             {new Date(
@@ -998,7 +1018,7 @@ export default function MoneyPage() {
                       </div>
                     </div>
                     <p className="font-semibold text-black">
-                      {formatCents(item.monthlyCents)}/mo
+                      {formatCentsOrDash(item.monthlyCents)}/mo
                     </p>
                   </motion.div>
                 ))

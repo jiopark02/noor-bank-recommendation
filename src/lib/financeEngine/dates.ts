@@ -1,15 +1,8 @@
-import type {
-  EngineAccount,
-  Freshness,
-  IsoDate,
-  IsoDateTime,
-  RecurringFrequency,
-} from "./types";
+import type { EngineAccount, Freshness, IsoDate } from "./types";
 
-// Date arithmetic is on calendar days, carried as day numbers on the UTC
-// axis. Which calendar "today" belongs to is the caller's decision
-// (EngineInput.today and dateBasis); when the caller had no user time zone,
-// the engine says so through the "dates_utc" assumption code.
+// Calendar dates and zoned timestamps, checked without the platform's date
+// parser. Date arithmetic is on calendar days, carried as day numbers on the
+// UTC axis.
 
 const MS_PER_DAY = 86400000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -112,13 +105,6 @@ export function parseTimestampMs(t: unknown): number | null {
   return ms < MIN_TIMESTAMP_MS ? null : ms;
 }
 
-/** The UTC calendar date of a zoned date-time, or null when it is not one. */
-export function utcDateOf(t: IsoDateTime): IsoDate | null {
-  const ms = parseTimestampMs(t);
-  if (ms === null) return null;
-  return fromDayNumber(Math.floor(ms / MS_PER_DAY));
-}
-
 /**
  * How fresh an account's balance is. `asOf` is only ever the institution's own
  * timestamp; the time our server received the balance stays in `fetchedAt` and
@@ -133,93 +119,4 @@ export function freshnessOf(a: EngineAccount): Freshness {
     fetchedAt,
     asOfSource: asOf === null ? "unknown" : "institution",
   };
-}
-
-/** Last day of the month containing `d`. Throws on an invalid date (caller bug). */
-export function endOfMonth(d: IsoDate): IsoDate {
-  const p = parseYmd(d);
-  if (!p) throw new Error("endOfMonth: invalid date");
-  return formatYmd(p.year, p.month, daysInMonth(p.year, p.month));
-}
-
-function addMonthsClamped(d: IsoDate, months: number): IsoDate | null {
-  const p = parseYmd(d);
-  if (!p) return null;
-  const zeroBased = p.month - 1 + months;
-  const year = p.year + Math.floor(zeroBased / 12);
-  const month = (((zeroBased % 12) + 12) % 12) + 1;
-  // Clamp to month end so Jan 31 + 1 month is Feb 28/29, not Mar 3.
-  const day = Math.min(p.day, daysInMonth(year, month));
-  return formatYmd(year, month, day);
-}
-
-/**
- * `d` advanced by `steps` cadence intervals. Month-based cadences are computed
- * from `d` in one jump rather than by repeated single steps, so a 31st anchor
- * does not drift to the 28th after February. SEMI_MONTHLY is approximated as
- * 15 days. UNKNOWN has no interval and returns null.
- */
-export function addCadence(
-  d: IsoDate,
-  frequency: RecurringFrequency,
-  steps: number = 1
-): IsoDate | null {
-  const start = dayNumber(d);
-  if (start === null) return null;
-  switch (frequency) {
-    case "WEEKLY":
-      return fromDayNumber(start + 7 * steps);
-    case "BIWEEKLY":
-      return fromDayNumber(start + 14 * steps);
-    case "SEMI_MONTHLY":
-      return fromDayNumber(start + 15 * steps);
-    case "MONTHLY":
-      return addMonthsClamped(d, steps);
-    case "ANNUALLY":
-      return addMonthsClamped(d, 12 * steps);
-    default:
-      return null;
-  }
-}
-
-/**
- * The smallest `k >= 0` for which `addCadence(d, frequency, k)` falls on or
- * after `targetDay` (a UTC day number), computed directly instead of by
- * stepping from `d`, so a stale anchor costs nothing. null for an invalid date
- * or an UNKNOWN cadence.
- */
-export function firstCadenceStepOnOrAfter(
-  d: IsoDate,
-  frequency: RecurringFrequency,
-  targetDay: number
-): number | null {
-  const start = dayNumber(d);
-  if (start === null) return null;
-  switch (frequency) {
-    case "WEEKLY":
-      return Math.max(0, Math.ceil((targetDay - start) / 7));
-    case "BIWEEKLY":
-      return Math.max(0, Math.ceil((targetDay - start) / 14));
-    case "SEMI_MONTHLY":
-      return Math.max(0, Math.ceil((targetDay - start) / 15));
-    case "MONTHLY":
-    case "ANNUALLY": {
-      if (start >= targetDay) return 0;
-      const from = parseYmd(d) as { year: number; month: number };
-      const target = parseYmd(fromDayNumber(targetDay)) as { year: number; month: number };
-      const months = (target.year - from.year) * 12 + (target.month - from.month);
-      const perStep = frequency === "MONTHLY" ? 1 : 12;
-      // One step short of the target's month lands before targetDay, so at
-      // most two forward steps remain.
-      let k = Math.max(0, Math.floor(months / perStep) - 1);
-      for (;;) {
-        const day = dayNumber(addCadence(d, frequency, k) as IsoDate);
-        if (day === null) return null;
-        if (day >= targetDay) return k;
-        k++;
-      }
-    }
-    default:
-      return null;
-  }
 }
