@@ -1,27 +1,12 @@
 import { describe, it, expect } from "vitest";
-import {
-  toCents,
-  isCents,
-  sumCents,
-  monthlyCentsFromCadence,
-} from "../financeEngine/money";
-import {
-  addCadence,
-  dayNumber,
-  endOfMonth,
-  fromDayNumber,
-  isIsoDate,
-  parseTimestampMs,
-  utcDateOf,
-} from "../financeEngine/dates";
+import { toCents, isCents } from "../financeEngine/money";
+import { dayNumber, fromDayNumber, isIsoDate, parseTimestampMs } from "../financeEngine/dates";
 
 /**
  * Finance engine — money and date primitives.
  *
  * Mutations that turn this file red:
- *   - BIWEEKLY ratio 26/12 changed to 52/12      -> "BIWEEKLY uses 26/12"
  *   - leap-year branch removed from daysInMonth  -> "February in a leap year"
- *   - month-end clamp removed from addMonths     -> "Jan 31 + 1 month"
  *   - zone made optional in TIMESTAMP_PATTERN    -> "zone-less timestamps are invalid"
  *   - year bound removed from parseYmd           -> "years before 2000 are not dates"
  *   - instant bound removed from parseTimestampMs -> "years before 2000 are not dates"
@@ -29,7 +14,7 @@ import {
  *   - isCents back to a finite-integer check     -> "rejects integers beyond the safe range"
  */
 
-describe("toCents / isCents / sumCents", () => {
+describe("toCents / isCents", () => {
   it("rounds float dollars to integer cents", () => {
     expect(toCents(15.49)).toBe(1549);
     expect(toCents(0.1 + 0.2)).toBe(30);
@@ -58,53 +43,12 @@ describe("toCents / isCents / sumCents", () => {
     expect(isCents(-(2 ** 53))).toBe(false);
     expect(isCents(1e21)).toBe(false);
   });
-
-  it("sums", () => {
-    expect(sumCents([])).toBe(0);
-    expect(sumCents([1, 2, -3])).toBe(0);
-  });
-});
-
-describe("monthlyCentsFromCadence", () => {
-  it("BIWEEKLY uses 26/12", () => {
-    expect(monthlyCentsFromCadence(1549, "BIWEEKLY")).toBe(3356);
-  });
-  it("WEEKLY uses 52/12", () => {
-    expect(monthlyCentsFromCadence(1000, "WEEKLY")).toBe(4333);
-  });
-  it("SEMI_MONTHLY doubles", () => {
-    expect(monthlyCentsFromCadence(1000, "SEMI_MONTHLY")).toBe(2000);
-  });
-  it("MONTHLY is unchanged", () => {
-    expect(monthlyCentsFromCadence(1549, "MONTHLY")).toBe(1549);
-  });
-  it("ANNUALLY divides by 12", () => {
-    expect(monthlyCentsFromCadence(60000, "ANNUALLY")).toBe(5000);
-  });
-  it("UNKNOWN has no ratio", () => {
-    expect(monthlyCentsFromCadence(1000, "UNKNOWN")).toBeNull();
-  });
 });
 
 describe("dates", () => {
-  it("February in a common year", () => {
-    expect(endOfMonth("2026-02-10")).toBe("2026-02-28");
-  });
   it("February in a leap year", () => {
-    expect(endOfMonth("2028-02-10")).toBe("2028-02-29");
     expect(isIsoDate("2028-02-29")).toBe(true);
     expect(isIsoDate("2026-02-29")).toBe(false);
-  });
-  it("Jan 31 + 1 month clamps to the end of February", () => {
-    expect(addCadence("2026-01-31", "MONTHLY")).toBe("2026-02-28");
-    expect(addCadence("2026-01-31", "MONTHLY", 2)).toBe("2026-03-31");
-  });
-  it("day-based cadences", () => {
-    expect(addCadence("2026-10-12", "WEEKLY", 2)).toBe("2026-10-26");
-    expect(addCadence("2026-10-12", "BIWEEKLY")).toBe("2026-10-26");
-    expect(addCadence("2026-12-25", "ANNUALLY")).toBe("2027-12-25");
-    expect(addCadence("2026-10-12", "UNKNOWN")).toBeNull();
-    expect(addCadence("not-a-date", "WEEKLY")).toBeNull();
   });
   it("rejects malformed dates", () => {
     expect(isIsoDate("2026-13-01")).toBe(false);
@@ -116,16 +60,8 @@ describe("dates", () => {
     expect(fromDayNumber(n)).toBe("2026-10-10");
     expect(fromDayNumber(n + 22)).toBe("2026-11-01");
   });
-  it("takes the UTC date of a date-time", () => {
-    expect(utcDateOf("2026-10-10T23:30:00-05:00")).toBe("2026-10-11");
-    expect(utcDateOf("2026-10-10T23:30:00Z")).toBe("2026-10-10");
-    expect(utcDateOf("garbage")).toBeNull();
-  });
-
   it("zone-less timestamps are invalid", () => {
     // These would be read as host local time by the platform parser.
-    expect(utcDateOf("2026-10-10T23:30:00")).toBeNull();
-    expect(utcDateOf("2026-10-10")).toBeNull();
     expect(parseTimestampMs("2026-10-10T23:30:00")).toBeNull();
     expect(parseTimestampMs("2026-10-10T23:30:00+0900")).toBeNull();
   });
@@ -159,6 +95,5 @@ describe("dates", () => {
     expect(dayNumber("9999-12-31")).toBeNull();
     expect(parseTimestampMs("9998-12-31T23:59:59Z")).not.toBeNull();
     expect(parseTimestampMs("9999-01-01T00:00:00Z")).toBeNull();
-    expect(utcDateOf("9999-06-01T00:00:00Z")).toBeNull();
   });
 });

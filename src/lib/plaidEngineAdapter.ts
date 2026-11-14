@@ -86,10 +86,7 @@ import type {
   DateBasis,
   EngineAccount,
   EngineConnection,
-  EngineInput,
   EngineRecurringStream,
-  EngineTransaction,
-  FinancialSummary,
   RecurringFrequency,
   RecurringStatus,
 } from "@/lib/financeEngine";
@@ -1408,21 +1405,6 @@ export function displayTransactions(read: BankRead, window: BankWindow): Display
   return out;
 }
 
-function toEngineTransaction(t: ReadTransaction): EngineTransaction {
-  return {
-    transactionId: t.transactionId,
-    accountId: t.accountId,
-    amountCents: t.amountCents,
-    currency: t.currency,
-    date: t.date,
-    pending: t.pending,
-    pfcPrimary: t.pfcPrimary,
-    pfcDetailed: t.pfcDetailed,
-    legacyCategory: t.category,
-    merchantEntityId: t.merchantEntityId,
-  };
-}
-
 /** The request-wide dates an engine input is built from, all from one `today`. */
 export interface EngineInputDates {
   nowIso: string;
@@ -1432,34 +1414,6 @@ export interface EngineInputDates {
   readWindow: BankWindow;
   /** The cash-flow period, inside readWindow. */
   period: BankWindow;
-}
-
-/** Only the fields the engine reads: no names, masks or institution. */
-export function toEngineInput(read: BankRead, dates: EngineInputDates): EngineInput {
-  return {
-    now: dates.nowIso,
-    today: dates.today,
-    dateBasis: dates.dateBasis,
-    currency: ENGINE_CURRENCY,
-    accounts: read.accounts.map((a) => ({
-      accountId: a.accountId,
-      type: a.type,
-      subtype: a.subtype,
-      currentCents: a.currentCents,
-      availableCents: a.availableCents,
-      limitCents: a.limitCents,
-      currency: a.currency,
-      balanceAsOf: a.balanceAsOf,
-      fetchedAt: a.fetchedAt,
-      duplicateKey: a.duplicateKey,
-      connectionKey: a.connectionKey,
-    })),
-    transactions: read.transactions.map(toEngineTransaction),
-    readWindow: { start: dates.readWindow.start, end: dates.readWindow.end },
-    period: { start: dates.period.start, end: dates.period.end },
-    connections: read.engineConnections.map((c) => ({ ...c })),
-    recurring: { streams: read.streams, incomeStreams: read.incomeStreams },
-  };
 }
 
 // ---- the cash-flow engine package ---------------------------------------------

@@ -1,7 +1,25 @@
 import type { CreditUtilizationResult, EngineAccount, EngineInput, Freshness } from "./types";
 import { isCents } from "./money";
 import { freshnessOf } from "./dates";
-import { uniqueAccounts } from "./cashFlow";
+
+/**
+ * The first account with a given id; later ones with the same id, and
+ * accounts without a usable id, are left out.
+ */
+function uniqueAccounts(accounts: EngineAccount[]): { accounts: EngineAccount[] } {
+  // A Set, not a plain object: an id such as "toString" would otherwise read
+  // as already seen through Object.prototype.
+  const seen = new Set<string>();
+  const unique: EngineAccount[] = [];
+  for (let i = 0; i < accounts.length; i++) {
+    const a = accounts[i];
+    if (!a || typeof a.accountId !== "string" || a.accountId === "") continue;
+    if (seen.has(a.accountId)) continue;
+    seen.add(a.accountId);
+    unique.push(a);
+  }
+  return { accounts: unique };
+}
 
 /**
  * Credit utilization, descriptive only: balance over limit per card and in
