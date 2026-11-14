@@ -59,6 +59,21 @@ import {
 } from "@/lib/plaidTokenCrypto";
 import { getPlaidErrorCode } from "@/lib/plaidErrorRedaction";
 import {
+  analyzeCashFlow,
+  EngineInputError,
+  type CfInput,
+  type CfResult,
+  type UserProfile,
+} from "@sungwon0162/cf-engine";
+import {
+  ENGINE_SUMMARY_FIELDS,
+  SCREEN_SUMMARY_FIELDS,
+  pickFields,
+  type FieldsOf,
+  type ScreenSummary,
+} from "@/lib/bankSummaryView";
+import {
+  creditUtilizationOf,
   dayNumber,
   fromDayNumber,
   isCardPaymentCategory,
@@ -155,8 +170,12 @@ export interface FinanceSummaryResponse {
    * connection could be read.
    */
   transactions?: DisplayTransaction[];
-  /** null when no connection could be read. */
-  summary: FinancialSummary | null;
+  /**
+   * null when no connection could be read. Exactly the fields the screens
+   * read (SCREEN_SUMMARY_FIELDS), picked from the engine's answer plus the
+   * app's credit utilization; nothing else the engine returns is sent.
+   */
+  summary: ScreenSummary | null;
 }
 
 // ---- dependencies -------------------------------------------------------------
@@ -1441,4 +1460,280 @@ export function toEngineInput(read: BankRead, dates: EngineInputDates): EngineIn
     connections: read.engineConnections.map((c) => ({ ...c })),
     recurring: { streams: read.streams, incomeStreams: read.incomeStreams },
   };
+}
+
+// ---- the cash-flow engine package ---------------------------------------------
+
+/** The input schema this adapter writes. The package refuses any other. */
+export const ENGINE_INPUT_SCHEMA_VERSION = 1;
+
+/** No per-user settings are kept yet, so the engine runs on its defaults. */
+export const ENGINE_PROFILE: UserProfile = {};
+
+/**
+ * When every connection's recurring read answered with no streams, recurring
+ * charges are shown as unknown, never as $0: Plaid needs history to detect a
+ * stream, so an empty answer does not prove there are none. "hide" also keeps
+ * the safe-to-spend figure off the screens in that case, since it would count
+ * no recurring charges at all.
+ */
+export const SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY: "hide" | "show" = "hide";
+
+/** The read as the engine package takes it: only the fields its contract names. */
+export function toPackageInput(read: BankRead, dates: EngineInputDates): CfInput {
+  const stream = (s: EngineRecurringStream) => ({
+    streamId: s.streamId,
+    label: s.label,
+    frequency: s.frequency,
+    averageAmountCents: s.averageAmountCents,
+    lastAmountCents: s.lastAmountCents,
+    currency: s.currency,
+    lastDate: s.lastDate,
+    predictedNextDate: s.predictedNextDate,
+    isActive: s.isActive,
+    status: s.status,
+    accountId: s.accountId,
+    pfcPrimary: s.pfcPrimary,
+    pfcDetailed: s.pfcDetailed,
+    transactionIds: s.transactionIds.slice(),
+  });
+  return {
+    schemaVersion: ENGINE_INPUT_SCHEMA_VERSION,
+    now: dates.nowIso,
+    today: dates.today,
+    dateBasis: dates.dateBasis,
+    currency: "USD",
+    readWindow: { start: dates.readWindow.start, end: dates.readWindow.end },
+    period: { start: dates.period.start, end: dates.period.end },
+    accounts: read.accounts.map((a) => ({
+      accountId: a.accountId,
+      type: a.type,
+      subtype: a.subtype,
+      currentCents: a.currentCents,
+      availableCents: a.availableCents,
+      limitCents: a.limitCents,
+      currency: a.currency,
+      balanceAsOf: a.balanceAsOf,
+      duplicateKey: a.duplicateKey,
+      connectionKey: a.connectionKey,
+    })),
+    connections: read.engineConnections.map((c) => ({
+      connectionKey: c.connectionKey,
+      state: c.state,
+      lastSuccessfulUpdate: c.lastSuccessfulUpdate,
+      recurringRead: c.recurringRead,
+      transactionsTruncated: c.transactionsTruncated,
+      earliestTransactionDate: c.earliestTransactionDate,
+      ...(c.invalidTransactions
+        ? {
+            invalidTransactions: {
+              duplicate: c.invalidTransactions.duplicate,
+              invalid: c.invalidTransactions.invalid,
+            },
+          }
+        : {}),
+    })),
+    transactions: read.transactions.map((t) => ({
+      transactionId: t.transactionId,
+      accountId: t.accountId,
+      amountCents: t.amountCents,
+      currency: t.currency,
+      date: t.date,
+      pending: t.pending,
+      pfcPrimary: t.pfcPrimary,
+      pfcDetailed: t.pfcDetailed,
+      legacyCategory: t.category.slice(),
+      merchantEntityId: t.merchantEntityId,
+    })),
+    recurring: {
+      streams: read.streams.map(stream),
+      incomeStreams: read.incomeStreams.map(stream),
+    },
+  };
+}
+
+// Messages the engine refuses an input with, as fixed codes. Some messages
+// end with the offending value; only the fixed part is ever kept.
+const ENGINE_ERROR_EXACT: ReadonlyArray<string> = [
+  "input",
+  "schemaVersion",
+  "date",
+  "datetime",
+  "tz",
+  "currency",
+  "windows",
+  "readWindow.end != today",
+  "dup account",
+  "invalidTransactions",
+  "legacyCategory",
+  "dup txn",
+  "pendingMove",
+  "pendingMove amount",
+  "pendingMove approvedAt",
+  "ownTransferTransactionIds",
+  "transactionIds",
+  "dup stream",
+  "profile",
+  "dup override",
+  "both targets",
+  "targetCents",
+  "targetMonths",
+  "planned",
+  "planned createdAt",
+  "output integer out of safe range",
+];
+const ENGINE_ERROR_WITH_VALUE: ReadonlyArray<string> = ["date range ", "datetime ", "date "];
+const ENGINE_ERROR_WITH_KEY: ReadonlyArray<string> = ["missing ", "type "];
+const FIELD_NAME = /^[A-Za-z]{1,40}$/;
+
+function codeOf(text: string): string {
+  return text.trim().replace(/[^A-Za-z0-9]+/g, "_");
+}
+
+/**
+ * A fixed code for an EngineInputError message, safe to log: one of the
+ * engine's own fixed messages, the fixed part of a message that ends with a
+ * value, or "missing_<field>" / "type_<field>" for a field name. Anything
+ * else is "unknown". The message itself is never returned.
+ */
+export function engineInputErrorCode(message: unknown): string {
+  if (typeof message !== "string") return "unknown";
+  if (ENGINE_ERROR_EXACT.indexOf(message) >= 0) return codeOf(message);
+  for (let i = 0; i < ENGINE_ERROR_WITH_KEY.length; i++) {
+    const prefix = ENGINE_ERROR_WITH_KEY[i];
+    if (message.indexOf(prefix) === 0 && FIELD_NAME.test(message.slice(prefix.length))) {
+      return codeOf(prefix) + "_" + message.slice(prefix.length);
+    }
+  }
+  for (let i = 0; i < ENGINE_ERROR_WITH_VALUE.length; i++) {
+    if (message.indexOf(ENGINE_ERROR_WITH_VALUE[i]) === 0) return codeOf(ENGINE_ERROR_WITH_VALUE[i]);
+  }
+  return "unknown";
+}
+
+/** The engine refused the input this adapter built: an adapter bug. */
+export class EngineContractBreach extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super("engine input refused: " + code);
+    this.name = "EngineContractBreach";
+    this.code = code;
+  }
+}
+
+/** The engine's answer lacked a field the screens read, or had it with the wrong type. */
+export class EngineOutputUnexpected extends Error {
+  constructor(what: string) {
+    super("engine output unexpected: " + what);
+    this.name = "EngineOutputUnexpected";
+  }
+}
+
+type Holds<T extends true> = T;
+/**
+ * Compile-time only: every field the screens read from the engine is in the
+ * package's declared result, with a type the field list accepts. A field the
+ * package renames or retypes fails here. The runtime check (pickFields) still
+ * runs: the declaration is not a guarantee about what the code returns.
+ */
+export type EngineResultSatisfiesScreenFields = Holds<
+  [CfResult] extends [FieldsOf<typeof ENGINE_SUMMARY_FIELDS>] ? true : false
+>;
+
+/** The one place the engine is called. Its answer is unknown until checked. */
+function callEngine(input: CfInput): unknown {
+  try {
+    const answer: unknown = analyzeCashFlow(input, ENGINE_PROFILE);
+    return answer;
+  } catch (error: unknown) {
+    if (error instanceof EngineInputError) {
+      throw new EngineContractBreach(engineInputErrorCode(error.message));
+    }
+    throw error;
+  }
+}
+
+/**
+ * Account ids the engine left out as copies of an account reached through
+ * another connection (its "duplicate_account_collapsed" issues), or null when
+ * the answer's dataIssues cannot be read.
+ */
+export function collapsedAccountIds(answer: unknown): Set<string> | null {
+  if (answer === null || typeof answer !== "object") return null;
+  const issues = (answer as Record<string, unknown>).dataIssues;
+  if (!Array.isArray(issues)) return null;
+  const ids = new Set<string>();
+  for (let i = 0; i < issues.length; i++) {
+    const issue: unknown = issues[i];
+    if (issue === null || typeof issue !== "object") return null;
+    const record = issue as Record<string, unknown>;
+    if (typeof record.reason !== "string") return null;
+    if (record.reason !== "duplicate_account_collapsed") continue;
+    if (typeof record.accountKey !== "string") return null;
+    ids.add(record.accountKey);
+  }
+  return ids;
+}
+
+/** Every connection answered its recurring read, and none returned a stream. */
+export function recurringAllEmpty(connections: EngineConnection[]): boolean {
+  return connections.length > 0 && connections.every((c) => c.recurringRead === "empty");
+}
+
+/**
+ * Runs the engine package over a read and returns the summary the screens
+ * receive: the fields they read, picked from the engine's answer, with two
+ * decisions of the app's own on top:
+ *   - recurring charges are unknown (null, no items) when every connection's
+ *     recurring read was empty, and safe-to-spend follows
+ *     SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY;
+ *   - credit utilization is the app's, over the read's accounts less those
+ *     the engine left out as copies.
+ * Throws EngineContractBreach when the engine refuses the input, and
+ * EngineOutputUnexpected when its answer lacks a field the screens read.
+ */
+export function runCashFlowEngine(read: BankRead, dates: EngineInputDates): ScreenSummary {
+  const answer = callEngine(toPackageInput(read, dates));
+  const picked = pickFields(ENGINE_SUMMARY_FIELDS, answer);
+  if (!picked.ok) throw new EngineOutputUnexpected("summary fields");
+  const collapsed = collapsedAccountIds(answer);
+  if (collapsed === null) throw new EngineOutputUnexpected("dataIssues");
+  const engine = picked.value as FieldsOf<typeof ENGINE_SUMMARY_FIELDS>;
+
+  const allEmpty = recurringAllEmpty(read.engineConnections);
+  const creditAccounts: EngineAccount[] = [];
+  for (let i = 0; i < read.accounts.length; i++) {
+    const a = read.accounts[i];
+    if (collapsed.has(a.accountId)) continue;
+    creditAccounts.push({
+      accountId: a.accountId,
+      type: a.type,
+      subtype: a.subtype,
+      currentCents: a.currentCents,
+      availableCents: a.availableCents,
+      limitCents: a.limitCents,
+      currency: a.currency,
+      balanceAsOf: a.balanceAsOf,
+      fetchedAt: a.fetchedAt,
+      duplicateKey: a.duplicateKey,
+      connectionKey: a.connectionKey,
+    });
+  }
+
+  const summary = {
+    coverage: {
+      safeToSpendShowable:
+        engine.coverage.safeToSpendShowable &&
+        !(allEmpty && SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY === "hide"),
+    },
+    cashFlow: engine.cashFlow,
+    safeToSpend: engine.safeToSpend,
+    recurring: allEmpty ? { totalMonthlyCents: null, items: [] } : engine.recurring,
+    creditUtilization: creditUtilizationOf(creditAccounts, ENGINE_CURRENCY),
+  };
+  // Picked once more, as a whole, so the app's own parts carry nothing the
+  // screens do not read either.
+  const checked = pickFields(SCREEN_SUMMARY_FIELDS, summary);
+  if (!checked.ok) throw new EngineOutputUnexpected("screen summary");
+  return checked.value as ScreenSummary;
 }

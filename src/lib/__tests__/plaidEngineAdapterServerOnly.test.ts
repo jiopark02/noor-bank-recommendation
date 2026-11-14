@@ -86,6 +86,8 @@ describe("the Plaid -> engine adapter stays on the server", () => {
  *   - the package is reached through `require(` or a dynamic `import(`
  *     outside the allowed files
  *   - the summary route stops declaring the Node.js runtime, or names "edge"
+ *   - the engine called a second time anywhere, or its answer not bound as
+ *     `unknown` where it is called
  *
  * Limits: the same as above — one import statement at a time, no re-exports.
  */
@@ -137,6 +139,23 @@ describe("the cash-flow engine package stays on the server", () => {
   it("the pattern matches the package and not a look-alike", () => {
     expect(ENGINE_PACKAGE.test(`from "@sungwon0162/cf-engine"`)).toBe(true);
     expect(ENGINE_PACKAGE.test(`from "@sungwon0162/cf-engine-extra"`)).toBe(false);
+  });
+
+  // Red if: the engine is called in a second place, or its answer is kept or
+  // returned under its declared type instead of being checked as unknown.
+  it("the engine is called in one place, and its answer is bound as unknown", () => {
+    const calls: string[] = [];
+    for (const file of files) {
+      const lines = readFileSync(file, "utf8").split(/\r?\n/);
+      for (const line of lines) {
+        if (/\banalyzeCashFlow\s*\(/.test(line) && !/^\s*(?:\/\/|\*)/.test(line)) {
+          calls.push(`${rel(file)}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(calls).toEqual([
+      "lib/plaidEngineAdapter.ts: const answer: unknown = analyzeCashFlow(input, ENGINE_PROFILE);",
+    ]);
   });
 
   it("the summary route declares the Node.js runtime", () => {

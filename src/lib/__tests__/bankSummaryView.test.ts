@@ -881,60 +881,43 @@ function checksEveryField(spec: FieldSpec, good: unknown, parse: (v: unknown) =>
 }
 
 describe("response bodies — every field the screens read is checked", () => {
-  const richSummary = () =>
-    summary({
-      accounts: [
+  // Written out field by field, so every listed field is present with a
+  // non-null value wherever the list allows one: a summary as the route sends
+  // it, whatever engine computed the figures.
+  const richSummary = () => ({
+    coverage: { safeToSpendShowable: true },
+    cashFlow: { incomeCents: 250000, spendingNetCents: 4000, period: { completeness: "complete" } },
+    safeToSpend: {
+      status: "computed",
+      reason: null,
+      amountCents: 73500,
+      uncoveredObligationsCents: 0,
+      horizon: { to: "2026-11-30", rule: "end_of_calendar_month" },
+      totals: {
+        spendableCashCents: 100000,
+        upcomingRecurringCents: 1500,
+        reservedCreditCents: 25000,
+        bufferCents: 0,
+      },
+      assumptions: ["dates_utc"],
+    },
+    recurring: {
+      totalMonthlyCents: 1500,
+      items: [
         {
-          accountId: "chk",
-          type: "depository",
-          subtype: "checking",
-          currentCents: 100000,
-          availableCents: 100000,
-          limitCents: null,
-          currency: "USD",
-          balanceAsOf: null,
-          fetchedAt: "2026-11-11T11:59:00Z",
-          duplicateKey: null,
-          connectionKey: "c0",
-        },
-        {
-          accountId: "card",
-          type: "credit",
-          subtype: "credit card",
-          currentCents: 25000,
-          availableCents: null,
-          limitCents: 100000,
-          currency: "USD",
-          balanceAsOf: null,
-          fetchedAt: "2026-11-11T11:59:00Z",
-          duplicateKey: null,
-          connectionKey: "c0",
+          streamId: "s1",
+          label: "Streaming",
+          monthlyCents: 1500,
+          nextDate: "2026-11-20",
+          nextDateAssumedToday: false,
+          pastDue: false,
         },
       ],
-      connections: [engineConnection("c0", "ok", { recurringRead: "ok" })],
-      recurring: {
-        streams: [
-          {
-            streamId: "s1",
-            label: "Streaming",
-            frequency: "MONTHLY",
-            averageAmountCents: 1500,
-            lastAmountCents: 1500,
-            currency: "USD",
-            lastDate: "2026-10-20",
-            predictedNextDate: "2026-11-20",
-            isActive: true,
-            status: "MATURE",
-            accountId: "chk",
-            pfcPrimary: null,
-            pfcDetailed: null,
-            legacyCategory: [],
-            transactionIds: [],
-          },
-        ],
-        incomeStreams: [],
-      },
-    });
+    },
+    creditUtilization: {
+      accounts: [{ accountId: "card", balanceCents: 25000, ratioBasisPoints: 2500 }],
+    },
+  });
 
   const goodSummaryBody = () =>
     JSON.parse(

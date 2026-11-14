@@ -388,6 +388,74 @@ const TRANSACTION_FIELDS = {
   category: { listOf: "string" },
 } as const;
 
+/**
+ * The part of a summary that comes from the cash-flow engine. The route builds
+ * a summary by picking exactly these fields from the engine's answer
+ * (pickFields), so a field the engine adds never reaches the browser.
+ */
+export const ENGINE_SUMMARY_FIELDS = {
+  coverage: { safeToSpendShowable: "boolean" },
+  cashFlow: {
+    incomeCents: "number",
+    spendingNetCents: "number",
+    period: { completeness: COMPLETENESS },
+  },
+  safeToSpend: {
+    status: { oneOf: ["computed", "unavailable"] },
+    reason: "string|null",
+    amountCents: "number|null",
+    uncoveredObligationsCents: "number|null",
+    // Both are null when the figure could not be computed.
+    horizon: {
+      orNull: {
+        to: "string",
+        rule: { oneOf: ["next_income_date", "end_of_calendar_month"] },
+      },
+    },
+    totals: {
+      orNull: {
+        spendableCashCents: "number",
+        upcomingRecurringCents: "number",
+        reservedCreditCents: "number",
+        bufferCents: "number",
+      },
+    },
+    assumptions: { listOf: "string" },
+  },
+  recurring: {
+    totalMonthlyCents: "number|null",
+    items: {
+      listOf: {
+        streamId: "string",
+        label: "string",
+        // null when the charge's amount or frequency is not known.
+        monthlyCents: "number|null",
+        nextDate: "string|null",
+        // The engine had no expected date and used today's.
+        nextDateAssumedToday: "boolean",
+        pastDue: "boolean",
+      },
+    },
+  },
+} as const;
+
+/** The part of a summary the app computes itself. */
+export const CREDIT_UTILIZATION_FIELDS = {
+  accounts: {
+    listOf: {
+      accountId: "string",
+      balanceCents: "number|null",
+      ratioBasisPoints: "number|null",
+    },
+  },
+} as const;
+
+/** Every summary field the dashboard, the money screen and this module read. */
+export const SCREEN_SUMMARY_FIELDS = {
+  ...ENGINE_SUMMARY_FIELDS,
+  creditUtilization: CREDIT_UTILIZATION_FIELDS,
+} as const;
+
 /** What the dashboard, the money screen and this module read from a summary body. */
 export const SUMMARY_RESPONSE_FIELDS = {
   connections: { listOf: CONNECTION_FIELDS },
@@ -403,60 +471,7 @@ export const SUMMARY_RESPONSE_FIELDS = {
       limitCents: "number|null",
     },
   },
-  summary: {
-    orNull: {
-      coverage: { safeToSpendShowable: "boolean" },
-      cashFlow: {
-        incomeCents: "number",
-        spendingNetCents: "number",
-        period: { completeness: COMPLETENESS },
-      },
-      safeToSpend: {
-        status: { oneOf: ["computed", "unavailable"] },
-        reason: "string|null",
-        amountCents: "number|null",
-        uncoveredObligationsCents: "number|null",
-        // Both are null when the figure could not be computed.
-        horizon: {
-          orNull: {
-            to: "string",
-            rule: { oneOf: ["next_income_date", "end_of_calendar_month"] },
-          },
-        },
-        totals: {
-          orNull: {
-            spendableCashCents: "number",
-            upcomingRecurringCents: "number",
-            reservedCreditCents: "number",
-            bufferCents: "number",
-          },
-        },
-        assumptions: { listOf: "string" },
-      },
-      recurring: {
-        totalMonthlyCents: "number|null",
-        items: {
-          listOf: {
-            streamId: "string",
-            label: "string",
-            // null when the charge's amount or frequency is not known.
-            monthlyCents: "number|null",
-            nextDate: "string|null",
-            pastDue: "boolean",
-          },
-        },
-      },
-      creditUtilization: {
-        accounts: {
-          listOf: {
-            accountId: "string",
-            balanceCents: "number|null",
-            ratioBasisPoints: "number|null",
-          },
-        },
-      },
-    },
-  },
+  summary: { orNull: SCREEN_SUMMARY_FIELDS },
 } as const;
 
 /**
@@ -467,6 +482,8 @@ export const SUMMARY_RESPONSE_FIELDS = {
 export const SUMMARY_TRANSACTIONS_FIELDS = { listOf: TRANSACTION_FIELDS } as const;
 
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
+/** The engine's part of a summary, as the screens read it. */
+export type EngineSummaryFields = FieldsOf<typeof ENGINE_SUMMARY_FIELDS>;
 export type ScreenSummary = NonNullable<ScreenSummaryResponse["summary"]>;
 export type ScreenTransaction = FieldsOf<typeof TRANSACTION_FIELDS>;
 
@@ -764,6 +781,17 @@ export const HIDDEN_SAFE_TO_SPEND_ANSWER: Readonly<Record<SafeToSpendHidden, str
     "Your bank is still sending your transaction history, so I'm not giving a spending number yet.",
   other: "I can't work out a spending number from these accounts yet.",
 };
+
+/**
+ * Whether a recurring charge's expected date is drawn: only a date the engine
+ * expected. A date it filled in with today because it had none is not shown.
+ */
+export function showsRecurringDate(item: {
+  nextDate: string | null;
+  nextDateAssumedToday: boolean;
+}): boolean {
+  return item.nextDate !== null && !item.nextDateAssumedToday;
+}
 
 /**
  * How far the safe-to-spend figure reaches, for a sentence: "through Nov 30"

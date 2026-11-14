@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   formatCentsOrDash,
@@ -8,6 +10,7 @@ import {
   pickFields,
   safeToSpendHiddenReason,
   safeToSpendHorizonPhrase,
+  showsRecurringDate,
   spendableCashCents,
   spendableCashTile,
   SUMMARY_RESPONSE_FIELDS,
@@ -34,6 +37,8 @@ import {
  *   - pickFields passing a field the list does not name, or passing a value
  *     that does not fit                                          -> pickFields
  *   - a hidden figure explained with the wrong reason             -> hidden
+ *   - a date the engine filled in with today drawn as "Next expected",
+ *     or the money screen drawing a date without showsRecurringDate -> items
  */
 
 function screenSummary(over: {
@@ -93,7 +98,16 @@ describe("summary fields that may be null", () => {
     const s = screenSummary({
       recurring: {
         totalMonthlyCents: null,
-        items: [{ streamId: "s1", label: "Gym", monthlyCents: null, nextDate: "2026-11-20", pastDue: false }],
+        items: [
+          {
+            streamId: "s1",
+            label: "Gym",
+            monthlyCents: null,
+            nextDate: "2026-11-20",
+            nextDateAssumedToday: false,
+            pastDue: false,
+          },
+        ],
       },
     });
     expect(parseFinanceSummaryResponse(JSON.parse(JSON.stringify(body(s))))).not.toBeNull();
@@ -137,6 +151,34 @@ describe("the spendable-cash tile", () => {
 });
 
 describe("recurring items", () => {
+  it("a date the engine filled in with today is not drawn; an expected date is", () => {
+    expect(showsRecurringDate({ nextDate: "2026-11-11", nextDateAssumedToday: true })).toBe(false);
+    expect(showsRecurringDate({ nextDate: "2026-11-20", nextDateAssumedToday: false })).toBe(true);
+    expect(showsRecurringDate({ nextDate: null, nextDateAssumedToday: false })).toBe(false);
+  });
+
+  it("the money screen draws a charge's date only through showsRecurringDate", () => {
+    const page = readFileSync(
+      fileURLToPath(new URL("../../app/money/page.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(page).toContain("{item.nextDate && showsRecurringDate(item) && (");
+    // The date line is drawn in one place only.
+    expect(page.match(/Next expected/g) ?? []).toHaveLength(1);
+  });
+
+  it("an item without nextDateAssumedToday is a failed read", () => {
+    const s = screenSummary({
+      recurring: {
+        totalMonthlyCents: 1500,
+        items: [
+          { streamId: "s1", label: "Gym", monthlyCents: 1500, nextDate: "2026-11-20", pastDue: false } as never,
+        ],
+      },
+    });
+    expect(parseFinanceSummaryResponse(JSON.parse(JSON.stringify(body(s))))).toBeNull();
+  });
+
   it("an unknown monthly amount is a dash, never $0.00", () => {
     expect(formatCentsOrDash(null)).toBe("—");
     expect(formatCentsOrDash(1500)).toBe("$15.00");

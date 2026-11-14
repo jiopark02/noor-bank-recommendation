@@ -232,7 +232,7 @@ export type { TxnClass, ClassificationSource } from "./classify";
 export { computeCashFlow } from "./cashFlow";
 export { computeRecurring, upcomingOccurrences } from "./recurring";
 export { computeSafeToSpend } from "./safeToSpend";
-export { computeCreditUtilization } from "./creditUtilization";
+export { computeCreditUtilization, creditUtilizationOf } from "./creditUtilization";
 export { computeCoverage, coverageOf } from "./coverage";
 export { dropDuplicateAccountCopies } from "./duplicates";
 export type { DuplicateCopiesDropped } from "./duplicates";

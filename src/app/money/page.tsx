@@ -43,6 +43,7 @@ import {
   missingBanksNote,
   parseFinanceSummaryResponse,
   parseSummaryTransactions,
+  showsRecurringDate,
   spendableCashCents,
   spendableCashTile,
   summaryLoadInputs,
@@ -1006,7 +1007,7 @@ export default function MoneyPage() {
                         <p className="font-medium text-black">{item.label}</p>
                         {/* A date already past is not "next": the charge
                             was expected then and has not been recorded. */}
-                        {item.nextDate && (
+                        {item.nextDate && showsRecurringDate(item) && (
                           <p className="text-xs text-gray-500">
                             {item.pastDue ? "Was expected " : "Next expected "}
                             {new Date(

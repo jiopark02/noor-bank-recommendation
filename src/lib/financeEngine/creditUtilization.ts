@@ -1,4 +1,4 @@
-import type { CreditUtilizationResult, EngineInput, Freshness } from "./types";
+import type { CreditUtilizationResult, EngineAccount, EngineInput, Freshness } from "./types";
 import { isCents } from "./money";
 import { freshnessOf } from "./dates";
 import { uniqueAccounts } from "./cashFlow";
@@ -9,6 +9,17 @@ import { uniqueAccounts } from "./cashFlow";
  */
 export function computeCreditUtilization(
   input: EngineInput
+): CreditUtilizationResult {
+  return creditUtilizationOf(input.accounts, input.currency);
+}
+
+/**
+ * Credit utilization over the given accounts, in `currency`. The first
+ * account with a given id is used; later ones with the same id are ignored.
+ */
+export function creditUtilizationOf(
+  inputAccounts: EngineAccount[],
+  currency: string
 ): CreditUtilizationResult {
   const result: CreditUtilizationResult = {
     accounts: [],
@@ -23,11 +34,11 @@ export function computeCreditUtilization(
     assumptions: [],
   };
 
-  const accounts = uniqueAccounts(input.accounts).accounts;
+  const accounts = uniqueAccounts(inputAccounts).accounts;
   for (let i = 0; i < accounts.length; i++) {
     const a = accounts[i];
     if (a.type !== "credit") continue;
-    if (a.currency !== input.currency) {
+    if (a.currency !== currency) {
       // Includes a null (unofficial) currency. Nothing is converted.
       result.aggregate.accountsExcluded += 1;
       result.excludedAccounts.push({ accountId: a.accountId, reason: "other_currency" });
