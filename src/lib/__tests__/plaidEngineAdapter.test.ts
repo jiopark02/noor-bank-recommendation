@@ -1467,3 +1467,197 @@ describe("transaction filter", () => {
     expect(cleanSummary.cashFlow.excluded.invalid.count).toBe(0);
   });
 });
+
+// ---- read options ---------------------------------------------------------------
+//
+// The summary route calls readBankData with no options. These hold that its
+// reads are then made as before the options existed: the Item read alongside
+// the accounts, request options of exactly { timeout } on every call, and no
+// origin on any log line. Each option is then shown to do what it says, on
+// its own and together.
+
+type RecordedCall = { method: string; token: string; options: unknown };
+
+/** Wraps a fake so every call's method, token and request options are kept. */
+function recordingPlaid(inner: PlaidReadCalls) {
+  const recorded: RecordedCall[] = [];
+  const plaid: PlaidReadCalls = {
+    itemGet(req, options) {
+      recorded.push({ method: "itemGet", token: req.access_token, options });
+      return inner.itemGet(req, options);
+    },
+    accountsGet(req, options) {
+      recorded.push({ method: "accountsGet", token: req.access_token, options });
+      return inner.accountsGet(req, options);
+    },
+    transactionsGet(req, options) {
+      recorded.push({ method: "transactionsGet", token: req.access_token, options });
+      return inner.transactionsGet(req, options);
+    },
+    transactionsRecurringGet(req, options) {
+      recorded.push({ method: "transactionsRecurringGet", token: req.access_token, options });
+      return inner.transactionsRecurringGet(req, options);
+    },
+  };
+  return { plaid, recorded };
+}
+
+/** Every line the read wrote to console.log, warn and error, in that order. */
+function bankLogLines(): string[] {
+  const lines: string[] = [];
+  for (const method of ["log", "warn", "error"] as const) {
+    const spy = console[method] as unknown as { mock: { calls: unknown[][] } };
+    for (const call of spy.mock.calls) lines.push(call.map(String).join(" "));
+  }
+  return lines.filter((l) => l.startsWith("[bank-"));
+}
+
+// Row 1 reads, row 2 needs a new login, row 3 does not decrypt.
+const OPTION_ROWS: StoredConnectionRow[] = [row(1), row(2), { ...row(3), access_token: "BROKEN" }];
+const OPTION_SCRIPTS: Record<string, Script> = {
+  TOKEN_2: { accounts: plaidError("ITEM_LOGIN_REQUIRED") },
+};
+
+describe("read options", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("without options: the Item is read, every call takes exactly { timeout }, no line names an origin", async () => {
+    const { plaid, recorded } = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+
+    await readBankData(USER, OPTION_ROWS, ALL, RANGE, deps(plaid));
+
+    expect(recorded.filter((c) => c.method === "itemGet").map((c) => c.token).sort()).toEqual([
+      "TOKEN_1",
+      "TOKEN_2",
+    ]);
+    expect(recorded.length).toBeGreaterThan(2);
+    for (const call of recorded) {
+      expect(call.options).toStrictEqual({ timeout: 10_000 });
+    }
+    const lines = bankLogLines();
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).not.toContain("origin=");
+  });
+
+  it("an empty options object reads exactly as no options", async () => {
+    const without = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+    await readBankData(USER, OPTION_ROWS, ALL, RANGE, deps(without.plaid));
+    const withoutLines = bankLogLines();
+    vi.restoreAllMocks();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const empty = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+    await readBankData(USER, OPTION_ROWS, ALL, RANGE, deps(empty.plaid), {});
+
+    expect(empty.recorded).toStrictEqual(without.recorded);
+    expect(bankLogLines()).toEqual(withoutLines);
+  });
+
+  it("itemStatus false: no Item read, and nothing else changes", async () => {
+    const { plaid, recorded } = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+
+    const read = await readBankData(
+      USER,
+      OPTION_ROWS,
+      { accounts: true, transactions: false, recurring: false },
+      RANGE,
+      deps(plaid),
+      { itemStatus: false }
+    );
+
+    expect(recorded.map((c) => c.method)).toEqual(["accountsGet", "accountsGet"]);
+    for (const call of recorded) expect(call.options).toStrictEqual({ timeout: 10_000 });
+    expect(read.connections.map((c) => c.status)).toEqual(["ok", "login_required", "failed"]);
+    expect(read.engineConnections.map((c) => c.lastSuccessfulUpdate)).toEqual([null, null, null]);
+    for (const line of bankLogLines()) expect(line).not.toContain("origin=");
+  });
+
+  it("signal: every call takes it next to the timeout", async () => {
+    const { plaid, recorded } = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+    const { signal } = new AbortController();
+
+    await readBankData(USER, OPTION_ROWS, ALL, RANGE, deps(plaid), { signal });
+
+    expect(new Set(recorded.map((c) => c.method))).toEqual(
+      new Set(["itemGet", "accountsGet", "transactionsGet", "transactionsRecurringGet"])
+    );
+    for (const call of recorded) {
+      expect(call.options).toStrictEqual({ timeout: 10_000, signal });
+    }
+  });
+
+  it("logOrigin: every log line of the read ends with the origin, the decrypt line included", async () => {
+    const { plaid } = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+
+    await readBankData(USER, OPTION_ROWS, ALL, RANGE, deps(plaid), { logOrigin: "chat" });
+
+    const lines = bankLogLines();
+    expect(lines.some((l) => l.startsWith("[bank-read] idx=0 status=ok"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("[bank-read] idx=1 status=login_required"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("[bank-read] idx=2 status=failed cause=decrypt"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("[bank-contract]"))).toBe(true);
+    for (const line of lines) expect(line.endsWith(" origin=chat")).toBe(true);
+  });
+
+  it("the three together, accounts only: one accounts call per readable row, with the signal", async () => {
+    const { plaid, recorded } = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+    const { signal } = new AbortController();
+
+    const read = await readBankData(
+      USER,
+      OPTION_ROWS,
+      { accounts: true, transactions: false, recurring: false },
+      RANGE,
+      deps(plaid),
+      { itemStatus: false, signal, logOrigin: "chat" }
+    );
+
+    expect(recorded).toStrictEqual([
+      { method: "accountsGet", token: "TOKEN_1", options: { timeout: 10_000, signal } },
+      { method: "accountsGet", token: "TOKEN_2", options: { timeout: 10_000, signal } },
+    ]);
+    expect(read.connections.map((c) => c.status)).toEqual(["ok", "login_required", "failed"]);
+    for (const line of bankLogLines()) expect(line.endsWith(" origin=chat")).toBe(true);
+  });
+});
+
+describe("an accounts-only read and its window", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // The chat reads accounts only and passes a one-day window ending today in
+  // UTC. Red if a later change lets the window reach the answer or the log of
+  // such a read: the chat would then need the user's own calendar date.
+  it("gives the same answer and the same log lines whatever the window", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const want = { accounts: true, transactions: false, recurring: false };
+    const runWith = async (range: { start: string; end: string }) => {
+      vi.mocked(console.log).mockClear();
+      vi.mocked(console.warn).mockClear();
+      vi.mocked(console.error).mockClear();
+      const { plaid, recorded } = recordingPlaid(fakePlaid(OPTION_SCRIPTS).plaid);
+      const read = await readBankData(USER, OPTION_ROWS, want, range, deps(plaid), {
+        itemStatus: false,
+        logOrigin: "chat",
+      });
+      // fetchedAt is the clock at the read, not the window.
+      const accounts = read.accounts.map((a) => ({ ...a, fetchedAt: "" }));
+      return { read: { ...read, accounts }, recorded, lines: bankLogLines() };
+    };
+
+    const a = await runWith({ start: "2026-11-11", end: "2026-11-11" });
+    const b = await runWith({ start: "2025-01-01", end: "2025-12-31" });
+
+    expect(b).toStrictEqual(a);
+    expect(a.lines.some((l) => l.includes("history_days=none"))).toBe(true);
+  });
+});

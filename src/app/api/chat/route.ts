@@ -12,10 +12,6 @@ import {
 } from "@/lib/chatInputLimits";
 import { buildModelConversation } from "@/lib/chatServerHistory";
 import {
-  buildJsonAuthorizedHeaders,
-  extrasFromAuthorizationValue,
-} from "@/lib/supabaseAuthHeaders";
-import {
   isAiMemoryEnabled,
   getOrCreateActiveSession,
   getActiveSession,
@@ -30,10 +26,13 @@ import {
 } from "@/lib/aiMemory";
 import {
   resolvePlaidStateMode,
+  resolvePlaidChatDepth,
   buildPlaidCapabilityBlock,
   maskPlaidBlockForLog,
+  plaidBlockCarriesBalances,
 } from "@/lib/plaidChatContext";
 import { getPlaidChatState } from "@/lib/plaidChatState";
+import { isPlaidTokenCryptoError } from "@/lib/plaidTokenCrypto";
 import {
   evaluatePlaidEgressDecision,
   logPlaidEgressDecision,
@@ -96,6 +95,10 @@ import {
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+// The bank read goes through the shared bank adapter, whose cash-flow engine
+// package uses node:crypto: this handler runs on the Node.js runtime, never
+// the edge runtime.
+export const runtime = "nodejs";
 
 const DEFAULT_SIMPLE_MODEL = "google/gemini-2.5-flash-lite";
 const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
@@ -217,14 +220,6 @@ function parseChatMessages(raw: unknown): ChatMessage[] | null {
   return out.length > 0 ? out : null;
 }
 
-interface PlaidAccountSummary {
-  type?: string;
-  name?: string;
-  current_balance?: number;
-  available_balance?: number | null;
-  iso_currency_code?: string;
-}
-
 function getLastUserMessage(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i].role === "user") {
@@ -314,77 +309,25 @@ function isFinancialPlanningQuestion(message: string): boolean {
   return signals.some((signal) => normalized.includes(signal));
 }
 
-function formatAmount(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `$${amount.toFixed(2)}`;
-  }
-}
-
-function buildBalanceSummary(accounts: PlaidAccountSummary[]): string | null {
-  if (!Array.isArray(accounts) || accounts.length === 0) {
-    return null;
-  }
-
-  const checkingAccount =
-    accounts.find((account) => account.type === "checking") || accounts[0];
-
-  if (typeof checkingAccount.current_balance !== "number") {
-    return null;
-  }
-
-  const currency = checkingAccount.iso_currency_code || "USD";
-  const available =
-    typeof checkingAccount.available_balance === "number"
-      ? checkingAccount.available_balance
-      : checkingAccount.current_balance;
-
-  return `Your checking available balance is ${formatAmount(
-    available,
-    currency
-  )} and current balance is ${formatAmount(
-    checkingAccount.current_balance,
-    currency
-  )}.`;
-}
-
 /**
- * The signal cancels the request to the accounts route. A cancelled request
- * answers null, like any other failure here; a caller that cancels must not
- * use the result. The accounts route itself keeps running to its own end.
+ * What kind of failure ended the bank-state read, for its log line: a cause
+ * and a code, never the error's message. The connection read's failure is
+ * recognized by its name (PlaidConnectionReadError, plaidChatState.ts) rather
+ * than by instanceof, so this never throws inside the fail-open catch that
+ * calls it, whatever the error is.
  */
-async function fetchBalanceSummaryFromPlaidRoute(
-  request: NextRequest,
-  signal: AbortSignal
-): Promise<string | null> {
-  try {
-    const plaidHeaders = buildJsonAuthorizedHeaders(
-      extrasFromAuthorizationValue(request.headers.get("authorization"))
-    );
-    const accountsUrl = new URL("/api/plaid/accounts", request.url);
-    const response = await fetch(accountsUrl.toString(), {
-      method: "POST",
-      headers: plaidHeaders,
-      body: JSON.stringify({}),
-      cache: "no-store",
-      signal,
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
-    return buildBalanceSummary(data?.accounts || []);
-  } catch {
-    return null;
+function plaidReadFailure(error: unknown): { cause: string; reason: string } {
+  if (isPlaidTokenCryptoError(error)) {
+    return { cause: "decrypt", reason: error.reason };
   }
+  if (error instanceof Error && error.name === "PlaidConnectionReadError") {
+    const code = (error as { code?: unknown }).code;
+    return {
+      cause: "db_read",
+      reason: typeof code === "string" && code !== "" ? code : "none",
+    };
+  }
+  return { cause: "unknown", reason: "none" };
 }
 
 function isComplexPrompt(message: string): boolean {
@@ -988,7 +931,6 @@ type ChatStage =
   | "session"
   | "memory"
   | "plaid_state"
-  | "balance"
   | "save";
 
 export async function POST(request: NextRequest) {
@@ -1010,7 +952,6 @@ export async function POST(request: NextRequest) {
     session: -1,
     memory: -1,
     plaid_state: -1,
-    balance: -1,
     save: -1,
   };
   const timed = async <T>(
@@ -1309,14 +1250,17 @@ export async function POST(request: NextRequest) {
     const wantsFinancialAnalysis =
       !isGreeting && isFinancialPlanningQuestion(lastUserMessageText);
 
-    // Plaid capability scaffold (B-1). AI_PLAID_STATE = off | connection | balances.
-    // "off" closes both paths below that read fresh bank data: the scaffold
-    // block and the balance-keyword block. The third, financial-analysis
-    // channel only has its egress decision evaluated and logged; there is no
-    // read behind it. The base prompt's guideline 2 also tells the model it
-    // has no bank data. Bank figures the model was given on earlier turns can
-    // still reach it through the stored conversation history and the memory
-    // block; "off" does not remove those.
+    // Bank data for the model. AI_PLAID_STATE = off | connection | balances.
+    // There is one bank read, getPlaidChatState, inside the capability
+    // scaffold's branch; "off" denies that channel, so nothing is read. The
+    // balance-keyword channel reads nothing itself: when it allows a turn
+    // (mode "connection" and a balance question) that read goes to depth
+    // "balances". The financial-analysis channel only has its egress decision
+    // evaluated and logged; there is no read behind it. The base prompt's
+    // guideline 2 also tells the model it has no bank data under "off". Bank
+    // figures the model was given on earlier turns can still reach it through
+    // the stored conversation history and the memory block; "off" does not
+    // remove those.
     const plaidStateMode = resolvePlaidStateMode();
     const plaidStateEnabled = plaidStateMode !== "off";
 
@@ -1330,11 +1274,24 @@ export async function POST(request: NextRequest) {
       plaidStateMode,
     });
     logPlaidEgressDecision(capabilityScaffoldDecision, { mode: plaidStateMode });
+    const balanceKeywordDecision = evaluatePlaidEgressDecision({
+      channel: "balance_keyword",
+      plaidStateMode,
+      wantsBalance,
+    });
+    logPlaidEgressDecision(balanceKeywordDecision, { mode: plaidStateMode });
+    // Whether this turn's block carries per-account balance lines, for
+    // llm_calls: the same predicate the block builder renders them by.
+    let plaidBalancesInjected = false;
     if (capabilityScaffoldDecision.allowed) {
-      // Balances (L2) are fetched only on substantive turns; greetings stay at
-      // the L1 connection scaffold so we never do a live balance fetch on "hi".
-      const effectiveDepth =
-        plaidStateMode === "balances" && !isGreeting ? "balances" : "connection";
+      // Balances are read only on substantive turns: under "balances" on any
+      // turn but a greeting, under "connection" on a balance question. A
+      // greeting never triggers a live balance read.
+      const effectiveDepth = resolvePlaidChatDepth({
+        mode: plaidStateMode,
+        isGreeting,
+        balanceKeywordAllowed: balanceKeywordDecision.allowed,
+      });
       try {
         const plaidState = await beforeLoop(
           "plaid_state",
@@ -1346,12 +1303,17 @@ export async function POST(request: NextRequest) {
         );
         const plaidBlock = buildPlaidCapabilityBlock(plaidState);
         systemPrompt += plaidBlock;
+        plaidBalancesInjected = plaidBlockCarriesBalances(plaidState);
+        const reads = plaidState.connections.map((c) => c.read);
         console.debug(
-          "[plaid-state] mode=%s depth=%s connected=%s accounts=%d block=%s",
+          "[plaid-state] mode=%s depth=%s connected=%s accounts=%d read=%d reconnect=%d unread=%d block=%s",
           plaidStateMode,
           effectiveDepth,
           plaidState.connected,
           plaidState.accounts?.length ?? 0,
+          reads.filter((r) => r === "read").length,
+          reads.filter((r) => r === "needs_reconnect").length,
+          reads.filter((r) => r === "not_read").length,
           maskPlaidBlockForLog(plaidBlock)
         );
       } catch (error) {
@@ -1361,10 +1323,14 @@ export async function POST(request: NextRequest) {
         // Fail-open on a read error: it never blocks the chat. Emit an
         // explicit "state unknown" block so the base prompt's pointer to
         // "What you can see this turn" stays consistent and the model does not
-        // fabricate a connection verdict.
+        // fabricate a connection verdict. The log names the kind of failure
+        // and a code only: never the error's message or the error itself,
+        // which can carry database or crypto detail.
+        const failure = plaidReadFailure(error);
         console.error(
-          "[plaid-state] failed to build capability block; using unknown-state fallback:",
-          error
+          "[plaid-state] read failed cause=%s reason=%s; using unknown-state fallback",
+          failure.cause,
+          failure.reason
         );
         systemPrompt += buildPlaidCapabilityBlock({
           depth: effectiveDepth,
@@ -1378,36 +1344,6 @@ export async function POST(request: NextRequest) {
     if (isGreeting) {
       systemPrompt +=
         "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, polite sentences. Do NOT mention their income, spending, budget, bank balance, or profile details unless they explicitly asked.";
-    }
-
-    // Under "balances" mode the always-on L2 block already injected shallow
-    // balances on substantive turns, so this keyword-gated balance path (and its
-    // buggy buildBalanceSummary formatter) is retired to avoid double-stating the
-    // balance. Under "connection" it runs on a balance question; under "off" it
-    // does not run at all.
-    const balanceKeywordDecision = evaluatePlaidEgressDecision({
-      channel: "balance_keyword",
-      plaidStateMode,
-      wantsBalance,
-    });
-    logPlaidEgressDecision(balanceKeywordDecision, { mode: plaidStateMode });
-    let balanceSnapshotInjected = false;
-    if (balanceKeywordDecision.allowed) {
-      // A read still running at the deadline throws here, past the helper's
-      // own catch, so it is never mistaken for "no snapshot available".
-      const balanceSummary = await beforeLoop(
-        "balance",
-        async (signal) =>
-          await fetchBalanceSummaryFromPlaidRoute(request, signal)
-      );
-
-      if (balanceSummary) {
-        balanceSnapshotInjected = true;
-        systemPrompt += `\n\n## Verified Balance Snapshot\n${balanceSummary}\n\nIf the user asks about their balance, respond in one sentence using exactly this verified snapshot. Do not change the amounts and do not add other accounts unless asked.`;
-      } else {
-        systemPrompt +=
-          "\n\nIf the user asks about their balance and no verified snapshot is available, explain that a bank connection is required and suggest reconnecting Plaid in Noor.";
-      }
     }
 
     // Evaluated and logged only: no bank read follows this decision.
@@ -1439,7 +1375,7 @@ export async function POST(request: NextRequest) {
       const promptBlocks: ChatPromptBlocks = {
         memory: memoryBlock !== "",
         plaidScaffold: capabilityScaffoldDecision.allowed,
-        balance: balanceSnapshotInjected,
+        balance: plaidBalancesInjected,
         financialSnapshot: false,
       };
       let attemptIndex = 0;
@@ -1580,14 +1516,13 @@ export async function POST(request: NextRequest) {
     // One line per request. Durations only. No user, session, or content
     // fields.
     console.info(
-      "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d balance_ms=%d save_ms=%d",
+      "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d save_ms=%d",
       stageMs.auth,
       stageMs.body,
       stageMs.profile,
       stageMs.session,
       stageMs.memory,
       stageMs.plaid_state,
-      stageMs.balance,
       stageMs.save
     );
     // Awaited: Vercel freezes the function once the response is returned.

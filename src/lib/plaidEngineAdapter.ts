@@ -3,8 +3,9 @@
 //
 // The one place where Plaid's account, transaction and recurring-stream
 // responses are read and turned into the engine's input. The summary route,
-// which serves the dashboard and the money screen, calls this; the chat path
-// does not.
+// which serves the dashboard and the money screen, calls this for every read.
+// The chat's bank-state read (plaidChatState.ts) calls it for accounts only,
+// with no Item read and its own log origin (BankReadOptions).
 //
 // Server only: it decrypts stored access tokens and calls Plaid. Client code may
 // import its TYPES (`import type`), never its values; a source probe in the test
@@ -177,7 +178,7 @@ export interface FinanceSummaryResponse {
 
 // ---- dependencies -------------------------------------------------------------
 
-type CallOptions = { timeout: number };
+type CallOptions = { timeout: number; signal?: AbortSignal };
 
 /** The Plaid calls the adapter makes, shaped like the SDK client so it can be passed as is. */
 export interface PlaidReadCalls {
@@ -226,6 +227,32 @@ export interface BankReadRequest {
   accounts: boolean;
   transactions: boolean;
   recurring: boolean;
+}
+
+/**
+ * How to make the reads. Every field is optional, and leaving one out keeps
+ * the read exactly as it is without it: the same calls, the same request
+ * options and the same log lines.
+ *
+ *   itemStatus  false: no /item/get call with the accounts read; the Item's
+ *               last update is then unknown (null), which only the engine
+ *               uses. A caller that runs no engine has no use for it.
+ *   signal      Handed to every Plaid call as a request option next to the
+ *               timeout, so a caller that stops waiting can cancel them. A
+ *               cancelled call fails its connection like any other failure;
+ *               a caller that cancels must not use the result.
+ *   logOrigin   Appended to every log line this read writes as
+ *               ` origin=<value>`, so reads made for one caller can be told
+ *               apart from the others in the log.
+ */
+export interface BankReadOptions {
+  itemStatus?: boolean;
+  signal?: AbortSignal;
+  logOrigin?: "chat";
+}
+
+function originSuffix(opts: BankReadOptions): string {
+  return opts.logOrigin ? ` origin=${opts.logOrigin}` : "";
 }
 
 // ---- dates --------------------------------------------------------------------
@@ -690,12 +717,18 @@ async function readConnection(
   accessToken: string,
   want: BankReadRequest,
   range: BankWindow,
-  plaid: PlaidReadCalls
+  plaid: PlaidReadCalls,
+  opts: BankReadOptions
 ): Promise<ConnectionRead> {
   const itemId = row.item_id;
   const institutionName = row.institution_name ?? null;
   const connectionKey = connectionKeyOf(index);
-  const options: CallOptions = { timeout: PLAID_CALL_TIMEOUT_MS };
+  // The signal key is added only when there is a signal, so a read made
+  // without one passes exactly the options it always has.
+  const options: CallOptions = opts.signal
+    ? { timeout: PLAID_CALL_TIMEOUT_MS, signal: opts.signal }
+    : { timeout: PLAID_CALL_TIMEOUT_MS };
+  const origin = originSuffix(opts);
   const accounts: ReadAccount[] = [];
   const transactions: ReadTransaction[] = [];
   let invalidTransactions = 0;
@@ -704,10 +737,12 @@ async function readConnection(
   let pfcV2 = 0;
   let pfcOtherVersion = 0;
   // Read with the accounts: the Item's status belongs to the connection, and
-  // a read that skips accounts has no use for it.
-  const itemStatus: Promise<ItemStatusRead> = want.accounts
-    ? readItemStatus(plaid, accessToken, options)
-    : Promise.resolve({ state: "skipped" });
+  // a read that skips accounts has no use for it. A caller can also leave it
+  // out (BankReadOptions.itemStatus).
+  const itemStatus: Promise<ItemStatusRead> =
+    want.accounts && opts.itemStatus !== false
+      ? readItemStatus(plaid, accessToken, options)
+      : Promise.resolve({ state: "skipped" });
 
   try {
     if (want.accounts) {
@@ -789,7 +824,7 @@ async function readConnection(
         `stream_ccy=${formatShapeCounts(emptyShapeCounts())} ` +
         `${itemLogFields(item)} inflow_streams=0 stream_pfc=0 history_days=none ` +
         `card_pay_out=${formatCardPaymentCounts(emptyCardPaymentCounts())} ` +
-        `card_pay_in=${formatCardPaymentCounts(emptyCardPaymentCounts())}`
+        `card_pay_in=${formatCardPaymentCounts(emptyCardPaymentCounts())}${origin}`
     );
     return {
       status: { itemId, institutionName, status: state },
@@ -900,7 +935,7 @@ async function readConnection(
       `${itemLogFields(item)} inflow_streams=${incomeStreams.length} ` +
       `stream_pfc=${streamsWithCategory} history_days=${historyDays(earliest, range)} ` +
       `card_pay_out=${formatCardPaymentCounts(cardPayOut)} ` +
-      `card_pay_in=${formatCardPaymentCounts(cardPayIn)}`
+      `card_pay_in=${formatCardPaymentCounts(cardPayIn)}${origin}`
   );
 
   return {
@@ -937,11 +972,14 @@ function decryptFailureReason(error: unknown): string {
 function decryptFailedRead(
   index: number,
   row: StoredConnectionRow,
-  reason: string
+  reason: string,
+  opts: BankReadOptions
 ): ConnectionRead {
   const itemId = row.item_id;
   const institutionName = row.institution_name ?? null;
-  console.error(`[bank-read] idx=${index} status=failed cause=decrypt reason=${reason}`);
+  console.error(
+    `[bank-read] idx=${index} status=failed cause=decrypt reason=${reason}${originSuffix(opts)}`
+  );
   return {
     status: { itemId, institutionName, status: "failed" },
     engine: {
@@ -1235,13 +1273,17 @@ export interface BankRead {
  * reported as each bank failing. When only some rows fail, each of those
  * connections is answered `failed` with no data, no Plaid call is made with
  * it, and the remaining connections are read as usual.
+ *
+ * `opts` changes how the reads are made (BankReadOptions); without it they
+ * are made as they always have been.
  */
 export async function readBankData(
   userId: string,
   rows: StoredConnectionRow[],
   want: BankReadRequest,
   range: BankWindow,
-  deps: BankAdapterDeps
+  deps: BankAdapterDeps,
+  opts: BankReadOptions = {}
 ): Promise<BankRead> {
   // Checked before any token is decrypted or any call made.
   if (want.recurring && !want.accounts) {
@@ -1268,8 +1310,8 @@ export async function readBankData(
     rows.map((row, i) => {
       const t = tokens[i];
       return t.ok
-        ? readConnection(i, row, t.token, want, range, deps.plaid)
-        : Promise.resolve(decryptFailedRead(i, row, decryptFailureReason(t.error)));
+        ? readConnection(i, row, t.token, want, range, deps.plaid, opts)
+        : Promise.resolve(decryptFailedRead(i, row, decryptFailureReason(t.error), opts));
     })
   );
 
@@ -1283,6 +1325,7 @@ export async function readBankData(
   // transaction id -> the account of the copy kept. A Map, so an id such as
   // "constructor" is not read as already seen.
   const keptTransactions = new Map<string, string>();
+  const origin = originSuffix(opts);
 
   const contract = applyEngineContract(
     reads.map((r) => ({
@@ -1331,7 +1374,7 @@ export async function readBankData(
     });
     if (duplicate > 0 || invalid > 0) {
       // Counts only: no id, amount or account.
-      console.log(`[bank-filter] idx=${i} invalid=${invalid} duplicate=${duplicate}`);
+      console.log(`[bank-filter] idx=${i} invalid=${invalid} duplicate=${duplicate}${origin}`);
     }
     // One line per connection, zeros included, so how often each case
     // happens can be read from the log. Counts only.
@@ -1340,7 +1383,8 @@ export async function readBankData(
       `[bank-contract] idx=${i} invalid_txn=${invalid} duplicate_txn=${duplicate} ` +
         `balance_as_of_nulled=${n.balanceAsOfNulled} amounts_nulled=${n.amountsNulled} ` +
         `stream_dates_nulled=${n.streamDatesNulled} last_update_nulled=${n.lastUpdateNulled} ` +
-        `identical_streams_dropped=${n.identicalStreamsDropped} recurring_failed=${n.recurringFailed}`
+        `identical_streams_dropped=${n.identicalStreamsDropped} recurring_failed=${n.recurringFailed}` +
+        origin
     );
     for (let j = 0; j < c.streams.length; j++) streams.push(c.streams[j]);
     for (let j = 0; j < c.incomeStreams.length; j++) incomeStreams.push(c.incomeStreams[j]);

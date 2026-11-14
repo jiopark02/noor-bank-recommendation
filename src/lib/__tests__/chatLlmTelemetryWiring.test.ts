@@ -175,7 +175,7 @@ const LOOP_HEAD = `      // Which optional blocks the system prompt carries, for
       const promptBlocks: ChatPromptBlocks = {
         memory: memoryBlock !== "",
         plaidScaffold: capabilityScaffoldDecision.allowed,
-        balance: balanceSnapshotInjected,
+        balance: plaidBalancesInjected,
         financialSnapshot: false,
       };
       let attemptIndex = 0;

@@ -65,9 +65,7 @@ const IDENTIFIER = ["access", "token"].join("_");
  * token — every one of these must decrypt before use.
  */
 const CONSUMING_SITES = [
-  "app/api/plaid/accounts/route.ts",
   "app/api/plaid/relink/route.ts",
-  "lib/plaidChatState.ts",
   // liveRevocationDeps() decrypts a stored token and hands the plaintext
   // straight to plaidClient.itemRemove. The revocation logic above it takes
   // that decrypt as an injected dependency (so the revoke-before-delete
@@ -89,6 +87,10 @@ const NON_CONSUMING_SITES: Record<string, string> = {
   "lib/plaidTokenCrypto.ts": "defines the encryption of the column",
   // The single write site, plus the row-shape doc comment.
   "lib/plaidApiUtils.ts": "the only write site; encrypts before insert",
+  // Selects the stored column and hands the rows to readBankData, which
+  // decrypts each one through liveAdapterDeps before any Plaid call.
+  "lib/plaidChatState.ts":
+    "selects the column; readBankData decrypts it through liveAdapterDeps",
   // Holds a Plaid response field, never a stored value.
   "app/api/plaid/exchange-token/route.ts":
     "reads the token off the Plaid exchange response, before storage",

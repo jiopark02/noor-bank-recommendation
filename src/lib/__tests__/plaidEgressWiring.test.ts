@@ -3,15 +3,17 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 
 /**
- * The chat route reads fresh bank data in two places. Each read must sit
- * inside the branch of its own egress decision, so that a decision that
- * denies (for example every channel under AI_PLAID_STATE=off) means the read
- * never happens and nothing from it reaches the prompt. The third channel,
- * financial analysis, is evaluated and logged with no read and no branch
- * behind it.
+ * The chat route reads fresh bank data in one place, getPlaidChatState. That
+ * read must sit inside the branch of the capability-scaffold decision, so a
+ * decision that denies (every channel under AI_PLAID_STATE=off) means the
+ * read never happens and nothing from it reaches the prompt. The
+ * balance-keyword decision reads nothing itself: it only raises that read's
+ * depth, inside the same branch. The third channel, financial analysis, is
+ * evaluated and logged with no read and no branch behind it.
  *
  * ⚠️ A SOURCE PROBE, NOT AN EXECUTED TEST. The decisions themselves are
- * executed in plaidEgressPolicy.test.ts.
+ * executed in plaidEgressPolicy.test.ts, and the depth they lead to in
+ * plaidChatContext.test.ts (resolvePlaidChatDepth).
  */
 
 const CHAT = readFileSync(
@@ -33,13 +35,23 @@ function allowedBranch(decision: string): string {
   return CHAT.slice(start, end);
 }
 
-describe.each([
-  ["capabilityScaffoldDecision", "await getPlaidChatState("],
-  ["balanceKeywordDecision", "await fetchBalanceSummaryFromPlaidRoute("],
-])("%s", (decision, call) => {
-  it("guards the only call that reads this bank data", () => {
-    expect(occurrences(CHAT, call)).toBe(1);
-    expect(allowedBranch(decision)).toContain(call);
+describe("capabilityScaffoldDecision", () => {
+  it("guards the only call that reads bank data", () => {
+    expect(occurrences(CHAT, "await getPlaidChatState(")).toBe(1);
+    expect(allowedBranch("capabilityScaffoldDecision")).toContain(
+      "await getPlaidChatState("
+    );
+  });
+});
+
+describe("balanceKeywordDecision", () => {
+  it("reads nothing, and only sets the depth of the guarded read", () => {
+    expect(occurrences(CHAT, 'channel: "balance_keyword"')).toBe(1);
+    expect(occurrences(CHAT, "balanceKeywordDecision.allowed")).toBe(1);
+    expect(occurrences(CHAT, "if (balanceKeywordDecision.allowed)")).toBe(0);
+    expect(allowedBranch("capabilityScaffoldDecision")).toContain(
+      "balanceKeywordAllowed: balanceKeywordDecision.allowed"
+    );
   });
 });
 
@@ -55,10 +67,12 @@ describe("financialAnalysisDecision", () => {
 });
 
 describe("bank-data reads in the chat route", () => {
-  it("happen only through the two guarded helpers", () => {
+  it("happen only through the guarded bank-state read", () => {
     expect(occurrences(CHAT, "plaidClient")).toBe(0);
-    // Each helper is defined once and called once.
-    expect(occurrences(CHAT, "fetchBalanceSummaryFromPlaidRoute(")).toBe(2);
+    expect(occurrences(CHAT, "readBankData")).toBe(0);
+    expect(occurrences(CHAT, "/api/plaid/")).toBe(0);
+    expect(occurrences(CHAT, "fetchBalanceSummaryFromPlaidRoute")).toBe(0);
+    expect(occurrences(CHAT, "buildBalanceSummary")).toBe(0);
     expect(occurrences(CHAT, "getPlaidChatState(")).toBe(1);
   });
 });

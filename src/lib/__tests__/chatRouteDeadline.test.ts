@@ -38,7 +38,7 @@ const BUDGET_BODY = {
 };
 const CUT_LINE = "[chat-deadline] stage cut stage=%s elapsed_ms=%d";
 const STAGES_LINE =
-  "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d balance_ms=%d save_ms=%d";
+  "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d save_ms=%d";
 
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 
@@ -52,7 +52,6 @@ const state = {
     session: false,
     memory: false,
     plaidState: false,
-    balance: false,
   },
   /** When set, the profile queries answer after this many milliseconds. */
   profileAnswersAfterMs: null as number | null,
@@ -64,7 +63,7 @@ const state = {
 const seen = {
   profileSignals: [] as AbortSignal[],
   plaidSignal: undefined as AbortSignal | undefined,
-  balanceSignal: undefined as AbortSignal | undefined,
+  plaidDepth: undefined as string | undefined,
   sessionCalls: 0,
   saveCalls: 0,
   modelCalls: 0,
@@ -161,6 +160,7 @@ vi.mock("@/lib/plaidChatState", () => ({
     opts: { depth: string; signal?: AbortSignal }
   ) => {
     seen.plaidSignal = opts.signal;
+    seen.plaidDepth = opts.depth;
     if (state.hang.plaidState) return never();
     if (state.plaidStateThrows) return Promise.reject(new Error("plaid state read failed"));
     return Promise.resolve({
@@ -216,14 +216,13 @@ beforeEach(() => {
     session: false,
     memory: false,
     plaidState: false,
-    balance: false,
   };
   state.profileAnswersAfterMs = null;
   state.sessionFailsAfterMs = null;
   state.plaidStateThrows = false;
   seen.profileSignals = [];
   seen.plaidSignal = undefined;
-  seen.balanceSignal = undefined;
+  seen.plaidDepth = undefined;
   seen.sessionCalls = 0;
   seen.saveCalls = 0;
   seen.modelCalls = 0;
@@ -241,20 +240,6 @@ beforeEach(() => {
     "fetch",
     vi.fn((url: unknown, init?: RequestInit) => {
       const target = String(url);
-      if (target === "https://noor.test/api/plaid/accounts") {
-        seen.balanceSignal = init?.signal ?? undefined;
-        if (state.hang.balance) return never();
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              accounts: [
-                { type: "checking", current_balance: 812.34, available_balance: 790.12 },
-              ],
-            }),
-            { status: 200, headers: { "content-type": "application/json" } }
-          )
-        );
-      }
       if (target !== "https://openrouter.ai/api/v1/chat/completions") {
         return Promise.reject(new Error(`unexpected fetch: ${target}`));
       }
@@ -351,15 +336,6 @@ const STAGE_CASES: StageCase[] = [
     },
     signals: () => [seen.plaidSignal],
   },
-  {
-    stage: "balance",
-    text: "what's my balance?",
-    setup: () => {
-      vi.stubEnv("AI_PLAID_STATE", "connection");
-      state.hang.balance = true;
-    },
-    signals: () => [seen.balanceSignal],
-  },
 ];
 
 describe("a wait still running at the pre-loop deadline", () => {
@@ -395,6 +371,23 @@ describe("a wait still running at the pre-loop deadline", () => {
     await vi.advanceTimersByTimeAsync(1);
     await request.done;
     for (const signal of signals) expect(signal?.aborted).toBe(true);
+  });
+
+  it("a balance question under connection reads at depth balances inside the same wait, and is cut and cancelled with it", async () => {
+    vi.stubEnv("AI_PLAID_STATE", "connection");
+    state.hang.plaidState = true;
+    const request = start("what's my balance?");
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS - 1);
+    expect(seen.plaidDepth).toBe("balances");
+    expect(seen.plaidSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const res = await request.done;
+    expect(res.status).toBe(503);
+    expect(res.json).toEqual(BUDGET_BODY);
+    expect(seen.modelCalls).toBe(0);
+    expect(cutLines()).toEqual([[CUT_LINE, "plaid_state", DEADLINE_MS]]);
+    expect(seen.plaidSignal?.aborted).toBe(true);
   });
 
   it("the profile read cancels both of its queries", async () => {
@@ -497,8 +490,8 @@ describe("the [chat-stages] line", () => {
   function durations(): number[] {
     const lines = stagesLines();
     expect(lines).toHaveLength(1);
-    // The format and eight values, and nothing else.
-    expect(lines[0]).toHaveLength(9);
+    // The format and seven values, and nothing else.
+    expect(lines[0]).toHaveLength(8);
     for (const value of lines[0].slice(1)) expect(typeof value).toBe("number");
     return lines[0].slice(1) as number[];
   }
@@ -512,9 +505,9 @@ describe("the [chat-stages] line", () => {
     const res = await post("what's my balance?", 120);
     expect(res.status).toBe(200);
     expect(seen.saveCalls).toBe(1);
-    const [auth, body, profile, session, memory, plaidState, balance, save] = durations();
+    const [auth, body, profile, session, memory, plaidState, save] = durations();
     expect(profile).toBe(120);
-    for (const value of [auth, body, session, memory, plaidState, balance, save]) {
+    for (const value of [auth, body, session, memory, plaidState, save]) {
       expect(value).toBeGreaterThanOrEqual(0);
     }
   });
@@ -525,7 +518,7 @@ describe("the [chat-stages] line", () => {
     const [auth, body, ...rest] = durations();
     expect(auth).toBeGreaterThanOrEqual(0);
     expect(body).toBeGreaterThanOrEqual(0);
-    expect(rest).toEqual([-1, -1, -1, -1, -1, -1]);
+    expect(rest).toEqual([-1, -1, -1, -1, -1]);
   });
 
   it("is written for a request refused at authentication", async () => {
@@ -534,16 +527,16 @@ describe("the [chat-stages] line", () => {
     expect(res.status).toBe(401);
     const [auth, ...rest] = durations();
     expect(auth).toBeGreaterThanOrEqual(0);
-    expect(rest).toEqual([-1, -1, -1, -1, -1, -1, -1]);
+    expect(rest).toEqual([-1, -1, -1, -1, -1, -1]);
   });
 
   it("reports the cut wait as having lasted until the deadline", async () => {
     vi.stubEnv("AI_PLAID_STATE", "connection");
     state.hang.plaidState = true;
     await post(GENERAL, DEADLINE_MS);
-    const [, , , , , plaidState, balance, save] = durations();
+    const [, , , , , plaidState, save] = durations();
     expect(plaidState).toBe(DEADLINE_MS);
-    expect([balance, save]).toEqual([-1, -1]);
+    expect(save).toBe(-1);
   });
 
   it("carries no user id, session id or message text", async () => {
