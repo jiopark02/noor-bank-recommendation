@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@sungwon0162/cf-engine": "1.0.0-draft7h",
     "@supabase/ssr": "0.5.2",
     "@supabase/supabase-js": "^2.39.0",
     "@types/uuid": "^10.0.0",

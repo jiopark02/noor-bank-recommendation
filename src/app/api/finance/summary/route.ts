@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ENGINE_VERSION } from "@sungwon0162/cf-engine";
 import { isPlaidConfigured } from "@/lib/plaid";
 import {
   authenticate,
@@ -38,6 +39,11 @@ import {
  *     answer, for the screen that shows it. Any other value leaves the field
  *     out. The banks are read the same way either way.
  */
+
+// The cash-flow engine package uses node:crypto, so this handler runs on the
+// Node.js runtime, never the edge runtime.
+export const runtime = "nodejs";
+
 export async function POST(request: NextRequest) {
   try {
     // Authentication first, before anything about configuration is revealed.
@@ -82,7 +88,8 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     const { today, dateBasis } = resolveToday(auth.body.timeZone, now);
     console.log(
-      `[finance-summary] date_basis=${dateBasis === "user_time_zone" ? "user" : "utc_fallback"}`
+      `[finance-summary] date_basis=${dateBasis === "user_time_zone" ? "user" : "utc_fallback"} ` +
+        `engine_pkg=${ENGINE_VERSION}`
     );
     const readWindow = bankWindow(today, READ_WINDOW_DAYS);
     const period = bankWindow(today, DISPLAY_WINDOW_DAYS);
