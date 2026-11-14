@@ -211,7 +211,11 @@ describe("dashboard money figures come only from the summary route", () => {
     // cash figure, a balance total, may be read before it.)
     const gateAt = PAGE.indexOf("if (!view.showSafeToSpend) {");
     expect(PAGE.indexOf("amountCents")).toBeGreaterThan(gateAt);
-    expect(PAGE.indexOf("uncoveredObligationsCents")).toBeGreaterThan(gateAt);
+    // The sentence comes from the tested helper, and a shortfall is never
+    // read from the uncovered-obligations field, which can be 0 while the
+    // figure is negative.
+    expect(PAGE.indexOf("safeToSpendLines(")).toBeGreaterThan(gateAt);
+    expect(PAGE).not.toContain("uncoveredObligationsCents");
   });
 });
 

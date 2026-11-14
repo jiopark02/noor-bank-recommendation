@@ -32,7 +32,6 @@ import {
   decideBankView,
   describeBankAction,
   formatCents,
-  formatCalendarDay,
   formatCentsOrDash,
   HIDDEN_SAFE_TO_SPEND_ANSWER,
   formatMonthlyOrUnknown,
@@ -40,7 +39,7 @@ import {
   missingBanksNote,
   parseFinanceSummaryResponse,
   safeToSpendHiddenReason,
-  safeToSpendHorizonPhrase,
+  safeToSpendLines,
   spendableCashCents,
   spendableCashTile,
   summaryPeriodNote,
@@ -450,28 +449,11 @@ export default function HomePage() {
       };
     }
 
-    const amount = s.amountCents ?? 0;
-    const reach = safeToSpendHorizonPhrase(s.horizon);
-    const dueReach =
-      s.horizon.rule === "next_income_date" ? reach : `by ${formatCalendarDay(s.horizon.to)}`;
-    const parts = [
-      `your spendable cash of ${formatCents(s.totals.spendableCashCents)}`,
-      `less ${formatCents(s.totals.upcomingRecurringCents)} in recurring charges due ${dueReach}`,
-      `and ${formatCents(s.totals.reservedCreditCents)} in card balances`,
-    ];
-    if (s.totals.bufferCents > 0) {
-      parts.push(`and a ${formatCents(s.totals.bufferCents)} buffer`);
-    }
-
+    const lines = safeToSpendLines(s.amountCents ?? 0, s.horizon);
     return {
-      opening:
-        amount >= 0
-          ? `Good day, ${userName}. After upcoming recurring charges and your card balances, you have about ${formatCents(amount)} to spend ${reach}.`
-          : `Good day, ${userName}. Your upcoming charges and card balances are ${formatCents(
-              s.uncoveredObligationsCents ?? -amount
-            )} more than your spendable cash ${reach}.`,
+      opening: `Good day, ${userName}. ${lines.statement}`,
       question,
-      answer: `That's ${parts.join(", ")}.`,
+      answer: lines.answer,
     };
   }, [moneyDisplay, moneyError, hasBankConnection, summary, view, userName]);
 

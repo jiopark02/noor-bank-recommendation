@@ -404,8 +404,10 @@ export const ENGINE_SUMMARY_FIELDS = {
     status: { oneOf: ["computed", "unavailable"] },
     reason: "string|null",
     amountCents: "number|null",
-    uncoveredObligationsCents: "number|null",
-    // Both are null when the figure could not be computed.
+    // Both are null when the figure could not be computed. Of the totals, only
+    // the cash the figure starts from is read: the figure also sets money
+    // aside that the totals do not itemize, so the screens never list a
+    // breakdown that would not add up to it.
     horizon: {
       orNull: {
         to: "string",
@@ -415,9 +417,6 @@ export const ENGINE_SUMMARY_FIELDS = {
     totals: {
       orNull: {
         spendableCashCents: "number",
-        upcomingRecurringCents: "number",
-        reservedCreditCents: "number",
-        bufferCents: "number",
       },
     },
   },
@@ -433,6 +432,8 @@ export const ENGINE_SUMMARY_FIELDS = {
         // The engine had no expected date and used today's.
         nextDateAssumedToday: "boolean",
         pastDue: "boolean",
+        // The charge posted on or after its expected date, which has passed.
+        paidSincePredicted: "boolean",
       },
     },
   },
@@ -832,13 +833,41 @@ export function orderRecurringItems<
 
 /**
  * Whether a recurring charge's expected date is drawn: only a date the engine
- * expected. A date it filled in with today because it had none is not shown.
+ * expected, for a charge not yet paid. A date it filled in with today because
+ * it had none is not shown, and neither is a passed date the charge has
+ * already been paid on or after.
  */
 export function showsRecurringDate(item: {
   nextDate: string | null;
   nextDateAssumedToday: boolean;
+  paidSincePredicted: boolean;
 }): boolean {
-  return item.nextDate !== null && !item.nextDateAssumedToday;
+  return item.nextDate !== null && !item.nextDateAssumedToday && !item.paidSincePredicted;
+}
+
+/**
+ * The dashboard's safe-to-spend lines, after its greeting. The figure is the
+ * only amount in them: what it sets aside is named in words, never itemized,
+ * because the parts the summary carries do not add up to it. A negative
+ * figure is the shortfall, stated as its absolute value.
+ */
+export function safeToSpendLines(
+  amountCents: number,
+  horizon: { to: string; rule: string }
+): { statement: string; answer: string } {
+  const reach = safeToSpendHorizonPhrase(horizon);
+  if (amountCents >= 0) {
+    return {
+      statement: `You have about ${formatCents(amountCents)} to spend ${reach}.`,
+      answer: "That's what's left after upcoming bills, card payments and your usual spending.",
+    };
+  }
+  return {
+    statement: `Your upcoming bills and usual spending ${reach} come to about ${formatCents(
+      -amountCents
+    )} more than your cash.`,
+    answer: "That's counting upcoming bills, card payments and your usual spending.",
+  };
 }
 
 /**
