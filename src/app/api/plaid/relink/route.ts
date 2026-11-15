@@ -16,6 +16,10 @@ import {
   isPlaidTokenCryptoConfigured,
 } from "@/lib/plaidTokenCrypto";
 
+/** Retryable by the user: the connection could not be read this time. */
+const RELINK_RETRY_MESSAGE =
+  "We couldn't start re-linking right now. Please try again in a moment.";
+
 export async function POST(request: NextRequest) {
   try {
     if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
@@ -50,17 +54,18 @@ export async function POST(request: NextRequest) {
     // check redundant.
     const lookup = await getPlaidConnectionByItemId(userId, itemId);
 
-    // BEHAVIOUR DELIBERATELY UNCHANGED. The helper now separates a failed read
-    // from an absent row, and this route maps both onto the 404 it has always
-    // answered — so nothing observable about relink moves in the change that
-    // introduced the distinction (it was made for /api/plaid/disconnect, where
-    // folding the two together was answering a database failure with "removed").
-    //
-    // Whether relink SHOULD answer a failed read differently is a real question
-    // and an open one: telling a user "Connection not found" when the query
-    // failed is the same class of silent-failure, and it is left alone here only
-    // to keep that decision out of an unrelated fix. It is logged, not forgotten.
-    if (!lookup.ok || !lookup.connection) {
+    // A FAILED READ IS NOT AN ABSENT ROW. Telling the user "Connection not
+    // found" when the query failed would report a database fault as a fact
+    // about their bank, so the failure gets its own retryable 500 and the
+    // absence keeps its 404. The failure is decided first: `{ ok: false }` has
+    // no `connection`, so checking absence first would absorb every failure.
+    if (!lookup.ok) {
+      return NextResponse.json(
+        { error: RELINK_RETRY_MESSAGE, code: "CONNECTION_READ_FAILED" },
+        { status: 500 }
+      );
+    }
+    if (!lookup.connection) {
       return NextResponse.json(
         { error: "Connection not found" },
         { status: 404 }
