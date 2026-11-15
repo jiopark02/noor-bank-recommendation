@@ -4,6 +4,7 @@ import {
   PLAID_COUNTRY_CODES,
   isPlaidConfigured,
 } from "@/lib/plaid";
+import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
@@ -19,6 +20,14 @@ import {
 const RELINK_RETRY_MESSAGE =
   "We couldn't start re-linking right now. Please try again in a moment.";
 
+/**
+ * A fault in OUR configuration. Worded without "try again", as in
+ * /api/plaid/disconnect: the client shows this string to the user, and
+ * retrying does not change a missing key.
+ */
+const SERVER_FAULT_MESSAGE =
+  "Something went wrong on our end. Please check back in a moment.";
+
 export async function POST(request: NextRequest) {
   try {
     if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
@@ -26,6 +35,19 @@ export async function POST(request: NextRequest) {
       // token, so without PLAID_TOKEN_ENCRYPTION_KEY this route cannot run.
       return NextResponse.json(
         { error: "Plaid is not configured" },
+        { status: 503 }
+      );
+    }
+
+    // The service-role key must exist before anything here reads the database.
+    // Checked before authenticate() because authenticate() would answer first
+    // and answer wrong: verifying the token builds a server client, which
+    // throws without the key, and that throw comes back as "no user" — a 401
+    // that blames the caller's session for our configuration. Same status,
+    // code and message as the same gate in /api/plaid/disconnect.
+    if (!isSupabaseAdminConfigured()) {
+      return NextResponse.json(
+        { error: SERVER_FAULT_MESSAGE, code: "ADMIN_UNCONFIGURED" },
         { status: 503 }
       );
     }
