@@ -34,6 +34,10 @@ import {
  * one outcome to one response.
  */
 
+// Literal, because the platform reads it statically. Must equal
+// PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
+export const maxDuration = 300;
+
 /** Retryable by the user: something transient failed and trying again may work. */
 const RETRYABLE_MESSAGE =
   "We couldn't disconnect this bank. Please try again in a moment. " +

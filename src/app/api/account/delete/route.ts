@@ -13,6 +13,10 @@ import { deleteAccountForUser } from "@/lib/accountDeletion";
 
 export const dynamic = "force-dynamic";
 
+// Literal, because the platform reads it statically. Must equal
+// PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
+export const maxDuration = 300;
+
 /**
  * POST /api/account/delete — permanent GDPR account deletion.
  *
@@ -67,6 +71,10 @@ export const dynamic = "force-dynamic";
  * tests.
  */
 export async function POST(request: NextRequest) {
+  // The start of the request, before anything waits: the revocation loop's
+  // time check counts from here, not from when the loop begins.
+  const startedAt = Date.now();
+
   const authUserId = await getAuthenticatedUserIdFromRequest(request);
   if (!authUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -111,7 +119,10 @@ export async function POST(request: NextRequest) {
     },
 
     revokeAll: (userId, connections) =>
-      revokeAndDeleteConnections(userId, connections, liveRevocationDeps()),
+      revokeAndDeleteConnections(userId, connections, liveRevocationDeps(), {
+        startedAtMs: startedAt,
+        now: Date.now,
+      }),
 
     // The row count comes from .select("id"): a PostgREST delete returns the
     // deleted rows when a representation is requested, so `data.length` IS the

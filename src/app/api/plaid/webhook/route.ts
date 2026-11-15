@@ -14,6 +14,10 @@ import {
 import { handlePlaidWebhook } from "@/lib/plaidWebhook";
 import { receivePlaidWebhook } from "@/lib/plaidWebhookReceive";
 
+// Literal, because the platform reads it statically. Must equal
+// PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
+export const maxDuration = 300;
+
 /**
  * POST /api/plaid/webhook — Plaid's webhook receiver.
  *
