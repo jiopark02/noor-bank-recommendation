@@ -45,6 +45,7 @@ function summary(overrides: Partial<RevocationSummary> = {}): RevocationSummary 
   return {
     outcomes: [],
     remaining: 0,
+    deferred: 0,
     sawCryptoConfigFailure: false,
     ...overrides,
   };

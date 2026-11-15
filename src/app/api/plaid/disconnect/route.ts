@@ -103,11 +103,12 @@ export async function POST(request: NextRequest) {
     // deleted=0-is-success reading in plaidRevocation.ts leans on that.
     //
     // /api/account/delete already refuses on this condition before it revokes
-    // anything (accountDeletion.ts:144); this route had no equivalent. Same code
-    // string as that route, deliberately: one fault, one name in the logs. The
-    // 503 and the message match this route's other configuration branch above
-    // rather than that route's 500, because this route already answers every
-    // configuration fault that way and this body is rendered to the user verbatim.
+    // anything (the admin check in deleteAccountForUser); this route had no
+    // equivalent. Same code string as that route, deliberately: one fault, one
+    // name in the logs. The 503 and the message match this route's other
+    // configuration branch above rather than that route's 500, because this
+    // route already answers every configuration fault that way and this body is
+    // rendered to the user verbatim.
     //
     // Checked before authenticate() because authenticate() would answer first
     // and answer wrong: getAuthenticatedUserIdFromRequest builds a
