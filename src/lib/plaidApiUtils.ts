@@ -228,29 +228,46 @@ export async function getPlaidConnectionsByItemIdAcrossUsers(
  *    Item (itemGet), and `excludeItemId` set to that new Item. This is the pass a
  *    client value cannot steer, and exchange-token fails closed on it.
  *
- * Throws on a query error so the caller can decide the fail direction.
+ * Returns the three states of ConnectionLookup rather than throwing, so the
+ * failure is in the return type and each caller decides its fail direction
+ * where the compiler can see it. A query error and a throw (createServerClient
+ * throws on missing env) are both `{ ok: false }`; no active row is
+ * `{ ok: true, connection: null }`. Logs the error code only.
  */
 export async function getActivePlaidConnectionByInstitution(
   userId: string,
   institutionId: string,
   excludeItemId?: string
-) {
-  const supabase = createServerClient();
-  let query = supabase
-    .from("plaid_connections")
-    .select("item_id,institution_name")
-    .eq("user_id", userId)
-    .eq("institution_id", institutionId)
-    .eq("status", "active");
-  if (excludeItemId !== undefined) {
-    query = query.neq("item_id", excludeItemId);
-  }
-  const { data, error } = await query.limit(1).maybeSingle();
+): Promise<
+  ConnectionLookup<{ item_id: string; institution_name: string | null }>
+> {
+  try {
+    const supabase = createServerClient();
+    let query = supabase
+      .from("plaid_connections")
+      .select("item_id,institution_name")
+      .eq("user_id", userId)
+      .eq("institution_id", institutionId)
+      .eq("status", "active");
+    if (excludeItemId !== undefined) {
+      query = query.neq("item_id", excludeItemId);
+    }
+    const result = await query.limit(1).maybeSingle();
 
-  if (error) {
-    throw error;
+    if (result.error) {
+      console.error(
+        "Error fetching Plaid connection by institution: code",
+        postgrestErrorCode(result.error) ?? "none"
+      );
+    }
+    return connectionRowOrFailure(result);
+  } catch (error) {
+    console.error(
+      "Error fetching Plaid connection by institution: threw, code",
+      postgrestErrorCode(error) ?? "none"
+    );
+    return { ok: false } as const;
   }
-  return data;
 }
 
 /**
