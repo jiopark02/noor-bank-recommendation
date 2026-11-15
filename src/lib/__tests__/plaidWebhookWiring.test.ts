@@ -55,6 +55,8 @@ describe("/api/plaid/webhook wiring", () => {
     expect(ROUTE).toContain("revokeAndDeleteConnection(userId, connection, liveRevocationDeps())");
     expect(ROUTE).toContain("lookupByItemId: getPlaidConnectionsByItemIdAcrossUsers");
     expect(ROUTE).toContain("plaidEnvironment: PLAID_ENVIRONMENT");
+    // Red if: the key check is wired to anything but the real predicate.
+    expect(ROUTE).toContain("isCryptoConfigured: isPlaidTokenCryptoConfigured");
     expect(ROUTE).toContain('request.headers.get("plaid-verification")');
   });
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isPlaidConfigured, PLAID_ENVIRONMENT } from "@/lib/plaid";
 import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getPlaidConnectionsByItemIdAcrossUsers } from "@/lib/plaidApiUtils";
+import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import {
   liveRevocationDeps,
   revokeAndDeleteConnection,
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
         handlePlaidWebhook(payload, {
           plaidEnvironment: PLAID_ENVIRONMENT,
           isAdminConfigured: isSupabaseAdminConfigured,
+          isCryptoConfigured: isPlaidTokenCryptoConfigured,
           lookupByItemId: getPlaidConnectionsByItemIdAcrossUsers,
           revoke: (userId, connection) =>
             revokeAndDeleteConnection(userId, connection, liveRevocationDeps()),

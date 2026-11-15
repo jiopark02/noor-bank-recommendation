@@ -72,6 +72,7 @@ export type WebhookOutcome =
   | "env_mismatch"
   | "logged"
   | "admin_unconfigured"
+  | "crypto_unconfigured"
   | "lookup_failed"
   | "unknown_item"
   | "ambiguous_item"
@@ -86,6 +87,8 @@ export type WebhookDecision = {
 export type WebhookDeps = {
   plaidEnvironment: PlaidEnvironmentName;
   isAdminConfigured: () => boolean;
+  /** The token encryption key is present and well-formed. */
+  isCryptoConfigured: () => boolean;
   lookupByItemId: (itemId: string) => Promise<ItemConnectionsLookup>;
   revoke: (
     userId: string,
@@ -116,6 +119,7 @@ const OUTCOME_LEVEL: Record<WebhookOutcome, LogLevel> = {
   env_mismatch: "warn",
   logged: "info",
   admin_unconfigured: "error",
+  crypto_unconfigured: "error",
   lookup_failed: "error",
   unknown_item: "info",
   ambiguous_item: "error",
@@ -213,6 +217,14 @@ export async function handlePlaidWebhook(
 
   if (!deps.isAdminConfigured()) {
     return decide(503, "admin_unconfigured");
+  }
+
+  // Without the token encryption key the stored token cannot be decrypted, so
+  // the Item cannot be revoked and the row must stay. Refused here, before the
+  // row is read, as the configuration fault it is: 503, which Plaid retries,
+  // the same answer the other revocation routes give a missing key.
+  if (!deps.isCryptoConfigured()) {
+    return decide(503, "crypto_unconfigured");
   }
 
   const lookup = await deps.lookupByItemId(itemId);
