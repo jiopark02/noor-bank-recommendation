@@ -120,15 +120,17 @@ export type RevokeFailureKind =
   | "plaid"
   | "row_delete";
 
-export type ConnectionRevocationOutcome = {
-  itemId: string;
-  /**
-   * True only when the Item is gone — revoked by this call, or confirmed already
-   * absent — AND its row is gone, deleted by this call or already absent.
-   */
-  ok: boolean;
-  failure?: RevokeFailureKind;
-};
+/**
+ * `ok: true` only when the Item is gone — revoked by this call, or confirmed
+ * already absent — AND its row is gone, deleted by this call or already absent.
+ *
+ * A discriminated union so that every failure carries its kind and a caller
+ * cannot read `failure` without first ruling out success. A consumer that maps
+ * the kinds to answers can then be checked for exhaustiveness by the compiler.
+ */
+export type ConnectionRevocationOutcome =
+  | { itemId: string; ok: true }
+  | { itemId: string; ok: false; failure: RevokeFailureKind };
 
 export type RevocationSummary = {
   outcomes: ConnectionRevocationOutcome[];
@@ -608,7 +610,7 @@ export async function revokeAndDeleteConnections(
     outcomes,
     remaining: outcomes.filter((outcome) => !outcome.ok).length,
     sawCryptoConfigFailure: outcomes.some(
-      (outcome) => outcome.failure === "crypto_config"
+      (outcome) => !outcome.ok && outcome.failure === "crypto_config"
     ),
   };
 }

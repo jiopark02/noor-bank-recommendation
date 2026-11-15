@@ -179,6 +179,11 @@ export async function POST(request: NextRequest) {
     // asked to REMOVE the bank is the wrong instruction, and re-linking can mint
     // a duplicate connection row. handlePlaidError stays on the outer catch,
     // where the error is genuinely unexpected.
+    //
+    // One case per failure kind and no `default`: a kind added to
+    // RevokeFailureKind without an answer here fails the `never` check below at
+    // compile time, instead of being absorbed into whichever answer a default
+    // happened to give.
     switch (outcome.failure) {
       case "crypto_config":
         return NextResponse.json(
@@ -209,13 +214,22 @@ export async function POST(request: NextRequest) {
           { error: RETRYABLE_MESSAGE, code: "ROW_DELETE_FAILED" },
           { status: 500 }
         );
-      default:
-        // crypto_row and plaid. The row is untouched either way.
+      case "crypto_row":
+      case "plaid":
+        // The row is untouched either way.
         return NextResponse.json(
           { error: RETRYABLE_MESSAGE, code: "REVOKE_FAILED" },
           { status: 500 }
         );
     }
+    // Compile-time only. At runtime a value outside the union (an unchecked
+    // cast upstream) still gets a named retryable answer, never a bodiless 500.
+    const _exhaustive: never = outcome.failure;
+    void _exhaustive;
+    return NextResponse.json(
+      { error: RETRYABLE_MESSAGE, code: "REVOKE_FAILED" },
+      { status: 500 }
+    );
   } catch (error: unknown) {
     console.error("Error disconnecting bank account:", error);
     return handlePlaidError(error);
