@@ -669,6 +669,8 @@ export function storeResultFromInsert(error: unknown): PlaidConnectionStore {
  * a null, so `db_error=` in the log tells those two apart — one is an environment
  * or transport fault, the other is a query that answered without the count it was
  * asked for. The marker's shape cannot collide with a SQLSTATE or a node errno.
+ * A third value, `"invalid"`, means the error did carry a string code but not
+ * one of a symbolic shape (see postgrestErrorCode); the string is not kept.
  */
 export type PlaidRowDeletion =
   | { ok: true; deleted: number }
@@ -677,18 +679,26 @@ export type PlaidRowDeletion =
 /**
  * The error's `code` and nothing else, for a log line.
  *
- * Total by construction: every non-string, empty or absent code becomes null.
- * Trimmed and capped because the value is interpolated into a single-line log
- * record — a PostgREST code is symbolic ("42501", "PGRST301") and a node code
- * is too ("ENOENT"), but this function must not be the place a multi-line or
- * unbounded string gets into the logs.
+ * Total by construction: an absent or non-string code becomes null. A string
+ * is returned only when it has the shape of a symbolic code — a SQLSTATE
+ * ("42501"), a PostgREST code ("PGRST301"), a node code ("ENOENT"). A string
+ * of any other shape (empty, padded, multi-line, containing `=` or spaces, or
+ * longer than the bound) becomes the literal "invalid" and is never echoed,
+ * not even in part: the value is interpolated into single-line `key=value` log
+ * records, and a cleaned-up fragment of an unexpected string is still
+ * something this function did not vet. The same rule as errorCodeField in
+ * accountDeletion.ts, which keeps its own copy so that module imports no IO.
+ *
+ * Callers that DECIDE on the result compare it with a well-formed SQLSTATE, so
+ * "invalid" is to them a failure with no usable code: it is not 23505 for
+ * storeResultFromInsert, and it is not a definite rejection for
+ * isDefiniteDbRejection (plaidExchange.ts), which re-reads the row instead.
  */
 export function postgrestErrorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null;
   const code = (error as Record<string, unknown>).code;
   if (typeof code !== "string") return null;
-  const trimmed = code.trim().slice(0, 32);
-  return trimmed === "" ? null : trimmed;
+  return /^[A-Za-z0-9_]{1,32}$/.test(code) ? code : "invalid";
 }
 
 /**
