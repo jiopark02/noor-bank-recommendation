@@ -147,10 +147,10 @@ import {
  *   user's connection rows, access tokens included.
  *
  *   Filtering by status in SQL is a change the helper's own documentation
- *   forbids: it would drop the non-active rows /api/account/delete needs in
- *   order to revoke their Plaid Items before the rows are destroyed, and it
- *   would re-merge "no rows" with "rows, none active" — the distinction this
- *   whole change exists to keep.
+ *   forbids: it would re-merge "no rows" with "rows, none active" — the
+ *   distinction this whole change exists to keep. (The revocation paths, which
+ *   need the non-active rows to revoke their Plaid Items, read through
+ *   getRevocableConnections instead; its tests are at the end of this file.)
  *
  * "scopes the read to the owning user and filters on nothing else" below is the
  * assertion that catches both. Before it existed, both mutations passed green.
@@ -237,8 +237,8 @@ describe("getAllPlaidConnections — the seam between the read and the decision"
   it("returns null when constructing the client throws, and logs the throw", async () => {
     // createServerClient throws on missing Supabase env. The whole body is
     // wrapped, so this must come back as a returned null like every other
-    // failure — /api/account/delete's outer catch documents that contract and
-    // has no other way to be reached. The logged object must be the thrown one,
+    // failure — the caller tells a failed read from an empty one only through
+    // that null. The logged object must be the thrown one,
     // so this null is known to have come from the catch.
     const thrown = new Error("Supabase URL and anon key are required");
     createServerClientMock.mockImplementation(() => {
@@ -255,8 +255,8 @@ describe("getAllPlaidConnections — the seam between the read and the decision"
     // client, RLS bypassed): dropping it, or passing anything but the caller's
     // userId, would return other users' rows and their tokens. And a second
     // filter — a status filter is the plausible one — would hide the inactive
-    // rows /api/account/delete must revoke before deleting, and would make
-    // "rows, none active" read as "no rows". eq must be called exactly once,
+    // rows and make "rows, none active" read as "no rows". eq must be called
+    // exactly once,
     // with exactly these arguments.
     const stub = clientResolving({ data: [], error: null });
     createServerClientMock.mockReturnValue(stub.client);

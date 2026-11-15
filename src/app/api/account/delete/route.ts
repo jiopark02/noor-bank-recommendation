@@ -3,7 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { isPlaidConfigured } from "@/lib/plaid";
-import { getRevocableConnections } from "@/lib/plaidApiUtils";
+import {
+  getRevocableConnections,
+  postgrestErrorCode,
+} from "@/lib/plaidApiUtils";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import {
   liveRevocationDeps,
@@ -104,15 +107,17 @@ export async function POST(request: NextRequest) {
     // changed. A throw would otherwise escape POST entirely (there is no outer
     // catch) and Next would answer with a bodiless 500, losing the named
     // CONNECTION_READ_FAILED answer. Both directions refuse to delete, so this
-    // costs nothing and keeps the response legible.
+    // costs nothing and keeps the response legible. Only the error's code is
+    // logged, as the helper itself does: a value thrown from this read could
+    // carry query details or row values.
     listConnections: async (userId) => {
       try {
         return await getRevocableConnections(userId);
       } catch (error) {
         console.error(
           "account/delete: getRevocableConnections threw, which its contract " +
-            "says it does not; treating as a failed read:",
-          error
+            "says it does not; treating as a failed read: threw, code",
+          postgrestErrorCode(error) ?? "none"
         );
         return null;
       }

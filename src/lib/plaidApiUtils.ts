@@ -683,7 +683,7 @@ export type PlaidRowDeletion =
  * is too ("ENOENT"), but this function must not be the place a multi-line or
  * unbounded string gets into the logs.
  */
-function postgrestErrorCode(error: unknown): string | null {
+export function postgrestErrorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null;
   const code = (error as Record<string, unknown>).code;
   if (typeof code !== "string") return null;
