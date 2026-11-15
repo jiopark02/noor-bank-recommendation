@@ -123,6 +123,22 @@ function emit(deps: AccountDeletionDeps, line: string): void {
   console.error(line);
 }
 
+/**
+ * The error's `code` and nothing else, bounded for a single log line.
+ *
+ * Never the message, details or hint: a database error's text can echo the
+ * row or the key it refused on. A code of the expected shape (a SQLSTATE or a
+ * PostgREST code) is logged as is; "none" when there is no string code;
+ * "invalid" for a string of any other shape, which is never echoed. Kept in
+ * this module so the decision code imports no client or IO module.
+ */
+function errorCodeField(error: unknown): string {
+  if (typeof error !== "object" || error === null) return "none";
+  const code = (error as Record<string, unknown>).code;
+  if (typeof code !== "string") return "none";
+  return /^[A-Za-z0-9_]{1,32}$/.test(code) ? code : "invalid";
+}
+
 function failure(
   status: number,
   message: string,
@@ -332,7 +348,13 @@ export async function deleteAccountForUser(
   // ---------------------------------------------------------------------
   const usersResult = await deps.deleteUsersRow(userId);
   if (usersResult.error) {
-    emit(deps, "[account-delete] failed to delete the public.users row");
+    // The database's code tells a foreign-key refusal (a connection row that
+    // appeared after step 3c) from any other failure; the message is not logged.
+    emit(
+      deps,
+      "[account-delete] failed to delete the public.users row " +
+        `route=/api/account/delete code=${errorCodeField(usersResult.error)}`
+    );
     return { status: 500, body: { error: USERS_DELETE_FAILED_MESSAGE } };
   }
   if (usersResult.deletedCount === 0) {

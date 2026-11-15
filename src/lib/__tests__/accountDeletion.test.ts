@@ -343,6 +343,71 @@ describe("deleteAccountForUser — the two irreversible steps", () => {
     expect(result.body.error).toBe("Failed to delete account data. Please retry.");
   });
 
+  it("logs a users-row failure with the route and the database code, never its message", async () => {
+    // Red if: the code is left out, or the error's message reaches the line.
+    const lines: string[] = [];
+    const deps = happyDeps();
+    deps.log = (line) => lines.push(line);
+    deps.deleteUsersRow.mockResolvedValue({
+      deletedCount: 0,
+      error: {
+        code: "23503",
+        message: `Key (id) is still referenced ${SENTINEL}`,
+        details: `still referenced ${SENTINEL}`,
+      },
+    });
+
+    const result = await deleteAccountForUser("user_1", deps);
+
+    const failureLines = lines.filter((line) =>
+      line.includes("failed to delete the public.users row")
+    );
+    expect(failureLines).toHaveLength(1);
+    expect(failureLines[0]).toContain("route=/api/account/delete");
+    expect(failureLines[0]).toContain("code=23503");
+    expect(lines.join("\n")).not.toContain("still referenced");
+    expect(lines.join("\n")).not.toContain(SENTINEL);
+    expect(Object.keys(result.body).sort()).toEqual(["error"]);
+  });
+
+  it("logs code=none when the users-row failure carries no code", async () => {
+    const lines: string[] = [];
+    const deps = happyDeps();
+    deps.log = (line) => lines.push(line);
+    deps.deleteUsersRow.mockResolvedValue({
+      deletedCount: 0,
+      error: new Error(`query failed ${SENTINEL}`),
+    });
+
+    await deleteAccountForUser("user_1", deps);
+
+    const failureLine = lines.find((line) =>
+      line.includes("failed to delete the public.users row")
+    );
+    expect(failureLine).toContain("code=none");
+    expect(lines.join("\n")).not.toContain(SENTINEL);
+  });
+
+  it("logs code=invalid for a code of an unexpected shape, never the value", async () => {
+    // Red if: a code outside the expected shape is echoed into the line.
+    const lines: string[] = [];
+    const deps = happyDeps();
+    deps.log = (line) => lines.push(line);
+    deps.deleteUsersRow.mockResolvedValue({
+      deletedCount: 0,
+      error: { code: `23503 forged=field ${SENTINEL}`, message: "x" },
+    });
+
+    await deleteAccountForUser("user_1", deps);
+
+    const failureLine = lines.find((line) =>
+      line.includes("failed to delete the public.users row")
+    );
+    expect(failureLine).toContain("code=invalid");
+    expect(lines.join("\n")).not.toContain("forged=field");
+    expect(lines.join("\n")).not.toContain(SENTINEL);
+  });
+
   it("treats a zero-row users delete as success and still finishes the auth step", async () => {
     // Idempotent convergence: on a retry after step 5 failed, the users row is
     // already gone and this retry must still reach step 5.
