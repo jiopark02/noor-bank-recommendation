@@ -96,6 +96,9 @@ export function connectionRowOrFailure<T>(result: {
  * The catch is a failure too, not an absence: createServerClient() throws on
  * missing env, and reporting that as "no such row" would resurrect the same bug
  * through the other door.
+ *
+ * Logs the error CODE only: the full row is selected here, and an error's
+ * message or details can echo a value from it.
  */
 export async function getPlaidConnectionByItemId(userId: string, itemId: string) {
   try {
@@ -108,12 +111,18 @@ export async function getPlaidConnectionByItemId(userId: string, itemId: string)
       .maybeSingle();
 
     if (result.error) {
-      console.error("Error fetching Plaid connection by item_id:", result.error);
+      console.error(
+        "Error fetching Plaid connection by item_id: code",
+        postgrestErrorCode(result.error) ?? "none"
+      );
     }
 
     return connectionRowOrFailure(result);
   } catch (error) {
-    console.error("Error fetching Plaid connection by item_id:", error);
+    console.error(
+      "Error fetching Plaid connection by item_id: threw, code",
+      postgrestErrorCode(error) ?? "none"
+    );
     // `as const` keeps `ok` a literal type, so the union this function returns
     // stays discriminated and callers can still narrow on it.
     return { ok: false } as const;
@@ -187,7 +196,8 @@ export function connectionsByItemIdOrFailure(result: {
  * this reads two rows: one means the owner is known, two means it is not, and
  * the caller acts on neither of the second.
  *
- * Logs the error shape only, never a row: a row carries a stored token.
+ * Logs the error code only, and only one of a symbolic shape (see
+ * postgrestErrorCode), never a row: a row carries a stored token.
  */
 export async function getPlaidConnectionsByItemIdAcrossUsers(
   itemId: string
@@ -203,7 +213,7 @@ export async function getPlaidConnectionsByItemIdAcrossUsers(
     if (result.error) {
       console.error(
         "Error fetching Plaid connections by item_id: code",
-        typeof result.error.code === "string" ? result.error.code : "none"
+        postgrestErrorCode(result.error) ?? "none"
       );
     }
     return connectionsByItemIdOrFailure(result);
@@ -724,7 +734,9 @@ export function postgrestErrorCode(error: unknown): string | null {
  * The three console.error lines stay. `dbErrorCode` distinguishes the
  * missing-representation case by marker, but a thrown createServerClient and a
  * PostgREST error carrying no code both arrive as null, and these lines are the
- * only trace that separates those two.
+ * only trace that separates those two: the thrown case says "threw". Each line
+ * carries the error's code and never the error itself, whose message or
+ * details can echo a value.
  */
 export async function deletePlaidConnection(
   userId: string,
@@ -740,8 +752,9 @@ export async function deletePlaidConnection(
       .select("id");
 
     if (error) {
-      console.error("Error deleting Plaid connection:", error);
-      return { ok: false, dbErrorCode: postgrestErrorCode(error) };
+      const dbErrorCode = postgrestErrorCode(error);
+      console.error("Error deleting Plaid connection: code", dbErrorCode ?? "none");
+      return { ok: false, dbErrorCode };
     }
 
     // NO REPRESENTATION IS "WE DO NOT KNOW", NOT "ZERO ROWS". `.select("id")`
@@ -772,8 +785,12 @@ export async function deletePlaidConnection(
 
     return { ok: true, deleted: data.length };
   } catch (error) {
-    console.error("Error deleting connection:", error);
-    return { ok: false, dbErrorCode: postgrestErrorCode(error) };
+    const dbErrorCode = postgrestErrorCode(error);
+    console.error(
+      "Error deleting Plaid connection: threw, code",
+      dbErrorCode ?? "none"
+    );
+    return { ok: false, dbErrorCode };
   }
 }
 
