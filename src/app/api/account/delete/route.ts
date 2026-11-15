@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { isPlaidConfigured } from "@/lib/plaid";
-import { getAllPlaidConnections } from "@/lib/plaidApiUtils";
+import { getRevocableConnections } from "@/lib/plaidApiUtils";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import {
   liveRevocationDeps,
@@ -90,18 +90,19 @@ export async function POST(request: NextRequest) {
     isCryptoConfigured: isPlaidTokenCryptoConfigured,
     isAdminConfigured: isSupabaseAdminConfigured,
 
-    // getAllPlaidConnections is contracted to report every failure by returning
-    // null; the catch is here because this route is the wrong place to discover
-    // that the contract changed. A throw would otherwise escape POST entirely
-    // (there is no outer catch) and Next would answer with a bodiless 500,
-    // losing the named CONNECTION_READ_FAILED answer. Both directions refuse to
-    // delete, so this costs nothing and keeps the response legible.
+    // getRevocableConnections reads only the two columns a revocation needs and
+    // is contracted to report every failure by returning null; the catch is
+    // here because this route is the wrong place to discover that the contract
+    // changed. A throw would otherwise escape POST entirely (there is no outer
+    // catch) and Next would answer with a bodiless 500, losing the named
+    // CONNECTION_READ_FAILED answer. Both directions refuse to delete, so this
+    // costs nothing and keeps the response legible.
     listConnections: async (userId) => {
       try {
-        return await getAllPlaidConnections(userId);
+        return await getRevocableConnections(userId);
       } catch (error) {
         console.error(
-          "account/delete: getAllPlaidConnections threw, which its contract " +
+          "account/delete: getRevocableConnections threw, which its contract " +
             "says it does not; treating as a failed read:",
           error
         );

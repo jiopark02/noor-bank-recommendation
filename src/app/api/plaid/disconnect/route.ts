@@ -5,7 +5,7 @@ import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
-  getPlaidConnectionByItemId,
+  getRevocableConnectionByItemId,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 import {
@@ -133,8 +133,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Scoped by (user_id, item_id), which is UNIQUE — one row or none, and a
-    // forged item_id can only ever name the caller's own connection.
-    const lookup = await getPlaidConnectionByItemId(userId, itemId);
+    // forged item_id can only ever name the caller's own connection. Reads only
+    // the two columns the revocation needs.
+    const lookup = await getRevocableConnectionByItemId(userId, itemId);
 
     // A FAILED READ IS NOT AN ABSENT ROW. This route cannot tell the difference
     // by itself — the helper is the only place that sees the query error — which

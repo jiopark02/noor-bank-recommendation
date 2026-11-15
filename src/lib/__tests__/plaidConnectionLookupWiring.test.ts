@@ -162,6 +162,36 @@ describe("getPlaidConnectionByItemId — both failure exits stay failures", () =
   });
 });
 
+const REVOCABLE_HELPER_ANCHOR =
+  /export async function getRevocableConnectionByItemId\s*\([^)]*\)[^{]*\{/;
+
+function revocableHelperBody(): string {
+  return blockAfter(
+    read(HELPER_SOURCE),
+    REVOCABLE_HELPER_ANCHOR,
+    "getRevocableConnectionByItemId"
+  );
+}
+
+describe("getRevocableConnectionByItemId — both failure exits stay failures", () => {
+  it("delegates the decision to the pure function the suite actually tests", () => {
+    // Red if: the delegation is replaced by an inline `error || !data` check.
+    expect(revocableHelperBody()).toContain("connectionRowOrFailure");
+  });
+
+  it("reports a thrown read as a failure, not as an absent row", () => {
+    // Red if: the catch returns { ok: true, connection: null }. /api/plaid/disconnect
+    // reads through this helper, and an absent row there is answered as success.
+    const catchBody = blockAfter(
+      revocableHelperBody(),
+      HELPER_CATCH_ANCHOR,
+      "getRevocableConnectionByItemId catch"
+    );
+    expect(catchBody).toMatch(/return\s*\{\s*ok:\s*false\s*\}/);
+    expect(catchBody).not.toMatch(/connection\s*:/);
+  });
+});
+
 describe("/api/plaid/disconnect — a failed read is not a completed removal", () => {
   it("answers a failed read with a named 500, never with success", () => {
     // MUTATION MEASURED RED: replacing this guard's body with

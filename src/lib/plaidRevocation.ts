@@ -89,10 +89,11 @@ import {
 /**
  * The minimum a connection row must carry to be revoked.
  *
- * Deliberately structural rather than a full row type: the rows come from
- * getAllPlaidConnections / getPlaidConnectionByItemId, which use select("*"),
- * and the migrations directory is not the source of truth for that table. This
- * names only what is read here.
+ * Deliberately structural rather than a full row type: the migrations directory
+ * is not the source of truth for that table, so this names only what is read
+ * here. The revocation routes read exactly these two columns
+ * (getRevocableConnections / getRevocableConnectionByItemId in plaidApiUtils.ts);
+ * the webhook's cross-user read selects them plus the owner's user_id.
  *
  * `access_token` holds CIPHERTEXT (PL1). It is never usable as-is; it must go
  * through `decrypt` below, with a userId taken verbatim from the verified token

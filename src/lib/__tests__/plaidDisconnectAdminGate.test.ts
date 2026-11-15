@@ -153,7 +153,7 @@ describe("/api/plaid/disconnect — the service-role key is a precondition", () 
 
     const gateAt = ADMIN_GATE_ANCHOR.exec(source)?.index ?? -1;
     const authAt = indexOf(source, "await authenticate(request)");
-    const lookupAt = indexOf(source, "await getPlaidConnectionByItemId(");
+    const lookupAt = indexOf(source, "await getRevocableConnectionByItemId(");
     const revokeAt = indexOf(source, "await revokeAndDeleteConnection(");
 
     expect(gateAt).toBeGreaterThan(-1);

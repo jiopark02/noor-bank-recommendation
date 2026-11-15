@@ -158,8 +158,8 @@ export async function deleteAccountForUser(
 
   // ---------------------------------------------------------------------
   // Step 1b. Read the connections. null means the read failed, and the
-  // distinction from [] is the entire reason getAllPlaidConnections returns a
-  // nullable (see its header).
+  // distinction from [] is the entire reason the connection read returns a
+  // nullable (see getRevocableConnections in plaidApiUtils.ts).
   //
   // A failed read is answered by REFUSING to delete, which is a change from the
   // previous behaviour — it used to log and carry on. Carrying on is no longer

@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
  * defeat that whole protection while every other test stays green and tsc stays
  * clean (both measured before this file existed):
  *
- *   1. `return (await getAllPlaidConnections(userId)) ?? [];` in the try.
+ *   1. `return (await getRevocableConnections(userId)) ?? [];` in the try.
  *   2. `return [];` instead of `return null;` in the catch.
  *
  * Either one hands deleteAccountForUser an empty list for a failed read, and
@@ -73,7 +73,7 @@ describe("/api/account/delete — the listConnections adapter passes a failed re
     // un-revoked Plaid Items. Pinning the full list of returns also catches a
     // third return added as an early exit.
     expect(returnedExpressions(adapterSource())).toEqual([
-      "await getAllPlaidConnections(userId)",
+      "await getRevocableConnections(userId)",
       "null",
     ]);
   });
