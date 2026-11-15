@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   plaidClient,
-  PLAID_PRODUCTS,
   PLAID_COUNTRY_CODES,
   isPlaidConfigured,
 } from "@/lib/plaid";
@@ -87,14 +86,17 @@ export async function POST(request: NextRequest) {
     );
 
     // Create a new link token in "update" mode using the existing access token
-    // This allows the user to re-authenticate their bank login
+    // This allows the user to re-authenticate their bank login.
+    //
+    // No `products`: the Plaid SDK's LinkTokenCreateRequest documents that the
+    // field should be omitted when launching Link in update mode, unless update
+    // mode is being used to add a credit product, which this route never does.
     try {
       const response = await plaidClient.linkTokenCreate({
         user: {
           client_user_id: userId,
         },
         client_name: "Noor",
-        products: PLAID_PRODUCTS,
         country_codes: PLAID_COUNTRY_CODES,
         language: "en",
         redirect_uri: process.env.PLAID_REDIRECT_URI,
