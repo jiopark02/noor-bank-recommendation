@@ -273,6 +273,36 @@ export async function deleteAccountForUser(
   }
 
   // ---------------------------------------------------------------------
+  // Step 3c. Read the connections again before anything below is spent.
+  //
+  // The gate above counts what step 2 was handed; it cannot see a row that
+  // appeared after step 1b read the list (a connection stored by a concurrent
+  // request). Such a row holds the only copy of its token, so the deletion
+  // stops here with the same answers as the earlier read and the gate: a
+  // failed read is CONNECTION_READ_FAILED, a row still present is
+  // REVOKE_INCOMPLETE.
+  //
+  // Nothing is revoked here. A retry starts again from step 1b, revokes what it
+  // finds, and converges the same way the gate does.
+  // ---------------------------------------------------------------------
+  const afterRevocation = await deps.listConnections(userId);
+  if (afterRevocation === null) {
+    emit(
+      deps,
+      "[account-delete] stopping before user deletion: connection re-read failed"
+    );
+    return failure(500, RETRYABLE_MESSAGE, "CONNECTION_READ_FAILED");
+  }
+  if (afterRevocation.length > 0) {
+    emit(
+      deps,
+      "[account-delete] stopping before user deletion: rows present on re-read " +
+        `count=${afterRevocation.length}`
+    );
+    return failure(500, RETRYABLE_MESSAGE, "REVOKE_INCOMPLETE");
+  }
+
+  // ---------------------------------------------------------------------
   // Step 4. Delete the public.users row. FK ON DELETE CASCADE removes the rows
   // of every table whose user_id references public.users. Tables whose
   // user_id references auth.users instead are cleared by the cascade from

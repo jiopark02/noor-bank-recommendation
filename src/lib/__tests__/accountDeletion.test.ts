@@ -62,11 +62,15 @@ type SpiedDeps = AccountDeletionDeps & {
 
 /** Everything configured, one connection, everything succeeds. */
 function happyDeps(): SpiedDeps {
+  let reads = 0;
   return {
     isPlaidConfigured: vi.fn(() => true),
     isCryptoConfigured: vi.fn(() => true),
     isAdminConfigured: vi.fn(() => true),
-    listConnections: vi.fn(async () => [connection("item_1")]),
+    // The first read is before revocation; the next is after it removed the row.
+    listConnections: vi.fn(async () =>
+      reads++ === 0 ? [connection("item_1")] : []
+    ),
     revokeAll: vi.fn(async () => summary({ remaining: 0 })),
     deleteUsersRow: vi.fn(async () => ({ deletedCount: 1, error: null })),
     deleteAuthUser: vi.fn(async () => ({ error: null })),
@@ -123,6 +127,72 @@ describe("deleteAccountForUser — an un-revoked connection stops the deletion",
     expect(deps.revokeAll).toHaveBeenCalledWith("User_MixedCase_1", [
       connection("item_1"),
     ]);
+  });
+});
+
+describe("deleteAccountForUser — the connections are read again after revocation", () => {
+  // Mutations that turn this block red:
+  //   - the re-read removed                               -> "row present", "failed re-read"
+  //   - the re-read moved before revokeAll                -> "after revocation, once"
+  //   - a row found on the re-read revoked on the spot    -> "after revocation, once"
+  //   - a failed re-read read as "no rows"                -> "failed re-read"
+
+  it("stops with REVOKE_INCOMPLETE when a row is present on the re-read", async () => {
+    const deps = happyDeps();
+    deps.listConnections.mockReset();
+    deps.listConnections
+      .mockResolvedValueOnce([connection("item_1")])
+      .mockResolvedValueOnce([connection("item_2")]);
+
+    const result = await deleteAccountForUser("user_1", deps);
+
+    expect(result.status).toBe(500);
+    expect(result.body.code).toBe("REVOKE_INCOMPLETE");
+    expect(deps.deleteUsersRow).not.toHaveBeenCalled();
+    expect(deps.deleteAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("stops with CONNECTION_READ_FAILED when the re-read fails", async () => {
+    const deps = happyDeps();
+    deps.listConnections.mockReset();
+    deps.listConnections
+      .mockResolvedValueOnce([connection("item_1")])
+      .mockResolvedValueOnce(null);
+
+    const result = await deleteAccountForUser("user_1", deps);
+
+    expect(result.status).toBe(500);
+    expect(result.body.code).toBe("CONNECTION_READ_FAILED");
+    expect(deps.deleteUsersRow).not.toHaveBeenCalled();
+    expect(deps.deleteAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("re-reads after revocation, once, and revokes only once", async () => {
+    const deps = happyDeps();
+    deps.listConnections.mockReset();
+    deps.listConnections
+      .mockResolvedValueOnce([connection("item_1")])
+      .mockResolvedValueOnce([connection("item_2")]);
+
+    await deleteAccountForUser("user_1", deps);
+
+    expect(deps.listConnections).toHaveBeenCalledTimes(2);
+    expect(deps.revokeAll).toHaveBeenCalledTimes(1);
+    expect(deps.revokeAll.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.listConnections.mock.invocationCallOrder[1]
+    );
+  });
+
+  it("proceeds to both deletions when the re-read finds nothing", async () => {
+    const deps = happyDeps();
+
+    const result = await deleteAccountForUser("user_1", deps);
+
+    expect(result).toEqual({ status: 200, body: { ok: true } });
+    expect(deps.listConnections).toHaveBeenCalledTimes(2);
+    expect(deps.listConnections.mock.invocationCallOrder[1]).toBeLessThan(
+      deps.deleteUsersRow.mock.invocationCallOrder[0]
+    );
   });
 });
 
