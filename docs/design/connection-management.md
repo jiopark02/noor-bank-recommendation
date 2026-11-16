@@ -188,45 +188,8 @@ Migration + connect-pipeline change ⇒ **HIGH**. Two-layer review + live verifi
 
 ---
 
-## 10. Reference — one-time cleanup SQL (operator-run, separate track)
-Not executed by this track. Conservative approach: **keep the most recent row per `item_id`** is a no-op (item_id is already unique); the real duplication is *multiple item_ids per institution*. Since pre-existing rows have NULL `institution_id`, institution-based cleanup is only reliable **after** a manual review. Provided as a starting point only.
-
-**READ-ONLY inspection first:**
-```sql
--- Per-user duplication overview
-select user_id,
-       count(*) as total,
-       count(*) filter (where status='active') as active_cnt,
-       count(distinct item_id) as distinct_items,
-       count(distinct institution_name) as distinct_inst_names
-from plaid_connections
-group by user_id
-having count(*) filter (where status='active') > count(distinct institution_name);
-
--- Row detail for one user
-select id, item_id, institution_name, institution_id, status, created_at
-from plaid_connections
-where user_id = '<user_id>'
-order by created_at desc;
-```
-**Cleanup (review before running; keep newest active per institution_name as a heuristic):**
-```sql
--- DELETE older duplicates, keeping the most recent active row per
--- (user_id, institution_name). Review the SELECT form first.
-delete from plaid_connections p
-using (
-  select id,
-         row_number() over (
-           partition by user_id, institution_name
-           order by (status='active') desc, created_at desc
-         ) as rn
-  from plaid_connections
-) ranked
-where p.id = ranked.id and ranked.rn > 1;
-```
-⚠️ Deleted rows' Plaid Items are **not** revoked here — hand off to the revoke roadmap item (§9). Balance/token implications: multiple access_tokens may be live for the same institution; deleting rows leaves those Items orphaned on Plaid until revoked.
-
-> **⚠️ RE-EVALUATE BEFORE RUNNING — added 2026-09-10.** Running this DELETE destroys the only copy of the access token for every row it removes. For any row whose Plaid Item has not been revoked, that Item can then never be revoked by anyone — which is exactly the outcome the 2026-09-10 change stops the code paths from producing (removal now revokes first and deletes the row only on success). The "hand off to the revoke roadmap item (§9)" pointer above no longer leads anywhere: §9 is implemented, and it is implemented precisely by refusing to do what this SQL does. Whether to run this at all is an open decision, not a documented-and-accepted cost.
+## 10. Reference — duplicate connection cleanup
+Clean up duplicate connections only through the app's revocation path; never delete plaid_connections rows with SQL — a row holds the only copy of its access token.
 
 ---
 
