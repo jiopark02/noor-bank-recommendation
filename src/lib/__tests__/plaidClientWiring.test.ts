@@ -54,6 +54,7 @@ type InterceptorHandler = {
 };
 
 type InspectableAxios = {
+  defaults?: { maxRedirects?: unknown };
   interceptors?: {
     request?: { handlers?: Array<InterceptorHandler | null> };
     response?: { handlers?: Array<InterceptorHandler | null> };
@@ -118,6 +119,15 @@ describe("plaidClient wiring — the interceptor is actually installed", () => {
     expect(dispatchAxios).toBeDefined();
     expect(dispatchAxios).not.toBe(axios);
     expect(dispatchAxios?.interceptors?.response).toBeDefined();
+  });
+
+  it("refuses to follow redirects by default", () => {
+    // Exactly 0: any other value (or none, which leaves follow-redirects'
+    // own limit in force) routes Plaid requests through follow-redirects and
+    // lets a 3xx carry the credential headers to another host. A per-request
+    // override is not visible here; plaidAxiosPipeline.test.ts sends a real
+    // redirect through the SDK to cover that.
+    expect(getDispatchAxios()?.defaults?.maxRedirects).toBe(0);
   });
 
   it("registers exactly one response interceptor and no request interceptor", () => {

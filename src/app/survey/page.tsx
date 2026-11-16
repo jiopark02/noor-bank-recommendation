@@ -20,23 +20,22 @@ import {
 } from "@/lib/supabase-browser";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import type { Session } from "@supabase/supabase-js";
-import { COUNTRY_DISPLAY } from "@/lib/countryConfig";
 import {
-  surveyFailureAction,
-  resumeAfterSurveySaveFailure,
-  staySignedInAfterSubmit,
-  SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE,
+  surveyFailureMessage,
+  signupOutcome,
+  type SignupOutcome,
 } from "@/lib/surveySubmitOutcome";
+import { MONEY_INPUT_MAX_LENGTH, moneyInputDigits } from "@/lib/moneyInputText";
+import { moneyInputKeyBlocked } from "@/lib/moneyInputText";
+import { AUTH_COPY } from "@/lib/authErrorCopy";
 
 interface SurveyData {
   firstName: string;
   email: string;
   password: string;
   confirmPassword: string;
-  staySignedIn: boolean;
   agreeToTerms: boolean;
-  // Not asked on this form: read from localStorage, and used only to pick the
-  // currency symbol shown beside the money inputs.
+  // Not asked on this form: the app serves the US only, so this is always "US".
   destinationCountry: string;
   monthlyIncome: number;
   monthlyExpenses: number;
@@ -51,29 +50,18 @@ const INITIAL_DATA: SurveyData = {
   email: "",
   password: "",
   confirmPassword: "",
-  staySignedIn: false,
   agreeToTerms: false,
-  destinationCountry: "",
+  destinationCountry: "US",
   monthlyIncome: 0,
   monthlyExpenses: 0,
   hasUsCreditHistory: undefined,
 };
 
-// Currency display only. Recommendation logic does not read this.
-const COUNTRY_CONFIG = {
-  US: {
-    currency: COUNTRY_DISPLAY.US.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.US.currency,
-  },
-  UK: {
-    currency: COUNTRY_DISPLAY.UK.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.UK.currency,
-  },
-  CA: {
-    currency: COUNTRY_DISPLAY.CA.currencySymbol,
-    currencyCode: COUNTRY_DISPLAY.CA.currency,
-  },
-};
+// The app serves the US only, so the money inputs always show US dollars.
+const countryConfig = {
+  currency: "$",
+  currencyCode: "USD",
+} as const;
 
 // Input Component - MUST be outside the main component to prevent re-renders
 const Input = ({
@@ -132,6 +120,7 @@ const PasswordInput = ({
     checks: Record<string, boolean>;
   };
 }) => {
+  const { t } = useLanguage();
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -220,7 +209,7 @@ const PasswordInput = ({
               { key: "hasUppercase", label: "Uppercase (A-Z)" },
               { key: "hasLowercase", label: "Lowercase (a-z)" },
               { key: "hasNumber", label: "Number (0-9)" },
-              { key: "hasSpecial", label: "Special (!@#$%)" },
+              { key: "hasSpecial", label: t("survey.password.special") },
             ].map((item) => (
               <div
                 key={item.key}
@@ -298,15 +287,19 @@ const ToggleButtons = ({
   </div>
 );
 
-// Money Input - handles leading zeros properly
+// Money Input. The text rules (cents cut off, non-digits and leading zeros
+// removed, the digit limit) live in moneyInputDigits, and the full-field key
+// rule in moneyInputKeyBlocked, where they are tested.
 const MoneyInput = ({
   value,
   onChange,
+  onBlur,
   placeholder = "0",
   currencySymbol = "$",
 }: {
   value: number;
   onChange: (v: number) => void;
+  onBlur?: () => void;
   placeholder?: string;
   currencySymbol?: string;
 }) => {
@@ -327,29 +320,55 @@ const MoneyInput = ({
       <input
         type="text"
         inputMode="numeric"
+        // Long enough for a pasted amount with separators and cents, so the
+        // browser does not cut the text before it is parsed; the digit limit
+        // is applied by moneyInputDigits.
+        maxLength={MONEY_INPUT_MAX_LENGTH}
         value={text}
+        onBlur={onBlur}
         placeholder={placeholder}
         onKeyDown={(e) => {
+          // Shortcuts (paste, copy, cut, select all) pass through; what they
+          // put in the field is cleaned up in onChange.
+          if (e.ctrlKey || e.metaKey) return;
           // Block "0" key when field is empty (prevents leading zeros)
           if (e.key === "0" && text === "") {
+            e.preventDefault();
+            return;
+          }
+          // A full field takes no more digits unless they replace a
+          // selection; read from the element, not from state.
+          if (
+            moneyInputKeyBlocked(
+              e.key,
+              e.currentTarget.value,
+              e.currentTarget.selectionStart,
+              e.currentTarget.selectionEnd
+            )
+          ) {
             e.preventDefault();
             return;
           }
           // Only allow digits and control keys
           if (
             !/^\d$/.test(e.key) &&
-            !["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"].includes(
-              e.key
-            )
+            ![
+              "Backspace",
+              "Delete",
+              "ArrowLeft",
+              "ArrowRight",
+              "Home",
+              "End",
+              "Tab",
+            ].includes(e.key)
           ) {
             e.preventDefault();
           }
         }}
         onChange={(e) => {
-          // Get raw value and strip any non-digits and leading zeros
-          const raw = e.target.value.replace(/\D/g, "").replace(/^0+/, "");
-          setText(raw);
-          onChange(raw ? parseInt(raw, 10) : 0);
+          const digits = moneyInputDigits(e.target.value);
+          setText(digits);
+          onChange(digits ? parseInt(digits, 10) : 0);
         }}
         className="w-full pl-8 pr-4 py-3.5 border border-gray-200 rounded-xl text-base outline-none transition-all duration-300 focus:border-black"
       />
@@ -375,11 +394,11 @@ const ViewedMark = () => (
   </svg>
 );
 
-// The browser record of a signed-in user: written after a successful submit,
-// and right after the sign-in that follows a failed survey save.
-function recordSignedInUser(userId: string, staySignedIn: boolean): void {
+// The browser record of a signed-in user, written after a successful submit on
+// the signed-in path. A new email signup writes none: it is not signed in.
+function recordSignedInUser(userId: string, keepSignedIn: boolean): void {
   localStorage.setItem("noor_user_id", userId);
-  createSession(staySignedIn);
+  createSession(keepSignedIn);
 }
 
 export default function SurveyPage() {
@@ -388,11 +407,12 @@ export default function SurveyPage() {
   const [data, setData] = useState<SurveyData>(INITIAL_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // The "stay signed in" choice recorded when a failed survey save was
-  // recovered by signing in; null until that happens. The resubmit keeps it.
-  const [recoveredStaySignedIn, setRecoveredStaySignedIn] = useState<
-    boolean | null
-  >(null);
+  // Set after a successful email signup: the form is replaced by a panel that
+  // says to check the inbox, or that the email could not be sent.
+  const [signupNotice, setSignupNotice] = useState<SignupOutcome | null>(null);
+  const [signupEmail, setSignupEmail] = useState("");
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+  const [isResending, setIsResending] = useState(false);
   // True when the user reaches /survey already authenticated (e.g. OAuth
   // profile completion). In that case we skip account creation and the password
   // fields, and submit the survey against their existing token.
@@ -408,28 +428,6 @@ export default function SurveyPage() {
   const [emailSuggestion, setEmailSuggestion] = useState<string | null>(null);
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
 
-  // Get country config
-  const countryConfig =
-    COUNTRY_CONFIG[data.destinationCountry as keyof typeof COUNTRY_CONFIG] ||
-    COUNTRY_CONFIG.US;
-
-  // Load destination country from localStorage. This form does not ask for it,
-  // and no screen writes the key any more, so it is read only if an earlier
-  // build left it. When it is missing or not US/UK/CA, the country is US, so
-  // the money inputs never render a wrong currency symbol.
-  useEffect(() => {
-    const savedCountry = localStorage.getItem("noor_selected_country");
-    if (
-      savedCountry &&
-      (savedCountry === "US" || savedCountry === "UK" || savedCountry === "CA")
-    ) {
-      setData((prev) => ({ ...prev, destinationCountry: savedCountry }));
-    } else {
-      // Default to US if not set
-      setData((prev) => ({ ...prev, destinationCountry: "US" }));
-    }
-  }, []);
-
   // Detect an existing session so OAuth users can complete their profile
   // without re-entering a password. Prefill the identity fields we already know.
   //
@@ -441,8 +439,6 @@ export default function SurveyPage() {
   // subscription (same combination as ClientLayout) lets a session that arrives
   // late still be adopted.
   //
-  // adoptSession lives outside the effect because handleSubmit also calls it,
-  // after signing in a new account whose survey save failed.
   const mountedRef = useRef(false);
 
   // Adoption is deliberately one-way: it only ever turns isAuthed on. A null
@@ -641,81 +637,33 @@ export default function SurveyPage() {
       const result = await response.json();
 
       if (!result.success) {
-        const action = surveyFailureAction(isAuthed, result);
-        if (action.kind === "message") {
-          setSubmitError(action.message);
-          return;
-        }
-
-        // The account was created but its answers were not saved. Sign it in
-        // with the credentials just used, switch this form to the signed-in
-        // path, and let the user press Submit again; that path saves a
-        // missing survey row.
-        if (!supabase) {
-          setSubmitError(SIGN_IN_AFTER_SAVE_FAILURE_MESSAGE);
-          return;
-        }
-        const client = supabase;
-        const resumed = await resumeAfterSurveySaveFailure<Session>(
-          {
-            email: data.email.trim().toLowerCase(),
-            password: data.password,
-            staySignedIn: data.staySignedIn,
-          },
-          {
-            signIn: async (credentials) => {
-              const { data: signInData, error } =
-                await client.auth.signInWithPassword(credentials);
-              return { session: signInData.session, error };
-            },
-            adoptSession,
-            recordSignedInUser: (userId, staySignedIn) => {
-              recordSignedInUser(userId, staySignedIn);
-              setRecoveredStaySignedIn(staySignedIn);
-            },
-            clearPassword: () =>
-              setData((prev) => ({ ...prev, password: "", confirmPassword: "" })),
-          }
-        );
-        setSubmitError(resumed.message);
+        setSubmitError(surveyFailureMessage(result));
         return;
       }
 
-      // Create a Supabase auth session immediately after successful signup.
-      // Skipped for the authenticated path — that user is already signed in.
-      if (!isAuthed && supabase) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: data.email.trim().toLowerCase(),
-          password: data.password,
-        });
-
-        if (signInError) {
-          console.error("Post-signup sign-in error:", signInError);
-          setSubmitError(
-            "Account created, but automatic sign-in failed. Please log in manually."
-          );
-          return;
-        }
+      // A new email signup is unconfirmed and is not signed in here: nothing
+      // is recorded locally and no session is created. The password fields
+      // are emptied, and the form gives way to the check-your-email panel.
+      if (!isAuthed) {
+        // Third layer of the consent gate, and the only one that is not UI: a
+        // user who did not tick the box gets no acceptance record written.
+        if (data.agreeToTerms) acceptTerms();
+        setData((prev) => ({ ...prev, password: "", confirmPassword: "" }));
+        setSignupEmail(data.email.trim().toLowerCase());
+        setSignupNotice(signupOutcome(result));
+        return;
       }
 
-      // Save user ID and create session
-      recordSignedInUser(
-        result.userId,
-        staySignedInAfterSubmit({
-          isAuthed,
-          recoveredChoice: recoveredStaySignedIn,
-          formChoice: data.staySignedIn,
-        })
-      );
+      // Signed-in path: save the user id and keep the session, as before.
+      recordSignedInUser(result.userId, true);
       // Third layer of the consent gate, and the only one that is not UI: a user
       // who did not tick the box gets no acceptance record written at all.
       if (data.agreeToTerms) acceptTerms();
 
-      // Merge over the cached profile rather than replacing it. Settings is the
-      // only writer for the school fields now, and re-submitting this form must
-      // not erase what it stored. result.profile is deliberately not spread
-      // wholesale: with the school keys gone from the request it comes back with
-      // those fields set to null, which would clobber them.
+      // Merge over the cached profile rather than replacing it. The school
+      // fields in it are copied from the stored survey row at sign-in, and
+      // re-submitting this form must not erase them. result.profile carries
+      // the first name only, and only that field is read from it.
       let priorProfile: Record<string, unknown> = {};
       try {
         priorProfile = JSON.parse(
@@ -729,7 +677,7 @@ export default function SurveyPage() {
         ...priorProfile,
         id: result.userId,
         firstName: result.profile?.firstName ?? data.firstName,
-        email: isAuthed ? data.email : result.profile?.email ?? data.email,
+        email: data.email,
         destinationCountry: data.destinationCountry,
         currency: countryConfig.currencyCode,
         monthlyIncome: data.monthlyIncome,
@@ -737,7 +685,7 @@ export default function SurveyPage() {
       };
       localStorage.setItem("noor_user_profile", JSON.stringify(userProfile));
 
-      router.push(isAuthed ? "/dashboard" : "/");
+      router.push("/dashboard");
     } catch (error) {
       console.error("Survey submission error:", error);
       setSubmitError("Something went wrong. Please try again.");
@@ -745,6 +693,66 @@ export default function SurveyPage() {
       setIsSubmitting(false);
     }
   };
+
+  // Sends the confirmation email again for the address just used. The route
+  // answers the same body whatever happened, so the notice is fixed text.
+  const handleResendConfirmation = async () => {
+    setIsResending(true);
+    setResendNotice(null);
+    try {
+      const res = await fetch("/api/auth/resend-confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: signupEmail }),
+      });
+      setResendNotice(res.ok ? AUTH_COPY.RESEND_SENT : AUTH_COPY.RESEND_FAILED);
+    } catch {
+      setResendNotice(AUTH_COPY.RESEND_FAILED);
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  if (signupNotice) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-2xl font-semibold tracking-tight mb-3">
+            {signupNotice === "check-email"
+              ? "Check your email"
+              : "We couldn't send the confirmation email"}
+          </h1>
+          <p className="text-gray-500 mb-6">
+            {signupNotice === "check-email"
+              ? "We sent a confirmation link to " +
+                signupEmail +
+                ". Open it and press Confirm email to finish creating your account."
+              : "Your account was created, but the confirmation email to " +
+                signupEmail +
+                " didn't go out. Please wait a minute, then send it again."}
+          </p>
+          <button
+            type="button"
+            onClick={handleResendConfirmation}
+            disabled={isResending}
+            className="w-full py-3 mb-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors disabled:opacity-50"
+          >
+            {isResending ? "Sending..." : "Send the confirmation email again"}
+          </button>
+          {resendNotice && (
+            <p className="text-sm text-gray-600 mb-3">{resendNotice}</p>
+          )}
+          <button
+            type="button"
+            onClick={() => router.push("/login")}
+            className="w-full py-3 border border-gray-200 rounded-xl font-medium hover:bg-gray-50 transition-colors"
+          >
+            Go to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -890,11 +898,20 @@ export default function SurveyPage() {
               <MoneyInput
                 value={data.monthlyIncome}
                 onChange={(v) => updateField("monthlyIncome", v)}
+                onBlur={() => markTouched("monthlyIncome")}
                 currencySymbol={countryConfig.currency}
               />
               <p className="text-gray-400 text-xs mt-1.5">
                 {t("survey.step4.incomeHint")}
               </p>
+              {/* Zero is not accepted: Noor is for people with a monthly
+                  income (the server refuses 0 as well, see surveyMoney.ts). */}
+              {data.monthlyIncome === 0 &&
+                touchedFields.has("monthlyIncome") && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {t("survey.step4.incomeRequired")}
+                  </p>
+                )}
             </div>
 
             {/* Money out */}
@@ -909,11 +926,20 @@ export default function SurveyPage() {
               <MoneyInput
                 value={data.monthlyExpenses}
                 onChange={(v) => updateField("monthlyExpenses", v)}
+                onBlur={() => markTouched("monthlyExpenses")}
                 currencySymbol={countryConfig.currency}
               />
               <p className="text-gray-400 text-xs mt-1.5">
                 {t("survey.step4.expensesHint")}
               </p>
+              {/* Zero is not accepted here either: the submit button stays
+                  disabled until spending is above zero, so say why. */}
+              {data.monthlyExpenses === 0 &&
+                touchedFields.has("monthlyExpenses") && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {t("survey.step4.expensesRequired")}
+                  </p>
+                )}
             </div>
 
             {/* Credit history. Optional: leaving it blank is a real answer
@@ -933,33 +959,6 @@ export default function SurveyPage() {
                 onChange={(v) => updateField("hasUsCreditHistory", v)}
               />
             </div>
-
-            {/* Stay signed in */}
-            <label className="flex items-center gap-3 py-2 cursor-pointer">
-              <div
-                onClick={() => updateField("staySignedIn", !data.staySignedIn)}
-                className={`w-5 h-5 rounded border-[1.5px] flex items-center justify-center transition-all duration-300 ${
-                  data.staySignedIn ? "bg-black border-black" : "border-gray-300"
-                }`}
-              >
-                {data.staySignedIn && (
-                  <svg
-                    className="w-3 h-3 text-white"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                )}
-              </div>
-              <span className="text-sm text-gray-600">
-                {t("survey.step1.staySignedIn")}
-              </span>
-            </label>
 
             {/* Terms & Privacy — standard clickwrap: ticking the box is the
                 consent, and each policy opens in its own titled modal. */}

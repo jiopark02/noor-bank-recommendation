@@ -46,6 +46,7 @@ function deps(overrides: Partial<WebhookDeps> = {}): WebhookDeps {
   return {
     plaidEnvironment: "sandbox",
     isAdminConfigured: () => true,
+    isCryptoConfigured: () => true,
     lookupByItemId: async () => ({ ok: true, rows: [row()] }),
     revoke: async (_userId, connection) => ({ itemId: connection.item_id, ok: true }),
     ...overrides,
@@ -98,6 +99,12 @@ const CASES: Case[] = [
     level: "error",
     payload: revocation(),
     deps: deps({ isAdminConfigured: () => false }),
+  },
+  {
+    outcome: "crypto_unconfigured",
+    level: "error",
+    payload: revocation(),
+    deps: deps({ isCryptoConfigured: () => false }),
   },
   {
     outcome: "lookup_failed",
@@ -167,6 +174,7 @@ describe("[plaid-webhook] outcome levels without an injected log", () => {
       "env_mismatch",
       "logged",
       "admin_unconfigured",
+      "crypto_unconfigured",
       "lookup_failed",
       "unknown_item",
       "ambiguous_item",

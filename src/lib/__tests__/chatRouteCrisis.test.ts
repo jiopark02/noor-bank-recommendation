@@ -439,41 +439,45 @@ describe("errors after the model loop carry the notice", () => {
     expect(tally.records).toHaveLength(1);
   });
 
-  it("provider 401: the notice", async () => {
+  // Every way the model attempts can all fail gives the same 502
+  // (chatRouteModelFailure.test.ts); these hold that it carries the notice.
+  it("provider 401: the model-failure response, with the notice", async () => {
     answers = [{ kind: "status", status: 401 }];
     const res = await post(say(CRISIS));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(502);
+    expect(res.json.code).toBe("CHAT_MODEL_FAILED");
     expect(res.json.crisisNotice).toBe(STANDARD);
   });
 
-  it("every model non-2xx: the last failure, with the notice, counted once", async () => {
+  it("every model non-2xx: the model-failure response, with the notice, counted once", async () => {
     answers = [
       { kind: "status", status: 500 },
       { kind: "status", status: 502 },
     ];
     const res = await post(say(CRISIS));
     expect(res.status).toBe(502);
-    expect(res.json.error).toBe("upstream 502");
+    expect(res.json.code).toBe("CHAT_MODEL_FAILED");
+    expect(res.json.error).toBe("Chat is temporarily unavailable. Please try again.");
     expect(res.json.crisisNotice).toBe(STANDARD);
     expect(tally.records).toHaveLength(1);
   });
 
-  it("provider 429 on both models: the notice", async () => {
+  it("provider 429 on both models: the model-failure response, with the notice", async () => {
     answers = [
       { kind: "status", status: 429 },
       { kind: "status", status: 429 },
     ];
     const res = await post(say(CRISIS));
-    expect(res.status).toBe(429);
-    expect(res.json.error).toBe("Rate limit exceeded. Please try again later.");
+    expect(res.status).toBe(502);
+    expect(res.json.code).toBe("CHAT_MODEL_FAILED");
     expect(res.json.crisisNotice).toBe(STANDARD);
   });
 
-  it("the last attempt threw: 500 with the notice, counted once", async () => {
+  it("the last attempt threw: the model-failure response, with the notice, counted once", async () => {
     answers = [{ kind: "throw" }, { kind: "throw" }];
     const res = await post(say(CRISIS));
-    expect(res.status).toBe(500);
-    expect(res.json.error).toBe("Failed to get response from AI");
+    expect(res.status).toBe(502);
+    expect(res.json.code).toBe("CHAT_MODEL_FAILED");
     expect(res.json.crisisNotice).toBe(STANDARD);
     expect(tally.records).toHaveLength(1);
     expect(crisisConsoleCalls()).toEqual([]);
@@ -556,8 +560,11 @@ describe("a message without a signal is unchanged", () => {
   it("an error: no crisisNotice key, not counted", async () => {
     answers = [{ kind: "throw" }, { kind: "throw" }];
     const res = await post(say("How do I build my first budget?"));
-    expect(res.status).toBe(500);
-    expect(res.json).toEqual({ error: "Failed to get response from AI" });
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual({
+      error: "Chat is temporarily unavailable. Please try again.",
+      code: "CHAT_MODEL_FAILED",
+    });
     expect(tally.records).toEqual([]);
   });
 });

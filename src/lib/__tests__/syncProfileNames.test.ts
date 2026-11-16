@@ -117,8 +117,13 @@ describe("OAuth callback wiring", () => {
     const applyAt = code.indexOf("namesFromSyncResponse(");
     expect(bodyAt).not.toBe(-1);
     expect(applyAt).toBeGreaterThan(bodyAt);
+    // The names are read into syncedNames by the sync, then applied after it:
+    // in the OAuth mode as returned, in the confirm mode through
+    // chooseConfirmedNames (probed in sessionFlowWiring.test.ts P33).
+    expect(code.slice(applyAt)).toMatch(/^namesFromSyncResponse\([^;]*\);/);
+    expect(code.slice(0, applyAt)).toMatch(/syncedNames = $/);
     expect(code.slice(applyAt)).toMatch(
-      /^namesFromSyncResponse\([^;]*\); if \( ?syncedNames ?\) \{ profile = \{ \.\.\.profile, \.\.\.syncedNames \};/
+      /\} else if \( ?syncedNames ?\) \{ profile = \{ \.\.\.profile, \.\.\.syncedNames \}; \}/
     );
   });
 

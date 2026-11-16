@@ -1,14 +1,19 @@
 import type { PlaidStateMode } from "@/lib/plaidChatContext";
 
 // Shared decision surface for the three places in the chat route that decide
-// whether Plaid-derived data reaches the LLM prompt (the "capability
-// scaffold" block, the balance-keyword path, and the financial-analysis
-// keyword path). The capability-scaffold formula is copied from that channel's
-// original inline condition in route.ts. The balance-keyword formula is too,
-// except that it now also denies under "off": before that, "off" stopped the
+// whether Plaid-derived data reaches the LLM prompt:
+//   capability_scaffold  whether the bank-state block, and the one bank read
+//                        behind it, happen at all.
+//   balance_keyword      whether a balance question raises that read to
+//                        depth "balances" (live account balances) under
+//                        "connection". It reads nothing itself. Under
+//                        "balances" the read is already at that depth on every
+//                        turn but a greeting, so this channel denies there.
+//   financial_analysis_keyword
+//                        switched off outright — see its case for why.
+// Every channel also denies under "off": before that held, "off" stopped the
 // scaffold but still let a balance question pull a live balance into the
-// prompt. The financial-analysis channel no longer mirrors an inline condition
-// and is switched off outright — see its case for why.
+// prompt.
 
 // Under AI_PLAID_STATE=off every channel denies, so "off" is a working
 // emergency switch for fresh bank data reaching the model. The channel type is

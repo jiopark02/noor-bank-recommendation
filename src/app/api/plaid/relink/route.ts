@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   plaidClient,
-  PLAID_PRODUCTS,
   PLAID_COUNTRY_CODES,
   isPlaidConfigured,
 } from "@/lib/plaid";
+import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
@@ -16,6 +16,18 @@ import {
   isPlaidTokenCryptoConfigured,
 } from "@/lib/plaidTokenCrypto";
 
+/** Retryable by the user: the connection could not be read this time. */
+const RELINK_RETRY_MESSAGE =
+  "We couldn't start re-linking right now. Please try again in a moment.";
+
+/**
+ * A fault in OUR configuration. Worded without "try again", as in
+ * /api/plaid/disconnect: the client shows this string to the user, and
+ * retrying does not change a missing key.
+ */
+const SERVER_FAULT_MESSAGE =
+  "Something went wrong on our end. Please check back in a moment.";
+
 export async function POST(request: NextRequest) {
   try {
     if (!isPlaidConfigured() || !isPlaidTokenCryptoConfigured()) {
@@ -23,6 +35,19 @@ export async function POST(request: NextRequest) {
       // token, so without PLAID_TOKEN_ENCRYPTION_KEY this route cannot run.
       return NextResponse.json(
         { error: "Plaid is not configured" },
+        { status: 503 }
+      );
+    }
+
+    // The service-role key must exist before anything here reads the database.
+    // Checked before authenticate() because authenticate() would answer first
+    // and answer wrong: verifying the token builds a server client, which
+    // throws without the key, and that throw comes back as "no user" — a 401
+    // that blames the caller's session for our configuration. Same status,
+    // code and message as the same gate in /api/plaid/disconnect.
+    if (!isSupabaseAdminConfigured()) {
+      return NextResponse.json(
+        { error: SERVER_FAULT_MESSAGE, code: "ADMIN_UNCONFIGURED" },
         { status: 503 }
       );
     }
@@ -50,17 +75,18 @@ export async function POST(request: NextRequest) {
     // check redundant.
     const lookup = await getPlaidConnectionByItemId(userId, itemId);
 
-    // BEHAVIOUR DELIBERATELY UNCHANGED. The helper now separates a failed read
-    // from an absent row, and this route maps both onto the 404 it has always
-    // answered — so nothing observable about relink moves in the change that
-    // introduced the distinction (it was made for /api/plaid/disconnect, where
-    // folding the two together was answering a database failure with "removed").
-    //
-    // Whether relink SHOULD answer a failed read differently is a real question
-    // and an open one: telling a user "Connection not found" when the query
-    // failed is the same class of silent-failure, and it is left alone here only
-    // to keep that decision out of an unrelated fix. It is logged, not forgotten.
-    if (!lookup.ok || !lookup.connection) {
+    // A FAILED READ IS NOT AN ABSENT ROW. Telling the user "Connection not
+    // found" when the query failed would report a database fault as a fact
+    // about their bank, so the failure gets its own retryable 500 and the
+    // absence keeps its 404. The failure is decided first: `{ ok: false }` has
+    // no `connection`, so checking absence first would absorb every failure.
+    if (!lookup.ok) {
+      return NextResponse.json(
+        { error: RELINK_RETRY_MESSAGE, code: "CONNECTION_READ_FAILED" },
+        { status: 500 }
+      );
+    }
+    if (!lookup.connection) {
       return NextResponse.json(
         { error: "Connection not found" },
         { status: 404 }
@@ -82,14 +108,17 @@ export async function POST(request: NextRequest) {
     );
 
     // Create a new link token in "update" mode using the existing access token
-    // This allows the user to re-authenticate their bank login
+    // This allows the user to re-authenticate their bank login.
+    //
+    // No `products`: the Plaid SDK's LinkTokenCreateRequest documents that the
+    // field should be omitted when launching Link in update mode, unless update
+    // mode is being used to add a credit product, which this route never does.
     try {
       const response = await plaidClient.linkTokenCreate({
         user: {
           client_user_id: userId,
         },
         client_name: "Noor",
-        products: PLAID_PRODUCTS,
         country_codes: PLAID_COUNTRY_CODES,
         language: "en",
         redirect_uri: process.env.PLAID_REDIRECT_URI,

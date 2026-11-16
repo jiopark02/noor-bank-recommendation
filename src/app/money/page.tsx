@@ -1,53 +1,154 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import { ConnectBankCard, PlaidLinkButton } from "@/components/plaid";
-import {
-  PlaidAccount,
-  PlaidTransaction,
-  formatCurrency,
-  CATEGORY_ICONS,
-  CATEGORY_COLORS,
-} from "@/lib/plaid";
+import { CATEGORY_ICONS } from "@/lib/categoryIcons";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders, getSessionSafe } from "@/lib/supabase-browser";
+import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
+import {
+  PROTECTED_SESSION_RETRY,
+  decideProtectedMount,
+  retryUntilAnswered,
+  shouldRetrySessionRead,
+  waitMs,
+} from "@/lib/sessionFlow";
 import { clearLocalAuthState } from "@/lib/validation";
 import {
   asPlainObject,
   readErrorMessage,
   readString,
 } from "@/lib/requestJson";
+import {
+  BANK_SCREEN_FETCH_TIMEOUT_MS,
+  withFetchTimeout,
+} from "@/lib/screenFetchTimeout";
+import {
+  DISPLAY_WINDOW_LABEL,
+  bankActionLines,
+  browserTimeZone,
+  createRequestGate,
+  creditUsedCents,
+  decideBankView,
+  describeBankAction,
+  formatCalendarDay,
+  formatCents,
+  formatCentsOrDash,
+  formatMonthlyOrUnknown,
+  formatSpending,
+  isNoActiveConnectionMessage,
+  missingBanksNote,
+  parseFinanceSummaryResponse,
+  parseSummaryTransactions,
+  showsRecurringDate,
+  spendableCashCents,
+  spendableCashTile,
+  summaryLoadInputs,
+  summaryPeriodNote,
+  transactionListView,
+  TRANSACTIONS_UNAVAILABLE,
+  utilizationPercent,
+  NO_CASH_ACCOUNT_HINT,
+  NO_CASH_ACCOUNT_LABEL,
+  type MoneyDisplayState,
+  type ScreenSummaryResponse,
+  type ScreenTransaction,
+} from "@/lib/bankSummaryView";
 
 type TabId = "overview" | "accounts" | "transactions" | "subscriptions";
 
-type SubscriptionView = {
-  id: string;
-  name: string;
-  amount: number;
-  monthly_amount: number;
-  frequency: "weekly" | "monthly" | "yearly" | "unknown";
-  last_charged: string | null;
-  next_charge: string | null;
-  source: "plaid_recurring" | "heuristic";
-};
+const BANK_DATA_LOAD_FAILED =
+  "We couldn't load your bank data right now. Please try again in a moment.";
+
+// A fetch that rejects and a 2xx body that does not parse are not something
+// the server said, and the browser's or the parser's own wording is not for
+// the screen. Both end as `message`; an error the server sent in a body is
+// thrown by the caller, with its text. The dashboard follows the same rule.
+async function fetchOrFail(
+  input: string,
+  init: RequestInit,
+  message: string
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error(message);
+  }
+}
+
+async function readJsonOrFail(res: Response, message: string): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(message);
+  }
+}
+
+// Only "ready" and "none" may render a dollar amount (decideBankView decides
+// which applies). An unknown figure must not look like a real $0.
+function MoneyFigure({
+  state,
+  children,
+}: {
+  state: MoneyDisplayState;
+  children: React.ReactNode;
+}) {
+  if (state === "loading") {
+    return (
+      <>
+        <span
+          aria-hidden="true"
+          className="inline-block w-24 h-[0.75em] rounded bg-gray-200 animate-pulse align-middle"
+        />
+        <span className="sr-only">Loading</span>
+      </>
+    );
+  }
+  if (state === "unavailable") {
+    return (
+      <>
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">Unavailable</span>
+      </>
+    );
+  }
+  return <>{children}</>;
+}
 
 export default function MoneyPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionDelayed, setSessionDelayed] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
-  const [accounts, setAccounts] = useState<PlaidAccount[]>([]);
-  const [transactions, setTransactions] = useState<PlaidTransaction[]>([]);
-  const [subscriptions, setSubscriptions] = useState<SubscriptionView[]>([]);
-  const [isLoadingData, setIsLoadingData] = useState(false);
+  // The summary route's answer for this load. Every amount and account on this
+  // screen comes from it; the screen only formats.
+  // Typed by the fields bankSummaryView checks, so a field read here that is
+  // not checked there is a type error.
+  const [bank, setBank] = useState<ScreenSummaryResponse | null>(null);
+  // The transaction list from the same answer, checked apart from the
+  // figures: null means the list could not be read, never an empty list.
+  const [transactionList, setTransactionList] = useState<
+    ScreenTransaction[] | null
+  >(null);
+  // True only once the summary route has answered successfully in this load.
+  const [hasMoneyData, setHasMoneyData] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Only the answer to the latest load is drawn: a load that answers after a
+  // later one has started is dropped.
+  const [requestGate] = useState(createRequestGate);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
   const [relinkToken, setRelinkToken] = useState<string | null>(null);
   const [isPreparingRelink, setIsPreparingRelink] = useState(false);
+  // The bank whose re-link request failed. Shown next to that bank only; it is
+  // not a failed load, and the figures and other banks' lines stay.
+  const [relinkFailedItemId, setRelinkFailedItemId] = useState<string | null>(
+    null
+  );
   // Connection management (accounts tab): inline-confirm remove + add-bank notice.
   const [confirmingRemoveItemId, setConfirmingRemoveItemId] = useState<
     string | null
@@ -60,23 +161,19 @@ export default function MoneyPage() {
   // list with no explanation.
   const [removeNotice, setRemoveNotice] = useState<string | null>(null);
 
-  // Date range for transactions
-  const [startDate, setStartDate] = useState<string>(() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 30);
-    return date.toISOString().split("T")[0];
-  });
-  const [endDate, setEndDate] = useState<string>(
-    () => new Date().toISOString().split("T")[0]
-  );
-
   // Use the Plaid connections hook
   const plaidConnections = usePlaidConnections(userId);
+  // Stable across renders (a callback keyed on userId inside the hook), unlike
+  // the hook's return object, so loaders can depend on it without re-running
+  // the fetch effect on every render.
+  const refetchConnections = plaidConnections.refetch;
 
   // Initialize user. noor_user_id is only a legacy synchronous cache; the live
   // Supabase session is the source of truth. Verify it before rendering so an
-  // expired session redirects cleanly to /login instead of showing the page
-  // with every Plaid endpoint returning 401.
+  // ended session redirects cleanly to /login instead of showing the page
+  // with every Plaid endpoint returning 401. Only a clean "none" means that: a
+  // read that never answered can come from a valid session, so it is retried,
+  // then shown as a delay, and it never clears anything.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -85,14 +182,24 @@ export default function MoneyPage() {
         router.push("/welcome");
         return;
       }
-      const session = await getSessionSafe();
+      const read = await retryUntilAnswered(
+        (timeoutMs, attempt) => readSession(timeoutMs, "money-mount", attempt),
+        shouldRetrySessionRead,
+        PROTECTED_SESSION_RETRY,
+        { sleep: waitMs, isCancelled: () => cancelled }
+      );
       if (cancelled) return;
-      if (!session) {
+      const action = decideProtectedMount(read);
+      if (action === "sign-out") {
         clearLocalAuthState();
         router.replace("/login");
         return;
       }
-      setUserId(session.user.id);
+      if (action === "show-delayed" || read.status !== "session") {
+        setSessionDelayed(true);
+        return;
+      }
+      setUserId(read.session.user.id);
       setIsLoading(false);
     })();
     return () => {
@@ -100,116 +207,106 @@ export default function MoneyPage() {
     };
   }, [router]);
 
-  // Fetch accounts and transactions
+  // The figures, accounts, transactions and connection statuses, all from one
+  // read. A failure here is shown as a failed load (dashes), never as an
+  // empty one. `token` is this load's; an answer for an earlier load is
+  // dropped, so it can never cover a later one.
+  const loadSummary = useCallback(
+    async (headers: HeadersInit, token: number) => {
+      try {
+        // The request and its body read run under the screen's limit, so a
+        // summary that never answers ends as a failed load (dashes), not on
+        // the loading state.
+        // A stale load's error answer returns nothing from here; the check
+        // after the parse then drops it.
+        const body = await withFetchTimeout(
+          BANK_SCREEN_FETCH_TIMEOUT_MS,
+          async (signal) => {
+            const res = await fetchOrFail(
+              "/api/finance/summary",
+              {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ timeZone: browserTimeZone(), includeTransactions: true }),
+                signal,
+              },
+              BANK_DATA_LOAD_FAILED
+            );
+
+            if (!res.ok) {
+              const data = asPlainObject(await res.json().catch(() => ({})));
+              if (!requestGate.isCurrent(token)) return;
+              const errText = readString(data, "error") ?? null;
+              if (isNoActiveConnectionMessage(errText)) {
+                // Re-pull authoritative connection state from the DB, which is
+                // the only place connection state lives.
+                refetchConnections();
+              }
+              throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
+            }
+
+            return readJsonOrFail(res, BANK_DATA_LOAD_FAILED);
+          }
+        );
+
+        const parsed = parseFinanceSummaryResponse(body);
+        if (!requestGate.isCurrent(token)) return;
+        if (parsed === null) {
+          throw new Error(BANK_DATA_LOAD_FAILED);
+        }
+        setBank(parsed);
+        // A list that does not read leaves the figures as they are; only the
+        // list area says it could not be loaded.
+        setTransactionList(parseSummaryTransactions(body));
+        setHasMoneyData(true);
+      } catch (err) {
+        if (!requestGate.isCurrent(token)) return;
+        setError(err instanceof Error ? err.message : BANK_DATA_LOAD_FAILED);
+      }
+    },
+    [refetchConnections, requestGate]
+  );
+
   const fetchData = useCallback(async () => {
+    // Every call starts a new load, so whatever an earlier one answers later
+    // is dropped, including after the branch below.
+    const token = requestGate.begin();
     if (!userId || !plaidConnections.hasActive) {
-      setAccounts([]);
-      setTransactions([]);
-      setSubscriptions([]);
+      setBank(null);
+      setTransactionList(null);
+      setIsLoadingData(false);
       return;
     }
 
-    setIsLoadingData(true);
+    // Drop the previous answer first, so nothing from an earlier load is drawn
+    // while this one runs or after it fails.
+    setHasMoneyData(false);
     setError(null);
+    setBank(null);
+    setTransactionList(null);
+    setRelinkFailedItemId(null);
+    setIsLoadingData(true);
 
     try {
       const plaidHeaders = buildJsonAuthorizedHeaders(
         await getSupabaseBearerHeaders()
       );
-
-      // Fetch accounts
-      const accountsRes = await fetch("/api/plaid/accounts", {
-        method: "POST",
-        headers: plaidHeaders,
-        body: JSON.stringify({}),
-      });
-
-      if (!accountsRes.ok) {
-        const data = asPlainObject(await accountsRes.json());
-        const errText = readString(data, "error");
-        if (errText && /no active bank connections/i.test(errText)) {
-          // Re-pull authoritative connection state from the DB, which is the
-          // only place connection state lives.
-          plaidConnections.refetch();
-        }
-        if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {
-          setError(
-            "Your bank connection has expired. Please re-link your account."
-          );
-          setRelinkItemId(plaidConnections.connections[0]?.itemId || null);
-          return;
-        }
-        throw new Error(readErrorMessage(data) || "Failed to fetch accounts");
-      }
-
-      const accountsData = asPlainObject(await accountsRes.json());
-      if (accountsData.success === true) {
-        setAccounts(
-          Array.isArray(accountsData.accounts) ? accountsData.accounts : []
-        );
-      }
-
-      // Fetch transactions
-      const txnRes = await fetch("/api/plaid/transactions", {
-        method: "POST",
-        headers: plaidHeaders,
-        body: JSON.stringify({ startDate, endDate }),
-      });
-
-      if (!txnRes.ok) {
-        const data = asPlainObject(await txnRes.json());
-        if (readString(data, "errorType") === "ITEM_LOGIN_REQUIRED") {
-          setError(
-            "Your bank connection has expired. Please re-link your account."
-          );
-          setRelinkItemId(plaidConnections.connections[0]?.itemId || null);
-          return;
-        }
-        throw new Error(
-          readErrorMessage(data) || "Failed to fetch transactions"
-        );
-      }
-
-      const txnData = asPlainObject(await txnRes.json());
-      if (txnData.success === true) {
-        setTransactions(
-          Array.isArray(txnData.transactions) ? txnData.transactions : []
-        );
-        setSubscriptions(
-          Array.isArray(txnData.subscriptions) ? txnData.subscriptions : []
-        );
-      }
+      await loadSummary(plaidHeaders, token);
     } catch (err) {
       console.error("Error fetching data:", err);
-      const message =
-        err instanceof Error ? err.message : "Failed to fetch data";
-      setError(message);
+      // Not something the server said: a fixed sentence, not the error's own.
+      if (requestGate.isCurrent(token)) setError(BANK_DATA_LOAD_FAILED);
     } finally {
-      setIsLoadingData(false);
+      if (requestGate.isCurrent(token)) setIsLoadingData(false);
     }
-  }, [
-    userId,
-    plaidConnections.hasActive,
-    plaidConnections.connections,
-    startDate,
-    endDate,
-  ]);
+  }, [userId, plaidConnections.hasActive, loadSummary, requestGate]);
 
-  // Fetch data when user connects or date range changes
+  // Fetch data when the user connects a bank
   useEffect(() => {
     if (userId && plaidConnections.hasActive) {
       fetchData();
     }
-  }, [userId, plaidConnections.hasActive, startDate, endDate, fetchData]);
-
-  // Handle date range change
-  const handleDateRangeChange = (type: "start" | "end", value: string) => {
-    if (type === "start") {
-      setStartDate(value);
-    } else {
-      setEndDate(value);
-    }
-  };
+  }, [userId, plaidConnections.hasActive, fetchData]);
 
   // Handle new bank connection
   const handleBankConnected = useCallback(() => {
@@ -219,21 +316,26 @@ export default function MoneyPage() {
     plaidConnections.refetch();
   }, [plaidConnections]);
 
-  // Handle re-link
-  const handleRelink = useCallback(async () => {
-    if (!relinkItemId) return;
-    try {
-      setIsPreparingRelink(true);
-      const linkToken = await plaidConnections.relink(relinkItemId);
-      if (linkToken) {
-        setRelinkToken(linkToken);
+  // Re-link one bank: the item id comes from the connection the summary
+  // reported as needing a new login, never from a position in a list. A failed
+  // request is recorded against that bank only.
+  const handleRelink = useCallback(
+    async (itemId: string) => {
+      try {
+        setRelinkItemId(itemId);
+        setRelinkToken(null);
+        setRelinkFailedItemId(null);
+        setIsPreparingRelink(true);
+        setRelinkToken(await plaidConnections.relink(itemId));
+      } catch (err) {
+        console.error("Relink failed:", err);
+        setRelinkFailedItemId(itemId);
+      } finally {
+        setIsPreparingRelink(false);
       }
-    } catch (err) {
-      console.error("Relink failed:", err);
-    } finally {
-      setIsPreparingRelink(false);
-    }
-  }, [relinkItemId, plaidConnections]);
+    },
+    [plaidConnections]
+  );
 
   // Update mode repairs the existing Item's login in place: its access token
   // does not change, so there is nothing to exchange and nothing to store. The
@@ -246,6 +348,12 @@ export default function MoneyPage() {
     handleBankConnected();
     await fetchData();
   }, [handleBankConnected, fetchData]);
+
+  // A re-link token serves one Link session. Closing Link drops it, so the
+  // re-link button comes back and the next press asks for a new token.
+  const handleRelinkExit = useCallback(() => {
+    setRelinkToken(null);
+  }, []);
 
   // Remove a single connection. The route now revokes the Plaid Item first and
   // deletes the row only if that succeeded, so a failure means the bank is still
@@ -339,62 +447,71 @@ export default function MoneyPage() {
     !!userId &&
     !plaidConnections.isLoading &&
     !plaidConnections.error &&
-    (!plaidConnections.hasActive ||
-      !!(error && /no active bank connections/i.test(error)));
+    (!plaidConnections.hasActive || isNoActiveConnectionMessage(error));
 
-  // Calculate totals
-  const totals = useMemo(() => {
-    const checking = accounts
-      .filter((a) => a.type === "checking" || a.type === "savings")
-      .reduce((sum, a) => sum + a.current_balance, 0);
+  const view = decideBankView({
+    ...summaryLoadInputs({
+      connectionsLoading: plaidConnections.isLoading,
+      connectionsFailed: !!plaidConnections.error,
+      hasActiveConnection: plaidConnections.hasActive,
+      loadError: error,
+      hasData: hasMoneyData,
+    }),
+    response: bank,
+  });
+  const moneyDisplay: MoneyDisplayState = view.figures;
+  const summary = view.figures === "ready" && bank ? bank.summary : null;
+  const accounts = summary && bank ? bank.accounts : [];
+  // The list comes from the same answer as the figures, over the same
+  // window, so it carries the same missing-bank and incomplete-period lines.
+  // It is drawn only with ready figures, and a list that could not be read
+  // shows its own line instead of rows.
+  const list = transactionListView(view, transactionList);
+  const transactions = list.kind === "rows" ? list.rows : [];
+  const missingNote = missingBanksNote(view.missingFrom);
+  const periodNote = summaryPeriodNote(view, bank);
+  const loadFailedMessage =
+    moneyDisplay === "unavailable" && !isNoActiveConnectionMessage(error)
+      ? error ?? "We couldn't read any of your banks just now."
+      : null;
 
-    const credit = accounts
-      .filter((a) => a.type === "credit")
-      .reduce((sum, a) => sum + a.current_balance, 0);
+  // Engine figures as they arrived. With no connection the zeros are true.
+  // The spendable-cash amount is null (a dash) when safe-to-spend was not
+  // computed; with no checking account the tile names that instead.
+  const cashTile = spendableCashTile(summary);
+  const noCashAccount = cashTile.kind === "no_cash_account";
+  const figures = {
+    cash: spendableCashCents(cashTile),
+    creditUsed: summary ? creditUsedCents(summary) : 0,
+    income: summary ? summary.cashFlow.incomeCents : 0,
+    spending: summary ? summary.cashFlow.spendingNetCents : 0,
+    recurringMonthly: summary ? summary.recurring.totalMonthlyCents : 0,
+    recurringItems: summary ? summary.recurring.items : [],
+  };
 
-    const creditLimit = accounts
-      .filter((a) => a.type === "credit")
-      .reduce((sum, a) => sum + (a.credit_limit || 0), 0);
-
-    const netWorth = checking - credit;
-
-    return { checking, credit, creditLimit, netWorth };
-  }, [accounts]);
-
-  // Calculate spending by category
-  const categorySpending = useMemo(() => {
-    const categories: Record<string, number> = {};
-
-    transactions
-      .filter((t) => t.amount > 0)
-      .forEach((t) => {
-        const category = t.category[0] || "Other";
-        categories[category] = (categories[category] || 0) + t.amount;
-      });
-
-    return Object.entries(categories)
-      .map(([name, amount]) => ({ name, amount }))
-      .sort((a, b) => b.amount - a.amount);
-  }, [transactions]);
-
-  const totalSubscriptions = subscriptions.reduce(
-    (sum, s) => sum + s.monthly_amount,
-    0
-  );
-
-  // Monthly spending
-  const monthlySpending = useMemo(() => {
-    return transactions
-      .filter((t) => t.amount > 0)
-      .reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions]);
-
-  // Monthly income
-  const monthlyIncome = useMemo(() => {
-    return transactions
-      .filter((t) => t.amount < 0)
-      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-  }, [transactions]);
+  // Reloads rather than reading again: a client whose auth read has hung stays
+  // hung until the page recreates it.
+  if (sessionDelayed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-xl font-semibold text-black mb-2">
+            We couldn&apos;t confirm your sign-in
+          </h1>
+          <p className="text-gray-500 mb-6">
+            Please check your connection and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -452,29 +569,62 @@ export default function MoneyPage() {
         </div>
       )}
 
-      {error && (
+      {loadFailedMessage && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-700">{error}</p>
-          {relinkItemId && !relinkToken && (
-            <button
-              onClick={handleRelink}
-              disabled={isPreparingRelink}
-              className="mt-3 rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isPreparingRelink ? "Preparing re-link..." : "Re-link bank"}
-            </button>
-          )}
-          {relinkToken && userId && (
-            <div className="mt-3">
-              <PlaidLinkButton
-                userId={userId}
-                linkTokenOverride={relinkToken}
-                onSuccess={handleRelinkSuccess}
-                className="rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white"
-              >
-                Complete bank re-link
-              </PlaidLinkButton>
+          <p className="text-sm text-red-700">{loadFailedMessage}</p>
+        </div>
+      )}
+
+      {view.actions.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
+          {bankActionLines(view.actions, relinkFailedItemId).map(
+            ({ action, relinkError }) => (
+            <div key={action.itemId}>
+              <p className="text-sm text-amber-900">
+                {describeBankAction(action)}
+              </p>
+              {relinkError && (
+                <p className="mt-1 text-xs text-red-700">{relinkError}</p>
+              )}
+              {action.kind === "relink" &&
+                !(relinkToken && relinkItemId === action.itemId) && (
+                  <button
+                    onClick={() => handleRelink(action.itemId)}
+                    disabled={isPreparingRelink}
+                    className="mt-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPreparingRelink && relinkItemId === action.itemId
+                      ? "Preparing re-link..."
+                      : `Re-link ${action.institutionName}`}
+                  </button>
+                )}
+              {action.kind === "relink" &&
+                relinkToken &&
+                relinkItemId === action.itemId &&
+                userId && (
+                  <div className="mt-2">
+                    <PlaidLinkButton
+                      userId={userId}
+                      linkTokenOverride={relinkToken}
+                      onSuccess={handleRelinkSuccess}
+                      onExit={handleRelinkExit}
+                      className="rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white"
+                    >
+                      Complete bank re-link
+                    </PlaidLinkButton>
+                  </div>
+                )}
+              {action.kind === "retry" && (
+                <button
+                  type="button"
+                  onClick={() => fetchData()}
+                  className="mt-2 rounded-lg border border-amber-300 px-3 py-2 text-xs font-medium text-amber-900"
+                >
+                  Try again
+                </button>
+              )}
             </div>
+            )
           )}
         </div>
       )}
@@ -488,79 +638,63 @@ export default function MoneyPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
           >
-            {/* Net Worth Card */}
-            <div className="noor-card p-6 mb-4 bg-gradient-to-br from-gray-900 to-black text-black">
-              <p className="text-gray-600 text-sm mb-1">Net Worth</p>
-              <p className="text-4xl font-semibold mb-4">
-                {formatCurrency(totals.netWorth)}
-              </p>
+            {/* Balances */}
+            <div className="noor-card p-6 mb-4">
+              {missingNote && (
+                <p className="text-xs text-amber-800 mb-3">{missingNote}</p>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-gray-600 text-xs">Cash</p>
-                  <p className="text-lg font-medium text-green-700">
-                    {formatCurrency(totals.checking)}
+                  <p className="text-gray-600 text-xs">Spendable cash</p>
+                  <p
+                    className={
+                      noCashAccount && moneyDisplay === "ready"
+                        ? "text-base font-semibold text-green-700"
+                        : "text-2xl font-semibold text-green-700"
+                    }
+                  >
+                    <MoneyFigure state={moneyDisplay}>
+                      {noCashAccount ? NO_CASH_ACCOUNT_LABEL : formatCentsOrDash(figures.cash)}
+                    </MoneyFigure>
                   </p>
+                  {noCashAccount && moneyDisplay === "ready" && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {NO_CASH_ACCOUNT_HINT}
+                    </p>
+                  )}
                 </div>
                 <div>
-                  <p className="text-gray-600 text-xs">Credit Used</p>
-                  <p className="text-lg font-medium text-red-700">
-                    -{formatCurrency(totals.credit)}
+                  <p className="text-gray-600 text-xs">Credit card balances</p>
+                  <p className="text-2xl font-semibold text-red-700">
+                    <MoneyFigure state={moneyDisplay}>
+                      {formatCentsOrDash(figures.creditUsed)}
+                    </MoneyFigure>
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Monthly Summary */}
+            {/* The display window */}
+            <p className="text-gray-500 text-xs mb-2">{DISPLAY_WINDOW_LABEL}</p>
+            {periodNote && (
+              <p className="text-xs text-amber-800 mb-2">{periodNote}</p>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Income</p>
                 <p className="text-xl font-semibold text-green-600">
-                  +{formatCurrency(monthlyIncome)}
+                  <MoneyFigure state={moneyDisplay}>
+                    +{formatCents(figures.income)}
+                  </MoneyFigure>
                 </p>
               </div>
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Spending</p>
                 <p className="text-xl font-semibold text-red-600">
-                  -{formatCurrency(monthlySpending)}
+                  <MoneyFigure state={moneyDisplay}>
+                    {formatSpending(figures.spending)}
+                  </MoneyFigure>
                 </p>
-              </div>
-            </div>
-
-            {/* Spending by Category */}
-            <div className="noor-card p-5 mb-4">
-              <h3 className="font-medium text-black mb-4">
-                Spending by Category
-              </h3>
-              <div className="space-y-3">
-                {categorySpending.slice(0, 5).map((cat) => (
-                  <div key={cat.name} className="flex items-center gap-3">
-                    <span className="text-xl w-8">
-                      {CATEGORY_ICONS[cat.name] || "💰"}
-                    </span>
-                    <div className="flex-1">
-                      <div className="flex justify-between mb-1">
-                        <span className="text-sm text-black">{cat.name}</span>
-                        <span className="text-sm font-medium text-black">
-                          {formatCurrency(cat.amount)}
-                        </span>
-                      </div>
-                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <motion.div
-                          className="h-full rounded-full"
-                          style={{
-                            backgroundColor:
-                              CATEGORY_COLORS[cat.name] || "#6B7280",
-                          }}
-                          initial={{ width: 0 }}
-                          animate={{
-                            width: `${(cat.amount / monthlySpending) * 100}%`,
-                          }}
-                          transition={{ duration: 0.5 }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
 
@@ -571,19 +705,23 @@ export default function MoneyPage() {
                   Monthly Subscriptions
                 </h3>
                 <span className="text-lg font-semibold text-black">
-                  {formatCurrency(totalSubscriptions)}
+                  <MoneyFigure state={moneyDisplay}>
+                    {formatMonthlyOrUnknown(figures.recurringMonthly)}
+                  </MoneyFigure>
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {subscriptions.map((sub, i) => (
-                  <span
-                    key={i}
-                    className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
-                  >
-                    {sub.name} · {formatCurrency(sub.monthly_amount)}/mo
-                  </span>
-                ))}
-              </div>
+              {moneyDisplay === "ready" && (
+                <div className="flex flex-wrap gap-2">
+                  {figures.recurringItems.map((item) => (
+                    <span
+                      key={item.streamId}
+                      className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
+                    >
+                      {item.label} · {formatCentsOrDash(item.monthlyCents)}/mo
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Connect Bank Account */}
@@ -663,10 +801,10 @@ export default function MoneyPage() {
 
                 {userId && (
                   <div className="mt-4">
-                    {/* Keyed on the count so the button remounts and asks for
-                        a fresh link token when a bank is added or removed:
-                        otherwise a limit refusal fetched at the limit stays on
-                        screen after a removal frees a slot. */}
+                    {/* Keyed on the count so the button remounts when a bank
+                        is added or removed, which clears an error sentence
+                        left from an earlier attempt (a limit refusal, say).
+                        The button asks for a link token only when pressed. */}
                     <PlaidLinkButton
                       key={plaidConnections.connections.length}
                       userId={userId}
@@ -685,73 +823,73 @@ export default function MoneyPage() {
               </div>
             )}
 
+            {missingNote && (
+              <p className="text-xs text-amber-800 mb-3">{missingNote}</p>
+            )}
+
             <div className="space-y-3">
-              {accounts.map((account) => (
-                <motion.div
-                  key={account.id}
-                  className="noor-card p-5"
-                  whileHover={{ scale: 1.01 }}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-medium text-black">{account.name}</p>
-                      <p className="text-sm text-gray-500">
-                        {account.institution_name} · ****{account.mask}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p
-                        className={`text-xl font-semibold ${
-                          account.type === "credit"
-                            ? "text-red-600"
-                            : "text-black"
-                        }`}
-                      >
-                        {account.type === "credit" ? "-" : ""}
-                        {formatCurrency(account.current_balance)}
-                      </p>
-                      {account.type === "credit" && account.credit_limit && (
-                        <p className="text-xs text-gray-500">
-                          of {formatCurrency(account.credit_limit)} limit
+              {accounts.map((account) => {
+                const isCredit = account.type === "credit";
+                const percent =
+                  isCredit && summary
+                    ? utilizationPercent(summary, account.accountId)
+                    : null;
+                return (
+                  <motion.div
+                    key={account.accountId}
+                    className="noor-card p-5"
+                    whileHover={{ scale: 1.01 }}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-medium text-black">{account.name}</p>
+                        <p className="text-sm text-gray-500">
+                          {account.institutionName ?? "Your bank"}
+                          {account.mask ? ` · ****${account.mask}` : ""}
                         </p>
-                      )}
-                      {account.available_balance !== null &&
-                        account.type !== "credit" && (
+                      </div>
+                      <div className="text-right">
+                        <p
+                          className={`text-xl font-semibold ${
+                            isCredit ? "text-red-600" : "text-black"
+                          }`}
+                        >
+                          {formatCentsOrDash(account.currentCents)}
+                        </p>
+                        {isCredit && (
+                          <p className="text-xs text-gray-500">balance owed</p>
+                        )}
+                        {isCredit && account.limitCents !== null && (
                           <p className="text-xs text-gray-500">
-                            {formatCurrency(account.available_balance)}{" "}
-                            available
+                            of {formatCents(account.limitCents)} limit
                           </p>
                         )}
-                    </div>
-                  </div>
-                  {account.type === "credit" && account.credit_limit && (
-                    <div className="mt-3">
-                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <motion.div
-                          className={`h-full rounded-full ${
-                            account.current_balance / account.credit_limit > 0.7
-                              ? "bg-red-500"
-                              : "bg-green-500"
-                          }`}
-                          initial={{ width: 0 }}
-                          animate={{
-                            width: `${
-                              (account.current_balance / account.credit_limit) *
-                              100
-                            }%`,
-                          }}
-                        />
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {Math.round(
-                          (account.current_balance / account.credit_limit) * 100
+                        {!isCredit && account.availableCents !== null && (
+                          <p className="text-xs text-gray-500">
+                            {formatCents(account.availableCents)} available
+                          </p>
                         )}
-                        % used
-                      </p>
+                      </div>
                     </div>
-                  )}
-                </motion.div>
-              ))}
+                    {percent !== null && (
+                      <div className="mt-3">
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <motion.div
+                            className={`h-full rounded-full ${
+                              percent > 70 ? "bg-red-500" : "bg-green-500"
+                            }`}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.min(100, percent)}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {percent}% used
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
             </div>
 
             {shouldShowConnectCard && (
@@ -773,10 +911,22 @@ export default function MoneyPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
           >
+            <p className="text-gray-500 text-xs mb-2">{DISPLAY_WINDOW_LABEL}</p>
+            {missingNote && (
+              <p className="text-xs text-amber-800 mb-3">{missingNote}</p>
+            )}
+            {periodNote && (
+              <p className="text-xs text-amber-800 mb-3">{periodNote}</p>
+            )}
+            {list.kind === "unavailable" && (
+              <p className="text-sm text-gray-500 mb-3">
+                {TRANSACTIONS_UNAVAILABLE}
+              </p>
+            )}
             <div className="space-y-2">
               {transactions.map((txn) => (
                 <motion.div
-                  key={txn.id}
+                  key={`${txn.accountId}:${txn.transactionId}`}
                   className="noor-card px-4 py-3 flex items-center justify-between"
                   whileHover={{ scale: 1.01 }}
                 >
@@ -786,24 +936,20 @@ export default function MoneyPage() {
                     </span>
                     <div>
                       <p className="font-medium text-black text-sm">
-                        {txn.merchant_name || txn.name}
+                        {txn.merchantName || txn.name}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {new Date(txn.date).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatCalendarDay(txn.date)}
                         {txn.pending && " · Pending"}
                       </p>
                     </div>
                   </div>
                   <p
                     className={`font-semibold ${
-                      txn.amount < 0 ? "text-green-600" : "text-black"
+                      txn.amountCents < 0 ? "text-green-600" : "text-black"
                     }`}
                   >
-                    {txn.amount < 0 ? "+" : "-"}
-                    {formatCurrency(Math.abs(txn.amount))}
+                    {formatSpending(txn.amountCents)}
                   </p>
                 </motion.div>
               ))}
@@ -825,19 +971,29 @@ export default function MoneyPage() {
                 Monthly Subscriptions
               </p>
               <p className="text-3xl font-semibold">
-                {formatCurrency(totalSubscriptions)}/mo
-              </p>
-              <p className="text-black/70 text-sm mt-2">
-                {formatCurrency(totalSubscriptions * 12)}/year
+                <MoneyFigure state={moneyDisplay}>
+                  {formatMonthlyOrUnknown(figures.recurringMonthly)}
+                  {figures.recurringMonthly !== null && "/mo"}
+                </MoneyFigure>
               </p>
             </div>
 
             {/* Subscription List */}
             <div className="space-y-2">
-              {subscriptions.length > 0 ? (
-                subscriptions.map((sub, i) => (
+              {moneyDisplay !== "ready" ? null : figures.recurringMonthly ===
+                null ? (
+                <div className="noor-card p-8 text-center">
+                  <p className="text-gray-500">
+                    We couldn&apos;t read your recurring charges yet
+                  </p>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Recurring charges show up once your bank has enough history
+                  </p>
+                </div>
+              ) : figures.recurringItems.length > 0 ? (
+                figures.recurringItems.map((item, i) => (
                   <motion.div
-                    key={i}
+                    key={item.streamId}
                     className="noor-card p-4 flex items-center justify-between"
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -848,33 +1004,27 @@ export default function MoneyPage() {
                         <span className="text-lg">📱</span>
                       </div>
                       <div>
-                        <p className="font-medium text-black">{sub.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {sub.last_charged
-                            ? `Last charged ${new Date(
-                                sub.last_charged
-                              ).toLocaleDateString()}`
-                            : "Recent recurring charge"}
-                        </p>
-                        {sub.next_charge && (
+                        <p className="font-medium text-black">{item.label}</p>
+                        {/* A date already past is not "next": the charge
+                            was expected then and has not been recorded. */}
+                        {item.nextDate && showsRecurringDate(item) && (
                           <p className="text-xs text-gray-500">
-                            Next expected{" "}
-                            {new Date(sub.next_charge).toLocaleDateString()}
+                            {item.pastDue ? "Was expected " : "Next expected "}
+                            {new Date(
+                              item.nextDate + "T00:00:00Z"
+                            ).toLocaleDateString("en-US", { timeZone: "UTC" })}
                           </p>
                         )}
                       </div>
                     </div>
                     <p className="font-semibold text-black">
-                      {formatCurrency(sub.monthly_amount)}/mo
+                      {formatCentsOrDash(item.monthlyCents)}/mo
                     </p>
                   </motion.div>
                 ))
               ) : (
                 <div className="noor-card p-8 text-center">
-                  <p className="text-gray-500">No subscriptions detected</p>
-                  <p className="text-gray-400 text-sm mt-1">
-                    Connect your accounts to detect subscriptions automatically
-                  </p>
+                  <p className="text-gray-500">No recurring charges detected</p>
                 </div>
               )}
             </div>

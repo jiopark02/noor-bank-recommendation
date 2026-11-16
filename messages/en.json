@@ -105,7 +105,6 @@
       "lastName": "Last name",
       "email": "Email",
       "eduVerified": ".edu email verified",
-      "staySignedIn": "Keep me signed in",
       "agreeToTerms": "I agree to the",
       "termsOfService": "Terms of Service",
       "privacyPolicy": "Privacy Policy",
@@ -128,7 +127,7 @@
       "uppercase": "Uppercase (A-Z)",
       "lowercase": "Lowercase (a-z)",
       "number": "Number (0-9)",
-      "special": "Special (!@#$%)"
+      "special": "A symbol (e.g. ! @ # _ -)"
     },
     "step2": {
       "title": "Where you are.",
@@ -178,10 +177,12 @@
     "step4": {
       "title": "Your Finances.",
       "subtitle": "Walk Us Through",
-      "income": "What comes in",
-      "incomeHint": "Paycheck, side gigs, anything else",
-      "expenses": "What goes out",
-      "expensesHint": "Rent, food, transportation, entertainment",
+      "income": "Monthly take-home pay",
+      "incomeHint": "After taxes: paychecks, side gigs, anything else",
+      "incomeRequired": "Noor is built for people with a monthly income. Enter your income to continue.",
+      "expenses": "Monthly spending",
+      "expensesHint": "Rent, food, transportation, everything else",
+      "expensesRequired": "Enter your monthly spending to continue.",
       "priority": "Your priority.",
       "budget": "Every dollar counts.",
       "balance": "Balance value and quality.",

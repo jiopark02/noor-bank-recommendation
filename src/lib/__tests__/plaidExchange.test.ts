@@ -60,12 +60,19 @@ type Spied = ExchangeDeps & {
   lines: string[];
 };
 
+/** The three answers of the duplicate-check read. */
+const NO_ACTIVE = { ok: true as const, connection: null };
+const ACTIVE_READ_FAILED = { ok: false as const };
+function activeFound(row: Record<string, unknown>) {
+  return { ok: true as const, connection: row };
+}
+
 /** Deps on which everything succeeds and the user has one unrelated bank. */
 function passingDeps(): Spied {
   const lines: string[] = [];
   return {
     countConnections: vi.fn(async () => 1),
-    findActiveByInstitution: vi.fn(async () => null),
+    findActiveByInstitution: vi.fn(async () => NO_ACTIVE),
     exchange: vi.fn(async () => ({ accessToken: ACCESS_SENTINEL, itemId: NEW_ITEM })),
     itemGet: vi.fn(async () => ({
       institutionId: "ins_server",
@@ -132,7 +139,9 @@ describe("duplicate check before the exchange", () => {
   it("answers 409 without exchanging", async () => {
     // MUTATION: removing the pre-exchange check.
     const deps = passingDeps();
-    deps.findActiveByInstitution.mockResolvedValue({ institution_name: "Old Bank" });
+    deps.findActiveByInstitution.mockResolvedValue(
+      activeFound({ institution_name: "Old Bank" })
+    );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(409);
     expect(out.body.code).toBe("ALREADY_CONNECTED");
@@ -147,6 +156,18 @@ describe("duplicate check before the exchange", () => {
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(deps.exchange).toHaveBeenCalledTimes(1);
     expect(out.status).toBe(200);
+  });
+
+  it("proceeds when the read reports a failure as { ok: false }", async () => {
+    // MUTATION: treating { ok: false } before the exchange as a refusal.
+    const deps = passingDeps();
+    deps.findActiveByInstitution.mockResolvedValueOnce(ACTIVE_READ_FAILED);
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(deps.exchange).toHaveBeenCalledTimes(1);
+    expect(out.status).toBe(200);
+    expect(
+      deps.lines.some((l) => l.includes("dedupe_read=failed stage=pre proceeding=true"))
+    ).toBe(true);
   });
 
   it("skips the client check for an empty institution id and checks Plaid's id after", async () => {
@@ -181,7 +202,9 @@ describe("compensating revocation after the exchange", () => {
     const deps = passingDeps();
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, institutionId: string) =>
-        institutionId === "ins_server" ? { institution_name: "Stored Bank" } : null
+        institutionId === "ins_server"
+          ? activeFound({ institution_name: "Stored Bank" })
+          : NO_ACTIVE
     );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(409);
@@ -197,11 +220,25 @@ describe("compensating revocation after the exchange", () => {
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, _i: string, exclude?: string) => {
         if (exclude) throw new Error("db down");
-        return null;
+        return NO_ACTIVE;
       }
     );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(503);
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
+    expect(deps.store).not.toHaveBeenCalled();
+  });
+
+  it("revokes and answers 503 when the post-exchange read reports { ok: false }", async () => {
+    // MUTATION: storing after a post-exchange { ok: false } (failing open).
+    const deps = passingDeps();
+    deps.findActiveByInstitution.mockImplementation(
+      async (_u: string, _i: string, exclude?: string) =>
+        exclude ? ACTIVE_READ_FAILED : NO_ACTIVE
+    );
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(503);
+    expect(out.body.code).toBe("CONNECTION_CHECK_FAILED");
     expect(deps.itemRemove).toHaveBeenCalledTimes(1);
     expect(deps.store).not.toHaveBeenCalled();
   });
@@ -306,9 +343,10 @@ describe("an Item this user already has is never revoked", () => {
   });
 
   it("does not revoke on a unique violation once the row is confirmed", async () => {
-    // MUTATION: folding duplicate_item into the generic store failure.
+    // MUTATION: folding unique_violation into the generic store failure, or
+    // revoking on 23505 without reading the row.
     const deps = passingDeps();
-    deps.store.mockResolvedValue({ ok: false, kind: "duplicate_item", dbErrorCode: "23505" });
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
     deps.findOwnItem
       .mockResolvedValueOnce({ ok: true, connection: null })
       .mockResolvedValueOnce({
@@ -321,16 +359,99 @@ describe("an Item this user already has is never revoked", () => {
     expect(deps.itemRemove).not.toHaveBeenCalled();
   });
 
-  it("does not report success on a unique violation whose row cannot be seen", async () => {
-    // MUTATION: answering 200 on duplicate_item without the confirming read.
+  it.each([
+    ["reports a failure", () => ({ ok: false as const })],
+    ["throws", () => {
+      throw new Error("read failed");
+    }],
+  ])("does not revoke on a unique violation when the row read %s twice", async (_n, failedRead) => {
+    // MUTATION: reading a failed row read as "no row" (revoking), or
+    // answering 200 without the confirming read.
     const deps = passingDeps();
-    deps.store.mockResolvedValue({ ok: false, kind: "duplicate_item", dbErrorCode: "23505" });
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    deps.findOwnItem
+      .mockResolvedValueOnce({ ok: true, connection: null })
+      .mockImplementation(async () => failedRead());
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(500);
+    expect(out.body.code).toBe("CONNECTION_SAVE_FAILED");
     expect(deps.itemRemove).not.toHaveBeenCalled();
+    // Step 4's read, then the confirming read and its one retry.
+    expect(deps.findOwnItem).toHaveBeenCalledTimes(3);
     expect(
-      deps.lines.some((l) => l.includes("refused=store_conflict") && l.includes("revoke=skipped"))
+      deps.lines.some(
+        (l) =>
+          l.includes("refused=store_conflict db_error=23505") &&
+          l.includes("revoke=skipped reason=recheck_read_failed")
+      )
     ).toBe(true);
+  });
+
+  it("does not revoke when the confirming read fails once and the retry finds the row", async () => {
+    // MUTATION: removing the retry of the confirming read.
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    deps.findOwnItem
+      .mockResolvedValueOnce({ ok: true, connection: null })
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({
+        ok: true,
+        connection: { institution_name: "Raced Bank", institution_id: "ins_server" },
+      });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(200);
+    expect(deps.itemRemove).not.toHaveBeenCalled();
+  });
+});
+
+describe("a unique violation with no row for the Item is another Item at the same institution", () => {
+  it("revokes the new Item and answers the duplicate 409 with Plaid's name", async () => {
+    // MUTATION: answering 500 without revoking when the row is absent.
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(409);
+    expect(out.body.code).toBe("ALREADY_CONNECTED");
+    expect(out.body.duplicate).toBe(true);
+    expect(out.body.institutionName).toBe("Server Bank");
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
+    expect(deps.itemRemove).toHaveBeenCalledWith(ACCESS_SENTINEL);
+    expect(
+      deps.lines.some(
+        (l) =>
+          l.includes(`item_id=${NEW_ITEM}`) && l.includes("refused=store_conflict_institution")
+      )
+    ).toBe(true);
+    expect(deps.lines.some((l) => l.includes("compensate=revoked"))).toBe(true);
+  });
+
+  it("answers the same body as the duplicate found before the insert", async () => {
+    // MUTATION: building this 409 by hand instead of through duplicate().
+    const raced = passingDeps();
+    raced.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    const fromInsert = response(await exchangeForUser(USER, INPUT, raced));
+
+    const found = passingDeps();
+    found.findActiveByInstitution.mockImplementation(
+      async (_u: string, _i: string, exclude?: string) =>
+        exclude ? activeFound({ institution_name: "Server Bank" }) : NO_ACTIVE
+    );
+    const fromRead = response(await exchangeForUser(USER, INPUT, found));
+    expect(fromInsert.status).toBe(fromRead.status);
+    expect(fromInsert.body).toEqual(fromRead.body);
+  });
+
+  it("revokes when the confirming read fails once and the retry finds no row", async () => {
+    // MUTATION: treating one failed confirming read as final (no retry).
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    deps.findOwnItem
+      .mockResolvedValueOnce({ ok: true, connection: null })
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, connection: null });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(409);
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -370,15 +491,112 @@ describe("stored values come from Plaid where Plaid has them", () => {
     expect(out.body.institutionName).toBe("Unknown Institution");
   });
 
-  it("stores NULL, never the client's id, when Plaid reports no institution id", async () => {
-    // MUTATION: `serverInstitutionId ?? clientInstitutionId`.
+  it("checks Plaid's institution id, excluding the new Item, before it stores", async () => {
+    // MUTATION: removing the post-exchange duplicate read.
     const deps = passingDeps();
-    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
     await exchangeForUser(USER, INPUT, deps);
-    expect(deps.store.mock.calls[0][4]).toBeNull();
+    expect(deps.findActiveByInstitution).toHaveBeenCalledWith(USER, "ins_server", NEW_ITEM);
+    expect(deps.findActiveByInstitution.mock.invocationCallOrder[1]).toBeLessThan(
+      deps.store.mock.invocationCallOrder[0]
+    );
+  });
+});
+
+describe("an Item Plaid reports no institution id for is refused, not stored", () => {
+  const missing: Array<[string, string | null]> = [
+    ["null", null],
+    ["an empty string", ""],
+    ["a blank string", "   "],
+  ];
+
+  it.each(missing)("does not store when the id is %s, and never falls back to the client's id", async (_n, value) => {
+    // MUTATION: removing the missing-id refusal, or
+    // `serverInstitutionId ?? clientInstitutionId`.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: value, institutionName: "Server Bank" });
+    await exchangeForUser(USER, INPUT, deps);
+    expect(deps.store).not.toHaveBeenCalled();
     // Only the pre-exchange check ran; there is no server id to check with.
     expect(deps.findActiveByInstitution).toHaveBeenCalledTimes(1);
     expect(deps.findActiveByInstitution).toHaveBeenCalledWith(USER, "ins_client");
+  });
+
+  it("revokes the new Item once and answers 502 with a failed lookup's sentence followed by where to turn", async () => {
+    // MUTATION: answering without the compensating revocation, answering with
+    // the failed lookup's sentence alone, or adding the contact sentence to
+    // the failed lookup's answer too.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(502);
+    expect(out.body.code).toBe("INSTITUTION_ID_MISSING");
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
+    expect(deps.itemRemove).toHaveBeenCalledWith(ACCESS_SENTINEL);
+
+    const lookupFailed = passingDeps();
+    lookupFailed.itemGet.mockRejectedValue(new Error("boom"));
+    const failed = response(await exchangeForUser(USER, INPUT, lookupFailed));
+    const contact = " If this keeps happening, please contact support.";
+    expect(typeof failed.body.error).toBe("string");
+    const lookupSentence = String(failed.body.error);
+    expect(lookupSentence.length).toBeGreaterThan(0);
+    expect(lookupSentence).not.toContain("contact");
+    expect(out.body.error).toBe(lookupSentence + contact);
+  });
+
+  it("logs the missing id as Plaid's, apart from a failed lookup", async () => {
+    // MUTATION: logging this refusal as `refused=item_get`, or dropping
+    // `source=plaid`.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
+    await exchangeForUser(USER, INPUT, deps);
+    expect(
+      deps.lines.some(
+        (l) =>
+          l.includes(`item_id=${NEW_ITEM}`) &&
+          l.includes("refused=institution_id_missing") &&
+          l.includes("source=plaid")
+      )
+    ).toBe(true);
+    expect(deps.lines.some((l) => l.includes("refused=item_get"))).toBe(false);
+
+    const lookupFailed = passingDeps();
+    lookupFailed.itemGet.mockRejectedValue(new Error("boom"));
+    await exchangeForUser(USER, INPUT, lookupFailed);
+    expect(lookupFailed.lines.some((l) => l.includes("refused=item_get"))).toBe(true);
+    expect(lookupFailed.lines.some((l) => l.includes("institution_id_missing"))).toBe(false);
+  });
+
+  it("puts no institution id and no token in any line or in the response", async () => {
+    // MUTATION: interpolating the client's institution id, Plaid's blank
+    // value or a token into the refusal line.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: "   ", institutionName: "Server Bank" });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    const text = deps.lines.join("\n") + JSON.stringify(out.body);
+    expect(text).not.toContain("ins_client");
+    expect(text).not.toContain(ACCESS_SENTINEL);
+    expect(text).not.toContain(PUBLIC_SENTINEL);
+    expect(deps.lines.some((l) => /source=plaid\s*$/.test(l))).toBe(true);
+  });
+
+  it("keeps the 502 when the revocation itself fails, and logs it like any other", async () => {
+    // MUTATION: dropping the compensate=failed line on this path, or
+    // answering differently when the revocation fails.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
+    deps.itemRemove.mockRejectedValue(plaidRejection("ITEM_LOCKED"));
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(502);
+    expect(out.body.code).toBe("INSTITUTION_ID_MISSING");
+    expect(
+      deps.lines.some(
+        (l) =>
+          l.includes(`item_id=${NEW_ITEM}`) &&
+          l.includes("compensate=failed") &&
+          l.includes("error_code=ITEM_LOCKED")
+      )
+    ).toBe(true);
   });
 });
 
@@ -388,13 +606,16 @@ describe("tokens never leave through logs or responses", () => {
     ["limit", (d) => d.countConnections.mockResolvedValue(CONNECTION_LIMIT)],
     ["itemGet failure", (d) => d.itemGet.mockRejectedValue(new Error(ACCESS_SENTINEL))],
     ["post duplicate", (d) => d.findActiveByInstitution.mockImplementation(
-      async (_u: string, _i: string, e?: string) => (e ? { institution_name: "X" } : null)
+      async (_u: string, _i: string, e?: string) =>
+        e ? activeFound({ institution_name: "X" }) : NO_ACTIVE
     )],
     ["store failure + revoke failure", (d) => {
       d.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null });
       d.itemRemove.mockRejectedValue(plaidRejection("ITEM_LOCKED"));
     }],
     ["ownership read failure", (d) => d.findOwnItem.mockResolvedValue({ ok: false })],
+    ["missing institution id", (d) =>
+      d.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" })],
     ["existing row", (d) => d.findOwnItem.mockResolvedValue({
       ok: true, connection: { institution_name: "E", institution_id: null },
     })],
@@ -446,7 +667,9 @@ describe("the row is read again only after a store failure that may have committ
     const deps = passingDeps();
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, institutionId: string) =>
-        institutionId === "ins_server" ? { institution_name: "Stored Bank" } : null
+        institutionId === "ins_server"
+          ? activeFound({ institution_name: "Stored Bank" })
+          : NO_ACTIVE
     );
     deps.findOwnItem.mockResolvedValueOnce(NO_ROW).mockResolvedValueOnce(ROW);
     const out = response(await exchangeForUser(USER, INPUT, deps));
@@ -501,13 +724,14 @@ describe("only a store failure that may have committed is re-read", () => {
 
   const preStore: Array<[string, (d: Spied) => void]> = [
     ["post-exchange duplicate", (d) => d.findActiveByInstitution.mockImplementation(
-      async (_u: string, _i: string, e?: string) => (e ? { institution_name: "X" } : null)
+      async (_u: string, _i: string, e?: string) =>
+        e ? activeFound({ institution_name: "X" }) : NO_ACTIVE
     )],
     ["itemGet failure", (d) => d.itemGet.mockRejectedValue(new Error("boom"))],
     ["post-exchange duplicate read failure", (d) => d.findActiveByInstitution.mockImplementation(
       async (_u: string, _i: string, e?: string) => {
         if (e) throw new Error("db down");
-        return null;
+        return NO_ACTIVE;
       }
     )],
   ];
@@ -526,6 +750,9 @@ describe("only a store failure that may have committed is re-read", () => {
     ["crypto", "crypto", null],
     ["db 23514 (check violation)", "db", "23514"],
     ["db 42501 (insufficient privilege)", "db", "42501"],
+    // The insert names a user with no profile row, where plaid_connections
+    // references public.users. Nothing was stored, so the new Item is revoked.
+    ["db 23503 (foreign key violation)", "db", "23503"],
   ];
 
   it.each(definite)("(b) %s: revokes without reading the row again", async (_n, kind, code) => {
@@ -608,7 +835,7 @@ describe("(f) isDefiniteDbRejection", () => {
   it("is true for SQLSTATEs the server sends when it rejects a statement", () => {
     // MUTATION: returning false for every code, or dropping the F0/HV/P0
     // classes.
-    for (const code of ["23514", "42501", "23505", "22001", "40001", "57014", "P0001", "F0000", "HV000"]) {
+    for (const code of ["23514", "23503", "42501", "23505", "22001", "40001", "57014", "P0001", "F0000", "HV000"]) {
       expect(isDefiniteDbRejection(code)).toBe(true);
     }
   });
@@ -666,7 +893,7 @@ describe("institution names are cut by code point, including the client's", () =
     // inside duplicate() (either one alone still caps it), or
     // INSTITUTION_NAME_MAX = 79.
     const deps = passingDeps();
-    deps.findActiveByInstitution.mockResolvedValue({ institution_name: null });
+    deps.findActiveByInstitution.mockResolvedValue(activeFound({ institution_name: null }));
     const long = "Z".repeat(120);
     const out = response(
       await exchangeForUser(USER, { ...INPUT, institutionName: long }, deps)
@@ -701,7 +928,7 @@ describe("names in responses are capped even when they were never stored by this
     deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: plaidName });
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, _i: string, exclude?: string) =>
-        exclude ? { institution_name: "" } : null
+        exclude ? activeFound({ institution_name: "" }) : NO_ACTIVE
     );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(409);
@@ -733,9 +960,28 @@ describe("a minted Item is logged as soon as it exists", () => {
   const scenarios: Array<[string, (d: Spied) => void]> = [
     ["success", () => {}],
     ["itemGet failure", (d) => d.itemGet.mockRejectedValue(new Error("boom"))],
+    ["missing institution id", (d) =>
+      d.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" })],
     ["store failure", (d) =>
       d.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null })],
     ["ownership read failure", (d) => d.findOwnItem.mockResolvedValue({ ok: false })],
+    ["unique violation, row present", (d) => {
+      d.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+      d.findOwnItem
+        .mockResolvedValueOnce({ ok: true, connection: null })
+        .mockResolvedValue({
+          ok: true,
+          connection: { institution_name: "Raced Bank", institution_id: "ins_server" },
+        });
+    }],
+    ["unique violation, row absent", (d) =>
+      d.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" })],
+    ["unique violation, row unreadable", (d) => {
+      d.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+      d.findOwnItem
+        .mockResolvedValueOnce({ ok: true, connection: null })
+        .mockResolvedValue({ ok: false });
+    }],
   ];
 
   it.each(scenarios)("%s: minted comes first and is paired with an outcome", async (_n, arrange) => {
@@ -806,11 +1052,11 @@ describe("storeResultFromInsert", () => {
     expect(storeResultFromInsert(null)).toEqual({ ok: true });
   });
 
-  it("reports 23505 as duplicate_item", () => {
+  it("reports 23505 as unique_violation", () => {
     // MUTATION: removing the 23505 comparison.
     expect(storeResultFromInsert({ code: "23505", message: "dup" })).toEqual({
       ok: false,
-      kind: "duplicate_item",
+      kind: "unique_violation",
       dbErrorCode: "23505",
     });
   });
@@ -825,6 +1071,16 @@ describe("storeResultFromInsert", () => {
       ok: false,
       kind: "db",
       dbErrorCode: null,
+    });
+  });
+
+  it("reports a foreign key violation as db, not unique_violation", () => {
+    // MUTATION: treating every class-23 code as unique_violation, which would
+    // skip the revocation of an Item that was never stored.
+    expect(storeResultFromInsert({ code: "23503" })).toEqual({
+      ok: false,
+      kind: "db",
+      dbErrorCode: "23503",
     });
   });
 });

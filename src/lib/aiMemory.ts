@@ -49,7 +49,35 @@ export interface ChatSession {
   facts_extracted: boolean;
   created_at: string;
   updated_at: string;
+  // Retry and give-up state of the two memory crons (prefix summary_ for the
+  // summarize cron, facts_ for the extract-facts cron). See
+  // src/lib/memoryCronBatch.ts for how they are written.
+  summary_failures: number;
+  summary_next_attempt_at: string | null;
+  summary_outcome: CronOutcome | null;
+  summary_given_up_reason: CronGiveUpReason | null;
+  summary_given_up_at: string | null;
+  facts_failures: number;
+  facts_next_attempt_at: string | null;
+  facts_outcome: CronOutcome | null;
+  facts_given_up_reason: CronGiveUpReason | null;
+  facts_given_up_at: string | null;
 }
+
+/** How a memory cron ended with a session; null while it has not ended. */
+export type CronOutcome = "done" | "given_up";
+
+/** Why a memory cron gave up on a session. A closed list, enforced by a check. */
+export type CronGiveUpReason = "output_unusable" | "input_rejected";
+
+/** Column prefix of a memory cron's state: summarize or extract-facts. */
+export type CronStatePrefix = "summary" | "facts";
+
+/** Each memory cron's completion flag on chat_sessions. */
+const CRON_COMPLETION_FLAG: Record<CronStatePrefix, "summarized" | "facts_extracted"> = {
+  summary: "summarized",
+  facts: "facts_extracted",
+};
 
 /**
  * A single message stored in the database. This is distinct from the client-side
@@ -253,13 +281,35 @@ export async function assertSessionBelongsToUser(
   sessionId: string,
   userId: string
 ): Promise<void> {
+  await readOwnedSession(sessionId, userId);
+}
+
+/**
+ * Reads the session by id AND user id, and returns its id and ended_at. Throws
+ * exactly as assertSessionBelongsToUser does when the read fails or no such
+ * session belongs to the user.
+ *
+ * ended_at is what saveMessages needs on top of ownership: a session the
+ * summarize cron has closed must not take new messages.
+ *
+ * @param signal  Optional. Cancels the read; a cancelled read comes back as a
+ *   failed one and throws.
+ */
+async function readOwnedSession(
+  sessionId: string,
+  userId: string,
+  signal?: AbortSignal
+): Promise<{ id: string; ended_at: string | null }> {
   const supabase = getAdmin();
-  const { data, error } = await supabase
+  const query = supabase
     .from("chat_sessions")
-    .select("id")
+    .select("id, ended_at")
     .eq("id", sessionId)
-    .eq("user_id", userId)
-    .maybeSingle();
+    .eq("user_id", userId);
+  const { data, error } = await (signal
+    ? query.abortSignal(signal)
+    : query
+  ).maybeSingle();
 
   if (error) {
     throw wrapDbError(
@@ -272,6 +322,46 @@ export async function assertSessionBelongsToUser(
       `Session ${sessionId} does not belong to user ${userId} or does not exist`
     );
   }
+  return data as { id: string; ended_at: string | null };
+}
+
+/**
+ * The SQLSTATE an insert into chat_messages is refused with when the session
+ * has been closed. The application checks ended_at itself before inserting
+ * (saveMessages), which leaves a gap between that read and the insert.
+ * Migration 20261110120000_reject_chat_messages_on_closed_session.sql closes
+ * it: it makes the trigger function that runs after every insert into
+ * chat_messages raise this code when the session is no longer open, so the
+ * statement stores nothing. Whether it is applied is a live-state question;
+ * in a database without it the check in saveMessages is the only one, and a
+ * session closed inside that gap still takes the turn.
+ */
+export const PG_CHAT_SESSION_CLOSED = "NR001";
+
+/**
+ * Thrown by saveMessages when the session is closed: either its own read saw
+ * ended_at set, in which case nothing was sent, or the database refused the
+ * insert with PG_CHAT_SESSION_CLOSED, in which case the whole statement was
+ * rolled back. Either way no row of the pair was stored, so the caller may
+ * insert the same pair, with the same ids, into another session.
+ */
+export class SessionClosedError extends Error {
+  readonly code = "SESSION_CLOSED";
+
+  constructor() {
+    super("Session is closed: the messages were not stored");
+    this.name = "SessionClosedError";
+    // Keeps instanceof working when the class is compiled to ES5.
+    Object.setPrototypeOf(this, SessionClosedError.prototype);
+  }
+}
+
+export function isSessionClosedError(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    (error as { code?: unknown }).code === "SESSION_CLOSED"
+  );
 }
 
 /**
@@ -438,12 +528,24 @@ export interface GetSessionMessagesOptions {
 
 const DEFAULT_MESSAGES_LIMIT = 50;
 
+/** The ids of the two rows of one saved turn. */
+export interface SavedTurnIds {
+  user: string;
+  assistant: string;
+}
+
+export interface SaveMessagesOptions {
+  ids?: SavedTurnIds;
+  signal?: AbortSignal;
+}
+
 /**
  * Persists a user message and the assistant reply that followed it. Always
  * called as a pair so the conversation order is preserved.
  *
  * SECURITY:
- *   - Verifies session ownership before inserting (admin client bypasses RLS).
+ *   - Verifies session ownership before inserting (admin client bypasses RLS),
+ *     and that the session is still open.
  *   - The user_id stored on both rows is the authenticated userId passed in,
  *     not anything from the request body. Never accept user_id from client.
  *
@@ -461,6 +563,17 @@ const DEFAULT_MESSAGES_LIMIT = 50;
  *                    The ids on the returned rows are useful as
  *                    source_message_id for facts.
  *
+ * @param options.ids  The ids of the two rows, chosen by the caller. With
+ *                    them a caller whose insert ended without an answer can
+ *                    ask afterwards whether the pair is stored
+ *                    (findSavedTurn), and can insert the same pair again
+ *                    after SessionClosedError without storing it twice.
+ *                    Without them the database chooses the ids.
+ * @param options.signal  Cancels the ownership read and the insert. A
+ *                    cancelled insert may or may not have been stored.
+ *
+ * @throws SessionClosedError when the session is closed (see the class): no
+ *   row of the pair was stored.
  * @throws Error when the session does not belong to the user, the user/
  *   assistant content is empty, the insert returns an unexpected shape, or
  *   the database insert fails.
@@ -468,7 +581,8 @@ const DEFAULT_MESSAGES_LIMIT = 50;
 export async function saveMessages(
   sessionId: string,
   userId: string,
-  pair: MessagePairToSave
+  pair: MessagePairToSave,
+  options: SaveMessagesOptions = {}
 ): Promise<{
   userMessage: DbChatMessage;
   assistantMessage: DbChatMessage;
@@ -481,8 +595,12 @@ export async function saveMessages(
     throw new Error("saveMessages: assistantContent must be a non-empty string");
   }
 
-  // SECURITY: verify ownership before any insert.
-  await assertSessionBelongsToUser(sessionId, userId);
+  // SECURITY: verify ownership before any insert. The same read says whether
+  // the session is still open; a closed one takes no new messages.
+  const session = await readOwnedSession(sessionId, userId, options.signal);
+  if (session.ended_at !== null) {
+    throw new SessionClosedError();
+  }
 
   const supabase = getAdmin();
 
@@ -498,10 +616,11 @@ export async function saveMessages(
   // Note: input_tokens/output_tokens/model live ONLY on the assistant row.
   // The trigger bump_chat_session_on_message will fire twice (once per row)
   // and bump message_count by 2, which is the intended per-turn behavior.
-  const { data, error } = await supabase
+  const insert = supabase
     .from("chat_messages")
     .insert([
       {
+        ...(options.ids ? { id: options.ids.user } : {}),
         session_id: sessionId,
         user_id: userId,
         role: "user",
@@ -509,6 +628,7 @@ export async function saveMessages(
         created_at: userCreatedAt,
       },
       {
+        ...(options.ids ? { id: options.ids.assistant } : {}),
         session_id: sessionId,
         user_id: userId,
         role: "assistant",
@@ -520,8 +640,16 @@ export async function saveMessages(
       },
     ])
     .select("*");
+  const { data, error } = await (options.signal
+    ? insert.abortSignal(options.signal)
+    : insert);
 
   if (error) {
+    // The session was closed between the read above and the insert, and the
+    // database refused the statement as a whole.
+    if ((error as { code?: unknown }).code === PG_CHAT_SESSION_CLOSED) {
+      throw new SessionClosedError();
+    }
     throw wrapDbError(`Failed to save messages: ${error.message}`, error);
   }
   if (!data || data.length !== 2) {
@@ -543,6 +671,46 @@ export async function saveMessages(
   }
 
   return { userMessage, assistantMessage };
+}
+
+/**
+ * Answers whether a pair saveMessages was given ids for is stored: the id of
+ * the session both rows are in, or null when either row is missing (or, which
+ * saveMessages cannot produce, the two are in different sessions).
+ *
+ * For a caller whose insert ended in an error or was cancelled, and so does
+ * not know whether the statement was stored. The pair is written by one
+ * statement, so the two rows are there together or not at all.
+ *
+ * SECURITY: Filters by user_id as well as by the ids.
+ *
+ * @throws Error when the database query fails. A cancelled query fails.
+ */
+export async function findSavedTurn(
+  userId: string,
+  ids: SavedTurnIds,
+  options: { signal?: AbortSignal } = {}
+): Promise<string | null> {
+  const supabase = getAdmin();
+  const query = supabase
+    .from("chat_messages")
+    .select("id, session_id")
+    .eq("user_id", userId)
+    .in("id", [ids.user, ids.assistant]);
+  const { data, error } = await (options.signal
+    ? query.abortSignal(options.signal)
+    : query);
+
+  if (error) {
+    throw wrapDbError(`Failed to look up saved messages: ${error.message}`, error);
+  }
+
+  const rows = (data ?? []) as Array<{ id: string; session_id: string }>;
+  const userRow = rows.find((r) => r.id === ids.user);
+  const assistantRow = rows.find((r) => r.id === ids.assistant);
+  if (!userRow || !assistantRow) return null;
+  if (userRow.session_id !== assistantRow.session_id) return null;
+  return userRow.session_id;
 }
 
 /**
@@ -1046,8 +1214,10 @@ export async function getSummaryBySessionId(
  * session_id triggers code 23505), returns the existing one instead of
  * throwing. This makes the function retry-safe for cron / fact pipelines.
  *
- * Also best-effort sets chat_sessions.summarized = true. If that step fails,
- * the summary is still saved and {@link markSessionSummarized} can recover.
+ * Also best-effort marks the session done for the summarize cron, with the
+ * same update {@link markSessionSummarized} makes. If that step fails, the
+ * summary is still saved; the cron finds the summary on its next run and
+ * marks the session done without calling the model.
  *
  * SECURITY: Verifies session ownership before insert.
  *
@@ -1117,10 +1287,10 @@ export async function createSummary(
     summary = data as ChatSummary;
   }
 
-  // Best-effort: flip chat_sessions.summarized = true.
+  // Best-effort: mark the session done for the summarize cron.
   const { error: flagError } = await supabase
     .from("chat_sessions")
-    .update({ summarized: true })
+    .update(cronDonePayload("summary"))
     .eq("id", sessionId)
     .eq("user_id", userId);
 
@@ -1135,8 +1305,29 @@ export async function createSummary(
 }
 
 /**
- * Sets chat_sessions.summarized = true. Recovery operation for
- * createSummary's best-effort flag update.
+ * The update that marks a session done for one memory cron: its completion
+ * flag true, outcome 'done', and no give-up reason, give-up time or next
+ * attempt. Every completion writes exactly this, whatever the path (a stored
+ * summary or facts, an empty session, a summary found already stored, a
+ * summary withheld by the crisis gate), so the row does not record which path
+ * it was. Clearing the give-up columns keeps the write inside the pair check
+ * whatever state the row was in before.
+ */
+export function cronDonePayload(
+  prefix: CronStatePrefix
+): Record<string, boolean | string | null> {
+  return {
+    [CRON_COMPLETION_FLAG[prefix]]: true,
+    [`${prefix}_outcome`]: "done",
+    [`${prefix}_given_up_reason`]: null,
+    [`${prefix}_given_up_at`]: null,
+    [`${prefix}_next_attempt_at`]: null,
+  };
+}
+
+/**
+ * Marks the session done for the summarize cron ({@link cronDonePayload}).
+ * Also the recovery for createSummary's best-effort update.
  *
  * SECURITY: Filters by both session id and user id.
  *
@@ -1149,7 +1340,7 @@ export async function markSessionSummarized(
   const supabase = getAdmin();
   const { error } = await supabase
     .from("chat_sessions")
-    .update({ summarized: true })
+    .update(cronDonePayload("summary"))
     .eq("id", sessionId)
     .eq("user_id", userId);
 
@@ -1222,11 +1413,16 @@ export async function getSessionsToClose(
  *
  * The cron passes a SMALL limit because each session triggers an LLM call.
  *
- * @param limit  Max sessions. Defaults to DEFAULT_CRON_BATCH_LIMIT.
+ * A session whose summary_next_attempt_at is still in the future is left out
+ * until then (see {@link cronAttemptDueFilter}).
+ *
+ * @param limit  Max sessions.
+ * @param nowIso The run's current time, as an ISO string.
  * @throws Error when the database query fails.
  */
 export async function getSessionsNeedingSummary(
-  limit: number = DEFAULT_CRON_BATCH_LIMIT
+  limit: number,
+  nowIso: string
 ): Promise<ChatSession[]> {
   const supabase = getAdmin();
 
@@ -1235,6 +1431,7 @@ export async function getSessionsNeedingSummary(
     .select("*")
     .eq("summarized", false)
     .not("ended_at", "is", null)
+    .or(cronAttemptDueFilter("summary", nowIso))
     .order("ended_at", { ascending: true })
     .limit(limit);
 
@@ -1264,11 +1461,16 @@ export async function getSessionsNeedingSummary(
  * the summarized flag. Summarization (PR4) and facts extraction (PR5) are
  * separate pipelines.
  *
- * @param limit  Max sessions. Defaults to DEFAULT_CRON_BATCH_LIMIT.
+ * A session whose facts_next_attempt_at is still in the future is left out
+ * until then (see {@link cronAttemptDueFilter}).
+ *
+ * @param limit  Max sessions.
+ * @param nowIso The run's current time, as an ISO string.
  * @throws Error when the database query fails.
  */
 export async function getSessionsNeedingFactsExtraction(
-  limit: number = DEFAULT_CRON_BATCH_LIMIT
+  limit: number,
+  nowIso: string
 ): Promise<ChatSession[]> {
   const supabase = getAdmin();
 
@@ -1277,6 +1479,7 @@ export async function getSessionsNeedingFactsExtraction(
     .select("*")
     .eq("facts_extracted", false)
     .not("ended_at", "is", null)
+    .or(cronAttemptDueFilter("facts", nowIso))
     .order("ended_at", { ascending: true })
     .limit(limit);
 
@@ -1291,13 +1494,13 @@ export async function getSessionsNeedingFactsExtraction(
 }
 
 /**
- * Sets chat_sessions.facts_extracted = true. Marks a session as processed
- * by the facts-extraction cron.
+ * Marks the session done for the facts-extraction cron
+ * ({@link cronDonePayload}).
  *
  * Unlike summarization (which has createSummary's best-effort flag update),
- * this flag is the ONLY completion signal for facts extraction. The cron
- * must call this on every processed session — including empty sessions and
- * sessions whose LLM output produced zero fact operations.
+ * this is the ONLY completion write for facts extraction. The cron calls it on
+ * every finished session — including empty sessions and sessions whose LLM
+ * output produced zero fact operations — and never after a fact write failed.
  *
  * SECURITY: Filters by both session id and user id.
  *
@@ -1310,7 +1513,7 @@ export async function markFactsExtracted(
   const supabase = getAdmin();
   const { error } = await supabase
     .from("chat_sessions")
-    .update({ facts_extracted: true })
+    .update(cronDonePayload("facts"))
     .eq("id", sessionId)
     .eq("user_id", userId);
 
@@ -1322,56 +1525,141 @@ export async function markFactsExtracted(
   }
 }
 
-/**
- * For each given session, how many times a memory cron's LLM call for it got a
- * response from the model: llm_calls rows for that route and session with a
- * 2xx status and an error class other than network_error (a timeout is
- * recorded as network_error). A 2xx whose content was empty or not JSON counts,
- * because the model answered and the call was paid for. A routing error
- * (503), any other non-2xx, a network error and a timeout do not count. A
- * failure after the model answered — a database write, parsing or validation
- * in our code, marking the session — is counted.
- *
- * Cron-only, spans all users by design (like getSessionsNeedingSummary); reads
- * only session ids. Sessions with no counted attempt are absent from the
- * result. llm_calls rows are written best-effort, so a count can be low, never
- * high.
- *
- * @throws Error when the database query fails. The crons treat that as "no
- *   bound this run" and process sessions as before.
- */
-export async function getRespondedAttemptCounts(
-  route: "cron_summarize" | "cron_extract_facts",
-  sessionIds: string[]
-): Promise<Record<string, number>> {
-  const counts: Record<string, number> = {};
-  if (sessionIds.length === 0) return counts;
+// ---------------------------------------------------------------------------
+// SECTION 5c-2: Memory cron retry state (server-only)
+// ---------------------------------------------------------------------------
 
+/**
+ * The PostgREST `or` filter that keeps a session whose next attempt is due:
+ * <prefix>_next_attempt_at is null, or no later than `nowIso`.
+ */
+export function cronAttemptDueFilter(
+  prefix: CronStatePrefix,
+  nowIso: string
+): string {
+  const column = `${prefix}_next_attempt_at`;
+  return `${column}.is.null,${column}.lte.${nowIso}`;
+}
+
+/** How many rows a cron state write changed. */
+export interface CronStateWriteResult {
+  updated: number;
+}
+
+function assertFailureCount(value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error("cron state write: failure count must be a non-negative integer");
+  }
+}
+
+/**
+ * One update of a session's cron state, only while that cron has not finished
+ * with it (completion flag false), and, when `failuresBefore` is given, only
+ * while its failure count is still that value. A run that read the session
+ * before another run changed it therefore changes nothing (updated 0) rather
+ * than counting a failure twice or reopening a finished session.
+ *
+ * SECURITY: Filters by both session id and user id.
+ *
+ * @throws Error when the update fails or returns no row list.
+ */
+async function updateCronState(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  payload: Record<string, boolean | number | string | null>,
+  failuresBefore?: number
+): Promise<CronStateWriteResult> {
   const supabase = getAdmin();
-  const { data, error } = await supabase
-    .from("llm_calls")
-    .select("session_id")
-    .eq("route", route)
-    .in("session_id", sessionIds)
-    .gte("http_status", 200)
-    .lte("http_status", 299)
-    // Not .neq(): SQL `<>` drops rows whose error_class is NULL, which are the
-    // real successes.
-    .or("error_class.is.null,error_class.neq.network_error");
+  let query = supabase
+    .from("chat_sessions")
+    .update(payload)
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .eq(CRON_COMPLETION_FLAG[prefix], false);
+  if (failuresBefore !== undefined) {
+    query = query.eq(`${prefix}_failures`, failuresBefore);
+  }
+  const { data, error } = await query.select("id");
 
   if (error) {
     throw wrapDbError(
-      `Failed to count responded attempts: ${error.message}`,
+      `Failed to write ${prefix} cron state: ${error.message}`,
       error
     );
   }
-
-  for (const row of (data ?? []) as Array<{ session_id: string | null }>) {
-    if (typeof row.session_id === "string") {
-      counts[row.session_id] = (counts[row.session_id] ?? 0) + 1;
-    }
+  if (!Array.isArray(data)) {
+    throw new Error(`Failed to write ${prefix} cron state: no row list returned`);
   }
-  return counts;
+  return { updated: data.length };
+}
+
+/**
+ * A failure that is not counted: only the next attempt time moves.
+ */
+export async function writeCronBackoff(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  nextAttemptAtIso: string
+): Promise<CronStateWriteResult> {
+  return updateCronState(prefix, sessionId, userId, {
+    [`${prefix}_next_attempt_at`]: nextAttemptAtIso,
+  });
+}
+
+/**
+ * A counted failure below the give-up bound: the failure count goes from
+ * `failuresBefore` to one more, and the next attempt time moves.
+ */
+export async function writeCronCountedFailure(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  failuresBefore: number,
+  nextAttemptAtIso: string
+): Promise<CronStateWriteResult> {
+  assertFailureCount(failuresBefore);
+  return updateCronState(
+    prefix,
+    sessionId,
+    userId,
+    {
+      [`${prefix}_failures`]: failuresBefore + 1,
+      [`${prefix}_next_attempt_at`]: nextAttemptAtIso,
+    },
+    failuresBefore
+  );
+}
+
+/**
+ * A counted failure that reaches the give-up bound. One update sets the
+ * completion flag, outcome 'given_up', the reason and the time together, as
+ * the pair check requires, with the failure count and no next attempt.
+ */
+export async function writeCronGiveUp(
+  prefix: CronStatePrefix,
+  sessionId: string,
+  userId: string,
+  failuresBefore: number,
+  reason: CronGiveUpReason,
+  givenUpAtIso: string
+): Promise<CronStateWriteResult> {
+  assertFailureCount(failuresBefore);
+  return updateCronState(
+    prefix,
+    sessionId,
+    userId,
+    {
+      [CRON_COMPLETION_FLAG[prefix]]: true,
+      [`${prefix}_outcome`]: "given_up",
+      [`${prefix}_given_up_reason`]: reason,
+      [`${prefix}_given_up_at`]: givenUpAtIso,
+      [`${prefix}_failures`]: failuresBefore + 1,
+      [`${prefix}_next_attempt_at`]: null,
+    },
+    failuresBefore
+  );
 }
 
 // ============================================================================

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserFromRequest } from "@/lib/apiAuth";
 import { syncProfileForUser } from "@/lib/profileSync";
+import { ensureHouseholdForUser } from "@/lib/householdEnsure";
 import { toLogSafeError } from "@/lib/logSafeError";
 
 /**
@@ -13,7 +14,8 @@ import { toLogSafeError } from "@/lib/logSafeError";
  * verified token. The metadata blob comes from the same user but is
  * user-writable through the Auth API, so it is profile data, not identity. The
  * request body is passed on only for its display names and its optional id
- * check.
+ * check. After a successful write the decision also makes sure the caller has
+ * a one-person household (householdEnsure.ts), with the verified id.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -64,6 +66,8 @@ export async function POST(request: NextRequest) {
         },
 
         now: () => new Date().toISOString(),
+
+        ensureHousehold: (userId) => ensureHouseholdForUser(admin(), userId),
       }
     );
 

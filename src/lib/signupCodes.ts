@@ -7,5 +7,8 @@
 /** The email belongs to an Auth account whose profile row does not exist. */
 export const ACCOUNT_INCOMPLETE = "ACCOUNT_INCOMPLETE";
 
-/** The account was created but its survey answers were not saved. */
-export const SURVEY_SAVE_FAILED = "SURVEY_SAVE_FAILED";
+/**
+ * A monthly income or spending answer is missing or not a whole number in
+ * range (see surveyMoney.ts). Refused before anything is created or written.
+ */
+export const INVALID_MONTHLY_AMOUNT = "INVALID_MONTHLY_AMOUNT";

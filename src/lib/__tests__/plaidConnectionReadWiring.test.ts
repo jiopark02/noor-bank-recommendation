@@ -7,8 +7,9 @@ import { describe, it, expect } from "vitest";
  *
  * `plaidApiUtils.test.ts` proves the decision is correct: connectionRowsOrNull
  * returns null for a failed read and [] for a genuine empty one. Correct and
- * misused is worth nothing. The user-visible half of that fix lives in the two
- * data routes, in how they SPEND the null — and that half had no check at all.
+ * misused is worth nothing. The user-visible half of that fix lives in the
+ * bank-data route, in how it SPENDS the null — and that half had no check at
+ * all.
  *
  * WHAT ALREADY COVERS THE ROUTES, AND WHAT DOES NOT
  * Deleting the null guard outright is already caught, by the type checker rather
@@ -82,14 +83,12 @@ import { describe, it, expect } from "vitest";
  * suite; that stopped being true the moment that file existed, and saying it here
  * would now be a description of the suite that the suite contradicts.
  *
- * What has NOT changed is the auth seam. apiAuth.test.ts fakes the server-client
- * factory to test token verification itself; no route's auth is faked, and the
- * existence of one mock elsewhere is
- * not an argument for adding that one — the reason it was left alone is that
- * faking an auth boundary in order to test a route is a much larger decision than
- * faking a client factory in order to test a database read. That remains a
- * separate track. Until it is taken, this file is the available check and the
- * limits above are the honest statement of what stays uncovered.
+ * The auth seam has since been crossed too. Route tests now fake the token
+ * verification under authenticate() and call the handler: the chat route's
+ * tests do, and financeSummaryRoute.test.ts does for /api/finance/summary,
+ * including a failed connection read answered as a 500. For a route that has
+ * such a test, this file is a second, textual line; for a route that does not,
+ * it is still the available check and the limits above still apply.
  */
 
 type RouteProbe = {
@@ -99,12 +98,8 @@ type RouteProbe = {
 
 const ROUTES: RouteProbe[] = [
   {
-    label: "/api/plaid/accounts",
-    relativePath: "../../app/api/plaid/accounts/route.ts",
-  },
-  {
-    label: "/api/plaid/transactions",
-    relativePath: "../../app/api/plaid/transactions/route.ts",
+    label: "/api/finance/summary",
+    relativePath: "../../app/api/finance/summary/route.ts",
   },
 ];
 
@@ -131,8 +126,9 @@ const EMPTY_CASE_MESSAGE =
  * when the scan reaches the end of the file without ever closing, which is the
  * opposite situation and does not cover this one.
  *
- * So a truncated body can pass while the route is wrong. Measured on this repo:
- * with the accounts route answering the null with the empty-case 404 and a `}`
+ * So a truncated body can pass while the route is wrong. Measured on this repo,
+ * on a data route since removed: with that route answering the null with the
+ * empty-case 404 and a `}`
  * placed in a comment above that return, all four assertions passed and tsc
  * stayed clean. It can also fail while the route is right — a `}` inside a
  * string ahead of the throw cuts the throw out of the body and the first

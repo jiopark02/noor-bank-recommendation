@@ -23,6 +23,12 @@ import { ChatUsageCheckError } from "../chatUsageLedger";
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 
+/** The body of the 502 a request gets when its model attempts all failed. */
+const MODEL_FAILED_BODY = {
+  error: "Chat is temporarily unavailable. Please try again.",
+  code: "CHAT_MODEL_FAILED",
+};
+
 const memory = {
   enabled: false,
   loadFails: false,
@@ -417,7 +423,8 @@ describe("one settle per admitted request, from the attempt tally", () => {
   it("upstream 401: one attempt at the hold", async () => {
     answers = [{ kind: "status", status: 401 }];
     const res = await post();
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual(MODEL_FAILED_BODY);
     expect(fetchCalls).toBe(1);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
@@ -428,14 +435,14 @@ describe("one settle per admitted request, from the attempt tally", () => {
     });
   });
 
-  it("upstream 429 on both models: the response is unchanged and both attempts are settled", async () => {
+  it("upstream 429 on both models: the model-failure response, and both attempts are settled", async () => {
     answers = [
       { kind: "status", status: 429 },
       { kind: "status", status: 429 },
     ];
     const res = await post();
-    expect(res.status).toBe(429);
-    expect(res.json).toEqual({ error: "Rate limit exceeded. Please try again later." });
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual(MODEL_FAILED_BODY);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
     expect(usage.settled[0]).toMatchObject({
@@ -448,8 +455,8 @@ describe("one settle per admitted request, from the attempt tally", () => {
   it("fetch throws on every model: both attempts at the hold", async () => {
     answers = [{ kind: "throw" }];
     const res = await post();
-    expect(res.status).toBe(500);
-    expect(res.json).toEqual({ error: "Failed to get response from AI" });
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual(MODEL_FAILED_BODY);
     expect(fetchCalls).toBe(2);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled).toHaveLength(1);
@@ -486,23 +493,23 @@ describe("one settle per admitted request, from the attempt tally", () => {
     expect(usage.settled[0]).toMatchObject({ attempts: 2 });
   });
 
-  it("a throw, then a non-2xx fallback: the fallback's failure is the response", async () => {
+  it("a throw, then a non-2xx fallback: the model-failure response, both attempts settled", async () => {
     answers = [{ kind: "throw" }, { kind: "status", status: 502 }];
     const res = await post();
     expect(res.status).toBe(502);
-    expect(res.json).toEqual({ error: "upstream 502" });
+    expect(res.json).toEqual(MODEL_FAILED_BODY);
     expect(fetchCalls).toBe(2);
     expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
   });
 
-  it("a non-2xx, then a fallback that times out: 500, both attempts settled", async () => {
+  it("a non-2xx, then a fallback that times out: the model-failure response, both attempts settled", async () => {
     answers = [
       { kind: "status", status: 500 },
       { kind: "throw", error: new DOMException("The operation was aborted.", "AbortError") },
     ];
     const res = await post();
-    expect(res.status).toBe(500);
-    expect(res.json).toEqual({ error: "Failed to get response from AI" });
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual(MODEL_FAILED_BODY);
     expect(fetchCalls).toBe(2);
     expect(usage.settled[0]).toMatchObject({ cost: 0.1, attempts: 2 });
   });
@@ -592,11 +599,11 @@ describe("the request time budget", () => {
     expect(usage.settled[0]).toMatchObject({ cost: 0.0123, attempts: 1 });
   });
 
-  it("a throw with no room left: no fallback, 500, one attempt", async () => {
+  it("a throw with no room left: no fallback, the model-failure response, one attempt", async () => {
     answers = [{ kind: "throw", advanceMs: 30001 }, { kind: "ok", cost: 0.01 }];
     const res = await postWithFakeClock();
-    expect(res.status).toBe(500);
-    expect(res.json).toEqual({ error: "Failed to get response from AI" });
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual(MODEL_FAILED_BODY);
     expect(fetchCalls).toBe(1);
     expect(res.settledAtResponse).toBe(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
@@ -610,11 +617,11 @@ describe("the request time budget", () => {
     expect(usage.settled[0]).toMatchObject({ cost: 0.06, attempts: 2 });
   });
 
-  it("a non-2xx with no room left: no fallback, the failure is the response", async () => {
+  it("a non-2xx with no room left: no fallback, the model-failure response", async () => {
     answers = [{ kind: "status", status: 500, advanceMs: 30001 }, { kind: "ok", cost: 0.01 }];
     const res = await postWithFakeClock();
-    expect(res.status).toBe(500);
-    expect(res.json).toEqual({ error: "upstream 500" });
+    expect(res.status).toBe(502);
+    expect(res.json).toEqual(MODEL_FAILED_BODY);
     expect(fetchCalls).toBe(1);
     expect(usage.settled[0]).toMatchObject({ cost: 0.05, attempts: 1 });
   });

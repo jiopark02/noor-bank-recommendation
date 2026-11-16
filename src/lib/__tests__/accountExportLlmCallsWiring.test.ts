@@ -1,18 +1,21 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
+import { EXPORT_SECTIONS } from "../accountExport";
 
 /**
  * GET /api/account/export includes the caller's llm_calls rows, and only
- * theirs.
+ * theirs. The section is declared in EXPORT_SECTIONS (src/lib/accountExport.ts);
+ * accountExport.test.ts executes the reading and filtering of every section.
  *
  * The select names its columns rather than using `*`, so a column added to
  * llm_calls later is not exported until someone decides it should be. The
  * list must be the migration's columns, in order, minus user_id; the payload's
- * top-level user_id already carries that value. Both sides are read from the
- * files themselves, so a typo in the export list (which PostgREST would answer
- * with a 400, failing every export) or a column added to the migration fails
- * here rather than only live.
+ * top-level user_id already carries that value. The export side is the
+ * section's declared list and the migration side is read from the file, so a
+ * typo in the export list (which PostgREST would answer with a 400, failing
+ * every export) or a column added to the migration fails here rather than
+ * only live.
  *
  * The same migration's closing DO block lists the CHECK constraints it expects
  * to find. That list must name exactly the constraints the CREATE TABLE
@@ -32,7 +35,6 @@ function read(relativePath: string): string {
   ).replace(/\r\n?/g, "\n");
 }
 
-const SOURCE = read("../../app/api/account/export/route.ts");
 const MIGRATION = read(
   "../../../supabase/migrations/20261009120000_create_llm_calls.sql"
 );
@@ -63,15 +65,11 @@ const MIGRATION_COLUMNS = (() => {
 })();
 
 describe("account export: llm_calls", () => {
-  const query = (() => {
-    const start = SOURCE.indexOf('.from("llm_calls")');
-    expect(start, "llm_calls query not found").toBeGreaterThan(-1);
-    const end = SOURCE.indexOf("\n  ]);", start);
-    return SOURCE.slice(start, end);
-  })();
+  const section = EXPORT_SECTIONS.find((s) => s.table === "llm_calls");
 
   it("filters by the verified caller's id", () => {
-    expect(query).toContain('.eq("user_id", authUserId)');
+    expect(section, "llm_calls section not found").toBeDefined();
+    expect(section?.filterColumn).toBe("user_id");
   });
 
   it("selects the migration's columns, in order, minus user_id", () => {
@@ -79,16 +77,14 @@ describe("account export: llm_calls", () => {
     expect(MIGRATION_COLUMNS).toContain("user_id");
     expect(MIGRATION_COLUMNS).toContain("session_id");
 
-    const select = /\.select\(\s*"([^"]*)"\s*\)/.exec(query);
-    expect(select, "llm_calls select list not found").not.toBeNull();
-    const exported = (select as RegExpExecArray)[1].split(", ");
+    expect(section?.columns).not.toBe("*");
+    const exported = (section?.columns ?? "").split(", ");
 
     expect(exported).toEqual(MIGRATION_COLUMNS.filter((c) => c !== "user_id"));
-    expect(query).not.toContain('select("*")');
   });
 
   it("adds the section to the payload", () => {
-    expect(SOURCE).toContain('["llm_calls", llmCallsRes]');
+    expect(section?.key).toBe("llm_calls");
   });
 });
 

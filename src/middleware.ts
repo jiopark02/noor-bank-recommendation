@@ -1,5 +1,6 @@
 import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_ONLY_COOKIE, applySessionPersistence } from "@/lib/sessionFlow";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
@@ -90,9 +91,16 @@ export async function middleware(request: NextRequest) {
             headers: request.headers,
           },
         });
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set({ name, value, ...options });
-        });
+        // A token refreshed here is written with the lifetime the user chose
+        // at sign-in: none while the session-only marker is present, so a
+        // refresh never turns a browser-session cookie back into a 400-day
+        // one. See SESSION_ONLY_COOKIE in sessionFlow.ts.
+        const persistent = !request.cookies.has(SESSION_ONLY_COOKIE);
+        applySessionPersistence(cookiesToSet, persistent).forEach(
+          ({ name, value, options }) => {
+            response.cookies.set({ name, value, ...options });
+          }
+        );
       },
     },
   });

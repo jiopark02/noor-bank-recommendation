@@ -1,13 +1,8 @@
-import type {
-  EngineAccount,
-  Freshness,
-  IsoDate,
-  IsoDateTime,
-  RecurringFrequency,
-} from "./types";
+import type { EngineAccount, Freshness, IsoDate } from "./types";
 
-// All date arithmetic is on UTC calendar days. The engine has no user time
-// zone, and says so through the "dates_utc" assumption code.
+// Calendar dates and zoned timestamps, checked without the platform's date
+// parser. Date arithmetic is on calendar days, carried as day numbers on the
+// UTC axis.
 
 const MS_PER_DAY = 86400000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -15,6 +10,9 @@ const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 // 1900-1999, and nothing the engine is given legitimately predates it.
 const MIN_YEAR = 2000;
 const MIN_TIMESTAMP_MS = Date.UTC(MIN_YEAR, 0, 1);
+// Dates after this year are rejected too. A four-digit year must survive one
+// annual cadence step and still format as four digits.
+const MAX_YEAR = 9998;
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function isLeapYear(year: number): boolean {
@@ -44,7 +42,7 @@ function parseYmd(
   const year = Number(m[1]);
   const month = Number(m[2]);
   const day = Number(m[3]);
-  if (year < MIN_YEAR) return null;
+  if (year < MIN_YEAR || year > MAX_YEAR) return null;
   if (month < 1 || month > 12) return null;
   if (day < 1 || day > daysInMonth(year, month)) return null;
   return { year, month, day };
@@ -107,13 +105,6 @@ export function parseTimestampMs(t: unknown): number | null {
   return ms < MIN_TIMESTAMP_MS ? null : ms;
 }
 
-/** The UTC calendar date of a zoned date-time, or null when it is not one. */
-export function utcDateOf(t: IsoDateTime): IsoDate | null {
-  const ms = parseTimestampMs(t);
-  if (ms === null) return null;
-  return fromDayNumber(Math.floor(ms / MS_PER_DAY));
-}
-
 /**
  * How fresh an account's balance is. `asOf` is only ever the institution's own
  * timestamp; the time our server received the balance stays in `fetchedAt` and
@@ -128,93 +119,4 @@ export function freshnessOf(a: EngineAccount): Freshness {
     fetchedAt,
     asOfSource: asOf === null ? "unknown" : "institution",
   };
-}
-
-/** Last day of the month containing `d`. Throws on an invalid date (caller bug). */
-export function endOfMonthUtc(d: IsoDate): IsoDate {
-  const p = parseYmd(d);
-  if (!p) throw new Error("endOfMonthUtc: invalid date");
-  return formatYmd(p.year, p.month, daysInMonth(p.year, p.month));
-}
-
-function addMonthsClamped(d: IsoDate, months: number): IsoDate | null {
-  const p = parseYmd(d);
-  if (!p) return null;
-  const zeroBased = p.month - 1 + months;
-  const year = p.year + Math.floor(zeroBased / 12);
-  const month = (((zeroBased % 12) + 12) % 12) + 1;
-  // Clamp to month end so Jan 31 + 1 month is Feb 28/29, not Mar 3.
-  const day = Math.min(p.day, daysInMonth(year, month));
-  return formatYmd(year, month, day);
-}
-
-/**
- * `d` advanced by `steps` cadence intervals. Month-based cadences are computed
- * from `d` in one jump rather than by repeated single steps, so a 31st anchor
- * does not drift to the 28th after February. SEMI_MONTHLY is approximated as
- * 15 days. UNKNOWN has no interval and returns null.
- */
-export function addCadence(
-  d: IsoDate,
-  frequency: RecurringFrequency,
-  steps: number = 1
-): IsoDate | null {
-  const start = dayNumber(d);
-  if (start === null) return null;
-  switch (frequency) {
-    case "WEEKLY":
-      return fromDayNumber(start + 7 * steps);
-    case "BIWEEKLY":
-      return fromDayNumber(start + 14 * steps);
-    case "SEMI_MONTHLY":
-      return fromDayNumber(start + 15 * steps);
-    case "MONTHLY":
-      return addMonthsClamped(d, steps);
-    case "ANNUALLY":
-      return addMonthsClamped(d, 12 * steps);
-    default:
-      return null;
-  }
-}
-
-/**
- * The smallest `k >= 0` for which `addCadence(d, frequency, k)` falls on or
- * after `targetDay` (a UTC day number), computed directly instead of by
- * stepping from `d`, so a stale anchor costs nothing. null for an invalid date
- * or an UNKNOWN cadence.
- */
-export function firstCadenceStepOnOrAfter(
-  d: IsoDate,
-  frequency: RecurringFrequency,
-  targetDay: number
-): number | null {
-  const start = dayNumber(d);
-  if (start === null) return null;
-  switch (frequency) {
-    case "WEEKLY":
-      return Math.max(0, Math.ceil((targetDay - start) / 7));
-    case "BIWEEKLY":
-      return Math.max(0, Math.ceil((targetDay - start) / 14));
-    case "SEMI_MONTHLY":
-      return Math.max(0, Math.ceil((targetDay - start) / 15));
-    case "MONTHLY":
-    case "ANNUALLY": {
-      if (start >= targetDay) return 0;
-      const from = parseYmd(d) as { year: number; month: number };
-      const target = parseYmd(fromDayNumber(targetDay)) as { year: number; month: number };
-      const months = (target.year - from.year) * 12 + (target.month - from.month);
-      const perStep = frequency === "MONTHLY" ? 1 : 12;
-      // One step short of the target's month lands before targetDay, so at
-      // most two forward steps remain.
-      let k = Math.max(0, Math.floor(months / perStep) - 1);
-      for (;;) {
-        const day = dayNumber(addCadence(d, frequency, k) as IsoDate);
-        if (day === null) return null;
-        if (day >= targetDay) return k;
-        k++;
-      }
-    }
-    default:
-      return null;
-  }
 }

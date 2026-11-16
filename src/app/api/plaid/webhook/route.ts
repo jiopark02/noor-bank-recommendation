@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isPlaidConfigured, PLAID_ENVIRONMENT } from "@/lib/plaid";
 import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getPlaidConnectionsByItemIdAcrossUsers } from "@/lib/plaidApiUtils";
+import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import {
   liveRevocationDeps,
   revokeAndDeleteConnection,
@@ -12,6 +13,10 @@ import {
 } from "@/lib/plaidWebhookVerification";
 import { handlePlaidWebhook } from "@/lib/plaidWebhook";
 import { receivePlaidWebhook } from "@/lib/plaidWebhookReceive";
+
+// Literal, because the platform reads it statically. Must equal
+// PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
+export const maxDuration = 300;
 
 /**
  * POST /api/plaid/webhook — Plaid's webhook receiver.
@@ -39,6 +44,7 @@ export async function POST(request: NextRequest) {
         handlePlaidWebhook(payload, {
           plaidEnvironment: PLAID_ENVIRONMENT,
           isAdminConfigured: isSupabaseAdminConfigured,
+          isCryptoConfigured: isPlaidTokenCryptoConfigured,
           lookupByItemId: getPlaidConnectionsByItemIdAcrossUsers,
           revoke: (userId, connection) =>
             revokeAndDeleteConnection(userId, connection, liveRevocationDeps()),

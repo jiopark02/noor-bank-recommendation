@@ -57,6 +57,10 @@ const FILES = {
   syncProfile: "../../app/api/auth/sync-profile/route.ts",
   email: "../email.ts",
   emailSignup: "../emailSignup.ts",
+  resendRoute: "../../app/api/auth/resend-confirmation/route.ts",
+  resendConfirmation: "../resendConfirmation.ts",
+  emailConfirmation: "../emailConfirmation.ts",
+  confirmationSendLimit: "../confirmationSendLimit.ts",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -242,11 +246,15 @@ describe("extractor", () => {
  */
 const CONSOLE_CALL_COUNTS: Record<keyof typeof FILES, number> = {
   cronRuns: 3,
-  survey: 4,
+  survey: 7,
   waitlist: 3,
   syncProfile: 2,
   email: 4,
   emailSignup: 1,
+  resendRoute: 0,
+  resendConfirmation: 1,
+  emailConfirmation: 0,
+  confirmationSendLimit: 0,
 };
 
 describe("(c) each probed file has exactly its pinned number of console calls", () => {
@@ -299,6 +307,11 @@ const ANCHORS: Anchor[] = [
     file: "survey",
     leading: "\"Profile name lookup error (authenticated survey):\"",
     errorIdentifier: "lookupError",
+  },
+  {
+    file: "survey",
+    leading: "\"Survey lookup error (authenticated survey):\"",
+    errorIdentifier: "surveyLookupError",
   },
   { file: "syncProfile", leading: "\"Profile sync error:\"", errorIdentifier: "error" },
   { file: "waitlist", leading: "'Waitlist insert error:'", errorIdentifier: "error" },
@@ -405,6 +418,10 @@ const ALLOWED_BY_FILE: Record<keyof typeof FILES, string[]> = {
   waitlist: [],
   syncProfile: [],
   emailSignup: ["line"],
+  resendRoute: [],
+  resendConfirmation: ["line"],
+  emailConfirmation: [],
+  confirmationSendLimit: [],
 };
 
 const CALLS_BY_FILE: Array<[string, keyof typeof FILES, ConsoleCall]> = [];
@@ -523,8 +540,25 @@ const TOUCHED_FILES = [
   "../defaultFirstName.ts",
   "../../app/login/page.tsx",
   "./loginPageWiring.test.ts",
-  "./welcomeEmailRender.test.ts",
   "./waitlistRoute.test.ts",
+  FILES.resendRoute,
+  FILES.resendConfirmation,
+  FILES.emailConfirmation,
+  FILES.confirmationSendLimit,
+  "../escapeHtml.ts",
+  "../authErrorCopy.ts",
+  "../sessionFlow.ts",
+  "../../app/auth/callback/page.tsx",
+  "../../app/forgot-password/page.tsx",
+  "../../../supabase/migrations/20261104120000_email_confirmation_sends.sql",
+  "./emailSignup.test.ts",
+  "./resendConfirmation.test.ts",
+  "./emailConfirmation.test.ts",
+  "./confirmationSendLimit.test.ts",
+  "./emailConfirmationSendsMigrationProbe.test.ts",
+  "./authErrorCopy.test.ts",
+  "./sessionFlowConfirm.test.ts",
+  "./forgotPasswordPageWiring.test.ts",
 ];
 
 describe("(e) touched files contain no literal control, bidi or zero-width character", () => {

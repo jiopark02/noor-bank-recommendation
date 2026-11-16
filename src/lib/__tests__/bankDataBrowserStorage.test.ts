@@ -82,11 +82,7 @@ function storageCalls(
 }
 
 // Keys the dashboard may read or write. None of them hold bank data.
-const DASHBOARD_ALLOWED_READS = [
-  '"noor_user_id"',
-  '"noor_user_profile"',
-  "STORAGE_KEY_BUDGET",
-];
+const DASHBOARD_ALLOWED_READS = ['"noor_user_id"', '"noor_user_profile"'];
 const DASHBOARD_ALLOWED_WRITES = ['"noor_quick_prompt"'];
 
 describe("dashboard and connect card keep no bank keys in browser storage; Plaid keys cleared on mount", () => {
@@ -134,7 +130,7 @@ describe("dashboard and connect card keep no bank keys in browser storage; Plaid
 
     const clearAt = effect.indexOf("clearPlaidLocalState()");
     const redirectAt = effect.indexOf('router.replace("/waitlist")');
-    const sessionAt = effect.indexOf("await getSessionSafe()");
+    const sessionAt = effect.indexOf("await retryUntilAnswered(");
 
     expect(redirectAt).toBeGreaterThan(-1);
     expect(sessionAt).toBeGreaterThan(-1);
@@ -151,12 +147,12 @@ describe("dashboard and connect card keep no bank keys in browser storage; Plaid
 
   it("ClientLayout mount effect clears the Plaid keys", () => {
     const start = CLIENT_LAYOUT.indexOf("useEffect(() => {");
-    const end = CLIENT_LAYOUT.indexOf("const shouldShowChat", start);
+    const end = CLIENT_LAYOUT.indexOf("}, []);", start);
     if (start < 0 || end < 0) {
       throw new Error(
         "ClientLayout.tsx: could not bound the mount effect between the " +
-          "first `useEffect(() => {` and `const shouldShowChat`; re-point " +
-          "these anchors."
+          "first `useEffect(() => {` and the first `}, []);` after it; " +
+          "re-point these anchors."
       );
     }
     expect(CLIENT_LAYOUT.slice(start, end)).toContain("clearPlaidLocalState()");

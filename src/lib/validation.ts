@@ -18,13 +18,33 @@ export interface PasswordValidation {
   };
 }
 
+/**
+ * The symbols Supabase Auth accepts for its "symbols" password requirement,
+ * exactly: the set documented at
+ * https://supabase.com/docs/guides/auth/password-security, which is what
+ * supabase/auth's PasswordRequiredCharacters.Decode makes of the Management
+ * API's symbols preset (its "\\:" keeps one backslash and the colon). 32
+ * characters; passwordValidation.test.ts pins every char code.
+ *
+ * Matched as a plain list of characters, not as a regex class, so no
+ * character here needs escaping beyond the string literal itself.
+ */
+export const PASSWORD_SYMBOLS = "!@#$%^&*()_+-=[]{};'\\:\"|<>?,./`~";
+
+/** True when the password contains at least one of PASSWORD_SYMBOLS. */
+function containsPasswordSymbol(password: string): boolean {
+  return PASSWORD_SYMBOLS.split("").some(
+    (symbol) => password.indexOf(symbol) !== -1
+  );
+}
+
 export function validatePassword(password: string): PasswordValidation {
   const checks = {
     minLength: password.length >= 8,
     hasUppercase: /[A-Z]/.test(password),
     hasLowercase: /[a-z]/.test(password),
     hasNumber: /[0-9]/.test(password),
-    hasSpecial: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+    hasSpecial: containsPasswordSymbol(password),
   };
 
   const errors: string[] = [];
@@ -32,7 +52,7 @@ export function validatePassword(password: string): PasswordValidation {
   if (!checks.hasUppercase) errors.push('Password must contain an uppercase letter');
   if (!checks.hasLowercase) errors.push('Password must contain a lowercase letter');
   if (!checks.hasNumber) errors.push('Password must contain a number');
-  if (!checks.hasSpecial) errors.push('Password must contain a special character (!@#$%^&*)');
+  if (!checks.hasSpecial) errors.push('Password must contain a symbol: ' + PASSWORD_SYMBOLS);
 
   const passedChecks = Object.values(checks).filter(Boolean).length;
   const score = Math.round((passedChecks / 5) * 100);
@@ -258,6 +278,33 @@ export function clearLocalAuthState(): void {
   localStorage.removeItem('noor_plaid_connections');
   localStorage.removeItem('noor_plaid_accounts');
   localStorage.removeItem('noor_plaid_transactions');
+}
+
+/**
+ * Replaces the local identity cache with the session's user. Used when the
+ * cached noor_user_id names a different user than the live session (another
+ * account was used on this device and its state was left behind). Everything
+ * clearLocalAuthState removes goes, then noor_user_id is written with the
+ * session's id. The cached profile is not rewritten here; the page falls back
+ * to its defaults until the next sign-in fills it.
+ */
+export function replaceLocalIdentity(sessionUserId: string): void {
+  clearLocalAuthState();
+  localStorage.setItem('noor_user_id', sessionUserId);
+}
+
+/**
+ * The auth-event side of the logout boundary above. ClientLayout subscribes
+ * this to supabase.auth.onAuthStateChange on every page, so a sign-out that
+ * did not go through an in-page logout handler (another tab, a refresh that
+ * the server refused, a sign-out the library performed itself) still clears
+ * the local auth state. Only SIGNED_OUT clears; every other event leaves
+ * local state alone. Returns whether it cleared, for the test suite.
+ */
+export function handleAuthEventForLocalState(event: string): boolean {
+  if (event !== 'SIGNED_OUT') return false;
+  clearLocalAuthState();
+  return true;
 }
 
 // Drops the Plaid keys from the browser. The app no longer writes them — bank
