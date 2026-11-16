@@ -16,7 +16,7 @@ import { isDefiniteDbRejection } from "../plaidExchange";
  *   - the anchors dropped from the pattern                  -> "replaces"
  *   - a well-formed code rewritten or replaced              -> "returns"
  *   - a non-string code reported as "invalid" (or echoed)   -> "null"
- *   - 23505 no longer read as a duplicate                   -> "decisions"
+ *   - 23505 no longer read as a unique violation            -> "decisions"
  */
 
 const SENTINEL = "SENTINEL_never_in_a_log_91c7ab";
@@ -82,10 +82,10 @@ describe("postgrestErrorCode — only a symbolic code is echoed", () => {
 });
 
 describe("postgrestErrorCode — the decisions made on its result", () => {
-  it("still reads a well-formed 23505 as a duplicate, and other SQLSTATEs as before", () => {
+  it("still reads a well-formed 23505 as a unique violation, and other SQLSTATEs as before", () => {
     expect(storeResultFromInsert({ code: "23505" })).toEqual({
       ok: false,
-      kind: "duplicate_item",
+      kind: "unique_violation",
       dbErrorCode: "23505",
     });
     expect(storeResultFromInsert({ code: "23514" })).toEqual({

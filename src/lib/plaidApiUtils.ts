@@ -228,7 +228,8 @@ export async function getPlaidConnectionsByItemIdAcrossUsers(
  *
  * Used for app-level duplicate detection (same user re-linking a bank they
  * already have). Only rows with a matching non-null institution_id are found,
- * so rows stored with a NULL institution_id never take part.
+ * so a row whose institution_id is NULL never takes part; the exchange path
+ * does not store such rows.
  *
  * Duplicate detection in exchange-token runs it twice, with the same predicate:
  *  - BEFORE the exchange, with the institution_id from the client's Link
@@ -561,10 +562,16 @@ export async function getRevocableConnectionByItemId(
  * It never throws, and every failure is reported by KIND, because the caller
  * has a freshly minted Plaid Item in hand and has to decide whether to revoke
  * it: an encryption failure and an ordinary database failure leave nothing
- * stored and the Item must be revoked, while `duplicate_item` means a row for
- * this (user_id, item_id) already exists and the Item must NOT be revoked. A
- * throw would bypass that decision entirely. There is no branch here that
+ * stored and the Item must be revoked, while `unique_violation` may mean a row
+ * for this (user_id, item_id) already exists, in which case the Item must NOT
+ * be revoked; the caller reads that row before deciding. A throw would bypass
+ * that decision entirely. There is no branch here that
  * stores a plaintext token.
+ *
+ * `institutionId` is Plaid's own id for the Item and is never null here: the
+ * exchange path refuses an Item Plaid reports no institution id for instead of
+ * storing it, so every row this function writes can take part in duplicate
+ * detection.
  *
  * The insert asks for no representation: nothing reads the stored row back,
  * and a returned row would carry the ciphertext.
@@ -578,7 +585,7 @@ export async function storePlaidConnection(
   accessToken: string,
   itemId: string,
   institutionName: string,
-  institutionId: string | null
+  institutionId: string
 ): Promise<PlaidConnectionStore> {
   let encryptedAccessToken: string;
   try {
@@ -620,17 +627,19 @@ export async function storePlaidConnection(
 /**
  * What one plaid_connections insert did.
  *
- * `duplicate_item` is PostgreSQL's unique_violation (23505). The live table's
- * only unique constraint besides its primary key is (user_id, item_id), so this
- * almost always means the row for this Item already exists. The caller still
- * re-reads to confirm before reporting success: a primary-key collision would
- * arrive with the same code.
+ * `unique_violation` is PostgreSQL's SQLSTATE 23505, and the code does not
+ * say which constraint was violated. It can be the row for this
+ * (user_id, item_id) already existing, or, in a database that has the unique
+ * index on (user_id, institution_id) over active rows, another Item's active
+ * row at the same institution; a primary-key collision would arrive with the
+ * same code. The caller reads the user's row for the Item to tell them apart
+ * before it reports success or revokes anything.
  */
 export type PlaidConnectionStore =
   | { ok: true }
   | {
       ok: false;
-      kind: "crypto" | "duplicate_item" | "db";
+      kind: "crypto" | "unique_violation" | "db";
       dbErrorCode: string | null;
     };
 
@@ -642,7 +651,7 @@ export function storeResultFromInsert(error: unknown): PlaidConnectionStore {
   const dbErrorCode = postgrestErrorCode(error);
   return {
     ok: false,
-    kind: dbErrorCode === "23505" ? "duplicate_item" : "db",
+    kind: dbErrorCode === "23505" ? "unique_violation" : "db",
     dbErrorCode,
   };
 }
