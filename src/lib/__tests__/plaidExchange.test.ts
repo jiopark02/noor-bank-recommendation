@@ -521,9 +521,10 @@ describe("an Item Plaid reports no institution id for is refused, not stored", (
     expect(deps.findActiveByInstitution).toHaveBeenCalledWith(USER, "ins_client");
   });
 
-  it("revokes the new Item once and answers 502 with the sentence a failed lookup uses", async () => {
-    // MUTATION: answering without the compensating revocation, or adding a
-    // sentence of its own.
+  it("revokes the new Item once and answers 502 with a failed lookup's sentence followed by where to turn", async () => {
+    // MUTATION: answering without the compensating revocation, answering with
+    // the failed lookup's sentence alone, or adding the contact sentence to
+    // the failed lookup's answer too.
     const deps = passingDeps();
     deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
     const out = response(await exchangeForUser(USER, INPUT, deps));
@@ -535,8 +536,12 @@ describe("an Item Plaid reports no institution id for is refused, not stored", (
     const lookupFailed = passingDeps();
     lookupFailed.itemGet.mockRejectedValue(new Error("boom"));
     const failed = response(await exchangeForUser(USER, INPUT, lookupFailed));
-    expect(typeof out.body.error).toBe("string");
-    expect(out.body.error).toBe(failed.body.error);
+    const contact = " If this keeps happening, please contact support.";
+    expect(typeof failed.body.error).toBe("string");
+    const lookupSentence = String(failed.body.error);
+    expect(lookupSentence.length).toBeGreaterThan(0);
+    expect(lookupSentence).not.toContain("contact");
+    expect(out.body.error).toBe(lookupSentence + contact);
   });
 
   it("logs the missing id as Plaid's, apart from a failed lookup", async () => {

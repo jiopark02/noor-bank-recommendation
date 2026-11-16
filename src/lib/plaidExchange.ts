@@ -201,6 +201,14 @@ export type ExchangeOutcome =
 
 const RETRY_MESSAGE =
   "We couldn't add your bank right now. Please try again in a moment.";
+/**
+ * For the one refusal a retry may not fix: Plaid answered, but without an
+ * institution id, and it may answer the same way again. The sentence after
+ * RETRY_MESSAGE is the one the disconnect and account-deletion answers already
+ * end with.
+ */
+const INSTITUTION_ID_MISSING_MESSAGE =
+  `${RETRY_MESSAGE} If this keeps happening, please contact support.`;
 const SAVE_FAILED_MESSAGE = "Failed to save connection. Please try again.";
 const DUPLICATE_MESSAGE = "This bank is already connected to your account.";
 const UNKNOWN_INSTITUTION = "Unknown Institution";
@@ -503,11 +511,12 @@ export async function exchangeForUser(
   // not stored, and the client's id is never stored in its place. The reason
   // and `source=plaid` keep this apart from `refused=item_get`, where the
   // lookup itself failed: here the value was missing upstream. The line
-  // carries no institution id and no token.
+  // carries no institution id and no token. The answer adds where to turn
+  // when it keeps happening, which the failed lookup's answer does not.
   if (serverInstitutionId === null) {
     return refuse(
       "institution_id_missing source=plaid",
-      failure(502, "INSTITUTION_ID_MISSING", RETRY_MESSAGE),
+      failure(502, "INSTITUTION_ID_MISSING", INSTITUTION_ID_MISSING_MESSAGE),
       "error"
     );
   }
