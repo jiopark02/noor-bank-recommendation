@@ -116,7 +116,7 @@ export async function sendWaitlistConfirmationEmail(
                 Thanks for signing up. We're rolling out access carefully so every new user gets the best experience possible.
               </p>
               <p style="margin: 0 0 30px; font-size: 15px; line-height: 1.6; color: #666666;">
-                When it's your turn, we'll send an invite so you can start chatting with noor — your AI money coach. Set savings goals, get plain-language guidance on your spending, and earn rewards when you hit your targets. No lectures, no judgment.
+                When it's your turn, we'll send an invite so you can start chatting with noor — your AI money coach. Set savings goals and get plain-language guidance on your spending. No lectures, no judgment.
               </p>
               <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #999999;">
                 No spam — we'll only reach out when it matters.

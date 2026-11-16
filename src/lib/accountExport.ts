@@ -44,18 +44,27 @@ export type ExportSection = {
 };
 
 /**
- * Sections whose column list is explicit leave user_id out: the file's
- * top-level user_id already carries it, and a column added to the table later
- * is not exported until someone decides it should be.
+ * Sections whose column list is explicit leave their filter column out (user_id,
+ * or owner_user_id): it always equals the file's top-level user_id, and a
+ * column added to the table later is not exported until someone decides it
+ * should be. The users table has no user_id; its id is the user's own id, and
+ * its list carries it.
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
-  { key: "users", table: "users", columns: "*", filterColumn: "id", orderColumn: "id", orderKeyType: "uuid" },
+  {
+    key: "users",
+    table: "users",
+    columns: "id, email, first_name, last_name, raw_user_meta_data, created_at, updated_at, status",
+    filterColumn: "id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
   { key: "survey_responses", table: "survey_responses", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   {
     key: "chat_sessions",
     table: "chat_sessions",
     columns:
-      "id, title, started_at, ended_at, last_message_at, message_count, summarized, facts_extracted, created_at, updated_at",
+      "id, title, started_at, ended_at, last_message_at, message_count, summarized, facts_extracted, summary_failures, summary_next_attempt_at, summary_outcome, summary_given_up_reason, summary_given_up_at, facts_failures, facts_next_attempt_at, facts_outcome, facts_given_up_reason, facts_given_up_at, created_at, updated_at",
     filterColumn: "user_id",
     orderColumn: "id",
     orderKeyType: "uuid",
@@ -89,6 +98,46 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     columns: "last_sent_at, window_start, window_count",
     filterColumn: "user_id",
     orderColumn: "user_id",
+    orderKeyType: "uuid",
+  },
+  // One row per user, keyed by user_id, which the output leaves out.
+  {
+    key: "plaid_link_token_issues",
+    table: "plaid_link_token_issues",
+    columns: "window_start, window_count",
+    filterColumn: "user_id",
+    orderColumn: "user_id",
+    orderKeyType: "uuid",
+  },
+  // The user's memberships, read by user_id. households itself is not
+  // exported: it holds no user data, only its id (household_id here) and a
+  // creation time.
+  {
+    key: "household_members",
+    table: "household_members",
+    columns: "id, household_id, role, status, joined_at, left_at",
+    filterColumn: "user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // Grants the user made, read by owner_user_id.
+  {
+    key: "share_grants",
+    table: "share_grants",
+    columns: "id, household_id, resource_type, resource_id, scope, granted_at, revoked_at",
+    filterColumn: "owner_user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // Personal goals only, read by owner_user_id. A joint goal belongs to a
+  // household and has no owner_user_id, so it is not read here.
+  {
+    key: "goals",
+    table: "goals",
+    columns:
+      "id, kind, household_id, created_by, target_amount_cents, target_date, monthly_amount_cents, status, created_at, updated_at",
+    filterColumn: "owner_user_id",
+    orderColumn: "id",
     orderKeyType: "uuid",
   },
 ];

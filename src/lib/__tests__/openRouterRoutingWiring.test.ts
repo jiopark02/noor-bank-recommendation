@@ -41,24 +41,62 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-const CALL_SITES: Array<[string, string]> = [
-  ["chat", "../../app/api/chat/route.ts"],
-  ["summarize cron", "../../app/api/cron/summarize/route.ts"],
-  ["extract-facts cron", "../../app/api/cron/extract-facts/route.ts"],
+// The third column says whether the call site serializes the body inside its
+// fetch options. The chat route builds it before fetch instead, so that a body
+// it cannot build is told apart from a network failure; see below.
+const CALL_SITES: Array<[string, string, boolean]> = [
+  ["chat", "../../app/api/chat/route.ts", false],
+  ["summarize cron", "../../app/api/cron/summarize/route.ts", true],
+  ["extract-facts cron", "../../app/api/cron/extract-facts/route.ts", true],
 ];
 
-describe.each(CALL_SITES)("%s route", (_label, path) => {
+describe.each(CALL_SITES)("%s route", (_label, path, inFetchOptions) => {
   const source = read(path);
 
   it("builds its request body with the shared builder, exactly once", () => {
     expect(occurrences(source, "buildOpenRouterRequestBody(")).toBe(1);
-    expect(source).toContain("body: JSON.stringify(\n");
+    // What is serialized is the builder's result itself, nothing wrapped
+    // around it or added to it.
+    expect(source).toMatch(/JSON\.stringify\(\n\s*buildOpenRouterRequestBody\(/);
+    if (inFetchOptions) {
+      expect(source).toContain("body: JSON.stringify(\n");
+    }
   });
 
   it("imports the URL and key resolver from the shared module", () => {
     expect(source).toContain('from "@/lib/openRouterRequest"');
     expect(source).not.toContain("function resolveOpenRouterApiKey(");
     expect(source).not.toContain("const OPENROUTER_URL =");
+  });
+});
+
+describe("chat route: the request body built before fetch", () => {
+  const source = read("../../app/api/chat/route.ts");
+  const uses = (): number[] => {
+    const at: number[] = [];
+    const pattern = /\brequestBody\b/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(source)) !== null) at.push(match.index);
+    return at;
+  };
+
+  it("is assigned once, from the serialized builder result", () => {
+    expect(occurrences(source, "requestBody = ")).toBe(1);
+    expect(source).toContain(
+      "requestBody = JSON.stringify(\n        buildOpenRouterRequestBody("
+    );
+  });
+
+  it("is handed to fetch as it is, with nothing rewriting it in between", () => {
+    expect(occurrences(source, "body: requestBody,")).toBe(1);
+    const declaredAt = source.indexOf("let requestBody: string;");
+    const assignedAt = source.indexOf("requestBody = JSON.stringify(");
+    const sentAt = source.indexOf("body: requestBody,");
+    expect(declaredAt).toBeGreaterThan(-1);
+    expect(assignedAt).toBeGreaterThan(declaredAt);
+    expect(sentAt).toBeGreaterThan(assignedAt);
+    // The declaration, the assignment and the use in fetch, and nothing else.
+    expect(uses()).toEqual([declaredAt + 4, assignedAt, sentAt + 6]);
   });
 });
 

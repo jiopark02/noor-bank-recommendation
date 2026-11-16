@@ -1,8 +1,19 @@
 "use client";
 
-import { createBrowserClient } from "@supabase/ssr";
+import {
+  createBrowserClient,
+  parseCookieHeader,
+  serializeCookieHeader,
+} from "@supabase/ssr";
 import type { LockFunc, Session } from "@supabase/supabase-js";
 import type { FetchStringHeaders } from "@/lib/supabaseAuthHeaders";
+import {
+  SESSION_ONLY_COOKIE,
+  applySessionPersistence,
+  defaultSupabaseStorageKey,
+  isSupabaseAuthCookieName,
+  type CookieToSet,
+} from "@/lib/sessionFlow";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -20,12 +31,84 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 // (handled by getSessionSafe) rather than a deadlock.
 const noOpLock: LockFunc = async (_name, _acquireTimeout, fn) => fn();
 
+// Cookie methods for the browser client. They read and write document.cookie
+// exactly as @supabase/ssr's own default does, with one difference: while the
+// SESSION_ONLY_COOKIE marker is present ("Keep me signed in" unchecked), the
+// auth cookies are written without a lifetime, so they end when the browser
+// closes. The library cannot do this itself: it overrides any maxAge given as
+// cookieOptions with its 400-day default. Outside a browser (prerender) there
+// is no cookie jar: reads answer empty and writes do nothing.
+function readDocumentCookies(): { name: string; value: string }[] {
+  if (typeof document === "undefined") return [];
+  return parseCookieHeader(document.cookie);
+}
+
+function hasSessionOnlyMarker(): boolean {
+  return readDocumentCookies().some(({ name }) => name === SESSION_ONLY_COOKIE);
+}
+
+function writeDocumentCookies(cookies: CookieToSet[]): void {
+  if (typeof document === "undefined") return;
+  const persistent = !hasSessionOnlyMarker();
+  applySessionPersistence(cookies, persistent).forEach(
+    ({ name, value, options }) => {
+      document.cookie = serializeCookieHeader(name, value, options);
+    }
+  );
+}
+
 export const supabase =
   supabaseUrl && supabaseAnonKey
     ? createBrowserClient(supabaseUrl, supabaseAnonKey, {
         auth: { lock: noOpLock },
+        cookies: {
+          getAll: readDocumentCookies,
+          setAll: writeDocumentCookies,
+        },
       })
     : null;
+
+/**
+ * Records the "Keep me signed in" choice for the sign-in that follows. Must
+ * run before the sign-in call, because the session cookie is written as part
+ * of it. Unchecked sets the marker with no lifetime; checked removes it. The
+ * choice applies to the auth cookies written from then on, including token
+ * refreshes in the middleware, until the next sign-in sets it again.
+ */
+export function setSessionPersistence(keepSignedIn: boolean): void {
+  if (typeof document === "undefined") return;
+  document.cookie = keepSignedIn
+    ? serializeCookieHeader(SESSION_ONLY_COOKIE, "", {
+        path: "/",
+        sameSite: "lax",
+        maxAge: 0,
+      })
+    : serializeCookieHeader(SESSION_ONLY_COOKIE, "1", {
+        path: "/",
+        sameSite: "lax",
+      });
+}
+
+/**
+ * Deletes the Supabase auth cookies on this device directly. Used by sign-out
+ * when the library kept its session because the server call failed or threw;
+ * see runSignOut in sessionFlow.ts. The refresh token stays valid on the
+ * server.
+ */
+export function removeSupabaseAuthCookies(): void {
+  if (typeof document === "undefined" || !supabaseUrl) return;
+  const storageKey = defaultSupabaseStorageKey(supabaseUrl);
+  if (!storageKey) return;
+  readDocumentCookies()
+    .filter(({ name }) => isSupabaseAuthCookieName(name, storageKey))
+    .forEach(({ name }) => {
+      document.cookie = serializeCookieHeader(name, "", {
+        path: "/",
+        sameSite: "lax",
+        maxAge: 0,
+      });
+    });
+}
 
 // Defense-in-depth safety net: even with the lock removed, any auth read that
 // stalls must never freeze the UI. Races getSession() against a timeout and
@@ -76,6 +159,8 @@ export type SessionReadLabel =
   | "survey-submit"
   | "survey-submit-retry"
   | "dashboard-mount"
+  | "money-mount"
+  | "chat-mount"
   | "login-mount"
   | "auth-callback";
 

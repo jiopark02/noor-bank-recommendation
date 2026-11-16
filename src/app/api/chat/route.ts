@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateSystemPrompt, UserContext } from "@/lib/noorAIPrompt";
-import {
-  createAdminClient,
-  isSupabaseAdminConfigured,
-  isSupabaseConfigured,
-} from "@/lib/supabase";
+import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { asPlainObject } from "@/lib/requestJson";
 import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
@@ -16,26 +12,27 @@ import {
 } from "@/lib/chatInputLimits";
 import { buildModelConversation } from "@/lib/chatServerHistory";
 import {
-  buildJsonAuthorizedHeaders,
-  extrasFromAuthorizationValue,
-} from "@/lib/supabaseAuthHeaders";
-import {
   isAiMemoryEnabled,
   getOrCreateActiveSession,
   getActiveSession,
   buildMemoryContext,
   formatMemoryForPrompt,
   saveMessages,
+  findSavedTurn,
+  isSessionClosedError,
   getSessionMessages,
   type DbChatMessage,
   type ChatSession,
 } from "@/lib/aiMemory";
 import {
   resolvePlaidStateMode,
+  resolvePlaidChatDepth,
   buildPlaidCapabilityBlock,
   maskPlaidBlockForLog,
+  plaidBlockCarriesBalances,
 } from "@/lib/plaidChatContext";
 import { getPlaidChatState } from "@/lib/plaidChatState";
+import { isPlaidTokenCryptoError } from "@/lib/plaidTokenCrypto";
 import {
   evaluatePlaidEgressDecision,
   logPlaidEgressDecision,
@@ -86,13 +83,22 @@ import {
 } from "@/lib/openRouterRequest";
 import {
   CHAT_LLM_TIMEOUT_MS,
+  CHAT_SAVE_DEADLINE_MS,
+  CHAT_SAVE_READBACK_RESERVE_MS,
+  ChatDeadlineError,
   chatHasBudgetForAnotherAttempt,
+  chatPreLoopDeadlineMs,
   logLlmTimeout,
+  runUntilDeadline,
 } from "@/lib/llmTimeouts";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+// The bank read goes through the shared bank adapter, whose cash-flow engine
+// package uses node:crypto: this handler runs on the Node.js runtime, never
+// the edge runtime.
+export const runtime = "nodejs";
 
 const DEFAULT_SIMPLE_MODEL = "google/gemini-2.5-flash-lite";
 const DEFAULT_COMPLEX_MODEL = "anthropic/claude-sonnet-4.6";
@@ -123,10 +129,21 @@ function mapSupabaseContextToUserContext(data: {
   };
 }
 
+/** True when the profile read below would query the database. */
+function isProfileReadEnabled(): boolean {
+  return isAiSupabaseReadEnabled() && isSupabaseAdminConfigured();
+}
+
+/**
+ * The signal cancels both queries. A cancelled query answers like a failed
+ * one, with no data, and this function then returns a profile with nothing
+ * in it; a caller that cancels must not use the result.
+ */
 async function loadReadOnlyUserContextFromSupabase(
-  userId: string
+  userId: string,
+  signal: AbortSignal
 ): Promise<Partial<UserContext>> {
-  if (!isAiSupabaseReadEnabled() || !isSupabaseAdminConfigured()) {
+  if (!isProfileReadEnabled()) {
     return {};
   }
 
@@ -137,6 +154,7 @@ async function loadReadOnlyUserContextFromSupabase(
       .from("users")
       .select("first_name,last_name")
       .eq("id", userId)
+      .abortSignal(signal)
       .maybeSingle(),
     supabaseAdmin
       .from("survey_responses")
@@ -146,6 +164,7 @@ async function loadReadOnlyUserContextFromSupabase(
       .eq("user_id", userId)
       .order("updated_at", { ascending: false })
       .limit(1)
+      .abortSignal(signal)
       .maybeSingle(),
   ]);
 
@@ -199,14 +218,6 @@ function parseChatMessages(raw: unknown): ChatMessage[] | null {
     out.push({ role: o.role, content: o.content });
   }
   return out.length > 0 ? out : null;
-}
-
-interface PlaidAccountSummary {
-  type?: string;
-  name?: string;
-  current_balance?: number;
-  available_balance?: number | null;
-  iso_currency_code?: string;
 }
 
 function getLastUserMessage(messages: ChatMessage[]): string {
@@ -298,70 +309,25 @@ function isFinancialPlanningQuestion(message: string): boolean {
   return signals.some((signal) => normalized.includes(signal));
 }
 
-function formatAmount(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `$${amount.toFixed(2)}`;
+/**
+ * What kind of failure ended the bank-state read, for its log line: a cause
+ * and a code, never the error's message. The connection read's failure is
+ * recognized by its name (PlaidConnectionReadError, plaidChatState.ts) rather
+ * than by instanceof, so this never throws inside the fail-open catch that
+ * calls it, whatever the error is.
+ */
+function plaidReadFailure(error: unknown): { cause: string; reason: string } {
+  if (isPlaidTokenCryptoError(error)) {
+    return { cause: "decrypt", reason: error.reason };
   }
-}
-
-function buildBalanceSummary(accounts: PlaidAccountSummary[]): string | null {
-  if (!Array.isArray(accounts) || accounts.length === 0) {
-    return null;
+  if (error instanceof Error && error.name === "PlaidConnectionReadError") {
+    const code = (error as { code?: unknown }).code;
+    return {
+      cause: "db_read",
+      reason: typeof code === "string" && code !== "" ? code : "none",
+    };
   }
-
-  const checkingAccount =
-    accounts.find((account) => account.type === "checking") || accounts[0];
-
-  if (typeof checkingAccount.current_balance !== "number") {
-    return null;
-  }
-
-  const currency = checkingAccount.iso_currency_code || "USD";
-  const available =
-    typeof checkingAccount.available_balance === "number"
-      ? checkingAccount.available_balance
-      : checkingAccount.current_balance;
-
-  return `Your checking available balance is ${formatAmount(
-    available,
-    currency
-  )} and current balance is ${formatAmount(
-    checkingAccount.current_balance,
-    currency
-  )}.`;
-}
-
-async function fetchBalanceSummaryFromPlaidRoute(
-  request: NextRequest
-): Promise<string | null> {
-  try {
-    const plaidHeaders = buildJsonAuthorizedHeaders(
-      extrasFromAuthorizationValue(request.headers.get("authorization"))
-    );
-    const accountsUrl = new URL("/api/plaid/accounts", request.url);
-    const response = await fetch(accountsUrl.toString(), {
-      method: "POST",
-      headers: plaidHeaders,
-      body: JSON.stringify({}),
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
-    return buildBalanceSummary(data?.accounts || []);
-  } catch {
-    return null;
-  }
+  return { cause: "unknown", reason: "none" };
 }
 
 function isComplexPrompt(message: string): boolean {
@@ -440,6 +406,21 @@ interface ChatLlmCallContext {
 }
 
 /**
+ * Thrown by callOpenRouter when the request body could not be built. The
+ * original error is its cause; its own message says nothing about it. The
+ * model loop logs its name, and the cause code it finds on the original error
+ * when that code is in the expected form (networkCauseCode), never a message.
+ */
+class ChatRequestBuildError extends Error {
+  constructor(cause: unknown) {
+    super("chat request body could not be built", { cause });
+    this.name = "ChatRequestBuildError";
+    // ES5 target: keep instanceof working on the subclass.
+    Object.setPrototypeOf(this, ChatRequestBuildError.prototype);
+  }
+}
+
+/**
  * One OpenRouter attempt. Every exit records one llm_calls row first.
  *
  * recordLlmCall never rejects (llmCallLog.ts), so the row write cannot replace
@@ -453,6 +434,12 @@ interface ChatLlmCallContext {
  * which would turn the cut-off body into an empty success and a stored
  * "could not generate a response" turn; it is recorded as a failed attempt and
  * thrown the same way.
+ *
+ * The request body is built before fetch is called. When building it throws
+ * — an error in our own code, before anything is sent — the attempt is
+ * recorded and counted exactly as a fetch that throws, and what is thrown is
+ * a ChatRequestBuildError carrying the original error as its cause, so the
+ * model loop's log line can tell it from a network failure.
  */
 async function callOpenRouter(
   apiKey: string,
@@ -464,6 +451,15 @@ async function callOpenRouter(
   const signal = AbortSignal.timeout(CHAT_LLM_TIMEOUT_MS);
   let res: Response;
   try {
+    let requestBody: string;
+    try {
+      requestBody = JSON.stringify(
+        buildOpenRouterRequestBody({ model, messages, maxTokens: 1024 })
+      );
+    } catch (error) {
+      // Rethrown to the catch below, which records the attempt.
+      throw new ChatRequestBuildError(error);
+    }
     res = await fetch(OPENROUTER_URL, {
       method: "POST",
       signal,
@@ -471,9 +467,7 @@ async function callOpenRouter(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(
-        buildOpenRouterRequestBody({ model, messages, maxTokens: 1024 })
-      ),
+      body: requestBody,
     });
   } catch (error) {
     await recordLlmCall(
@@ -611,11 +605,22 @@ function isRetryableError(error: unknown): boolean {
 }
 
 /**
+ * Throws ChatDeadlineError when the wait this operation belongs to has
+ * already been cut at its deadline. isRetryableError does not treat that
+ * error as transient, so withRetry does not start the operation again.
+ */
+function notCut(signal: AbortSignal, stage: string): void {
+  if (signal.aborted) throw new ChatDeadlineError(stage);
+}
+
+/**
  * Runs an async operation with one retry on transient failures.
  * Adds ~250ms delay before retry.
  *
- * ⚠️ DO NOT use this around non-idempotent writes such as saveMessages.
- * The first call may have committed before timeout; retry would duplicate.
+ * ⚠️ DO NOT use this around writes that are not safe to send twice, such as
+ * saveMessages. The first call may have committed before it failed, and a
+ * second insert of the same pair then fails on its ids instead of telling the
+ * caller the turn is stored; persistTurnIfEnabled asks by id instead.
  * Use only for reads and idempotent writes (e.g., getOrCreateActiveSession).
  */
 async function withRetry<T>(
@@ -677,11 +682,31 @@ function toClientChatMessage(row: DbChatMessage): ClientChatMessage {
  * The "empty content throws" rule prevents silent "200 OK but DB has 0 turns"
  * which would break the data-consistency guarantee.
  *
- * Does NOT retry (saveMessages is non-idempotent). Callers should catch
- * and translate to an HTTP error response.
+ * HOW THE TURN IS STORED
+ * The ids of the two rows are chosen here, before anything is sent, so the
+ * route can always find out afterwards whether the pair is stored.
  *
- * @throws Error when persistence is expected but content is empty, or
- *   when the underlying saveMessages call fails.
+ * 1. Insert, no later than the save deadline less the read-back reserve
+ *    (llmTimeouts.ts). An insert still running then is cancelled.
+ * 2. If the session turns out to be closed (the summarize cron closed it
+ *    while this request was running), nothing was stored: the user's active
+ *    session is fetched again, or created, and the same pair is inserted
+ *    there with the same ids. This happens at most once per save, inside the
+ *    same deadline as step 1.
+ * 3. If the insert ended in any error or at its deadline, the route does not
+ *    know whether the statement was stored. It asks once, by the two ids, no
+ *    later than the save deadline: both rows there is a saved turn, anything
+ *    else — a row missing, a failed or unanswered lookup — is a failed save.
+ *    A cancelled insert can still be stored after that lookup has answered
+ *    "missing"; the route then reports a failed save for a turn that exists.
+ *
+ * Apart from step 2, an insert is never sent twice. Callers should catch and
+ * translate a throw to an HTTP error response.
+ *
+ * @returns The id of the session the turn was stored in, or null when
+ *   nothing was to be stored.
+ * @throws Error when persistence is expected but content is empty, or when
+ *   the turn could not be stored or confirmed stored.
  */
 async function persistTurnIfEnabled(params: {
   activeSession: ChatSession | null;
@@ -691,9 +716,10 @@ async function persistTurnIfEnabled(params: {
   assistantModel: string;
   inputTokens?: number;
   outputTokens?: number;
-}): Promise<void> {
-  if (!isAiMemoryEnabled()) return;
-  if (!params.activeSession) return;
+  requestStartedAtMs: number;
+}): Promise<string | null> {
+  if (!isAiMemoryEnabled()) return null;
+  if (!params.activeSession) return null;
 
   if (!params.userContent.trim() || !params.assistantContent.trim()) {
     throw new Error(
@@ -702,13 +728,174 @@ async function persistTurnIfEnabled(params: {
     );
   }
 
-  await saveMessages(params.activeSession.id, params.authUserId, {
+  const firstSessionId = params.activeSession.id;
+  const userId = params.authUserId;
+  const pair = {
     userContent: params.userContent,
     assistantContent: params.assistantContent,
     assistantModel: params.assistantModel,
     inputTokens: params.inputTokens,
     outputTokens: params.outputTokens,
-  });
+  };
+  const ids = { user: randomUUID(), assistant: randomUUID() };
+  const readBackDeadlineAtMs =
+    params.requestStartedAtMs + CHAT_SAVE_DEADLINE_MS;
+  const insertDeadlineAtMs =
+    readBackDeadlineAtMs - CHAT_SAVE_READBACK_RESERVE_MS;
+  // For the [chat-save] line. sessionClosed: the first insert found the
+  // session closed. switched: the open session was read and the second
+  // insert is about to be sent to it. A session found closed whose re-read
+  // then failed or ran out of time has the first without the second.
+  let sessionClosed = false;
+  let switched = false;
+  const logSave = (outcome: string, level: "info" | "warn"): void => {
+    console[level](
+      "[chat-save] outcome=%s session_closed=%s switched=%s",
+      outcome,
+      sessionClosed,
+      switched
+    );
+  };
+
+  try {
+    const savedSessionId = await runUntilDeadline(
+      insertDeadlineAtMs,
+      "save",
+      async (signal) => {
+        try {
+          await saveMessages(firstSessionId, userId, pair, { ids, signal });
+          return firstSessionId;
+        } catch (error) {
+          if (!isSessionClosedError(error)) throw error;
+          sessionClosed = true;
+        }
+        // The session is closed and nothing was stored. The session read
+        // takes no signal, so check before and after it that this save has
+        // not been cut meanwhile.
+        notCut(signal, "save");
+        const session = await getOrCreateActiveSession(userId);
+        notCut(signal, "save");
+        switched = true;
+        await saveMessages(session.id, userId, pair, { ids, signal });
+        return session.id;
+      }
+    );
+    logSave("inserted", "info");
+    return savedSessionId;
+  } catch (error) {
+    let confirmedSessionId: string | null = null;
+    try {
+      confirmedSessionId = await runUntilDeadline(
+        readBackDeadlineAtMs,
+        "save_readback",
+        (signal) => findSavedTurn(userId, ids, { signal })
+      );
+    } catch {
+      // A lookup that fails or is still running at the deadline confirms
+      // nothing.
+    }
+    if (confirmedSessionId !== null) {
+      logSave("confirmed_by_readback", "info");
+      return confirmedSessionId;
+    }
+    logSave("failed", "warn");
+    throw error;
+  }
+}
+
+/**
+ * The response to a request whose model attempts all failed, whichever way
+ * each one failed: a provider status, a rejected key, a rate limit, a timeout
+ * or a network error. It says nothing about the provider: no upstream status
+ * and no upstream error text reach the client. What failed is recorded per
+ * attempt, in llm_calls and in the [chat-model] log line.
+ */
+const CHAT_MODEL_FAILED_BODY = {
+  error: "Chat is temporarily unavailable. Please try again.",
+  code: "CHAT_MODEL_FAILED",
+} as const;
+const CHAT_MODEL_FAILED_STATUS = 502;
+
+const NETWORK_CAUSE_CODE_PATTERN = /^[A-Z0-9_]{1,32}$/;
+
+/**
+ * The code on a thrown error's cause, or "none". For a fetch that failed, that
+ * is the network error's code (ECONNRESET, ENOTFOUND and the like); for a
+ * ChatRequestBuildError, it is the code of the error the request builder
+ * threw, if that error has one. Only a string made of capitals, digits and
+ * underscores, at most 32 characters long, is returned: anything else, a
+ * message included, is "none". The error's own message and its cause's
+ * message are never read.
+ */
+function networkCauseCode(error: unknown): string {
+  try {
+    const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+    const code = (cause as { code?: unknown } | null | undefined)?.code;
+    return typeof code === "string" && NETWORK_CAUSE_CODE_PATTERN.test(code)
+      ? code
+      : "none";
+  } catch {
+    return "none";
+  }
+}
+
+const ERROR_NAME_PATTERN = /^[A-Za-z0-9_]{1,40}$/;
+
+/**
+ * The name of a thrown error (TypeError, TimeoutError, ChatRequestBuildError
+ * and the like), or "none". Only a string made of letters, digits and
+ * underscores, at most 40 characters long, is returned: anything else is
+ * "none". The error's message is never read.
+ *
+ * Together with the cause code it tells apart failures the kind alone does
+ * not: a timeout before a response (TimeoutError), a timeout while the body
+ * was being read (Error), a request body our code could not build
+ * (ChatRequestBuildError) and a network failure (TypeError, with a cause code
+ * only when the runtime puts one on it).
+ */
+function errorName(error: unknown): string {
+  try {
+    const name = (error as { name?: unknown } | null | undefined)?.name;
+    return typeof name === "string" && ERROR_NAME_PATTERN.test(name)
+      ? name
+      : "none";
+  } catch {
+    return "none";
+  }
+}
+
+/**
+ * One line per failed model attempt: the attempt's number, its kind (the
+ * error class llm_calls records for it), the upstream HTTP status, and, for
+ * an attempt that threw, the cause code (see networkCauseCode) and the
+ * error's name. The
+ * status is "none" for an attempt that threw, whether before a response
+ * arrived or while its body was being read; the cause and the name are "none"
+ * for an attempt that did not throw, and whenever networkCauseCode or
+ * errorName found nothing in the expected form. Never the provider's error
+ * text and never the thrown error's message.
+ */
+function logFailedModelAttempt(
+  attemptIndex: number,
+  upstreamStatus: number | null,
+  causeCode: string = "none",
+  thrownName: string = "none"
+): void {
+  const kind = classifyLlmOutcome({
+    route: "chat",
+    httpStatus: upstreamStatus,
+    threw: upstreamStatus === null,
+    jsonParsed: false,
+    contentPresent: false,
+  }).errorClass;
+  console.warn(
+    "[chat-model] attempt failed attempt=%d kind=%s upstream_status=%s cause=%s name=%s",
+    attemptIndex,
+    kind ?? "unknown",
+    upstreamStatus === null ? "none" : String(upstreamStatus),
+    causeCode,
+    thrownName
+  );
 }
 
 /**
@@ -726,8 +913,63 @@ function jsonWithCrisisNotice(
   );
 }
 
+/**
+ * The response to a request that ran out of time before a model attempt could
+ * start: either no attempt fitted in the request budget, or a wait before the
+ * model loop was still running at the pre-loop deadline.
+ */
+const CHAT_TIME_BUDGET_EXHAUSTED_BODY = {
+  error: "Chat is taking longer than usual. Please try again.",
+  code: "CHAT_TIME_BUDGET_EXHAUSTED",
+} as const;
+
+/** The waits a request can make around the model loop, as named in the log. */
+type ChatStage =
+  | "auth"
+  | "body"
+  | "profile"
+  | "session"
+  | "memory"
+  | "plaid_state"
+  | "save";
+
 export async function POST(request: NextRequest) {
   const requestStartedAtMs = Date.now();
+  // Every wait before the model loop ends at this moment at the latest
+  // (llmTimeouts.ts). A wait that is still running then is cut, and the
+  // request answers 503 CHAT_TIME_BUDGET_EXHAUSTED from the outer catch,
+  // whatever that wait does with an ordinary failure: a request cut at the
+  // deadline never reaches the model, so it never reaches it with a block
+  // missing from the prompt.
+  const preLoopDeadlineAtMs = requestStartedAtMs + chatPreLoopDeadlineMs();
+  // How long each wait took, for the one [chat-stages] line in the finally.
+  // -1 means the request did not make that wait.
+  // Durations only. No user, session, or content fields.
+  const stageMs: Record<ChatStage, number> = {
+    auth: -1,
+    body: -1,
+    profile: -1,
+    session: -1,
+    memory: -1,
+    plaid_state: -1,
+    save: -1,
+  };
+  const timed = async <T>(
+    stage: ChatStage,
+    run: () => Promise<T>
+  ): Promise<T> => {
+    const startedAtMs = Date.now();
+    try {
+      return await run();
+    } finally {
+      stageMs[stage] = Date.now() - startedAtMs;
+    }
+  };
+  const beforeLoop = <T>(
+    stage: Exclude<ChatStage, "save">,
+    fn: (signal: AbortSignal) => PromiseLike<T> | T
+  ): Promise<T> =>
+    timed(stage, () => runUntilDeadline(preLoopDeadlineAtMs, stage, fn));
   // The chat usage reservation this request holds, if any, and the per-attempt
   // costs it is settled from in the finally below, on every exit.
   let usageReservation: { reservationId: string; userId: string } | null =
@@ -752,7 +994,9 @@ export async function POST(request: NextRequest) {
     return jsonWithCrisisNotice(body, notice, init);
   };
   try {
-    const authUserId = await getAuthenticatedUserIdFromRequest(request);
+    const authUserId = await beforeLoop("auth", () =>
+      getAuthenticatedUserIdFromRequest(request)
+    );
     if (!authUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -763,9 +1007,8 @@ export async function POST(request: NextRequest) {
     // byte ceiling and its conversation is checked against the message and
     // character limits. Only its last user message is used below: the model's
     // history is read from the stored session, never taken from the body.
-    const bodyRead = await readRequestJsonWithByteLimit(
-      request,
-      CHAT_MAX_BODY_BYTES
+    const bodyRead = await beforeLoop("body", () =>
+      readRequestJsonWithByteLimit(request, CHAT_MAX_BODY_BYTES)
     );
     if (bodyRead.kind === "too_large") {
       console.warn("[chat-input] refused reason=%s", "payload_too_large");
@@ -901,33 +1144,49 @@ export async function POST(request: NextRequest) {
     let storedHistory: DbChatMessage[] = [];
     let historySource: "server" | "none" = "none";
 
-    const dbContext = await loadReadOnlyUserContextFromSupabase(authUserId);
+    // With the profile read off there is nothing to wait for, so the request
+    // makes no profile wait at all.
+    const dbContext: Partial<UserContext> = isProfileReadEnabled()
+      ? await beforeLoop("profile", (signal) =>
+          loadReadOnlyUserContextFromSupabase(authUserId, signal)
+        )
+      : {};
 
     if (isAiMemoryEnabled()) {
       try {
-        const session = await withRetry(
-          () => getOrCreateActiveSession(authUserId),
-          "getOrCreateActiveSession"
+        // The session read and the memory reads take no signal, so the
+        // deadline only stops the request waiting for them. notCut keeps
+        // withRetry from starting a read again once the wait has been cut.
+        const session = await beforeLoop("session", (signal) =>
+          withRetry(() => {
+            notCut(signal, "session");
+            return getOrCreateActiveSession(authUserId);
+          }, "getOrCreateActiveSession")
         );
         activeSession = session;
 
         // The model's history is this session's stored turns: the session
         // this turn is saved into, not a second lookup of the active session.
         // Read newest first so the limit keeps the latest rows.
-        const [memoryContext, recentRows] = await Promise.all([
-          withRetry(
-            () => buildMemoryContext(authUserId, { activeSession: session }),
-            "buildMemoryContext"
-          ),
-          withRetry(
-            () =>
-              getSessionMessages(session.id, authUserId, {
-                limit: CHAT_MAX_HISTORY_MESSAGES,
-                order: "desc",
-              }),
-            "getSessionMessages (history)"
-          ),
-        ]);
+        const [memoryContext, recentRows] = await beforeLoop(
+          "memory",
+          (signal) =>
+            Promise.all([
+              withRetry(() => {
+                notCut(signal, "memory");
+                return buildMemoryContext(authUserId, {
+                  activeSession: session,
+                });
+              }, "buildMemoryContext"),
+              withRetry(() => {
+                notCut(signal, "memory");
+                return getSessionMessages(session.id, authUserId, {
+                  limit: CHAT_MAX_HISTORY_MESSAGES,
+                  order: "desc",
+                });
+              }, "getSessionMessages (history)"),
+            ])
+        );
 
         memoryBlock = formatMemoryForPrompt(memoryContext);
         storedHistory = recentRows.reverse();
@@ -938,6 +1197,9 @@ export async function POST(request: NextRequest) {
           crisisVariant = "escalated";
         }
       } catch (error) {
+        // A wait cut at the deadline is not a memory failure: it goes to the
+        // outer catch, which answers it as the time budget.
+        if (error instanceof ChatDeadlineError) throw error;
         console.error("AI memory load failed:", error);
         return respond(
           {
@@ -988,14 +1250,17 @@ export async function POST(request: NextRequest) {
     const wantsFinancialAnalysis =
       !isGreeting && isFinancialPlanningQuestion(lastUserMessageText);
 
-    // Plaid capability scaffold (B-1). AI_PLAID_STATE = off | connection | balances.
-    // "off" closes both paths below that read fresh bank data: the scaffold
-    // block and the balance-keyword block. The third, financial-analysis
-    // channel only has its egress decision evaluated and logged; there is no
-    // read behind it. The base prompt's guideline 2 also tells the model it
-    // has no bank data. Bank figures the model was given on earlier turns can
-    // still reach it through the stored conversation history and the memory
-    // block; "off" does not remove those.
+    // Bank data for the model. AI_PLAID_STATE = off | connection | balances.
+    // There is one bank read, getPlaidChatState, inside the capability
+    // scaffold's branch; "off" denies that channel, so nothing is read. The
+    // balance-keyword channel reads nothing itself: when it allows a turn
+    // (mode "connection" and a balance question) that read goes to depth
+    // "balances". The financial-analysis channel only has its egress decision
+    // evaluated and logged; there is no read behind it. The base prompt's
+    // guideline 2 also tells the model it has no bank data under "off". Bank
+    // figures the model was given on earlier turns can still reach it through
+    // the stored conversation history and the memory block; "off" does not
+    // remove those.
     const plaidStateMode = resolvePlaidStateMode();
     const plaidStateEnabled = plaidStateMode !== "off";
 
@@ -1009,33 +1274,63 @@ export async function POST(request: NextRequest) {
       plaidStateMode,
     });
     logPlaidEgressDecision(capabilityScaffoldDecision, { mode: plaidStateMode });
+    const balanceKeywordDecision = evaluatePlaidEgressDecision({
+      channel: "balance_keyword",
+      plaidStateMode,
+      wantsBalance,
+    });
+    logPlaidEgressDecision(balanceKeywordDecision, { mode: plaidStateMode });
+    // Whether this turn's block carries per-account balance lines, for
+    // llm_calls: the same predicate the block builder renders them by.
+    let plaidBalancesInjected = false;
     if (capabilityScaffoldDecision.allowed) {
-      // Balances (L2) are fetched only on substantive turns; greetings stay at
-      // the L1 connection scaffold so we never do a live balance fetch on "hi".
-      const effectiveDepth =
-        plaidStateMode === "balances" && !isGreeting ? "balances" : "connection";
+      // Balances are read only on substantive turns: under "balances" on any
+      // turn but a greeting, under "connection" on a balance question. A
+      // greeting never triggers a live balance read.
+      const effectiveDepth = resolvePlaidChatDepth({
+        mode: plaidStateMode,
+        isGreeting,
+        balanceKeywordAllowed: balanceKeywordDecision.allowed,
+      });
       try {
-        const plaidState = await getPlaidChatState(authUserId, {
-          depth: effectiveDepth,
-        });
+        const plaidState = await beforeLoop(
+          "plaid_state",
+          async (signal) =>
+            await getPlaidChatState(authUserId, {
+              depth: effectiveDepth,
+              signal,
+            })
+        );
         const plaidBlock = buildPlaidCapabilityBlock(plaidState);
         systemPrompt += plaidBlock;
+        plaidBalancesInjected = plaidBlockCarriesBalances(plaidState);
+        const reads = plaidState.connections.map((c) => c.read);
         console.debug(
-          "[plaid-state] mode=%s depth=%s connected=%s accounts=%d block=%s",
+          "[plaid-state] mode=%s depth=%s connected=%s accounts=%d read=%d reconnect=%d unread=%d block=%s",
           plaidStateMode,
           effectiveDepth,
           plaidState.connected,
           plaidState.accounts?.length ?? 0,
+          reads.filter((r) => r === "read").length,
+          reads.filter((r) => r === "needs_reconnect").length,
+          reads.filter((r) => r === "not_read").length,
           maskPlaidBlockForLog(plaidBlock)
         );
       } catch (error) {
-        // Fail-open: never block the chat on a Plaid-state read error. Emit an
+        // A read still running at the deadline is not a read error: it goes
+        // to the outer catch and the request ends without a model call.
+        if (error instanceof ChatDeadlineError) throw error;
+        // Fail-open on a read error: it never blocks the chat. Emit an
         // explicit "state unknown" block so the base prompt's pointer to
         // "What you can see this turn" stays consistent and the model does not
-        // fabricate a connection verdict.
+        // fabricate a connection verdict. The log names the kind of failure
+        // and a code only: never the error's message or the error itself,
+        // which can carry database or crypto detail.
+        const failure = plaidReadFailure(error);
         console.error(
-          "[plaid-state] failed to build capability block; using unknown-state fallback:",
-          error
+          "[plaid-state] read failed cause=%s reason=%s; using unknown-state fallback",
+          failure.cause,
+          failure.reason
         );
         systemPrompt += buildPlaidCapabilityBlock({
           depth: effectiveDepth,
@@ -1049,30 +1344,6 @@ export async function POST(request: NextRequest) {
     if (isGreeting) {
       systemPrompt +=
         "\n\n## Current Turn: Simple Greeting or Small Talk\nThe user's latest message is only a greeting or brief small talk. Reply in 1-2 short, polite sentences. Do NOT mention their income, spending, budget, bank balance, or profile details unless they explicitly asked.";
-    }
-
-    // Under "balances" mode the always-on L2 block already injected shallow
-    // balances on substantive turns, so this keyword-gated balance path (and its
-    // buggy buildBalanceSummary formatter) is retired to avoid double-stating the
-    // balance. Under "connection" it runs on a balance question; under "off" it
-    // does not run at all.
-    const balanceKeywordDecision = evaluatePlaidEgressDecision({
-      channel: "balance_keyword",
-      plaidStateMode,
-      wantsBalance,
-    });
-    logPlaidEgressDecision(balanceKeywordDecision, { mode: plaidStateMode });
-    let balanceSnapshotInjected = false;
-    if (balanceKeywordDecision.allowed) {
-      const balanceSummary = await fetchBalanceSummaryFromPlaidRoute(request);
-
-      if (balanceSummary) {
-        balanceSnapshotInjected = true;
-        systemPrompt += `\n\n## Verified Balance Snapshot\n${balanceSummary}\n\nIf the user asks about their balance, respond in one sentence using exactly this verified snapshot. Do not change the amounts and do not add other accounts unless asked.`;
-      } else {
-        systemPrompt +=
-          "\n\nIf the user asks about their balance and no verified snapshot is available, explain that a bank connection is required and suggest reconnecting Plaid in Noor.";
-      }
     }
 
     // Evaluated and logged only: no bank read follows this decision.
@@ -1100,16 +1371,14 @@ export async function POST(request: NextRequest) {
       ];
 
       const modelsToTry = selectOpenRouterModels(modelConversation.messages);
-      let lastFailure: OpenRouterResult | null = null;
       // Which optional blocks the system prompt carries, for llm_calls only.
       const promptBlocks: ChatPromptBlocks = {
         memory: memoryBlock !== "",
         plaidScaffold: capabilityScaffoldDecision.allowed,
-        balance: balanceSnapshotInjected,
+        balance: plaidBalancesInjected,
         financialSnapshot: false,
       };
       let attemptIndex = 0;
-      let lastThrew = false;
 
       for (const model of modelsToTry) {
         // Every attempt, the first included, starts only if it could run to
@@ -1139,12 +1408,17 @@ export async function POST(request: NextRequest) {
             }
           );
         } catch (error) {
-          // callOpenRouter has already recorded the attempt.
-          lastThrew = true;
-          console.error("Chat API error:", error);
+          // callOpenRouter has already recorded the attempt. A thrown attempt
+          // has no upstream status to report; its cause code and its name are
+          // all that is read from the error, never its message.
+          logFailedModelAttempt(
+            attemptIndex,
+            null,
+            networkCauseCode(error),
+            errorName(error)
+          );
           continue;
         }
-        lastThrew = false;
 
         if (result.ok) {
           // With a crisis signal the notice leads the reply, and the reply
@@ -1154,8 +1428,10 @@ export async function POST(request: NextRequest) {
             notice === null
               ? result.message
               : composeCrisisReply(notice, result.message, EMPTY_ASSISTANT_REPLY);
+          const saveStartedAtMs = Date.now();
+          let savedSessionId: string | null = null;
           try {
-            await persistTurnIfEnabled({
+            savedSessionId = await persistTurnIfEnabled({
               activeSession,
               authUserId,
               userContent: lastUserMessageText,
@@ -1163,6 +1439,7 @@ export async function POST(request: NextRequest) {
               assistantModel: result.model,
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
+              requestStartedAtMs,
             });
           } catch (error) {
             console.error("Failed to save messages (OpenRouter branch):", error);
@@ -1174,58 +1451,41 @@ export async function POST(request: NextRequest) {
               },
               { status: 500 }
             );
+          } finally {
+            // Without a session there is no save to time.
+            if (activeSession) stageMs.save = Date.now() - saveStartedAtMs;
           }
 
           return respond({
             success: true,
             message: replyMessage,
             model: result.model,
-            sessionId: activeSession?.id ?? null,
+            // The session the turn was stored in, which is not the one the
+            // request started with when that one was closed meanwhile.
+            sessionId: savedSessionId ?? activeSession?.id ?? null,
             usage: result.usage,
           });
         }
 
+        logFailedModelAttempt(attemptIndex, result.status);
+
         // Auth errors should fail fast rather than retrying other models.
         if (result.status === 401) {
-          return respond(
-            { error: "Invalid OpenRouter API key" },
-            { status: 401 }
-          );
+          return respond(CHAT_MODEL_FAILED_BODY, {
+            status: CHAT_MODEL_FAILED_STATUS,
+          });
         }
-
-        lastFailure = result;
       }
 
       // No attempt fitted in the request budget.
       if (attemptIndex === 0) {
-        return respond(
-          {
-            error: "Chat is taking longer than usual. Please try again.",
-            code: "CHAT_TIME_BUDGET_EXHAUSTED",
-          },
-          { status: 503 }
-        );
+        return respond(CHAT_TIME_BUDGET_EXHAUSTED_BODY, { status: 503 });
       }
 
-      // The same response a throw reaching the outer catch gets.
-      if (lastThrew) {
-        return respond(
-          { error: "Failed to get response from AI" },
-          { status: 500 }
-        );
-      }
-
-      if (lastFailure?.status === 429) {
-        return respond(
-          { error: "Rate limit exceeded. Please try again later." },
-          { status: 429 }
-        );
-      }
-
-      return respond(
-        { error: lastFailure?.error || "OpenRouter request failed" },
-        { status: lastFailure?.status || 500 }
-      );
+      // Every attempt that started has failed.
+      return respond(CHAT_MODEL_FAILED_BODY, {
+        status: CHAT_MODEL_FAILED_STATUS,
+      });
     }
 
     return respond(
@@ -1235,6 +1495,17 @@ export async function POST(request: NextRequest) {
       { status: 503 }
     );
   } catch (error) {
+    // A wait before the model loop was still running at the pre-loop
+    // deadline. No model attempt was made.
+    if (error instanceof ChatDeadlineError) {
+      console.warn(
+        "[chat-deadline] stage cut stage=%s elapsed_ms=%d",
+        error.stage,
+        Date.now() - requestStartedAtMs
+      );
+      return respond(CHAT_TIME_BUDGET_EXHAUSTED_BODY, { status: 503 });
+    }
+
     console.error("Chat API error:", error);
 
     return respond(
@@ -1242,6 +1513,18 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   } finally {
+    // One line per request. Durations only. No user, session, or content
+    // fields.
+    console.info(
+      "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d save_ms=%d",
+      stageMs.auth,
+      stageMs.body,
+      stageMs.profile,
+      stageMs.session,
+      stageMs.memory,
+      stageMs.plaid_state,
+      stageMs.save
+    );
     // Awaited: Vercel freezes the function once the response is returned.
     // settleChatUsage and recordCrisisNotice never reject and are bounded by
     // their own timeouts; they run side by side. The notice is counted once

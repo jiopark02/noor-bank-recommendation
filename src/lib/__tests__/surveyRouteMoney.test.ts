@@ -78,7 +78,10 @@ function fakeAdmin() {
       },
       update: (payload: unknown) => {
         state.calls.push({ table, op: "update", payload });
-        return { eq: async () => ({ error: null }) };
+        // The route reads the changed rows back with .select("id").
+        return {
+          eq: () => ({ select: async () => ({ data: [{ id: "row-1" }], error: null }) }),
+        };
       },
       insert: async (payload: unknown) => {
         state.calls.push({ table, op: "insert", payload });

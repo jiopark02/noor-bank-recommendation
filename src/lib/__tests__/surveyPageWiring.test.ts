@@ -18,15 +18,19 @@ import { describe, it, expect } from "vitest";
  *       it to a signed-in submit                                    -> W5
  *   P8  the first-name field no longer marking itself touched       -> W6
  *   P9  the first-name error testing the unsanitized name           -> W6
- *   P10 the money input's length limit written as a literal         -> PW1
+ *   P10 the money input's length limit written as a literal, or its
+ *       text parsed inline instead of through moneyInputDigits      -> PW1
  *   P11 the zero-income notice's condition or key removed           -> PW2
  *   P12 an en.json key the pages read removed or changed            -> PW3
+ *   P13 the zero-spending notice's blur, condition or key removed   -> PW4
+ *   P14 the full-field key check no longer called on key down       -> PW5
+ *   P15 a key added to or dropped from the /api/survey request body  -> PW6
  *
  * The masking matches surveyRouteWiring.test.ts: comments are blanked and,
  * in `code`, so are string contents; whitespace is collapsed. Besides
  * handleSubmit, only short regions are searched (the derived input checks,
  * the first-name field, the submit button's disabled condition, MoneyInput
- * and the income field),
+ * and the income and spending fields),
  * so JSX text elsewhere in the file cannot confuse the quote tracking.
  */
 
@@ -189,13 +193,14 @@ describe("survey page wiring: sanitized name and email checks", () => {
 });
 
 describe("survey page wiring: monthly money inputs", () => {
-  it("PW1 the money input's length limit is the shared digit constant", () => {
+  it("PW1 the money input parses through moneyInputDigits and its maxLength is the shared constant", () => {
     const input = pageRegion("const MoneyInput = (", "const ViewedMark");
-    expect(input).toContain("maxLength={MAX_MONTHLY_AMOUNT_DIGITS}");
-    expect(input).toContain(".slice(0, MAX_MONTHLY_AMOUNT_DIGITS)");
+    expect(input).toContain("maxLength={MONEY_INPUT_MAX_LENGTH}");
+    expect(input).toContain("const digits = moneyInputDigits(e.target.value);");
     expect(input).not.toMatch(/maxLength=\{\d/);
+    expect(input).not.toContain(".replace(");
     expect(readFileSync(PAGE, "utf8")).toContain(
-      'import { MAX_MONTHLY_AMOUNT_DIGITS } from "@/lib/surveyMoney";'
+      'import { MONEY_INPUT_MAX_LENGTH, moneyInputDigits } from "@/lib/moneyInputText";'
     );
   });
 
@@ -207,6 +212,36 @@ describe("survey page wiring: monthly money inputs", () => {
     expect(income).toContain('onBlur={() => markTouched("monthlyIncome")}');
     expect(income).toMatch(
       /\{data\.monthlyIncome === 0 && touchedFields\.has\("monthlyIncome"\) && \( <p [^>]*> \{t\("survey\.step4\.incomeRequired"\)\} <\/p> \)\}/
+    );
+  });
+
+  it("PW4 a zero spending amount shows the spending notice once the field was left", () => {
+    const expenses = pageRegion(
+      "value={data.monthlyExpenses}",
+      "Do you have a credit history in the US?"
+    );
+    expect(expenses).toContain('onBlur={() => markTouched("monthlyExpenses")}');
+    expect(expenses).toMatch(
+      /\{data\.monthlyExpenses === 0 && touchedFields\.has\("monthlyExpenses"\) && \( <p [^>]*> \{t\("survey\.step4\.expensesRequired"\)\} <\/p> \)\}/
+    );
+    const messages = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL("../../../messages/en.json", import.meta.url)),
+        "utf8"
+      )
+    ) as { survey: { step4: Record<string, unknown> } };
+    expect(messages.survey.step4.expensesRequired).toBe(
+      "Enter your monthly spending to continue."
+    );
+  });
+
+  it("PW5 the key handler blocks a digit in a full field through moneyInputKeyBlocked", () => {
+    const input = pageRegion("const MoneyInput = (", "const ViewedMark");
+    expect(input).toMatch(
+      /if \( moneyInputKeyBlocked\( e\.key, e\.currentTarget\.value, e\.currentTarget\.selectionStart, e\.currentTarget\.selectionEnd \) \) \{ e\.preventDefault\(\); return; \}/
+    );
+    expect(readFileSync(PAGE, "utf8")).toContain(
+      'import { moneyInputKeyBlocked } from "@/lib/moneyInputText";'
     );
   });
 
@@ -222,5 +257,21 @@ describe("survey page wiring: monthly money inputs", () => {
     );
     expect(typeof messages.survey.password.special).toBe("string");
     expect(messages.survey.password.special).not.toBe("");
+  });
+});
+
+describe("survey page wiring: the /api/survey request body", () => {
+  it("PW6 the body names exactly these keys", () => {
+    const request = between(codeWithStrings, 'fetch("/api/survey", {', "const result =");
+    const body = between(request, "body: JSON.stringify({", "}),");
+    const keys = (body.slice("body: JSON.stringify({".length).match(/[A-Za-z_$][\w$]*(?=\s*:)/g) ?? []);
+    expect(keys).toEqual([
+      "first_name",
+      "email",
+      "password",
+      "monthly_income",
+      "monthly_budget",
+      "has_us_credit_history",
+    ]);
   });
 });

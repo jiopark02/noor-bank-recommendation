@@ -133,7 +133,7 @@ describe("evaluatePlaidEgressDecision — balance_keyword", () => {
     });
   });
 
-  it("denies when wantsBalance is true and mode is balances — the only case B is suppressed", () => {
+  it("denies when wantsBalance is true and mode is balances — the read is already at depth balances there", () => {
     const decision = evaluatePlaidEgressDecision({
       channel: "balance_keyword",
       plaidStateMode: "balances",

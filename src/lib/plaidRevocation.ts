@@ -1,6 +1,7 @@
 import {
   plaidClient,
   PLAID_ENVIRONMENT,
+  PLAID_HTTP_DEFAULT_TIMEOUT_MS,
   type PlaidEnvironmentName,
 } from "./plaid";
 import { deletePlaidConnection, type PlaidRowDeletion } from "./plaidApiUtils";
@@ -89,10 +90,11 @@ import {
 /**
  * The minimum a connection row must carry to be revoked.
  *
- * Deliberately structural rather than a full row type: the rows come from
- * getAllPlaidConnections / getPlaidConnectionByItemId, which use select("*"),
- * and the migrations directory is not the source of truth for that table. This
- * names only what is read here.
+ * Deliberately structural rather than a full row type: the migrations directory
+ * is not the source of truth for that table, so this names only what is read
+ * here. The revocation routes read exactly these two columns
+ * (getRevocableConnections / getRevocableConnectionByItemId in plaidApiUtils.ts);
+ * the webhook's cross-user read selects them plus the owner's user_id.
  *
  * `access_token` holds CIPHERTEXT (PL1). It is never usable as-is; it must go
  * through `decrypt` below, with a userId taken verbatim from the verified token
@@ -120,25 +122,36 @@ export type RevokeFailureKind =
   | "plaid"
   | "row_delete";
 
-export type ConnectionRevocationOutcome = {
-  itemId: string;
-  /**
-   * True only when the Item is gone — revoked by this call, or confirmed already
-   * absent — AND its row is gone, deleted by this call or already absent.
-   */
-  ok: boolean;
-  failure?: RevokeFailureKind;
-};
+/**
+ * `ok: true` only when the Item is gone — revoked by this call, or confirmed
+ * already absent — AND its row is gone, deleted by this call or already absent.
+ *
+ * A discriminated union so that every failure carries its kind and a caller
+ * cannot read `failure` without first ruling out success. A consumer that maps
+ * the kinds to answers can then be checked for exhaustiveness by the compiler.
+ */
+export type ConnectionRevocationOutcome =
+  | { itemId: string; ok: true }
+  | { itemId: string; ok: false; failure: RevokeFailureKind };
 
 export type RevocationSummary = {
+  /** One per connection whose revocation was started. */
   outcomes: ConnectionRevocationOutcome[];
   /**
-   * Connections whose row was deliberately left in place.
+   * Connections whose row was deliberately left in place: every failed
+   * outcome, plus every connection whose revocation was not started (see
+   * `deferred`).
    *
    * ⚠️ This does NOT shrink to 0 on its own for every kind of failure. See the
    * non-converging case named on revokeAndDeleteConnections below.
    */
   remaining: number;
+  /**
+   * Connections whose revocation was not started because too little of the
+   * request's time was left (see shouldStartRevocation). Their rows are
+   * untouched and a retry picks them up. Included in `remaining`.
+   */
+  deferred: number;
   /**
    * At least one failure was key-level rather than row-level. The caller uses
    * this to answer "our configuration is broken" instead of "we could not
@@ -565,9 +578,61 @@ export async function revokeAndDeleteConnection(
 }
 
 /**
+ * The maxDuration, in seconds, that every route reaching a revocation declares.
+ * Each of those route files states the same number as a literal, because the
+ * platform reads that export statically; a test holds the two equal.
+ */
+export const PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS = 300;
+
+/**
+ * How much of the request's time must be left before a revocation may start.
+ *
+ * Starting one commits the request to, at worst: one itemRemove, up to two row
+ * deletes, and then — if it was the last connection — the account deletion's
+ * re-read of the connections, its users-row delete and its Auth user delete.
+ * That is six calls, each allowed what a normal Plaid call is allowed
+ * (PLAID_HTTP_DEFAULT_TIMEOUT_MS). None of those calls is bounded in code:
+ * itemRemove runs with no time limit on purpose, and the database and Auth
+ * calls carry no signal. So this does not guarantee the request finishes; it
+ * only stops a new revocation from starting when that much time is not left.
+ *
+ * Provisional; revisit with per-step timing from production logs.
+ */
+export const PLAID_REVOKE_START_RESERVE_MS = 6 * PLAID_HTTP_DEFAULT_TIMEOUT_MS;
+
+/**
+ * Whether a revocation may start: true when the time left before the route's
+ * maxDuration, counted from the start of the request, is at least the reserve.
+ *
+ * Pure and exported so the boundary is executed by a test.
+ */
+export function shouldStartRevocation(
+  startedAtMs: number,
+  nowMs: number,
+  maxDurationSeconds: number,
+  reserveMs: number
+): boolean {
+  return startedAtMs + maxDurationSeconds * 1000 - nowMs >= reserveMs;
+}
+
+/**
+ * The request's clock, injected so the time check can be executed with a fake
+ * one. `startedAtMs` is when the request started, not when the loop did.
+ */
+export type RevocationBudget = {
+  startedAtMs: number;
+  now: () => number;
+};
+
+/**
  * The same, across every connection. Sequential on purpose: these are writes to
  * an external system plus a database, and there is nothing to gain from racing
  * them.
+ *
+ * Before each connection it checks the request's time (shouldStartRevocation).
+ * When too little is left, that connection and every one after it are not
+ * started: their rows stay, each is logged as deferred, and they count in
+ * `remaining`, so the account-deletion gate stops and a retry continues.
  *
  * `remaining` counts rows left behind, and it is the number the account
  * deletion path gates on. It never GROWS across calls — a successful connection
@@ -596,19 +661,41 @@ export async function revokeAndDeleteConnection(
 export async function revokeAndDeleteConnections(
   userId: string,
   connections: RevocableConnection[],
-  deps: RevocationDeps
+  deps: RevocationDeps,
+  budget: RevocationBudget
 ): Promise<RevocationSummary> {
   const outcomes: ConnectionRevocationOutcome[] = [];
+  let deferred = 0;
 
-  for (const connection of connections) {
-    outcomes.push(await revokeAndDeleteConnection(userId, connection, deps));
+  for (let i = 0; i < connections.length; i++) {
+    if (
+      !shouldStartRevocation(
+        budget.startedAtMs,
+        budget.now(),
+        PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS,
+        PLAID_REVOKE_START_RESERVE_MS
+      )
+    ) {
+      for (let j = i; j < connections.length; j++) {
+        emit(
+          deps,
+          `[plaid-revoke] user_id=${userId} item_id=${connections[j].item_id} ` +
+            `deferred=time_budget`,
+          "warn"
+        );
+      }
+      deferred = connections.length - i;
+      break;
+    }
+    outcomes.push(await revokeAndDeleteConnection(userId, connections[i], deps));
   }
 
   return {
     outcomes,
-    remaining: outcomes.filter((outcome) => !outcome.ok).length,
+    remaining: outcomes.filter((outcome) => !outcome.ok).length + deferred,
+    deferred,
     sawCryptoConfigFailure: outcomes.some(
-      (outcome) => outcome.failure === "crypto_config"
+      (outcome) => !outcome.ok && outcome.failure === "crypto_config"
     ),
   };
 }
@@ -638,9 +725,13 @@ export function liveRevocationDeps(): RevocationDeps {
   return {
     decrypt: (stored, userId) => decryptPlaidAccessToken(stored, userId),
     itemRemove: async (accessToken) => {
-      const response = await plaidClient.itemRemove({
-        access_token: accessToken,
-      });
+      // No time limit, stated per call so the client's default does not apply:
+      // a revocation cut short on our side may still complete at Plaid, and
+      // the caller would then keep a row for an Item that no longer exists.
+      const response = await plaidClient.itemRemove(
+        { access_token: accessToken },
+        { timeout: 0 }
+      );
       // Read as if request_id were optional, though the SDK types it as required
       // and as the only field on the response. A response that does not match
       // its own type is not a reason to report a completed revocation as a

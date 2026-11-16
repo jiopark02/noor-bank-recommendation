@@ -107,8 +107,15 @@ const configuration = new Configuration({
   },
 });
 
-// PLAID-SEC1: every Plaid call goes through this axios instance, whose only job
-// is to strip credentials off rejected requests before they reach any caller.
+/**
+ * Default per-call limit, in milliseconds, for every Plaid call that does not
+ * set its own. The same value as the finance adapter's per-call limit; an
+ * unvalidated default.
+ */
+export const PLAID_HTTP_DEFAULT_TIMEOUT_MS = 10_000;
+
+// PLAID-SEC1: every Plaid call goes through this axios instance, whose job is
+// to strip credentials off rejected requests before they reach any caller.
 //
 // The Configuration above injects PLAID-CLIENT-ID / PLAID-SECRET as request
 // headers, so an AxiosError carries them on `error.config.headers` and carries
@@ -117,10 +124,32 @@ const configuration = new Configuration({
 // every `catch` in the app receives an already-safe error, instead of the
 // safety depending on each log site remembering to be careful.
 //
-// create() is deliberately called with NO config object: an empty create()
-// inherits the global axios defaults, so timeout, transformRequest/Response and
+// create() receives two settings, maxRedirects and timeout. Everything else is
+// merged from the global axios defaults, so transformRequest/Response and
 // validateStatus stay exactly as they were when the SDK used the global axios.
-const plaidHttp = axios.create();
+//
+// maxRedirects: 0 makes axios's Node adapter send through the built-in
+// http/https modules instead of follow-redirects, so a 3xx answer is never
+// followed. Following one would resend the PLAID-CLIENT-ID / PLAID-SECRET
+// headers (which follow-redirects does not strip on a cross-origin hop) and,
+// on a 307/308, the request body with the user's access_token, to whatever
+// host the Location header names. A 3xx instead fails validateStatus, rejects
+// as an AxiosError, and goes through the same redacting interceptor below
+// into the callers' existing Plaid error handling.
+//
+// timeout is the default for every call that does not set its own. Without it
+// a Plaid call that never answers holds the function until the platform ends
+// it. A call that must not be cut short passes its own `timeout` as a
+// per-call option, which axios applies over this default; `{ timeout: 0 }`
+// means no limit. On this transport the value bounds the wait for the
+// response headers by wall clock, and after that each idle gap while the body
+// arrives, not the body's total time. A call that runs out rejects as an
+// AxiosError with code ECONNABORTED and no response, through the same
+// redacting interceptor.
+const plaidHttp = axios.create({
+  maxRedirects: 0,
+  timeout: PLAID_HTTP_DEFAULT_TIMEOUT_MS,
+});
 
 // One response interceptor, error path only.
 // - The success handler is the identity function: successful responses pass
@@ -141,7 +170,8 @@ plaidHttp.interceptors.response.use(
  * the third argument as well. The redaction guarantee above is a property of
  * THIS instance, not of the SDK: a client built as `new PlaidApi(configuration)`
  * falls back to the global axios, has no interceptor, and will leak the secret
- * and the user's access_token into the logs on its first failed call.
+ * and the user's access_token into the logs on its first failed call. It also
+ * has no default time limit and no redirect refusal.
  *
  * ⚠️ The third constructor parameter is plaid's public API
  * (`BaseAPI(configuration?, basePath?, axios?)`) and every generated method
@@ -164,6 +194,14 @@ export const PLAID_PRODUCTS: Products[] = [
   // Products.Identity, // Requires additional Plaid dashboard configuration
   //Products.Liabilities,
 ];
+
+/**
+ * Days of transaction history requested when a new Item is created. Plaid fixes
+ * this when Transactions is added to an Item and it cannot be changed later;
+ * update mode carries no such field, so existing Items keep what they were
+ * created with.
+ */
+export const PLAID_TRANSACTIONS_DAYS_REQUESTED = 730;
 
 // Country codes we support
 export const PLAID_COUNTRY_CODES: CountryCode[] = [CountryCode.Us];
@@ -198,25 +236,6 @@ export interface PlaidAccount {
   created_at: string;
 }
 
-export interface PlaidTransaction {
-  id: string;
-  user_id: string;
-  account_id: string;
-  transaction_id: string;
-  amount: number;
-  iso_currency_code: string;
-  date: string;
-  datetime: string | null;
-  name: string;
-  merchant_name: string | null;
-  category: string[];
-  category_id: string | null;
-  pending: boolean;
-  payment_channel: "online" | "in store" | "other";
-  logo_url: string | null;
-  created_at: string;
-}
-
 export interface Subscription {
   id: string;
   user_id: string;
@@ -229,126 +248,4 @@ export interface Subscription {
   next_charge: string | null;
   is_active: boolean;
   created_at: string;
-}
-
-// Category mappings for better display
-export const CATEGORY_ICONS: Record<string, string> = {
-  "Food and Drink": "🍔",
-  Shops: "🛍️",
-  Travel: "✈️",
-  Transfer: "💸",
-  Payment: "💳",
-  Recreation: "🎮",
-  Service: "🔧",
-  Community: "🏘️",
-  Healthcare: "🏥",
-  "Bank Fees": "🏦",
-  Interest: "📈",
-  Tax: "📋",
-  Rent: "🏠",
-  Utilities: "💡",
-  Subscription: "📱",
-};
-
-export const CATEGORY_COLORS: Record<string, string> = {
-  "Food and Drink": "#F97316",
-  Shops: "#8B5CF6",
-  Travel: "#3B82F6",
-  Transfer: "#6B7280",
-  Payment: "#10B981",
-  Recreation: "#EC4899",
-  Service: "#F59E0B",
-  Community: "#14B8A6",
-  Healthcare: "#EF4444",
-  "Bank Fees": "#64748B",
-  Interest: "#22C55E",
-  Tax: "#DC2626",
-  Rent: "#7C3AED",
-  Utilities: "#FBBF24",
-  Subscription: "#06B6D4",
-};
-
-// Known subscription merchants
-export const SUBSCRIPTION_MERCHANTS = [
-  { pattern: /netflix/i, name: "Netflix", category: "Entertainment" },
-  { pattern: /spotify/i, name: "Spotify", category: "Entertainment" },
-  {
-    pattern: /apple.*music|itunes/i,
-    name: "Apple Music",
-    category: "Entertainment",
-  },
-  {
-    pattern: /amazon prime|amzn.*prime/i,
-    name: "Amazon Prime",
-    category: "Shopping",
-  },
-  { pattern: /hulu/i, name: "Hulu", category: "Entertainment" },
-  { pattern: /disney/i, name: "Disney+", category: "Entertainment" },
-  { pattern: /hbo.*max/i, name: "HBO Max", category: "Entertainment" },
-  {
-    pattern: /youtube.*premium/i,
-    name: "YouTube Premium",
-    category: "Entertainment",
-  },
-  {
-    pattern: /gym|fitness|planet.*fitness|equinox/i,
-    name: "Gym",
-    category: "Health",
-  },
-  { pattern: /adobe/i, name: "Adobe", category: "Software" },
-  {
-    pattern: /microsoft.*365|office.*365/i,
-    name: "Microsoft 365",
-    category: "Software",
-  },
-  { pattern: /dropbox/i, name: "Dropbox", category: "Software" },
-  {
-    pattern: /google.*storage|google.*one/i,
-    name: "Google One",
-    category: "Software",
-  },
-  { pattern: /icloud/i, name: "iCloud", category: "Software" },
-  {
-    pattern: /at&t|verizon|t-mobile|sprint/i,
-    name: "Phone",
-    category: "Utilities",
-  },
-  {
-    pattern: /xfinity|comcast|spectrum/i,
-    name: "Internet",
-    category: "Utilities",
-  },
-  { pattern: /pg&e|edison|electric/i, name: "Electric", category: "Utilities" },
-];
-
-// Detect if a transaction is a subscription
-export function detectSubscription(transaction: PlaidTransaction): {
-  isSubscription: boolean;
-  merchant?: string;
-  category?: string;
-} {
-  const name = transaction.merchant_name || transaction.name;
-
-  for (const sub of SUBSCRIPTION_MERCHANTS) {
-    if (sub.pattern.test(name)) {
-      return {
-        isSubscription: true,
-        merchant: sub.name,
-        category: sub.category,
-      };
-    }
-  }
-
-  return { isSubscription: false };
-}
-
-// Format currency
-export function formatCurrency(
-  amount: number,
-  currency: string = "USD"
-): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-  }).format(amount);
 }

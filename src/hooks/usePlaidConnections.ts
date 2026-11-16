@@ -3,6 +3,11 @@ import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 import { clearPlaidLocalState } from "@/lib/validation";
+import { createRequestGate } from "@/lib/bankSummaryView";
+import {
+  BANK_SCREEN_FETCH_TIMEOUT_MS,
+  withFetchTimeout,
+} from "@/lib/screenFetchTimeout";
 
 export interface PlaidConnection {
   itemId: string;
@@ -36,12 +41,20 @@ export function usePlaidConnections(userId: string | null) {
   // Starts true so consumers don't flash a "not connected" state (and prompt a
   // re-link) before the first fetch resolves.
   const [isLoading, setIsLoading] = useState(true);
+  // Set only by fetchConnections: non-null means the connection list could
+  // not be read. A failed disconnect or re-link is reported to its caller.
   const [error, setError] = useState<string | null>(null);
+
+  // Only the latest list read writes state. Each read now ends at the latest
+  // when the screen's limit runs out, so without this an earlier read that
+  // timed out could mark the list failed after a later read had loaded it.
+  const [requestGate] = useState(createRequestGate);
 
   // Fetch existing connections from the DB (authoritative source), not
   // localStorage — so connection state survives a localStorage purge
   // (logout / shared-device cleanup / a new device).
   const fetchConnections = useCallback(async () => {
+    const token = requestGate.begin();
     if (!userId) {
       setConnections([]);
       setError(null);
@@ -53,13 +66,24 @@ export function usePlaidConnections(userId: string | null) {
     setError(null);
 
     try {
-      const response = await fetch("/api/plaid/connections", {
-        method: "GET",
-        headers: await getSupabaseBearerHeaders(),
-      });
-
-      const payload = asPlainObject(await response.json());
-      if (!response.ok) {
+      const headers = await getSupabaseBearerHeaders();
+      // The request and its body read run under the screen's limit, so a
+      // list that never answers ends in the error state, not on loading.
+      const { ok, payload } = await withFetchTimeout(
+        BANK_SCREEN_FETCH_TIMEOUT_MS,
+        async (signal) => {
+          const response = await fetch("/api/plaid/connections", {
+            method: "GET",
+            headers,
+            signal,
+          });
+          return {
+            ok: response.ok,
+            payload: asPlainObject(await response.json()),
+          };
+        }
+      );
+      if (!ok) {
         throw new Error(
           readErrorMessage(payload) || "Failed to load bank connections"
         );
@@ -68,8 +92,10 @@ export function usePlaidConnections(userId: string | null) {
       const list = Array.isArray(payload.connections)
         ? (payload.connections as PlaidConnection[])
         : [];
+      if (!requestGate.isCurrent(token)) return;
       setConnections(list);
     } catch (err) {
+      if (!requestGate.isCurrent(token)) return;
       // Distinguish a transient load failure from "no connections": set an
       // error and DO NOT collapse to an empty/disconnected state, so callers
       // don't surface the connect card (which would push the user to re-link and
@@ -79,9 +105,9 @@ export function usePlaidConnections(userId: string | null) {
         err instanceof Error ? err.message : "Failed to load bank connections"
       );
     } finally {
-      setIsLoading(false);
+      if (requestGate.isCurrent(token)) setIsLoading(false);
     }
-  }, [userId]);
+  }, [userId, requestGate]);
 
   // Load connections on mount
   useEffect(() => {
@@ -151,42 +177,51 @@ export function usePlaidConnections(userId: string | null) {
     [userId, fetchConnections]
   );
 
-  // Relink a broken connection
+  // Ask for a link token to repair one connection's login.
+  //
+  // A failure is THROWN TO THE CALLER, never written into the shared `error`,
+  // for the same reason as disconnect: `error` means "loading the connection
+  // list failed", and the money screen reads it to mark every figure as
+  // unknown. A failed re-link request concerns one bank, and the caller shows
+  // it next to that bank.
   const relink = useCallback(
-    async (itemId: string) => {
+    async (itemId: string): Promise<string> => {
       if (!userId) {
-        setError("Please log in first");
-        return;
+        throw new Error("Please log in first");
       }
 
-      try {
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
+      const plaidHeaders = buildJsonAuthorizedHeaders(
+        await getSupabaseBearerHeaders()
+      );
+      // The request and its body read run under the screen's limit, so a
+      // re-link request that never answers ends as a failed re-link for that
+      // bank, not a button left on "Preparing re-link...".
+      const { ok, payload } = await withFetchTimeout(
+        BANK_SCREEN_FETCH_TIMEOUT_MS,
+        async (signal) => {
+          const response = await fetch("/api/plaid/relink", {
+            method: "POST",
+            headers: plaidHeaders,
+            body: JSON.stringify({ itemId }),
+            signal,
+          });
+          return {
+            ok: response.ok,
+            payload: asPlainObject(await response.json()),
+          };
+        }
+      );
+      if (!ok) {
+        throw new Error(
+          readErrorMessage(payload) || "Failed to create relink token"
         );
-        const response = await fetch("/api/plaid/relink", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({ itemId }),
-        });
-
-        const payload = asPlainObject(await response.json());
-        if (!response.ok) {
-          throw new Error(
-            readErrorMessage(payload) || "Failed to create relink token"
-          );
-        }
-
-        const linkToken = readString(payload, "linkToken");
-        if (!linkToken) {
-          throw new Error("Failed to create relink token");
-        }
-        return linkToken;
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to relink bank";
-        setError(message);
-        throw err;
       }
+
+      const linkToken = readString(payload, "linkToken");
+      if (!linkToken) {
+        throw new Error("Failed to create relink token");
+      }
+      return linkToken;
     },
     [userId]
   );

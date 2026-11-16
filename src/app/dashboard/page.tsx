@@ -10,36 +10,45 @@ import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
 import {
   DASHBOARD_SESSION_RETRY,
   decideDashboardMount,
+  decideLocalIdentity,
   retryUntilAnswered,
   shouldRetrySessionRead,
   waitMs,
 } from "@/lib/sessionFlow";
-import { clearLocalAuthState, clearPlaidLocalState } from "@/lib/validation";
+import {
+  clearLocalAuthState,
+  clearPlaidLocalState,
+  replaceLocalIdentity,
+} from "@/lib/validation";
 import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
+import {
+  BANK_SCREEN_FETCH_TIMEOUT_MS,
+  withFetchTimeout,
+} from "@/lib/screenFetchTimeout";
+import {
+  DISPLAY_WINDOW_LABEL,
+  browserTimeZone,
+  creditUsedCents,
+  decideBankView,
+  describeBankAction,
+  formatCents,
+  formatCentsOrDash,
+  HIDDEN_SAFE_TO_SPEND_ANSWER,
+  formatMonthlyOrUnknown,
+  formatSpending,
+  missingBanksNote,
+  parseFinanceSummaryResponse,
+  safeToSpendHiddenReason,
+  safeToSpendLines,
+  spendableCashCents,
+  spendableCashTile,
+  summaryPeriodNote,
+  NO_CASH_ACCOUNT_HINT,
+  NO_CASH_ACCOUNT_LABEL,
+  type MoneyDisplayState,
+  type ScreenSummaryResponse,
+} from "@/lib/bankSummaryView";
 
-interface StoredBudget {
-  total?: number;
-  spent?: number;
-}
-
-interface StoredPlaidAccount {
-  type?: string;
-  current_balance?: number;
-}
-
-interface StoredPlaidTransaction {
-  amount?: number;
-  category?: string[];
-  name?: string;
-}
-
-interface StoredPlaidSubscription {
-  name?: string;
-  amount?: number;
-  monthly_amount?: number;
-}
-
-const STORAGE_KEY_BUDGET = "noor_budget";
 const CONNECTIONS_LOAD_FAILED = "Failed to load bank connections";
 const BANK_DATA_LOAD_FAILED =
   "We couldn't load your bank data right now. Please try again in a moment.";
@@ -77,23 +86,10 @@ const QUICK_PROMPTS = [
   "Am I on track this month?",
 ];
 
-function formatMoney(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(value);
-}
 
-// What the money figures can honestly show right now:
-//   ready       - the server answered for a connected bank; show its numbers.
-//   none        - no active connection; the zeros are true.
-//   unavailable - the last read failed; we do not know the numbers.
-//   loading     - connected, no answer yet.
-// Only "ready" and "none" may render a dollar amount. An unknown figure must
-// not look like a real $0.
-type MoneyDisplayState = "ready" | "none" | "unavailable" | "loading";
-
+// What the money figures can honestly show right now is decided by
+// decideBankView (bankSummaryView.ts). Only "ready" and "none" may render a
+// dollar amount. An unknown figure must not look like a real $0.
 function MoneyFigure({
   state,
   children,
@@ -130,21 +126,17 @@ export default function HomePage() {
   // The session read never answered, even after the retries. Nothing is known
   // about the session, so the page waits on the user instead of signing out.
   const [sessionDelayed, setSessionDelayed] = useState(false);
-  // True only once the accounts and transactions routes have both answered
-  // successfully in this visit. Nothing else may make the figures "ready".
+  // True only once the summary route has answered successfully in this visit.
+  // Nothing else may make the figures "ready".
   const [hasMoneyData, setHasMoneyData] = useState(false);
   const [moneyError, setMoneyError] = useState<string | null>(null);
   const [hasBankConnection, setHasBankConnection] = useState(false);
   const [userName, setUserName] = useState("there");
   const [promptDraft, setPromptDraft] = useState("");
-  const [budget, setBudget] = useState<StoredBudget>({ total: 0, spent: 0 });
-  const [accounts, setAccounts] = useState<StoredPlaidAccount[]>([]);
-  const [transactions, setTransactions] = useState<StoredPlaidTransaction[]>(
-    []
-  );
-  const [subscriptions, setSubscriptions] = useState<StoredPlaidSubscription[]>(
-    []
-  );
+  // The summary route's answer for this visit. Every amount on this screen
+  // comes from it; the screen only formats. Typed by the fields bankSummaryView
+  // checks, so a field read here that is not checked there is a type error.
+  const [bank, setBank] = useState<ScreenSummaryResponse | null>(null);
 
   useEffect(() => {
     // Bank data is never kept in browser storage; every figure comes from the
@@ -170,21 +162,6 @@ export default function HomePage() {
       }
     } catch {
       // Ignore profile parse errors.
-    }
-
-    try {
-      const budgetRaw = localStorage.getItem(STORAGE_KEY_BUDGET);
-      if (budgetRaw) {
-        const parsed = JSON.parse(budgetRaw) as StoredBudget;
-        if (typeof parsed.total === "number" && parsed.total > 0) {
-          setBudget({
-            total: parsed.total,
-            spent: typeof parsed.spent === "number" ? parsed.spent : 0,
-          });
-        }
-      }
-    } catch {
-      // Ignore budget parse errors.
     }
 
     // Determine bank-connection state from the DB (authoritative source), not
@@ -222,25 +199,46 @@ export default function HomePage() {
           setSessionDelayed(true);
           return;
         }
-
-        const res = await fetchOrFail(
-          "/api/plaid/connections",
-          {
-            method: "GET",
-            headers: await getSupabaseBearerHeaders(),
-          },
-          CONNECTIONS_LOAD_FAILED
-        );
-        if (!res.ok) {
-          const data = asPlainObject(await res.json().catch(() => ({})));
-          throw new Error(
-            readErrorMessage(data) || CONNECTIONS_LOAD_FAILED
-          );
+        // A cached id left by another account on this device is replaced
+        // with the session's user, not acted on: the session decides who is
+        // signed in.
+        if (
+          read.status === "session" &&
+          decideLocalIdentity(storedUserId, read.session.user.id) === "replace"
+        ) {
+          replaceLocalIdentity(read.session.user.id);
+          setUserId(read.session.user.id);
+          setUserName("there");
         }
-        // A 200 whose body does not parse is a failed read, not an empty list,
-        // and the parser's own wording is not for the screen.
-        const payload = asPlainObject(
-          await readJsonOrFail(res, CONNECTIONS_LOAD_FAILED)
+
+        const connectionsHeaders = await getSupabaseBearerHeaders();
+        // The request and its body read run under the screen's limit: an
+        // answer that never comes ends in the error state below, not on the
+        // loading state.
+        const payload = await withFetchTimeout(
+          BANK_SCREEN_FETCH_TIMEOUT_MS,
+          async (signal) => {
+            const res = await fetchOrFail(
+              "/api/plaid/connections",
+              {
+                method: "GET",
+                headers: connectionsHeaders,
+                signal,
+              },
+              CONNECTIONS_LOAD_FAILED
+            );
+            if (!res.ok) {
+              const data = asPlainObject(await res.json().catch(() => ({})));
+              throw new Error(
+                readErrorMessage(data) || CONNECTIONS_LOAD_FAILED
+              );
+            }
+            // A 200 whose body does not parse is a failed read, not an empty
+            // list, and the parser's own wording is not for the screen.
+            return asPlainObject(
+              await readJsonOrFail(res, CONNECTIONS_LOAD_FAILED)
+            );
+          }
         );
         if (cancelled) return;
 
@@ -260,9 +258,7 @@ export default function HomePage() {
         setHasBankConnection(hasActiveConnection);
 
         if (!hasActiveConnection) {
-          setAccounts([]);
-          setTransactions([]);
-          setSubscriptions([]);
+          setBank(null);
         }
       } catch (err) {
         if (cancelled) return;
@@ -284,101 +280,66 @@ export default function HomePage() {
 
   const fetchLiveMoneyData = useCallback(async () => {
     if (!userId || !hasBankConnection) {
-      setAccounts([]);
-      setTransactions([]);
-      setSubscriptions([]);
+      setBank(null);
       return;
     }
 
+    // Drop the previous answer first, so nothing from an earlier load is drawn
+    // while this one runs or after it fails.
     setHasMoneyData(false);
     setMoneyError(null);
+    setBank(null);
 
     try {
-      const endDate = new Date().toISOString().split("T")[0];
-      const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0];
-
       const plaidHeaders = buildJsonAuthorizedHeaders(
         await getSupabaseBearerHeaders()
       );
 
-      const [accountsRes, transactionsRes] = await Promise.all([
-        fetchOrFail(
-          "/api/plaid/accounts",
+      // The request and its body read run under the screen's limit, so a
+      // summary that never answers ends as a failed load, not on the loading
+      // state.
+      await withFetchTimeout(BANK_SCREEN_FETCH_TIMEOUT_MS, async (signal) => {
+        const summaryRes = await fetchOrFail(
+          "/api/finance/summary",
           {
             method: "POST",
             headers: plaidHeaders,
-            body: JSON.stringify({}),
+            body: JSON.stringify({ timeZone: browserTimeZone() }),
+            signal,
           },
           BANK_DATA_LOAD_FAILED
-        ),
-        fetchOrFail(
-          "/api/plaid/transactions",
-          {
-            method: "POST",
-            headers: plaidHeaders,
-            body: JSON.stringify({ startDate, endDate }),
-          },
-          BANK_DATA_LOAD_FAILED
-        ),
-      ]);
-
-      if (!accountsRes.ok) {
-        const data = asPlainObject(
-          await accountsRes.json().catch(() => ({}))
         );
-        throw new Error(readErrorMessage(data) || "Failed to fetch accounts");
-      }
 
-      if (!transactionsRes.ok) {
-        const data = asPlainObject(
-          await transactionsRes.json().catch(() => ({}))
+        if (!summaryRes.ok) {
+          const data = asPlainObject(await summaryRes.json().catch(() => ({})));
+          throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
+        }
+
+        // A 2xx body of the wrong shape is a failed read, never an empty one:
+        // read as empty it would show $0.00 as if it were the user's real
+        // figure.
+        const parsed = parseFinanceSummaryResponse(
+          await readJsonOrFail(summaryRes, BANK_DATA_LOAD_FAILED)
         );
-        throw new Error(
-          readErrorMessage(data) || "Failed to fetch transactions"
-        );
-      }
+        if (parsed === null) {
+          throw new Error(BANK_DATA_LOAD_FAILED);
+        }
 
-      const accountsData = asPlainObject(
-        await readJsonOrFail(accountsRes, BANK_DATA_LOAD_FAILED)
-      );
-      const transactionsData = asPlainObject(
-        await readJsonOrFail(transactionsRes, BANK_DATA_LOAD_FAILED)
-      );
-
-      // Both routes always send these as arrays, empty when there is nothing
-      // to show. Anything else is a failed read: read as empty it would show
-      // $0.00 as if it were the user's real figure. All three are checked
-      // before any state is set, so a partial body never becomes "ready".
-      if (!Array.isArray(accountsData.accounts)) {
-        throw new Error(BANK_DATA_LOAD_FAILED);
-      }
-      if (!Array.isArray(transactionsData.transactions)) {
-        throw new Error(BANK_DATA_LOAD_FAILED);
-      }
-      if (!Array.isArray(transactionsData.subscriptions)) {
-        throw new Error(BANK_DATA_LOAD_FAILED);
-      }
-
-      setAccounts(accountsData.accounts);
-      setTransactions(transactionsData.transactions);
-      setSubscriptions(transactionsData.subscriptions);
-      setHasMoneyData(true);
+        setBank(parsed);
+        setHasMoneyData(true);
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to sync bank data";
 
       if (/no active bank connection/i.test(message)) {
-        // Not a failed read: the routes answer this only after reading the
+        // Not a failed read: the route answers this only after reading the
         // connections and finding none active (a failed read is a generic
         // 500). Show the no-connection state, not an error, and clear only
         // what this screen holds in memory.
         setMoneyError(null);
         setHasBankConnection(false);
-        setAccounts([]);
-        setTransactions([]);
-        setSubscriptions([]);
+        setBank(null);
       } else {
         setMoneyError(message);
       }
@@ -391,140 +352,51 @@ export default function HomePage() {
     }
   }, [isLoading, fetchLiveMoneyData]);
 
-  const metrics = useMemo(() => {
-    const cash = accounts
-      .filter(
-        (account) => account.type === "checking" || account.type === "savings"
-      )
-      .reduce((sum, account) => sum + (account.current_balance || 0), 0);
+  const view = decideBankView({
+    hasActiveConnection: hasBankConnection,
+    fetchState: moneyError ? "failed" : hasMoneyData ? "loaded" : "loading",
+    response: bank,
+  });
+  const moneyDisplay: MoneyDisplayState = view.figures;
+  const summary = view.figures === "ready" && bank ? bank.summary : null;
+  const missingNote = missingBanksNote(view.missingFrom);
+  const periodNote = summaryPeriodNote(view, bank);
 
-    const creditUsed = accounts
-      .filter((account) => account.type === "credit")
-      .reduce((sum, account) => sum + (account.current_balance || 0), 0);
-
-    const spending = transactions
-      .filter((txn) => (txn.amount || 0) > 0)
-      .reduce((sum, txn) => sum + (txn.amount || 0), 0);
-
-    const income = transactions
-      .filter((txn) => (txn.amount || 0) < 0)
-      .reduce((sum, txn) => sum + Math.abs(txn.amount || 0), 0);
-
-    const netWorth = cash - creditUsed;
-    const totalBudget = budget.total && budget.total > 0 ? budget.total : 0;
-    const budgetSpent =
-      typeof budget.spent === "number" && budget.spent > 0
-        ? budget.spent
-        : spending;
-    const budgetRemaining =
-      totalBudget > 0 ? Math.max(0, totalBudget - budgetSpent) : 0;
-
-    const categoryMap: Record<string, number> = {};
-    transactions
-      .filter((txn) => (txn.amount || 0) > 0)
-      .forEach((txn) => {
-        const category = txn.category?.[0] || "Other";
-        categoryMap[category] =
-          (categoryMap[category] || 0) + (txn.amount || 0);
-      });
-
-    const categorySpending = Object.entries(categoryMap)
-      .map(([name, amount]) => ({ name, amount }))
-      .sort((a, b) => b.amount - a.amount);
-
-    const inferredSubscriptions = transactions.filter((txn) => {
-      const amount = txn.amount || 0;
-      if (amount <= 0) return false;
-
-      const categoryText = (txn.category || []).join(" ").toLowerCase();
-      const nameText = (txn.name || "").toLowerCase();
-      return (
-        categoryText.includes("subscription") ||
-        /netflix|spotify|apple|prime|adobe|hulu|youtube|google/i.test(nameText)
-      );
-    });
-
-    const normalizedSubscriptions =
-      subscriptions.length > 0
-        ? subscriptions
-            .map((sub) => ({
-              name: sub.name || "Subscription",
-              amount:
-                typeof sub.monthly_amount === "number"
-                  ? sub.monthly_amount
-                  : sub.amount || 0,
-            }))
-            .filter((sub) => sub.amount > 0)
-        : inferredSubscriptions.map((txn) => ({
-            name: txn.name || "Subscription",
-            amount: txn.amount || 0,
-          }));
-
-    const totalSubscriptions = normalizedSubscriptions.reduce(
-      (sum, sub) => sum + sub.amount,
-      0
-    );
-
-    return {
-      cash,
-      creditUsed,
-      netWorth,
-      spending,
-      income,
-      budgetRemaining,
-      categorySpending,
-      subscriptions: normalizedSubscriptions,
-      totalSubscriptions,
-    };
-  }, [accounts, transactions, budget, subscriptions]);
-
-  const displayMetrics = useMemo(() => {
-    if (!hasBankConnection) {
-      return {
-        cash: 0,
-        creditUsed: 0,
-        netWorth: 0,
-        spending: 0,
-        income: 0,
-        budgetRemaining: 0,
-        categorySpending: [] as Array<{ name: string; amount: number }>,
-        subscriptions: [] as Array<{ name: string; amount: number }>,
-        totalSubscriptions: 0,
-      };
-    }
-
-    return metrics;
-  }, [hasBankConnection, metrics]);
-
-  const moneyDisplay: MoneyDisplayState =
-    hasBankConnection && hasMoneyData
-      ? "ready"
-      : !hasBankConnection && !moneyError
-        ? "none"
-        : moneyError
-          ? "unavailable"
-          : "loading";
+  // Engine figures as they arrived. With no connection the zeros are true.
+  // The spendable-cash amount is null (a dash) when safe-to-spend was not
+  // computed; with no checking account the tile names that instead.
+  const cashTile = spendableCashTile(summary);
+  const noCashAccount = cashTile.kind === "no_cash_account";
+  const figures = {
+    cash: spendableCashCents(cashTile),
+    creditUsed: summary ? creditUsedCents(summary) : 0,
+    income: summary ? summary.cashFlow.incomeCents : 0,
+    spending: summary ? summary.cashFlow.spendingNetCents : 0,
+    recurringMonthly: summary ? summary.recurring.totalMonthlyCents : 0,
+    recurringItems: summary ? summary.recurring.items : [],
+  };
 
   const aiSummary = useMemo(() => {
+    const question = "How much can I safely spend this month?";
+
     // Keyed on the display state rather than an in-flight flag: between the
     // connection check and the start of the sync there is a render with no
     // request running, and it must not read as "connected, no history yet".
     if (moneyDisplay === "loading") {
       return {
-        opening:
-          "Syncing your Plaid data now. I will calculate your safe cap in a moment.",
-        question: "Can you show me a safe spending cap for this week?",
+        opening: "Syncing your bank data now. I'll have your numbers in a moment.",
+        question,
         answer:
-          "I am updating your balances and recent transactions before giving a number.",
+          "I'm updating your balances and recent transactions before giving a number.",
       };
     }
 
     if (moneyError) {
       return {
-        opening: "I could not read your latest Plaid data due to a sync error.",
-        question: "Can you show me a safe spending cap for this week?",
-        // A failed read, not a broken connection: this screen does not read
-        // the routes' re-link signal, so it must not tell the user to reconnect.
+        opening: "I couldn't read your latest bank data.",
+        question,
+        // A failed read, not a broken connection: re-link advice comes only
+        // from a connection status in the summary, never from a failed load.
         answer:
           "I couldn't load your bank data right now. Try refreshing in a moment.",
       };
@@ -533,68 +405,57 @@ export default function HomePage() {
     if (!hasBankConnection) {
       return {
         opening:
-          "Connect your bank account in Money page and I will calculate your spending cap from live Plaid data.",
-        question: "Can you show me a safe spending cap for this week?",
-        answer:
-          "I need a connected account before I can estimate a safe weekly cap.",
+          "Connect your bank account on the Money page and I'll work out what you can spend from your real balances.",
+        question,
+        answer: "I need a connected account before I can give you a number.",
       };
     }
 
-    if (transactions.length === 0 && accounts.length === 0) {
+    const fixes = view.actions.map(describeBankAction).join(" ");
+
+    if (!summary) {
       return {
-        opening:
-          "Your bank is connected, but there is not enough transaction history yet to compute a reliable cap.",
-        question: "Can you show me a safe spending cap for this week?",
-        answer:
-          "Once Plaid returns recent activity, I will calculate this using your real cash flow.",
+        opening: "I couldn't read any of your banks just now.",
+        question,
+        answer: fixes || "Try refreshing in a moment.",
       };
     }
 
-    const now = new Date();
-    const daysInMonth = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0
-    ).getDate();
-    const dayOfMonth = now.getDate();
-    const daysRemaining = Math.max(1, daysInMonth - dayOfMonth + 1);
-    const weeksRemaining = Math.max(1, Math.ceil(daysRemaining / 7));
+    const hidden = safeToSpendHiddenReason(view, summary);
+    if (!view.showSafeToSpend) {
+      if (hidden === "banks_not_read") {
+        return {
+          opening: `Good day, ${userName}. Not every bank synced, so I'm not giving a spending number yet: it could miss a card balance.`,
+          question,
+          answer: `${fixes} Once that's fixed I'll include every account.`,
+        };
+      }
+      return {
+        opening: `Good day, ${userName}.`,
+        question,
+        answer: HIDDEN_SAFE_TO_SPEND_ANSWER[hidden ?? "other"],
+      };
+    }
 
-    const averageDailySpending = metrics.spending / 30;
-    const projectedRemainingSpend = averageDailySpending * daysRemaining;
-    const subscriptionReserve = metrics.totalSubscriptions;
-    const safetyReserve = Math.max(150, metrics.cash * 0.2);
-    const spendableThisMonth = Math.max(
-      0,
-      metrics.cash -
-        projectedRemainingSpend -
-        subscriptionReserve -
-        safetyReserve
-    );
-    const weeklyCap = Math.max(0, spendableThisMonth / weeksRemaining);
+    const s = summary.safeToSpend;
+    if (hidden !== null || s.horizon === null || s.totals === null) {
+      return {
+        opening: `Good day, ${userName}.`,
+        question,
+        answer:
+          HIDDEN_SAFE_TO_SPEND_ANSWER[
+            hidden === null || hidden === "banks_not_read" ? "other" : hidden
+          ],
+      };
+    }
 
+    const lines = safeToSpendLines(s.amountCents ?? 0, s.horizon);
     return {
-      opening: `Good day, ${userName}. Based on your balances and recent spending, you can safely spend ${formatMoney(
-        spendableThisMonth
-      )} for the rest of this month while keeping a reserve of ${formatMoney(
-        safetyReserve
-      )}.`,
-      question: "Can you show me a safe spending cap for this week?",
-      answer: `Using your recent run rate (${formatMoney(
-        averageDailySpending
-      )}/day) and ${daysRemaining} day(s) left this month, a safe weekly cap is about ${formatMoney(
-        weeklyCap
-      )}.`,
+      opening: `Good day, ${userName}. ${lines.statement}`,
+      question,
+      answer: lines.answer,
     };
-  }, [
-    moneyDisplay,
-    moneyError,
-    hasBankConnection,
-    transactions,
-    accounts,
-    metrics,
-    userName,
-  ]);
+  }, [moneyDisplay, moneyError, hasBankConnection, summary, view, userName]);
 
   const accentColor = "#111111";
   const accentTextColor = "#FFFFFF";
@@ -791,7 +652,7 @@ export default function HomePage() {
 
             {moneyDisplay === "unavailable" && (
               <div className="mb-4 rounded-xl border border-red-200 bg-rose-50 px-4 py-3 text-sm text-red-800">
-                {moneyError}
+                {moneyError ?? "We couldn't read any of your banks just now."}
               </div>
             )}
 
@@ -801,36 +662,76 @@ export default function HomePage() {
               </div>
             )}
 
+            {view.actions.length > 0 && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-2">
+                {view.actions.map((action) => (
+                  <div
+                    key={action.itemId}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <p>{describeBankAction(action)}</p>
+                    {action.kind === "relink" && (
+                      <Link
+                        href="/money"
+                        className="shrink-0 rounded-lg bg-black px-3 py-1.5 text-xs font-medium text-white"
+                      >
+                        Fix connection
+                      </Link>
+                    )}
+                    {action.kind === "retry" && (
+                      <button
+                        type="button"
+                        onClick={() => fetchLiveMoneyData()}
+                        className="shrink-0 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium"
+                      >
+                        Try again
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="noor-card p-6 mb-5">
-              <p className="text-gray-500 text-sm mb-1">Net Worth</p>
-              <p className="text-4xl font-semibold text-black mb-4">
-                <MoneyFigure state={moneyDisplay}>
-                  {formatMoney(displayMetrics.netWorth)}
-                </MoneyFigure>
-              </p>
+              {missingNote && (
+                <p className="text-xs text-amber-800 mb-3">{missingNote}</p>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-gray-500 text-xs">Cash</p>
+                  <p className="text-gray-500 text-xs">Spendable cash</p>
                   <p
-                    className="text-lg font-medium"
+                    className={
+                      noCashAccount && moneyDisplay === "ready"
+                        ? "text-base font-semibold"
+                        : "text-2xl font-semibold"
+                    }
                     style={{ color: accentColor }}
                   >
                     <MoneyFigure state={moneyDisplay}>
-                      {formatMoney(displayMetrics.cash)}
+                      {noCashAccount ? NO_CASH_ACCOUNT_LABEL : formatCentsOrDash(figures.cash)}
                     </MoneyFigure>
                   </p>
+                  {noCashAccount && moneyDisplay === "ready" && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {NO_CASH_ACCOUNT_HINT}
+                    </p>
+                  )}
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Credit Used</p>
-                  <p className="text-lg font-medium text-red-600">
+                  <p className="text-gray-500 text-xs">Credit card balances</p>
+                  <p className="text-2xl font-semibold text-red-600">
                     <MoneyFigure state={moneyDisplay}>
-                      -{formatMoney(displayMetrics.creditUsed)}
+                      {formatCentsOrDash(figures.creditUsed)}
                     </MoneyFigure>
                   </p>
                 </div>
               </div>
             </div>
 
+            <p className="text-gray-500 text-xs mb-2">{DISPLAY_WINDOW_LABEL}</p>
+            {periodNote && (
+              <p className="text-xs text-amber-800 mb-2">{periodNote}</p>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="noor-card p-4">
                 <p className="text-gray-500 text-xs mb-1">Income</p>
@@ -839,7 +740,7 @@ export default function HomePage() {
                   style={{ color: accentColor }}
                 >
                   <MoneyFigure state={moneyDisplay}>
-                    +{formatMoney(displayMetrics.income)}
+                    +{formatCents(figures.income)}
                   </MoneyFigure>
                 </p>
               </div>
@@ -847,7 +748,7 @@ export default function HomePage() {
                 <p className="text-gray-500 text-xs mb-1">Spending</p>
                 <p className="text-xl font-semibold text-red-600">
                   <MoneyFigure state={moneyDisplay}>
-                    -{formatMoney(displayMetrics.spending)}
+                    {formatSpending(figures.spending)}
                   </MoneyFigure>
                 </p>
               </div>
@@ -860,7 +761,7 @@ export default function HomePage() {
                 </h3>
                 <span className="text-lg font-semibold text-black">
                   <MoneyFigure state={moneyDisplay}>
-                    {formatMoney(displayMetrics.totalSubscriptions)}
+                    {formatMonthlyOrUnknown(figures.recurringMonthly)}
                   </MoneyFigure>
                 </span>
               </div>
@@ -869,19 +770,22 @@ export default function HomePage() {
                   <span className="text-sm text-gray-500">
                     <MoneyFigure state={moneyDisplay}>{null}</MoneyFigure>
                   </span>
-                ) : displayMetrics.subscriptions.length > 0 ? (
-                  displayMetrics.subscriptions.slice(0, 2).map((sub, idx) => (
+                ) : figures.recurringMonthly === null ? (
+                  <span className="text-sm text-gray-500">
+                    We couldn&apos;t read your recurring charges yet.
+                  </span>
+                ) : figures.recurringItems.length > 0 ? (
+                  figures.recurringItems.slice(0, 2).map((item) => (
                     <span
-                      key={`${sub.name || "subscription"}-${idx}`}
+                      key={item.streamId}
                       className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
                     >
-                      {sub.name || "Subscription"} ·{" "}
-                      {formatMoney(sub.amount || 0)}/mo
+                      {item.label} · {formatCentsOrDash(item.monthlyCents)}/mo
                     </span>
                   ))
                 ) : (
                   <span className="text-sm text-gray-500">
-                    No subscriptions detected
+                    No recurring charges detected
                   </span>
                 )}
               </div>

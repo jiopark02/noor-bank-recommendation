@@ -41,6 +41,7 @@ function harness(options: {
   lookupFails?: boolean;
   revokeOutcome?: ConnectionRevocationOutcome;
   adminConfigured?: boolean;
+  cryptoConfigured?: boolean;
 } = {}) {
   let rows = options.rows ?? [row()];
   const lines: string[] = [];
@@ -66,6 +67,7 @@ function harness(options: {
   const deps: WebhookDeps = {
     plaidEnvironment: "sandbox",
     isAdminConfigured: () => options.adminConfigured ?? true,
+    isCryptoConfigured: () => options.cryptoConfigured ?? true,
     lookupByItemId,
     revoke,
     log: (line) => lines.push(line),
@@ -142,6 +144,28 @@ describe("handlePlaidWebhook — USER_PERMISSION_REVOKED", () => {
       outcome: "admin_unconfigured",
     });
     expect(h.lookupByItemId).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 before reading or revoking when the token key is not configured", async () => {
+    // Red if: the key check is removed, or moved after the lookup or the revoke.
+    const h = harness({ cryptoConfigured: false });
+    expect(await handlePlaidWebhook(revocation(), h.deps)).toEqual({
+      status: 503,
+      outcome: "crypto_unconfigured",
+    });
+    expect(h.lookupByItemId).not.toHaveBeenCalled();
+    expect(h.revoke).not.toHaveBeenCalled();
+  });
+
+  it("still acknowledges a webhook that is not a revocation when the token key is not configured", async () => {
+    // Red if: the key check is moved ahead of the revocation test, so every
+    // webhook is refused while the key is missing.
+    const h = harness({ cryptoConfigured: false });
+    const decision = await handlePlaidWebhook(
+      { ...revocation(), webhook_type: "TRANSACTIONS", webhook_code: "SYNC_UPDATES_AVAILABLE" },
+      h.deps
+    );
+    expect(decision).toEqual({ status: 200, outcome: "logged" });
   });
 
   it("ignores a webhook for another environment, or none", async () => {

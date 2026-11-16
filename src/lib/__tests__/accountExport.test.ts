@@ -276,6 +276,10 @@ describe("account export: what each section reads", () => {
     llm_calls: "user_id",
     chat_usage_reservations: "user_id",
     email_confirmation_sends: "user_id",
+    plaid_link_token_issues: "user_id",
+    household_members: "user_id",
+    share_grants: "owner_user_id",
+    goals: "owner_user_id",
   };
 
   /** Each table's primary key, the column the keyset pages on. */
@@ -290,6 +294,10 @@ describe("account export: what each section reads", () => {
     llm_calls: "id",
     chat_usage_reservations: "id",
     email_confirmation_sends: "user_id",
+    plaid_link_token_issues: "user_id",
+    household_members: "id",
+    share_grants: "id",
+    goals: "id",
   };
 
   it("E5 the file carries exactly these top-level keys", async () => {
@@ -309,6 +317,10 @@ describe("account export: what each section reads", () => {
         "llm_calls",
         "chat_usage_reservations",
         "email_confirmation_sends",
+        "plaid_link_token_issues",
+        "household_members",
+        "share_grants",
+        "goals",
       ].sort()
     );
   });
@@ -416,9 +428,21 @@ describe("account export: what each section reads", () => {
 describe("account export: explicit column lists match the schema", () => {
   const MIGRATIONS_DIR = new URL("../../../supabase/migrations/", import.meta.url);
 
+  /**
+   * Normalizes line endings and strips SQL line comments, so a statement
+   * quoted in a comment (a reversal block, an example) is not read as a
+   * schema change. Every text the column computation sees goes through here.
+   */
+  function prepareMigrationText(raw: string): string {
+    return raw
+      .replace(/\r\n?/g, "\n")
+      .replace(/--[^\n]*/g, "");
+  }
+
   function readMigration(name: string): string {
-    return readFileSync(fileURLToPath(new URL(name, MIGRATIONS_DIR)), "utf8")
-      .replace(/\r\n?/g, "\n");
+    return prepareMigrationText(
+      readFileSync(fileURLToPath(new URL(name, MIGRATIONS_DIR)), "utf8")
+    );
   }
 
   const MIGRATION_FILES = readdirSync(fileURLToPath(MIGRATIONS_DIR))
@@ -426,11 +450,14 @@ describe("account export: explicit column lists match the schema", () => {
     .sort();
 
   /**
-   * The table's columns as the migrations leave them: the CREATE TABLE's
-   * column lines, then every later ADD COLUMN / DROP COLUMN on the table, in
-   * file order.
+   * The table's columns as the given migration texts leave them, in order:
+   * the CREATE TABLE's column lines, then every later ADD COLUMN / DROP
+   * COLUMN on the table. Pure, so it can be run on synthetic texts.
    */
-  function migrationColumns(table: string): string[] {
+  function migrationColumnsFrom(
+    table: string,
+    texts: readonly string[]
+  ): { columns: string[]; created: number } {
     const columns: string[] = [];
     let created = 0;
     const createHead = `create table if not exists public.${table} (`;
@@ -438,8 +465,7 @@ describe("account export: explicit column lists match the schema", () => {
       `alter table (?:if exists )?(?:only )?public\\.${table}\\b([\\s\\S]*?);`,
       "gi"
     );
-    for (const name of MIGRATION_FILES) {
-      const text = readMigration(name);
+    for (const text of texts) {
       const start = text.indexOf(createHead);
       if (start !== -1) {
         created += 1;
@@ -467,25 +493,127 @@ describe("account export: explicit column lists match the schema", () => {
         }
       }
     }
+    return { columns, created };
+  }
+
+  /** The table's columns as the repository's migrations leave them. */
+  function migrationColumns(table: string): string[] {
+    const { columns, created } = migrationColumnsFrom(
+      table,
+      MIGRATION_FILES.map(readMigration)
+    );
     expect(created, `CREATE TABLE for ${table}`).toBe(1);
     return columns;
   }
 
-  const EXPLICIT = ["chat_sessions", "chat_usage_reservations", "email_confirmation_sends"];
+  const SYNTHETIC_CREATE =
+    "create table if not exists public.users (\n" +
+    "  id uuid primary key,\n" +
+    "  email text not null\n" +
+    ");\n";
+  const SYNTHETIC_ADD_STATUS =
+    "alter table public.users\n  add column status text not null default 'active';\n";
+
+  it("E15 a drop column quoted in a comment after the real add does not remove the column", () => {
+    // Read as a statement, the comment would hide a column the database has.
+    const { columns } = migrationColumnsFrom("users", [
+      prepareMigrationText(SYNTHETIC_CREATE),
+      prepareMigrationText(
+        SYNTHETIC_ADD_STATUS + "-- alter table public.users drop column status;\n"
+      ),
+    ]);
+    expect(columns).toEqual(["id", "email", "status"]);
+  });
+
+  it("E17 the real migration files are read through the comment stripping", () => {
+    // E15 and E16 call prepareMigrationText directly; this holds that the
+    // files the column computation reads go through it too. The integrity
+    // migration quotes its reversal, a drop of status, only in its header.
+    const text = readMigration(
+      "20261107130000_add_integrity_constraints_users_plaid_connections.sql"
+    );
+    expect(text).toContain("add column status");
+    expect(text).not.toContain("drop column status");
+  });
+
+  it("E16 an add column quoted in a comment does not add a column", () => {
+    // Read as a statement, the comment would report a column the database
+    // lacks, and an export selecting it would pass here and fail with 42703.
+    const { columns } = migrationColumnsFrom("users", [
+      prepareMigrationText(SYNTHETIC_CREATE),
+      prepareMigrationText(
+        SYNTHETIC_ADD_STATUS + "-- alter table public.users add column ghost text;\n"
+      ),
+    ]);
+    expect(columns).toEqual(["id", "email", "status"]);
+  });
+
+  const EXPLICIT = [
+    "chat_sessions",
+    "chat_usage_reservations",
+    "email_confirmation_sends",
+    "plaid_link_token_issues",
+    "household_members",
+    "share_grants",
+    "goals",
+  ];
 
   for (const table of EXPLICIT) {
-    it(`E10 ${table}: the export's columns are the table's columns minus user_id`, () => {
+    it(`E10 ${table}: the export's columns are the table's columns minus its filter column`, () => {
       const section = sectionFor(table);
       expect(section.columns).not.toBe("*");
       const exported = section.columns.split(", ");
       const schema = migrationColumns(table);
-      expect(schema).toContain("user_id");
+      expect(schema).toContain(section.filterColumn);
       expect(new Set(exported).size).toBe(exported.length);
       expect([...exported].sort()).toEqual(
-        schema.filter((c) => c !== "user_id").sort()
+        schema.filter((c) => c !== section.filterColumn).sort()
       );
     });
   }
+
+  it("E14 users: the export's columns are the table's columns, id included", () => {
+    // users has no user_id; its id is the user's own id. A column added to
+    // the table is exported only once someone adds it here.
+    const section = sectionFor("users");
+    expect(section.columns).not.toBe("*");
+    const exported = section.columns.split(", ");
+    const schema = migrationColumns("users");
+    expect(schema).not.toContain("user_id");
+    expect(schema).toContain("id");
+    expect(schema).toContain("status");
+    expect(new Set(exported).size).toBe(exported.length);
+    expect([...exported].sort()).toEqual([...schema].sort());
+  });
+
+  it("E18 chat_sessions: the cron state columns are in the schema and in the export", () => {
+    // E10 compares the two sides with each other, so it stays green when
+    // both lack these columns: a migration the parser cannot read and an
+    // export list without them. This names the columns on both sides.
+    const added = [
+      "summary_failures",
+      "summary_next_attempt_at",
+      "summary_outcome",
+      "summary_given_up_reason",
+      "summary_given_up_at",
+      "facts_failures",
+      "facts_next_attempt_at",
+      "facts_outcome",
+      "facts_given_up_reason",
+      "facts_given_up_at",
+    ];
+    const exported = sectionFor("chat_sessions").columns.split(", ");
+    const schema = migrationColumns("chat_sessions");
+    for (const column of added) {
+      expect(exported).toContain(column);
+      expect(schema).toContain(column);
+    }
+    // The file's reversal, quoted only in its header, drops every one of
+    // them; read as a statement it would remove them from the schema.
+    const text = readMigration("20261111120000_add_cron_retry_state_to_chat_sessions.sql");
+    expect(text).toContain("add column summary_failures");
+    expect(text).not.toContain("drop column");
+  });
 });
 
 describe("account export: the production page reader", () => {

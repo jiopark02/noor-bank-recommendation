@@ -106,7 +106,11 @@ vi.mock("../supabase", () => ({
 }));
 
 // Imported after the mock is registered (vi.mock is hoisted above it anyway).
-import { getAllPlaidConnections } from "../plaidApiUtils";
+import {
+  getAllPlaidConnections,
+  getRevocableConnectionByItemId,
+  getRevocableConnections,
+} from "../plaidApiUtils";
 
 /**
  * The smallest client that satisfies the call under test:
@@ -143,10 +147,10 @@ import { getAllPlaidConnections } from "../plaidApiUtils";
  *   user's connection rows, access tokens included.
  *
  *   Filtering by status in SQL is a change the helper's own documentation
- *   forbids: it would drop the non-active rows /api/account/delete needs in
- *   order to revoke their Plaid Items before the rows are destroyed, and it
- *   would re-merge "no rows" with "rows, none active" — the distinction this
- *   whole change exists to keep.
+ *   forbids: it would re-merge "no rows" with "rows, none active" — the
+ *   distinction this whole change exists to keep. (The revocation paths, which
+ *   need the non-active rows to revoke their Plaid Items, read through
+ *   getRevocableConnections instead; its tests are at the end of this file.)
  *
  * "scopes the read to the owning user and filters on nothing else" below is the
  * assertion that catches both. Before it existed, both mutations passed green.
@@ -233,8 +237,8 @@ describe("getAllPlaidConnections — the seam between the read and the decision"
   it("returns null when constructing the client throws, and logs the throw", async () => {
     // createServerClient throws on missing Supabase env. The whole body is
     // wrapped, so this must come back as a returned null like every other
-    // failure — /api/account/delete's outer catch documents that contract and
-    // has no other way to be reached. The logged object must be the thrown one,
+    // failure — the caller tells a failed read from an empty one only through
+    // that null. The logged object must be the thrown one,
     // so this null is known to have come from the catch.
     const thrown = new Error("Supabase URL and anon key are required");
     createServerClientMock.mockImplementation(() => {
@@ -251,8 +255,8 @@ describe("getAllPlaidConnections — the seam between the read and the decision"
     // client, RLS bypassed): dropping it, or passing anything but the caller's
     // userId, would return other users' rows and their tokens. And a second
     // filter — a status filter is the plausible one — would hide the inactive
-    // rows /api/account/delete must revoke before deleting, and would make
-    // "rows, none active" read as "no rows". eq must be called exactly once,
+    // rows and make "rows, none active" read as "no rows". eq must be called
+    // exactly once,
     // with exactly these arguments.
     const stub = clientResolving({ data: [], error: null });
     createServerClientMock.mockReturnValue(stub.client);
@@ -292,5 +296,128 @@ describe("getAllPlaidConnections — the seam between the read and the decision"
     );
 
     await expect(getAllPlaidConnections("user_1")).resolves.toEqual([]);
+  });
+});
+
+/**
+ * The revocation reads: the same seam, with the column list pinned.
+ *
+ * Mutations that turn these red:
+ *   - the select widened back to "*" or to any other column list -> "selects only"
+ *   - the user_id filter dropped, or a status filter added        -> "selects only"
+ *   - a query error, a non-array payload or a throw read as []    -> "returns null"
+ *   - the single-row read's catch answering an absent row         -> "single row"
+ */
+describe("getRevocableConnections — the two columns a revocation reads", () => {
+  beforeEach(() => {
+    createServerClientMock.mockReset();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("selects only item_id and access_token, scoped to the owning user and nothing else", async () => {
+    const rows = [{ item_id: "item_1", access_token: "v1:a:b:c" }];
+    const stub = clientResolving({ data: rows, error: null });
+    createServerClientMock.mockReturnValue(stub.client);
+
+    await expect(getRevocableConnections("user_scope_7")).resolves.toEqual(rows);
+
+    expect(stub.from.mock.calls).toEqual([["plaid_connections"]]);
+    expect(stub.select.mock.calls).toEqual([["item_id,access_token"]]);
+    expect(stub.eq.mock.calls).toEqual([["user_id", "user_scope_7"]]);
+  });
+
+  it("returns [] for a genuine zero-row read", async () => {
+    createServerClientMock.mockReturnValue(
+      clientResolving({ data: [], error: null }).client
+    );
+    await expect(getRevocableConnections("user_1")).resolves.toEqual([]);
+  });
+
+  it("returns null for a query error, a non-array payload, and a throw", async () => {
+    createServerClientMock.mockReturnValue(
+      clientResolving({ data: null, error: { code: "PGRST301" } }).client
+    );
+    await expect(getRevocableConnections("user_1")).resolves.toBeNull();
+
+    createServerClientMock.mockReturnValue(
+      clientResolving({ data: null, error: null }).client
+    );
+    await expect(getRevocableConnections("user_1")).resolves.toBeNull();
+
+    createServerClientMock.mockImplementation(() => {
+      throw new Error("Supabase service role key is required");
+    });
+    await expect(getRevocableConnections("user_1")).resolves.toBeNull();
+  });
+});
+
+describe("getRevocableConnectionByItemId — the single row, three states", () => {
+  /** from(...).select(...).eq(...).eq(...).maybeSingle() -> { data, error } */
+  function singleRowClient(result: { data: unknown; error: unknown }) {
+    const maybeSingle = vi.fn(() => Promise.resolve(result));
+    const builder: Record<string, unknown> = { maybeSingle };
+    const select = vi.fn(() => builder);
+    const eq = vi.fn(() => builder);
+    builder.select = select;
+    builder.eq = eq;
+    const from = vi.fn(() => builder);
+    return { client: { from }, from, select, eq, maybeSingle };
+  }
+
+  beforeEach(() => {
+    createServerClientMock.mockReset();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("selects only item_id and access_token, scoped by user_id and item_id", async () => {
+    const row = { item_id: "item_1", access_token: "v1:a:b:c" };
+    const stub = singleRowClient({ data: row, error: null });
+    createServerClientMock.mockReturnValue(stub.client);
+
+    await expect(getRevocableConnectionByItemId("user_7", "item_1")).resolves.toEqual({
+      ok: true,
+      connection: row,
+    });
+
+    expect(stub.from.mock.calls).toEqual([["plaid_connections"]]);
+    expect(stub.select.mock.calls).toEqual([["item_id,access_token"]]);
+    expect(stub.eq.mock.calls).toEqual([
+      ["user_id", "user_7"],
+      ["item_id", "item_1"],
+    ]);
+  });
+
+  it("reports an absent row as ok with no connection", async () => {
+    createServerClientMock.mockReturnValue(
+      singleRowClient({ data: null, error: null }).client
+    );
+    await expect(getRevocableConnectionByItemId("user_7", "item_1")).resolves.toEqual({
+      ok: true,
+      connection: null,
+    });
+  });
+
+  it("reports a query error and a throw as a failed read, never as an absent row", async () => {
+    createServerClientMock.mockReturnValue(
+      singleRowClient({ data: null, error: { code: "PGRST301" } }).client
+    );
+    await expect(getRevocableConnectionByItemId("user_7", "item_1")).resolves.toEqual({
+      ok: false,
+    });
+
+    createServerClientMock.mockImplementation(() => {
+      throw new Error("Supabase service role key is required");
+    });
+    await expect(getRevocableConnectionByItemId("user_7", "item_1")).resolves.toEqual({
+      ok: false,
+    });
   });
 });

@@ -26,6 +26,7 @@ import { describe, it, expect } from "vitest";
  *   R15 .maybeSingle() changed to .single()                  -> W3h
  *   R16 upsertProfile writes to another table                -> W3i
  *   R17 .upsert( changed to .insert(                         -> W3j
+ *   R18 ensureHousehold not wired, or passed another id      -> W4
  *
  * Two masked views of the source are used. `code` has comments and the
  * contents of string literals blanked, so text in either cannot satisfy or
@@ -177,6 +178,15 @@ describe("sync-profile route wiring", () => {
   it("W3j upsertProfile upserts rather than inserts", () => {
     const block = between(code, "upsertProfile:", "now:");
     expect(block).toContain(".upsert(");
+  });
+
+  it("W4 ensureHousehold calls ensureHouseholdForUser with the admin client and the given userId", () => {
+    expect(codeWithStrings).toContain(
+      'import { ensureHouseholdForUser } from "@/lib/householdEnsure";'
+    );
+    expect(code).toMatch(
+      /ensureHousehold: \( ?userId ?\) => ensureHouseholdForUser\( ?admin\(\), userId ?\)/
+    );
   });
 
   it("W3e the response carries the decision's status and body", () => {

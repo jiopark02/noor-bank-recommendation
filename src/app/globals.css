@@ -350,16 +350,6 @@ body {
   background-color: var(--noor-gray-100);
 }
 
-/* Hide Scrollbar */
-.hide-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
 /* Safe Area */
 .pb-safe {
   padding-bottom: calc(5rem + env(safe-area-inset-bottom));

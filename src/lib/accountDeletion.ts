@@ -24,20 +24,27 @@ import type { RevocableConnection, RevocationSummary } from "./plaidRevocation";
  *   1. Preconditions      — everything that can refuse BEFORE anything is spent
  *   2. Revoke + delete    — per connection, paired (see plaidRevocation.ts)
  *   3. Gate               — a single un-revoked connection stops the deletion
- *   4. DELETE public.users — FK ON DELETE CASCADE removes the child tables
+ *   4. DELETE public.users — FK ON DELETE CASCADE removes the child tables,
+ *                            and a trigger removes households left empty
  *   5. auth.admin.deleteUser — most irreversible, therefore last
  *
- * ⚠️ STEP 4'S CASCADE DOES NOT REACH plaid_connections. That table has no
- * foreign key to public.users and its user_id column is TEXT, not the uuid the
- * other child tables carry, so no ON DELETE CASCADE covers it. Its rows are
- * removed one at a time in step 2 and nowhere else. This is why step 3 can be a
- * gate at all: if the cascade did clean the table up, deleting the users row
- * would destroy the rows for un-revoked connections as a side effect, and
- * refusing at step 3 would be the only thing standing between a failed
- * revocation and a permanently unrevokable Item. It is also why step 2 cannot
- * be skipped as redundant — an earlier single-statement helper that deleted
- * every row for the user carried this same note, and it was deleted along with
- * the unconditional-delete behaviour it justified.
+ * ⚠️ STEP 4'S CASCADE DOES NOT REACH plaid_connections. Migration
+ * 20261107130000_add_integrity_constraints_users_plaid_connections.sql makes
+ * its user_id a uuid that references public.users with ON DELETE RESTRICT, not
+ * CASCADE; whether that migration is applied in a given database is live
+ * state. Where it is, the database refuses step 4 while any connection row for
+ * the user remains, and the query error is answered like any other step 4
+ * failure. Where it is not, nothing ties the two tables and nothing refuses.
+ * Either way the rows are removed one at a time in step 2 and nowhere else.
+ *
+ * This is why step 3 is a gate: a cascade on that key would destroy the rows
+ * for un-revoked connections as a side effect of deleting the users row, and
+ * the token each row holds is the only means of revoking its Item later.
+ * RESTRICT holds the same rule in the database, including for a row that
+ * appears between step 2 and step 4, which the gate cannot see. It is also why
+ * step 2 cannot be skipped as redundant — an earlier single-statement helper
+ * that deleted every row for the user carried this same note, and it was
+ * deleted along with the unconditional-delete behaviour it justified.
  *
  * Step 1 is new and it is a fix, not a tidy-up. The admin client used to be
  * constructed AFTER the Plaid loop, with no try around it; createAdminClient()
@@ -116,6 +123,22 @@ function emit(deps: AccountDeletionDeps, line: string): void {
   console.error(line);
 }
 
+/**
+ * The error's `code` and nothing else, bounded for a single log line.
+ *
+ * Never the message, details or hint: a database error's text can echo the
+ * row or the key it refused on. A code of the expected shape (a SQLSTATE or a
+ * PostgREST code) is logged as is; "none" when there is no string code;
+ * "invalid" for a string of any other shape, which is never echoed. Kept in
+ * this module so the decision code imports no client or IO module.
+ */
+function errorCodeField(error: unknown): string {
+  if (typeof error !== "object" || error === null) return "none";
+  const code = (error as Record<string, unknown>).code;
+  if (typeof code !== "string") return "none";
+  return /^[A-Za-z0-9_]{1,32}$/.test(code) ? code : "invalid";
+}
+
 function failure(
   status: number,
   message: string,
@@ -151,8 +174,8 @@ export async function deleteAccountForUser(
 
   // ---------------------------------------------------------------------
   // Step 1b. Read the connections. null means the read failed, and the
-  // distinction from [] is the entire reason getAllPlaidConnections returns a
-  // nullable (see its header).
+  // distinction from [] is the entire reason the connection read returns a
+  // nullable (see getRevocableConnections in plaidApiUtils.ts).
   //
   // A failed read is answered by REFUSING to delete, which is a change from the
   // previous behaviour — it used to log and carry on. Carrying on is no longer
@@ -266,10 +289,57 @@ export async function deleteAccountForUser(
   }
 
   // ---------------------------------------------------------------------
+  // Step 3c. Read the connections again before anything below is spent.
+  //
+  // The gate above counts what step 2 was handed; it cannot see a row that
+  // appeared after step 1b read the list (a connection stored by a concurrent
+  // request). Such a row holds the only copy of its token, so the deletion
+  // stops here with the same answers as the earlier read and the gate: a
+  // failed read is CONNECTION_READ_FAILED, a row still present is
+  // REVOKE_INCOMPLETE.
+  //
+  // Nothing is revoked here. A retry starts again from step 1b, revokes what it
+  // finds, and converges the same way the gate does.
+  // ---------------------------------------------------------------------
+  const afterRevocation = await deps.listConnections(userId);
+  if (afterRevocation === null) {
+    emit(
+      deps,
+      "[account-delete] stopping before user deletion: connection re-read failed"
+    );
+    return failure(500, RETRYABLE_MESSAGE, "CONNECTION_READ_FAILED");
+  }
+  if (afterRevocation.length > 0) {
+    emit(
+      deps,
+      "[account-delete] stopping before user deletion: rows present on re-read " +
+        `count=${afterRevocation.length}`
+    );
+    return failure(500, RETRYABLE_MESSAGE, "REVOKE_INCOMPLETE");
+  }
+
+  // ---------------------------------------------------------------------
   // Step 4. Delete the public.users row. FK ON DELETE CASCADE removes the rows
   // of every table whose user_id references public.users. Tables whose
   // user_id references auth.users instead are cleared by the cascade from
-  // step 5, and plaid_connections, which has no foreign key, only in step 2.
+  // step 5. plaid_connections is cleared only in step 2: its key to
+  // public.users, where the migration adding it is applied, is ON DELETE
+  // RESTRICT, so a row left behind makes this delete fail rather than vanish.
+  //
+  // The cascade also reaches the household tables. household_members,
+  // share_grants and personal goals cascade from public.users, and joint
+  // goals have created_by set null. A database trigger on household_members
+  // (migration 20261108120000_create_households_and_goals.sql, live state
+  // like every migration) then deletes any household left with no active
+  // member, and that household's joint goals and share grants with it. It
+  // runs inside this same delete, so a trigger failure fails this step and
+  // nothing is removed; there is no separate household step and no separate
+  // failure answer. A trigger fired by this cascade runs as the role that
+  // issued the delete (service_role here, supabase_auth_admin when an Auth
+  // user is deleted), so the trigger function is SECURITY DEFINER, owned by
+  // the owner of households: it deletes the household whoever issued the
+  // delete, and neither service_role nor any client role holds DELETE on
+  // households.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to
@@ -278,7 +348,13 @@ export async function deleteAccountForUser(
   // ---------------------------------------------------------------------
   const usersResult = await deps.deleteUsersRow(userId);
   if (usersResult.error) {
-    emit(deps, "[account-delete] failed to delete the public.users row");
+    // The database's code tells a foreign-key refusal (a connection row that
+    // appeared after step 3c) from any other failure; the message is not logged.
+    emit(
+      deps,
+      "[account-delete] failed to delete the public.users row " +
+        `route=/api/account/delete code=${errorCodeField(usersResult.error)}`
+    );
     return { status: 500, body: { error: USERS_DELETE_FAILED_MESSAGE } };
   }
   if (usersResult.deletedCount === 0) {
@@ -291,7 +367,9 @@ export async function deleteAccountForUser(
   // ---------------------------------------------------------------------
   // Step 5. Delete the Supabase Auth user. Most irreversible, therefore last:
   // deleting it first would invalidate the token this request authenticated
-  // with and block everything above.
+  // with and block everything above. Where the integrity migration is
+  // applied, public.users.id references auth.users with ON DELETE CASCADE;
+  // step 4 has already removed that row, so the cascade finds nothing here.
   // ---------------------------------------------------------------------
   const authResult = await deps.deleteAuthUser(userId);
   if (authResult.error) {

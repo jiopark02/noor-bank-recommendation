@@ -1,4 +1,10 @@
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { inspect } from "node:util";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -39,8 +45,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * are not read by proxy-from-env 2.1.0; they are cleared anyway so a
  * different resolver version cannot route around the loopback.
  *
- * WHAT IT DOES NOT PROVE. Anything about TLS, redirects, or a live Plaid
- * response; the loopback server is plain HTTP and answers once.
+ * REDIRECTS. The second describe block makes the loopback server answer 302,
+ * pointing either at a second loopback server on another port (another
+ * origin) or at another path on the same server, and asserts that no second
+ * request arrives anywhere and that the call rejects through the same
+ * redaction. It goes through a real SDK method rather than the axios instance
+ * directly, so a per-request maxRedirects coming from the SDK's options would
+ * be caught as well as a change to the instance defaults.
+ *
+ * WHAT IT DOES NOT PROVE. Anything about TLS or a live Plaid response; the
+ * loopback servers are plain HTTP. Whether Plaid itself ever answers 3xx is
+ * not something a local test can tell.
  */
 
 // Fake values. Nothing here is or resembles a real credential.
@@ -83,6 +98,20 @@ type ReceivedRequest = {
 
 type MutableConfiguration = { basePath?: string };
 
+type Responder = (req: IncomingMessage, res: ServerResponse) => void;
+
+/** The default answer: a Plaid error, as the first describe block expects. */
+const answerPlaidError: Responder = (_req, res) => {
+  res.writeHead(400, { "Content-Type": "application/json" });
+  res.end(
+    JSON.stringify({
+      error_type: "ITEM_ERROR",
+      error_code: "ITEM_LOGIN_REQUIRED",
+      request_id: "req-1",
+    })
+  );
+};
+
 /** Same deep serialization as plaidClientWiring.test.ts. */
 function serializeDeeply(value: unknown): string {
   let asJson = "";
@@ -101,6 +130,7 @@ let configuration: MutableConfiguration | undefined;
 let savedBasePath: string | undefined;
 let server: Server | undefined;
 let received: ReceivedRequest[] = [];
+let respond: Responder = answerPlaidError;
 
 beforeEach(async () => {
   original = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
@@ -110,6 +140,7 @@ beforeEach(async () => {
   setEnv("PLAID_SECRET", SENTINEL_SECRET);
 
   received = [];
+  respond = answerPlaidError;
   server = createServer((req, res) => {
     let body = "";
     req.setEncoding("utf8");
@@ -123,14 +154,7 @@ beforeEach(async () => {
         headers: req.headers,
         body,
       });
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error_type: "ITEM_ERROR",
-          error_code: "ITEM_LOGIN_REQUIRED",
-          request_id: "req-1",
-        })
-      );
+      respond(req, res);
     });
   });
   const listening = server;
@@ -227,5 +251,102 @@ describe("a failed Plaid call through real axios", () => {
     expect(asJson).not.toContain(SENTINEL_SECRET);
     expect(asJson).not.toContain(SENTINEL_CLIENT);
     expect(asJson).not.toContain(SENTINEL_TOKEN);
+  });
+});
+
+describe("a Plaid call answered with a redirect", () => {
+  // A second loopback server: the place a followed redirect would land.
+  // 127.0.0.1 on another port, so it is another origin; "localhost" is avoided
+  // because it can resolve to ::1, where nothing listens, and a followed
+  // redirect would then look exactly like one that was refused.
+  let elsewhere: Server | undefined;
+  let elsewhereReceived: ReceivedRequest[] = [];
+  let elsewherePort = 0;
+
+  beforeEach(async () => {
+    elsewhereReceived = [];
+    elsewhere = createServer((req, res) => {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        elsewhereReceived.push({
+          method: req.method,
+          url: req.url,
+          headers: req.headers,
+          body,
+        });
+        // A success body, so a followed redirect resolves the call and the
+        // rejection assertions fail loudly instead of passing by accident.
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ accounts: [], request_id: "elsewhere" }));
+      });
+    });
+    const listening = elsewhere;
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => reject(error);
+      listening.once("error", onError);
+      listening.listen(0, "127.0.0.1", () => {
+        listening.off("error", onError);
+        resolve();
+      });
+    });
+    elsewherePort = (listening.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    if (elsewhere) {
+      const closing = elsewhere;
+      elsewhere = undefined;
+      closing.closeAllConnections();
+      await new Promise<void>((resolve) => closing.close(() => resolve()));
+    }
+  });
+
+  it("does not follow a 302 to another origin, and rejects redacted", async () => {
+    respond = (_req, res) => {
+      res.writeHead(302, {
+        Location: `http://127.0.0.1:${elsewherePort}/stolen`,
+      });
+      res.end();
+    };
+
+    const error = (await rejectionOfAccountsGet()) as Error &
+      Record<string, unknown>;
+
+    expect(received).toHaveLength(1);
+    expect(received[0].headers["plaid-secret"]).toBe(SENTINEL_SECRET);
+    expect(elsewhereReceived).toHaveLength(0);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("Request failed with status code 302");
+    expect(error.redacted).toBe(true);
+    expect(redaction.getPlaidErrorStatus(error)).toBe(302);
+    expect(redaction.getPlaidErrorCode(error)).toBeUndefined();
+
+    const serialized = serializeDeeply(error);
+    expect(serialized).not.toContain(SENTINEL_SECRET);
+    expect(serialized).not.toContain(SENTINEL_CLIENT);
+    expect(serialized).not.toContain(SENTINEL_TOKEN);
+  });
+
+  it("does not follow a 302 to another path on the same server", async () => {
+    respond = (req, res) => {
+      if (req.url === "/accounts/get") {
+        res.writeHead(302, { Location: "/accounts/elsewhere" });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ accounts: [], request_id: "same-origin" }));
+    };
+
+    const error = (await rejectionOfAccountsGet()) as Error;
+
+    expect(received.map((request) => request.url)).toEqual(["/accounts/get"]);
+    expect(elsewhereReceived).toHaveLength(0);
+    expect(error.message).toBe("Request failed with status code 302");
   });
 });

@@ -3,7 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
 import { isPlaidConfigured } from "@/lib/plaid";
-import { getAllPlaidConnections } from "@/lib/plaidApiUtils";
+import {
+  getRevocableConnections,
+  postgrestErrorCode,
+} from "@/lib/plaidApiUtils";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import {
   liveRevocationDeps,
@@ -12,6 +15,10 @@ import {
 import { deleteAccountForUser } from "@/lib/accountDeletion";
 
 export const dynamic = "force-dynamic";
+
+// Literal, because the platform reads it statically. Must equal
+// PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
+export const maxDuration = 300;
 
 /**
  * POST /api/account/delete — permanent GDPR account deletion.
@@ -67,6 +74,10 @@ export const dynamic = "force-dynamic";
  * tests.
  */
 export async function POST(request: NextRequest) {
+  // The start of the request, before anything waits: the revocation loop's
+  // time check counts from here, not from when the loop begins.
+  const startedAt = Date.now();
+
   const authUserId = await getAuthenticatedUserIdFromRequest(request);
   if (!authUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -90,27 +101,33 @@ export async function POST(request: NextRequest) {
     isCryptoConfigured: isPlaidTokenCryptoConfigured,
     isAdminConfigured: isSupabaseAdminConfigured,
 
-    // getAllPlaidConnections is contracted to report every failure by returning
-    // null; the catch is here because this route is the wrong place to discover
-    // that the contract changed. A throw would otherwise escape POST entirely
-    // (there is no outer catch) and Next would answer with a bodiless 500,
-    // losing the named CONNECTION_READ_FAILED answer. Both directions refuse to
-    // delete, so this costs nothing and keeps the response legible.
+    // getRevocableConnections reads only the two columns a revocation needs and
+    // is contracted to report every failure by returning null; the catch is
+    // here because this route is the wrong place to discover that the contract
+    // changed. A throw would otherwise escape POST entirely (there is no outer
+    // catch) and Next would answer with a bodiless 500, losing the named
+    // CONNECTION_READ_FAILED answer. Both directions refuse to delete, so this
+    // costs nothing and keeps the response legible. Only the error's code is
+    // logged, as the helper itself does: a value thrown from this read could
+    // carry query details or row values.
     listConnections: async (userId) => {
       try {
-        return await getAllPlaidConnections(userId);
+        return await getRevocableConnections(userId);
       } catch (error) {
         console.error(
-          "account/delete: getAllPlaidConnections threw, which its contract " +
-            "says it does not; treating as a failed read:",
-          error
+          "account/delete: getRevocableConnections threw, which its contract " +
+            "says it does not; treating as a failed read: threw, code",
+          postgrestErrorCode(error) ?? "none"
         );
         return null;
       }
     },
 
     revokeAll: (userId, connections) =>
-      revokeAndDeleteConnections(userId, connections, liveRevocationDeps()),
+      revokeAndDeleteConnections(userId, connections, liveRevocationDeps(), {
+        startedAtMs: startedAt,
+        now: Date.now,
+      }),
 
     // The row count comes from .select("id"): a PostgREST delete returns the
     // deleted rows when a representation is requested, so `data.length` IS the

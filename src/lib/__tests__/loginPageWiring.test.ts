@@ -3,18 +3,13 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 
 /**
- * Source probe of the login page's local-profile write: both ways the first
- * name is filled (the public.users row, or Auth metadata when there is no
- * row) go through firstNameForClient before the profile is stored, and the
- * row's metadata is still spread last. firstNameForClient itself is executed
- * in defaultFirstName.test.ts; this file does not render the page.
+ * Source probe of the login page: no metadata is spread into the local
+ * profile (L3), and auth errors reach the screen only as fixed copy (L5-L7).
  *
- * Mutations of page.tsx and the tests each one turns red:
- *   G1  the firstNameForClient import removed                     -> L1
- *   G2  the row path storing first_name as read                   -> L2, L3
- *   G3  the metadata path storing the name as read                -> L2
- *   G4  the metadata spread moved ahead of the names              -> L3
- *   G5  the profile stored before the names are filled            -> L4
+ * Where the local profile's names come from — the profile sync's answer only,
+ * never user_metadata or a browser read of public.users — and that the profile
+ * is stored only after the sync has answered or timed out, is held by
+ * loginProfileSync.test.ts.
  *
  * The masking matches surveyPageWiring.test.ts: comments are blanked and,
  * in `code`, so are string contents; whitespace is collapsed. Only
@@ -79,33 +74,13 @@ function handleSubmitSource(): string {
 
 const submit = mask(handleSubmitSource(), false).replace(/\s+/g, " ");
 
-describe("login page wiring: first name in the local profile", () => {
-  it("L1 imports firstNameForClient from the shared module", () => {
-    expect(mask(source, false)).toMatch(
-      /import \{ firstNameForClient \} from "@\/lib\/defaultFirstName";/
-    );
-  });
-
-  it("L2 both first-name sources go through firstNameForClient", () => {
-    expect(submit.split("firstName: firstNameForClient(").length - 1).toBe(2);
-    expect(submit).toMatch(
-      /firstName: firstNameForClient\( ?user\.user_metadata\?\.first_name \|\|/
-    );
-  });
-
-  it("L3 the row path converts first_name and still spreads its metadata last", () => {
+describe("login page wiring: the local profile", () => {
+  it("L3 spreads no metadata into the local profile", () => {
     expect(submit).toContain(
-      'firstName: firstNameForClient(profileRow.first_name), lastName: profileRow.last_name || "", ...(profileRow.raw_user_meta_data || {}),'
+      "firstName: names.firstName, lastName: names.lastName, };"
     );
-  });
-
-  it("L4 the profile is stored after both names are filled", () => {
-    const metadataPath = submit.indexOf("firstName: firstNameForClient( user.user_metadata");
-    const rowPath = submit.indexOf("firstName: firstNameForClient(profileRow.first_name)");
-    const store = submit.indexOf('localStorage.setItem( "noor_user_profile"');
-    expect(metadataPath).toBeGreaterThan(-1);
-    expect(rowPath).toBeGreaterThan(metadataPath);
-    expect(store).toBeGreaterThan(rowPath);
+    expect(submit).not.toContain("raw_user_meta_data");
+    expect(submit).not.toContain("user_metadata");
   });
 });
 

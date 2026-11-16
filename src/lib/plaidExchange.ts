@@ -27,7 +27,8 @@ import {
  *   2. Duplicate (client id) — read fails open; step 6 backs it up
  *   3. Exchange              — mints the Item
  *   4. Ownership             — does this user already have a row for the Item?
- *   5. itemGet               — Plaid's own institution id and name
+ *   5. itemGet               — Plaid's own institution id and name; an Item
+ *                              Plaid reports no institution id for is refused
  *   6. Duplicate (server id) — read fails closed
  *   7. Store                 — encrypt + insert
  *
@@ -52,6 +53,14 @@ import {
  * `revoke=skipped reason=recheck_read_failed`. The cost of that direction is a
  * possible orphaned Item, which the log line names so it can be cleaned up by
  * hand.
+ *
+ * A unique violation (23505) on the insert is decided by the same read, because
+ * it has two causes: a row for this Item that already exists, or an active row
+ * at the same institution under another Item that a concurrent request stored
+ * after step 6. A row for this Item means success and no revocation; no row
+ * means the conflict is with the other Item, so this one is revoked and the
+ * answer is the duplicate 409; two failed reads mean no revocation, 500, and
+ * `refused=store_conflict … revoke=skipped reason=recheck_read_failed`.
  *
  * Remaining risk: if the re-read finds no row and the Item is revoked, and the
  * original insert commits only after that, a row is left pointing at a revoked
@@ -143,12 +152,15 @@ export type StoredConnectionView = {
 export type ExchangeDeps = {
   /** null means the count could not be read. */
   countConnections: (userId: string) => Promise<number | null>;
-  /** Throws when the read fails; null when there is no such active row. */
+  /**
+   * `{ ok: false }` when the read failed; `connection: null` when there is no
+   * such active row. A throw is treated as a failed read too.
+   */
   findActiveByInstitution: (
     userId: string,
     institutionId: string,
     excludeItemId?: string
-  ) => Promise<StoredConnectionView | null>;
+  ) => Promise<ConnectionLookup<StoredConnectionView>>;
   /** Rejects with the Plaid error when the exchange is refused. */
   exchange: (
     publicToken: string
@@ -167,7 +179,8 @@ export type ExchangeDeps = {
     accessToken: string,
     itemId: string,
     institutionName: string,
-    institutionId: string | null
+    /** Plaid's own id. Never null: an Item without one is not stored. */
+    institutionId: string
   ) => Promise<PlaidConnectionStore>;
   /** Revokes the Item. Resolves with Plaid's request_id or null. */
   itemRemove: (accessToken: string) => Promise<string | null>;
@@ -188,6 +201,14 @@ export type ExchangeOutcome =
 
 const RETRY_MESSAGE =
   "We couldn't add your bank right now. Please try again in a moment.";
+/**
+ * For the one refusal a retry may not fix: Plaid answered, but without an
+ * institution id, and it may answer the same way again. The sentence after
+ * RETRY_MESSAGE is the one the disconnect and account-deletion answers already
+ * end with.
+ */
+const INSTITUTION_ID_MISSING_MESSAGE =
+  `${RETRY_MESSAGE} If this keeps happening, please contact support.`;
 const SAVE_FAILED_MESSAGE = "Failed to save connection. Please try again.";
 const DUPLICATE_MESSAGE = "This bank is already connected to your account.";
 const UNKNOWN_INSTITUTION = "Unknown Institution";
@@ -302,6 +323,26 @@ async function readOwnItem(
 }
 
 /**
+ * The duplicate-check read. A dependency that throws instead of returning
+ * `{ ok: false }` is read as a failed read, so each caller's fail direction
+ * applies to it too.
+ */
+async function readActiveByInstitution(
+  deps: ExchangeDeps,
+  userId: string,
+  institutionId: string,
+  excludeItemId?: string
+): Promise<ConnectionLookup<StoredConnectionView>> {
+  try {
+    return excludeItemId === undefined
+      ? await deps.findActiveByInstitution(userId, institutionId)
+      : await deps.findActiveByInstitution(userId, institutionId, excludeItemId);
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
  * Revoke an Item that was minted by this request and never stored.
  *
  * There is no row, so revokeAndDeleteConnection does not fit: it decrypts a
@@ -381,23 +422,18 @@ export async function exchangeForUser(
   // Capped here, once, so every answer that falls back to it is capped too.
   const clientInstitutionName = capName(nonEmpty(input.institutionName));
   if (clientInstitutionId) {
-    try {
-      const existing = await deps.findActiveByInstitution(
-        userId,
-        clientInstitutionId
-      );
-      if (existing) {
-        return duplicate(
-          nonEmpty(existing.institution_name) ??
-            clientInstitutionName ??
-            "This bank"
-        );
-      }
-    } catch {
+    const pre = await readActiveByInstitution(deps, userId, clientInstitutionId);
+    if (!pre.ok) {
       emit(
         deps,
         `${userPrefix} dedupe_read=failed stage=pre proceeding=true`,
         "warn"
+      );
+    } else if (pre.connection) {
+      return duplicate(
+        nonEmpty(pre.connection.institution_name) ??
+          clientInstitutionName ??
+          "This bank"
       );
     }
   }
@@ -470,35 +506,45 @@ export async function exchangeForUser(
     serverInstitutionName ?? clientInstitutionName ?? UNKNOWN_INSTITUTION
   );
 
-  // 6. Duplicate check on Plaid's institution id. Fails closed. Skipped when
-  // Plaid reports no institution: the row is then stored with a NULL id, and
-  // the client's id is never stored in its place.
-  if (serverInstitutionId) {
-    let existing: StoredConnectionView | null;
-    try {
-      existing = await deps.findActiveByInstitution(
-        userId,
-        serverInstitutionId,
-        itemId
-      );
-    } catch {
-      return refuse(
-        "dedupe_read",
-        failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE),
-        "error"
-      );
-    }
-    if (existing) {
-      return refuse(
-        "post_duplicate",
-        duplicate(
-          nonEmpty(existing.institution_name) ??
-            serverInstitutionName ??
-            "This bank"
-        ),
-        "info"
-      );
-    }
+  // Plaid answered, but with no institution id (null, empty or blank). A row
+  // without one could never take part in duplicate detection, so the Item is
+  // not stored, and the client's id is never stored in its place. The reason
+  // and `source=plaid` keep this apart from `refused=item_get`, where the
+  // lookup itself failed: here the value was missing upstream. The line
+  // carries no institution id and no token. The answer adds where to turn
+  // when it keeps happening, which the failed lookup's answer does not.
+  if (serverInstitutionId === null) {
+    return refuse(
+      "institution_id_missing source=plaid",
+      failure(502, "INSTITUTION_ID_MISSING", INSTITUTION_ID_MISSING_MESSAGE),
+      "error"
+    );
+  }
+
+  // 6. Duplicate check on Plaid's institution id. Fails closed.
+  const post = await readActiveByInstitution(
+    deps,
+    userId,
+    serverInstitutionId,
+    itemId
+  );
+  if (!post.ok) {
+    return refuse(
+      "dedupe_read",
+      failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE),
+      "error"
+    );
+  }
+  if (post.connection) {
+    return refuse(
+      "post_duplicate",
+      duplicate(
+        nonEmpty(post.connection.institution_name) ??
+          serverInstitutionName ??
+          "This bank"
+      ),
+      "info"
+    );
   }
 
   // 7. Store.
@@ -520,15 +566,37 @@ export async function exchangeForUser(
     return connected(itemId, serverInstitutionId, institutionName);
   }
 
-  if (stored.kind === "duplicate_item") {
-    // 23505 arrives when this user already has a row with this item_id — not
-    // from a race after step 4 (no other request holds this Item), but, for
-    // example, when an earlier ambiguous store failure had in fact committed —
-    // or on a primary-key collision. The code alone does not say which, so the
-    // Item is not revoked, and success is reported only once the row is
-    // actually read back.
-    const confirm = await readOwnItem(deps, userId, itemId);
-    if (confirm.ok && confirm.connection) {
+  if (stored.kind === "unique_violation") {
+    // 23505 has two causes, and the code alone does not say which:
+    //   - this user already has a row with this item_id — not from a race
+    //     after step 4 (no other request holds this Item), but, for example,
+    //     when an earlier ambiguous store failure had in fact committed;
+    //   - this user already has an active row at the same institution under
+    //     another Item, stored by a concurrent request after step 6 read none
+    //     (the unique index on user and institution over active rows).
+    // The user's row for this Item is read to tell them apart; one retry, as
+    // in step 4. The insert was rejected, so it stored nothing itself.
+    //   row present -> the Item is stored: never revoked, answered as success
+    //   row absent  -> the conflict is with another Item: this one has no
+    //                  row, so it is revoked and the answer is the duplicate
+    //   read failed -> nothing is known, so nothing is revoked
+    // A primary-key collision would also arrive as "row absent" and be
+    // answered as a duplicate; revoking is still right, as no row holds the
+    // Item.
+    let confirm = await readOwnItem(deps, userId, itemId);
+    if (!confirm.ok) {
+      confirm = await readOwnItem(deps, userId, itemId);
+    }
+    if (!confirm.ok) {
+      emit(
+        deps,
+        `${prefix} refused=store_conflict db_error=${logField(stored.dbErrorCode)} ` +
+          `revoke=skipped reason=recheck_read_failed`,
+        "error"
+      );
+      return failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
+    }
+    if (confirm.connection) {
       emit(deps, `${prefix} resolved=already_stored stage=insert`, "info");
       return connected(
         itemId,
@@ -536,13 +604,13 @@ export async function exchangeForUser(
         nonEmpty(confirm.connection.institution_name) ?? institutionName
       );
     }
-    emit(
-      deps,
-      `${prefix} refused=store_conflict db_error=${logField(stored.dbErrorCode)} ` +
-        `revoke=skipped`,
-      "error"
+    // The name is Plaid's for the new Item: the row it collided with is at the
+    // same institution and is not read here.
+    return refuse(
+      "store_conflict_institution",
+      duplicate(serverInstitutionName ?? "This bank"),
+      "info"
     );
-    return failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
   }
 
   const saveFailed = failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);

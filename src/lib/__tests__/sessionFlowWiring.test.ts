@@ -137,13 +137,15 @@ describe("login page submit", () => {
     );
   });
 
-  it("P5 both follow-up reads run under their time limit", () => {
-    expect(SUBMIT).toMatch(
-      /settleWithin\( supabase \.from\("users"\)[^;]*?\.maybeSingle\(\), PROFILE_READ_TIMEOUT_MS \)/
-    );
+  it("P5 the profile sync and the survey read each run under their time limit", () => {
     expect(SUBMIT).toContain(
       "settleWithin( getSurveyFieldsForUserProfile(supabase, user.id), PROFILE_READ_TIMEOUT_MS )"
     );
+    expect(SUBMIT).toContain("syncProfileAfterSignIn(user.id),");
+    expect(LOGIN.replace(/\s+/g, " ")).toContain(
+      "setTimeout(() => abort.abort(), LOGIN_SYNC_TIMEOUT_MS)"
+    );
+    expect(LOGIN).not.toContain('.from("users")');
   });
 });
 

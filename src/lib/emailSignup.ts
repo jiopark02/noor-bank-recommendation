@@ -135,7 +135,6 @@ export type EmailSignupInput = {
   firstName: string | null;
   /** Sanitized again here; empty after sanitizing becomes null. */
   lastName: string | null;
-  destinationCountry: unknown;
   /**
    * The whole request body. Only its monthly money keys are read here, to be
    * checked before anything is read or created; insertSurveyResponse builds
@@ -544,7 +543,9 @@ export async function createEmailAccount(
     last_name: lastName,
     raw_user_meta_data: {
       source: "survey_signup",
-      destination_country: input.destinationCountry || null,
+      // Taken from no caller; the key is kept so every row's blob has the
+      // same shape.
+      destination_country: null,
     },
     created_at: now,
     updated_at: now,

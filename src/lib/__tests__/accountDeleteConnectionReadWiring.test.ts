@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
  * defeat that whole protection while every other test stays green and tsc stays
  * clean (both measured before this file existed):
  *
- *   1. `return (await getAllPlaidConnections(userId)) ?? [];` in the try.
+ *   1. `return (await getRevocableConnections(userId)) ?? [];` in the try.
  *   2. `return [];` instead of `return null;` in the catch.
  *
  * Either one hands deleteAccountForUser an empty list for a failed read, and
@@ -73,8 +73,27 @@ describe("/api/account/delete — the listConnections adapter passes a failed re
     // un-revoked Plaid Items. Pinning the full list of returns also catches a
     // third return added as an early exit.
     expect(returnedExpressions(adapterSource())).toEqual([
-      "await getAllPlaidConnections(userId)",
+      "await getRevocableConnections(userId)",
       "null",
     ]);
+  });
+
+  it("logs only the thrown value's code from its catch, never the value itself", () => {
+    // A value thrown from this read could carry query details or row values.
+    // Red if: the caught `error` is passed to console.error as an argument
+    // again, or the code is no longer read through postgrestErrorCode.
+    const span = adapterSource();
+    const catchAt = span.indexOf("catch (error) {");
+    expect(catchAt).toBeGreaterThan(-1);
+    const catchBody = span.slice(catchAt, span.indexOf("return null;", catchAt));
+
+    expect(catchBody).toContain("postgrestErrorCode(error)");
+    // Every use of `error` in the catch is the argument to postgrestErrorCode.
+    // The console method's own name is removed first so it is not counted.
+    const code = catchBody.replace(/console\.error/g, "");
+    const uses = code.match(/\berror\b/g) ?? [];
+    const readThroughCode = code.match(/postgrestErrorCode\(error\)/g) ?? [];
+    // `uses` also counts the `catch (error)` binding itself.
+    expect(uses.length).toBe(readThroughCode.length + 1);
   });
 });

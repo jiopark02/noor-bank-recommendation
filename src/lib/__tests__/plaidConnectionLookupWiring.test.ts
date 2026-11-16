@@ -60,14 +60,10 @@ import { describe, it, expect } from "vitest";
  * inside any of those truncates a body silently, exactly as measured in
  * plaidConnectionReadWiring.test.ts's guardBody.
  *
- * WHAT STAYS UNCOVERED, DELIBERATELY
- * /api/plaid/relink is not asserted on. It maps BOTH `!lookup.ok` and an absent
- * row onto the 404 it has always answered, and whether it should keep doing so
- * is an open question its own comment records. Pinning that here would make the
- * eventual deliberate change fail a test named "wiring", which is the wrong
- * signal. What protects relink meanwhile is the type checker: `{ ok: false }`
- * carries no `connection`, so a caller cannot reach the row without deciding
- * what a failed read means, and that guarantee needs no probe.
+ * WHAT THIS FILE LEAVES TO ANOTHER
+ * /api/plaid/relink is not asserted on here. It answers a failed read with a
+ * 500 and an absent row with a 404, and plaidRelinkLookup.test.ts pins that by
+ * executing the route.
  */
 
 /** Resolved against this file, not the cwd, so the probe survives being run from anywhere. */
@@ -158,6 +154,36 @@ describe("getPlaidConnectionByItemId — both failure exits stay failures", () =
     expect(catchBody).toMatch(/return\s*\{\s*ok:\s*false\s*\}/);
     // The object-literal property, not the word: the log line in this same
     // block legitimately contains "connection" in its message text.
+    expect(catchBody).not.toMatch(/connection\s*:/);
+  });
+});
+
+const REVOCABLE_HELPER_ANCHOR =
+  /export async function getRevocableConnectionByItemId\s*\([^)]*\)[^{]*\{/;
+
+function revocableHelperBody(): string {
+  return blockAfter(
+    read(HELPER_SOURCE),
+    REVOCABLE_HELPER_ANCHOR,
+    "getRevocableConnectionByItemId"
+  );
+}
+
+describe("getRevocableConnectionByItemId — both failure exits stay failures", () => {
+  it("delegates the decision to the pure function the suite actually tests", () => {
+    // Red if: the delegation is replaced by an inline `error || !data` check.
+    expect(revocableHelperBody()).toContain("connectionRowOrFailure");
+  });
+
+  it("reports a thrown read as a failure, not as an absent row", () => {
+    // Red if: the catch returns { ok: true, connection: null }. /api/plaid/disconnect
+    // reads through this helper, and an absent row there is answered as success.
+    const catchBody = blockAfter(
+      revocableHelperBody(),
+      HELPER_CATCH_ANCHOR,
+      "getRevocableConnectionByItemId catch"
+    );
+    expect(catchBody).toMatch(/return\s*\{\s*ok:\s*false\s*\}/);
     expect(catchBody).not.toMatch(/connection\s*:/);
   });
 });

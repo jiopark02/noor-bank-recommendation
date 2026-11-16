@@ -7,15 +7,17 @@ import { BottomNav, BOTTOM_NAV_CLEARANCE } from "@/components/layout";
 import { UserLevel, getUserFinanceLevel } from "@/lib/financeProTips";
 import { useChat } from "@/hooks/useChat";
 import { UserContext } from "@/lib/noorAIPrompt";
-import { supabase, getSessionSafe } from "@/lib/supabase-browser";
+import { supabase, readSession } from "@/lib/supabase-browser";
+import {
+  PROTECTED_SESSION_RETRY,
+  decideProtectedMount,
+  retryUntilAnswered,
+  shouldRetrySessionRead,
+  waitMs,
+} from "@/lib/sessionFlow";
+import { clearLocalAuthState } from "@/lib/validation";
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
-
-// Guards the one-shot auto-reload below. sessionStorage survives a reload
-// (same tab) so the second hydrate pass after a reload sees the flag and
-// stops, preventing an infinite reload loop. Cleared on a valid session so a
-// future stale event can self-heal again.
-const AUTH_RELOAD_FLAG = "noor_auth_stale_reload";
 
 function buildUserContext(profile: Record<string, unknown>): UserContext {
   return {
@@ -68,6 +70,7 @@ export default function ChatPage() {
   const [userContext, setUserContext] = useState<UserContext>({});
   const [userName, setUserName] = useState("");
   const [isBooting, setIsBooting] = useState(true);
+  const [sessionDelayed, setSessionDelayed] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
 
   // Read and clear the pending prompt synchronously on first render so it
@@ -94,31 +97,28 @@ export default function ChatPage() {
   useEffect(() => {
     let isMounted = true;
     const hydrate = async () => {
-      if (!supabase) { if (isMounted) router.replace("/login"); return; }
-      const session = await getSessionSafe();
-      if (!session?.user) {
-        // getSessionSafe returned null: either a genuinely absent session (logged
-        // out / expired) or a stale Supabase client whose getSession() timed out
-        // (known SDK bug — a backgrounded tab can corrupt the client so getSession
-        // hangs even though the cookie session is still valid; the only reliable
-        // recovery is recreating the client via a full reload). We can't distinguish
-        // the two from null alone, so reload once to recreate the client: if the
-        // session was real, the reload restores it and chat loads; if genuinely
-        // absent, the post-reload pass is still null and falls through to /login.
-        // The sessionStorage flag caps this at a single reload (no infinite loop).
-        if (!sessionStorage.getItem(AUTH_RELOAD_FLAG)) {
-          sessionStorage.setItem(AUTH_RELOAD_FLAG, "1");
-          window.location.reload();
-          return;
-        }
-        sessionStorage.removeItem(AUTH_RELOAD_FLAG);
-        if (isMounted) router.replace("/login");
+      // Only a clean "none" signs out. A read that never answered (a timeout,
+      // an error, or a client that is not configured) can come from a valid
+      // session, so it is retried, then shown as a delay with a reload button,
+      // and it never clears anything.
+      const read = await retryUntilAnswered(
+        (timeoutMs, attempt) => readSession(timeoutMs, "chat-mount", attempt),
+        shouldRetrySessionRead,
+        PROTECTED_SESSION_RETRY,
+        { sleep: waitMs, isCancelled: () => !isMounted }
+      );
+      if (!isMounted) return;
+      const action = decideProtectedMount(read);
+      if (action === "sign-out") {
+        clearLocalAuthState();
+        router.replace("/login");
         return;
       }
-      // Valid session: clear the guard so a future stale event can self-heal again.
-      sessionStorage.removeItem(AUTH_RELOAD_FLAG);
-      const uid = session.user.id;
-      if (!isMounted) return;
+      if (action === "show-delayed" || read.status !== "session" || !supabase) {
+        setSessionDelayed(true);
+        return;
+      }
+      const uid = read.session.user.id;
       setUserId(uid);
       try {
         const [{ data: userRow }, { data: surveyRow }] = await Promise.all([
@@ -181,6 +181,30 @@ export default function ChatPage() {
     setInput("");
     await sendMessage(msg);
   };
+
+  // Reloads rather than reading again: a client whose auth read has hung stays
+  // hung until the page recreates it.
+  if (sessionDelayed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white px-6">
+        <div className="max-w-sm w-full text-center">
+          <h1 className="text-xl font-semibold text-black mb-2">
+            We couldn&apos;t confirm your sign-in
+          </h1>
+          <p className="text-gray-500 mb-6">
+            Please check your connection and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="w-full py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Only block the whole page on boot if there's no question to show yet.
   // If a quick prompt was tapped, render the page immediately so the user
