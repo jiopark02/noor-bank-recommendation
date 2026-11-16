@@ -49,9 +49,25 @@
 --   2. The index.
 --   3. A DO block that reads the catalog and raises unless an index of that
 --      name exists on the table, is unique and valid, is on exactly those two
---      columns in that order, and carries that condition. `if not exists`
---      skips by name alone, so this is what catches an index of the same name
---      with another definition.
+--      columns in that order, and carries exactly that condition. `if not
+--      exists` skips by name alone, so this is what catches an index of the
+--      same name with another definition. The condition is compared as a
+--      whole with the text PostgreSQL prints for it (pg_get_expr), not
+--      searched for its parts: a condition such as status <> 'active' holds
+--      every part and is still another index.
+--
+-- The text the check expects is how PostgreSQL prints the condition on a
+-- table whose status column is character varying. Where that column has
+-- another type the same condition prints differently (with a text column,
+-- status = 'active'::text with no cast on the column), so there the correct
+-- index raises in this check too and the whole file rolls back, the index
+-- with it. The message carries both texts: read them before concluding the
+-- index is wrong, and when only the printed form differs, change the expected
+-- text to that database's form rather than removing the check.
+--
+-- When the check raises on an index that was already there under this name,
+-- the file has changed nothing and that index is still in place; it has to be
+-- looked at and replaced by hand before this file can pass.
 --
 -- Locks: a plain CREATE INDEX holds a SHARE lock on the table while it
 -- builds, so inserts, updates and deletes of plaid_connections wait for it;
@@ -107,6 +123,8 @@ declare
   v_valid boolean;
   v_columns name[];
   v_predicate text;
+  v_expected_predicate constant text :=
+    '((institution_id IS NOT NULL) AND ((status)::text = ''active''::text))';
 begin
   select i.indisunique,
          i.indisvalid,
@@ -140,14 +158,11 @@ begin
       'plaid_connections: plaid_connections_user_institution_active_key is on %, expected (user_id, institution_id)',
       v_columns;
   end if;
-  if v_predicate is null
-     or v_predicate !~ 'institution_id IS NOT NULL'
-     or v_predicate !~ 'status'
-     or v_predicate !~ '''active'''
-  then
+  if v_predicate is distinct from v_expected_predicate then
     raise exception
-      'plaid_connections: plaid_connections_user_institution_active_key has the condition %, expected institution_id is not null and status = ''active''',
-      coalesce(v_predicate, '(none)');
+      'plaid_connections: plaid_connections_user_institution_active_key has the condition %, expected %',
+      coalesce(v_predicate, '(none)'),
+      v_expected_predicate;
   end if;
 end;
 $$;

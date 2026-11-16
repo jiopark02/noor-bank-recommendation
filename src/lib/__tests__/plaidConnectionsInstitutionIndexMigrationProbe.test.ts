@@ -24,6 +24,8 @@ import path from "path";
  *   the index built CONCURRENTLY, or the transaction removed -> M3
  *   the duplicate check before the index removed             -> M4
  *   the catalog check after the index removed                -> M5
+ *   the expected condition text changed, or the comparison
+ *     turned back into a search for parts of it              -> M5
  *   a grant, a policy or a row change added                  -> M6
  *   the header's deploy-order sentence removed               -> M7
  */
@@ -94,6 +96,13 @@ describe("plaid_connections institution index migration", () => {
     expect(after).toContain("array['user_id', 'institution_id']::name[]");
     expect(after).toContain(`c.relname = '${INDEX}'`);
     expect(occurrences(after, "raise exception")).toBeGreaterThanOrEqual(5);
+    // The condition is compared whole with the text PostgreSQL prints for it,
+    // never searched for its parts: `status <> 'active'` holds every part.
+    expect(after).toContain(
+      "v_expected_predicate constant text := '((institution_id IS NOT NULL) AND ((status)::text = ''active''::text))';"
+    );
+    expect(after).toContain("if v_predicate is distinct from v_expected_predicate then");
+    expect(after).not.toContain("!~");
   });
 
   it("M6 changes no privilege, no policy and no row", () => {
