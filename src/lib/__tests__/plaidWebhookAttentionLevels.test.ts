@@ -54,6 +54,7 @@ function harness(): Harness {
     deps: {
       plaidEnvironment: "sandbox",
       isAdminConfigured: () => true,
+      isCryptoConfigured: () => true,
       lookupByItemId,
       revoke,
     },

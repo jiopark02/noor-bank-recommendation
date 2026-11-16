@@ -17,6 +17,10 @@ import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import { liveRevocationDeps } from "@/lib/plaidRevocation";
 import { exchangeForUser, INSTITUTION_NAME_MAX } from "@/lib/plaidExchange";
 
+// Literal, because the platform reads it statically. Must equal
+// PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
+export const maxDuration = 300;
+
 /**
  * The body's institution id, cut to the institution name's cap in code points
  * (never splitting a character outside the BMP). It is read only for the

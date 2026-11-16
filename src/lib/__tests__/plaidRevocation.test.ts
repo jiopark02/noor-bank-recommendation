@@ -5,7 +5,11 @@ import {
   plaidTokenEnvironment,
   revokeAndDeleteConnection,
   revokeAndDeleteConnections,
+  shouldStartRevocation,
+  PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS,
+  PLAID_REVOKE_START_RESERVE_MS,
   type RevocableConnection,
+  type RevocationBudget,
   type RevocationDeps,
 } from "../plaidRevocation";
 import { PlaidTokenCryptoError } from "../plaidTokenCrypto";
@@ -43,6 +47,13 @@ function connection(itemId: string): RevocableConnection {
     access_token: `v1:${itemId}-iv:${itemId}-tag:${itemId}-ciphertext`,
   };
 }
+
+/**
+ * A clock that never runs out: the request started now and time does not
+ * advance. For the tests that are not about the time check, so every
+ * connection's revocation is started.
+ */
+const NO_DEADLINE: RevocationBudget = { startedAtMs: 0, now: () => 0 };
 
 /**
  * An axios-shaped Plaid error carrying `code`, pushed through the real
@@ -158,7 +169,8 @@ describe("revokeAndDeleteConnections — only revoked connections lose their row
     const summary = await revokeAndDeleteConnections(
       "user_1",
       [connection("item_1"), connection("item_2"), connection("item_3")],
-      deps
+      deps,
+      NO_DEADLINE
     );
 
     expect(deletedItemIds(deps)).toEqual(["item_1", "item_3"]);
@@ -182,7 +194,8 @@ describe("revokeAndDeleteConnections — only revoked connections lose their row
     const summary = await revokeAndDeleteConnections(
       "user_1",
       [connection("item_1"), connection("item_2"), connection("item_3")],
-      deps
+      deps,
+      NO_DEADLINE
     );
 
     expect(summary.remaining).toBe(1);
@@ -387,7 +400,8 @@ describe("revokeAndDeleteConnection — key-level and row-level crypto failures"
     const summary = await revokeAndDeleteConnections(
       "user_1",
       [connection("item_1")],
-      deps
+      deps,
+      NO_DEADLINE
     );
 
     expect(summary.outcomes[0].failure).toBe("crypto_config");
@@ -408,7 +422,8 @@ describe("revokeAndDeleteConnection — key-level and row-level crypto failures"
     const summary = await revokeAndDeleteConnections(
       "user_1",
       [connection("item_1")],
-      deps
+      deps,
+      NO_DEADLINE
     );
 
     expect(summary.outcomes[0].failure).toBe("crypto_row");
@@ -785,14 +800,14 @@ describe("revokeAndDeleteConnection — a retry converges", () => {
     deps.deleteRow.mockResolvedValue({ ok: false, dbErrorCode: "40001" });
 
     const connections = [connection("item_1"), connection("item_2")];
-    const first = await revokeAndDeleteConnections("user_1", connections, deps);
+    const first = await revokeAndDeleteConnections("user_1", connections, deps, NO_DEADLINE);
 
     expect(first.remaining).toBe(2);
 
     deps.itemRemove.mockRejectedValue(plaidRejection("ITEM_NOT_FOUND"));
     deps.deleteRow.mockResolvedValue({ ok: true, deleted: 1 });
 
-    const second = await revokeAndDeleteConnections("user_1", connections, deps);
+    const second = await revokeAndDeleteConnections("user_1", connections, deps, NO_DEADLINE);
 
     expect(second.remaining).toBe(0);
     expect(second.sawCryptoConfigFailure).toBe(false);
@@ -812,12 +827,14 @@ describe("revokeAndDeleteConnection — a retry converges", () => {
     const first = await revokeAndDeleteConnections(
       "user_1",
       [connection("item_1")],
-      deps
+      deps,
+      NO_DEADLINE
     );
     const second = await revokeAndDeleteConnections(
       "user_1",
       [connection("item_1")],
-      deps
+      deps,
+      NO_DEADLINE
     );
 
     expect(first.remaining).toBe(1);
@@ -995,11 +1012,12 @@ describe("revokeAndDeleteConnections — the empty and all-success cases", () =>
   it("reports nothing remaining for a user with no connections", async () => {
     const deps = passingDeps();
 
-    const summary = await revokeAndDeleteConnections("user_1", [], deps);
+    const summary = await revokeAndDeleteConnections("user_1", [], deps, NO_DEADLINE);
 
     expect(summary).toEqual({
       outcomes: [],
       remaining: 0,
+      deferred: 0,
       sawCryptoConfigFailure: false,
     });
     expect(deps.itemRemove).not.toHaveBeenCalled();
@@ -1011,10 +1029,113 @@ describe("revokeAndDeleteConnections — the empty and all-success cases", () =>
     const summary = await revokeAndDeleteConnections(
       "user_1",
       [connection("item_1"), connection("item_2")],
-      deps
+      deps,
+      NO_DEADLINE
     );
 
     expect(summary.remaining).toBe(0);
     expect(deletedItemIds(deps)).toEqual(["item_1", "item_2"]);
+  });
+});
+
+/**
+ * The request's time limit: a revocation is started only while enough of the
+ * request's time is left, counted from the start of the request.
+ *
+ * Mutations that turn this block red:
+ *   - the check removed, or made after the revocation instead of before it -> "stops starting"
+ *   - the check counted from the loop's start instead of the request's       -> "request start"
+ *   - deferred connections left out of `remaining`                           -> "stops starting", "with failures"
+ *   - `>=` changed to `>` in shouldStartRevocation                           -> "boundary"
+ */
+describe("revokeAndDeleteConnections — the request's time limit", () => {
+  const LIMIT_MS = PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS * 1000;
+  /** The first moment at which a new revocation may no longer start. */
+  const PAST_RESERVE = LIMIT_MS - PLAID_REVOKE_START_RESERVE_MS + 1;
+
+  it("stops starting revocations when too little time is left, and defers the rest", async () => {
+    const deps = passingDeps();
+    const lines = withLog(deps);
+    let clock = 0;
+    deps.itemRemove.mockImplementation(async () => {
+      clock = PAST_RESERVE;
+      return "req_fake_ok";
+    });
+
+    const summary = await revokeAndDeleteConnections(
+      "user_1",
+      [connection("item_1"), connection("item_2"), connection("item_3")],
+      deps,
+      { startedAtMs: 0, now: () => clock }
+    );
+
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
+    expect(deletedItemIds(deps)).toEqual(["item_1"]);
+    expect(summary.outcomes).toHaveLength(1);
+    expect(summary.deferred).toBe(2);
+    expect(summary.remaining).toBe(2);
+    const deferredLines = lines.filter((line) => line.includes("deferred=time_budget"));
+    expect(deferredLines).toHaveLength(2);
+    expect(deferredLines[0]).toContain("item_id=item_2");
+    expect(deferredLines[1]).toContain("item_id=item_3");
+  });
+
+  it("counts from the request start, not from when the loop begins", async () => {
+    // The time before the loop (authentication, the reads) has already used
+    // the budget, so not even the first revocation may start.
+    const deps = passingDeps();
+
+    const summary = await revokeAndDeleteConnections(
+      "user_1",
+      [connection("item_1"), connection("item_2")],
+      deps,
+      { startedAtMs: 0, now: () => PAST_RESERVE }
+    );
+
+    expect(deps.itemRemove).not.toHaveBeenCalled();
+    expect(deps.deleteRow).not.toHaveBeenCalled();
+    expect(summary.deferred).toBe(2);
+    expect(summary.remaining).toBe(2);
+  });
+
+  it("adds deferred connections to the failures in remaining", async () => {
+    const deps = passingDeps();
+    let clock = 0;
+    deps.itemRemove.mockImplementation(async () => {
+      clock = PAST_RESERVE;
+      throw plaidRejection("INTERNAL_SERVER_ERROR", 500);
+    });
+
+    const summary = await revokeAndDeleteConnections(
+      "user_1",
+      [connection("item_1"), connection("item_2"), connection("item_3")],
+      deps,
+      { startedAtMs: 0, now: () => clock }
+    );
+
+    expect(summary.outcomes).toEqual([
+      { itemId: "item_1", ok: false, failure: "plaid" },
+    ]);
+    expect(summary.deferred).toBe(2);
+    expect(summary.remaining).toBe(3);
+    expect(deps.deleteRow).not.toHaveBeenCalled();
+  });
+});
+
+describe("shouldStartRevocation — the boundary", () => {
+  it("starts when exactly the reserve is left, and not 1 ms later", () => {
+    const limit = 300 * 1000;
+    expect(shouldStartRevocation(0, limit - 60_000, 300, 60_000)).toBe(true);
+    expect(shouldStartRevocation(0, limit - 60_000 + 1, 300, 60_000)).toBe(false);
+  });
+
+  it("counts the elapsed time from startedAtMs", () => {
+    expect(shouldStartRevocation(1_000, 1_000, 300, 60_000)).toBe(true);
+    expect(shouldStartRevocation(1_000, 1_000 + 240_001, 300, 60_000)).toBe(false);
+  });
+
+  it("uses a 300 s limit and a reserve of six default Plaid call limits", () => {
+    expect(PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS).toBe(300);
+    expect(PLAID_REVOKE_START_RESERVE_MS).toBe(60_000);
   });
 });

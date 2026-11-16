@@ -324,11 +324,12 @@ describe("deletePlaidConnection — the delete reports its row count", () => {
     });
   });
 
-  it("caps and trims a code that is not the symbolic string it should be", async () => {
+  it("rejects a code that is not the symbolic string it should be", async () => {
     // postgrestErrorCode is total and bounded by construction. The catch path
     // receives an arbitrary thrown value, not a PostgREST error, so `code` is
     // whatever that value carries — a node error's "ENOENT", or something that
-    // has no business occupying a log line.
+    // has no business occupying a log line. A padded or over-long string is
+    // rejected whole and reported as "invalid"; no part of it is kept.
     const longCode = `  ${"C".repeat(80)}  `;
     createServerClientMock.mockImplementation(() => {
       const error = new Error("thrown") as Error & { code?: string };
@@ -338,6 +339,6 @@ describe("deletePlaidConnection — the delete reports its row count", () => {
 
     const result = await deletePlaidConnection("user_1", "item_1");
 
-    expect(result).toEqual({ ok: false, dbErrorCode: "C".repeat(32) });
+    expect(result).toEqual({ ok: false, dbErrorCode: "invalid" });
   });
 });

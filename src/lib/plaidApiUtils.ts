@@ -7,6 +7,9 @@ import {
   encryptPlaidAccessToken,
   isPlaidTokenCryptoError,
 } from "./plaidTokenCrypto";
+// Type-only: erased at build time, so plaidRevocation's runtime import of this
+// module does not become a cycle.
+import type { RevocableConnection } from "./plaidRevocation";
 
 /**
  * Authenticate Plaid API requests via Supabase Bearer JWT.
@@ -93,6 +96,9 @@ export function connectionRowOrFailure<T>(result: {
  * The catch is a failure too, not an absence: createServerClient() throws on
  * missing env, and reporting that as "no such row" would resurrect the same bug
  * through the other door.
+ *
+ * Logs the error CODE only: the full row is selected here, and an error's
+ * message or details can echo a value from it.
  */
 export async function getPlaidConnectionByItemId(userId: string, itemId: string) {
   try {
@@ -105,12 +111,18 @@ export async function getPlaidConnectionByItemId(userId: string, itemId: string)
       .maybeSingle();
 
     if (result.error) {
-      console.error("Error fetching Plaid connection by item_id:", result.error);
+      console.error(
+        "Error fetching Plaid connection by item_id: code",
+        postgrestErrorCode(result.error) ?? "none"
+      );
     }
 
     return connectionRowOrFailure(result);
   } catch (error) {
-    console.error("Error fetching Plaid connection by item_id:", error);
+    console.error(
+      "Error fetching Plaid connection by item_id: threw, code",
+      postgrestErrorCode(error) ?? "none"
+    );
     // `as const` keeps `ok` a literal type, so the union this function returns
     // stays discriminated and callers can still narrow on it.
     return { ok: false } as const;
@@ -184,7 +196,8 @@ export function connectionsByItemIdOrFailure(result: {
  * this reads two rows: one means the owner is known, two means it is not, and
  * the caller acts on neither of the second.
  *
- * Logs the error shape only, never a row: a row carries a stored token.
+ * Logs the error code only, and only one of a symbolic shape (see
+ * postgrestErrorCode), never a row: a row carries a stored token.
  */
 export async function getPlaidConnectionsByItemIdAcrossUsers(
   itemId: string
@@ -200,7 +213,7 @@ export async function getPlaidConnectionsByItemIdAcrossUsers(
     if (result.error) {
       console.error(
         "Error fetching Plaid connections by item_id: code",
-        typeof result.error.code === "string" ? result.error.code : "none"
+        postgrestErrorCode(result.error) ?? "none"
       );
     }
     return connectionsByItemIdOrFailure(result);
@@ -225,29 +238,46 @@ export async function getPlaidConnectionsByItemIdAcrossUsers(
  *    Item (itemGet), and `excludeItemId` set to that new Item. This is the pass a
  *    client value cannot steer, and exchange-token fails closed on it.
  *
- * Throws on a query error so the caller can decide the fail direction.
+ * Returns the three states of ConnectionLookup rather than throwing, so the
+ * failure is in the return type and each caller decides its fail direction
+ * where the compiler can see it. A query error and a throw (createServerClient
+ * throws on missing env) are both `{ ok: false }`; no active row is
+ * `{ ok: true, connection: null }`. Logs the error code only.
  */
 export async function getActivePlaidConnectionByInstitution(
   userId: string,
   institutionId: string,
   excludeItemId?: string
-) {
-  const supabase = createServerClient();
-  let query = supabase
-    .from("plaid_connections")
-    .select("item_id,institution_name")
-    .eq("user_id", userId)
-    .eq("institution_id", institutionId)
-    .eq("status", "active");
-  if (excludeItemId !== undefined) {
-    query = query.neq("item_id", excludeItemId);
-  }
-  const { data, error } = await query.limit(1).maybeSingle();
+): Promise<
+  ConnectionLookup<{ item_id: string; institution_name: string | null }>
+> {
+  try {
+    const supabase = createServerClient();
+    let query = supabase
+      .from("plaid_connections")
+      .select("item_id,institution_name")
+      .eq("user_id", userId)
+      .eq("institution_id", institutionId)
+      .eq("status", "active");
+    if (excludeItemId !== undefined) {
+      query = query.neq("item_id", excludeItemId);
+    }
+    const result = await query.limit(1).maybeSingle();
 
-  if (error) {
-    throw error;
+    if (result.error) {
+      console.error(
+        "Error fetching Plaid connection by institution: code",
+        postgrestErrorCode(result.error) ?? "none"
+      );
+    }
+    return connectionRowOrFailure(result);
+  } catch (error) {
+    console.error(
+      "Error fetching Plaid connection by institution: threw, code",
+      postgrestErrorCode(error) ?? "none"
+    );
+    return { ok: false } as const;
   }
-  return data;
 }
 
 /**
@@ -373,22 +403,18 @@ export function connectionRowsOrNull<T>(result: {
  * type, so a caller that ignores it does not compile; a throw is invisible to the
  * compiler and gets absorbed by whatever outer catch happens to be in scope.
  *
- * Its callers are the bank-data route (/api/finance/summary) and the
- * account-deletion route, and they answer the null differently. The bank-data
- * route converts it straight back into a throw and lands in its own outer
- * catch, so a failed read is answered with the 500 and the generic "There was
- * a problem reaching your bank" that handlePlaidError produces for any error
- * carrying no Plaid error_code — which is also what throwing from here would
- * produce.
+ * Its caller is the bank-data route (/api/finance/summary). It converts the null
+ * straight back into a throw and lands in its own outer catch, so a failed read
+ * is answered with the 500 and the generic "There was a problem reaching your
+ * bank" that handlePlaidError produces for any error carrying no Plaid
+ * error_code — which is also what throwing from here would produce.
  *
- * /api/account/delete used to catch and carry on either way, because its Plaid
- * revocation was best-effort. It no longer does: a row is now deleted only after
- * its Plaid Item has actually been revoked, so a read that failed cannot report
- * whether an un-revoked connection is about to be destroyed. That route answers
- * the null by REFUSING to delete the account. If this helper is ever changed to
- * report a failed read as [], that route silently starts deleting accounts whose
- * bank connections were never revoked — with the tokens that could have revoked
- * them.
+ * The revocation paths do not read through this helper; they use
+ * getRevocableConnections below, which keeps the same null-versus-[] contract.
+ * That contract is what lets /api/account/delete answer a failed read by
+ * REFUSING to delete the account: a failed read reported as [] would delete an
+ * account whose bank connections were never revoked, with the tokens that could
+ * have revoked them.
  *
  * What the null does buy at the bank-data route is not the 500 — it is not
  * emitting the 404. That 404's wording is string-matched by the money and dashboard screens;
@@ -396,8 +422,7 @@ export function connectionRowsOrNull<T>(result: {
  * cached data survives.
  *
  * Rows are returned UNFILTERED, including status != 'active'. Callers filter for
- * themselves: /api/account/delete needs the inactive ones to revoke their Plaid
- * Items, and filtering here in SQL would also re-merge "no rows" with "rows, none
+ * themselves, and filtering here in SQL would re-merge "no rows" with "rows, none
  * active" — the distinction this helper exists to keep.
  */
 export async function getAllPlaidConnections(
@@ -429,6 +454,93 @@ export async function getAllPlaidConnections(
   } catch (error) {
     console.error("Error fetching Plaid connections:", error);
     return null;
+  }
+}
+
+/**
+ * Every connection row for one user, with only the two columns a revocation
+ * reads, or null if the read failed.
+ *
+ * The revocation paths read through this helper and its single-row sibling
+ * below instead of the full-row helpers, so a revocation is handed the Item id
+ * and the stored token and nothing else from the row. The return type is
+ * stated rather than inferred: the client here is not generic over the schema,
+ * so the column list is not what the compiler sees.
+ *
+ * Same contract as getAllPlaidConnections: null means the read FAILED, [] means
+ * the user genuinely has no rows, and rows are returned unfiltered by status —
+ * an errored connection still holds a live Plaid Item that must be revoked.
+ *
+ * Logs the error CODE only: a row carries a stored token.
+ */
+export async function getRevocableConnections(
+  userId: string
+): Promise<RevocableConnection[] | null> {
+  try {
+    const supabase = createServerClient();
+    const result = await supabase
+      .from("plaid_connections")
+      .select("item_id,access_token")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (result.error) {
+      console.error(
+        "Error fetching revocable Plaid connections: code",
+        postgrestErrorCode(result.error) ?? "none"
+      );
+    } else if (!Array.isArray(result.data)) {
+      console.error(
+        "Error fetching revocable Plaid connections: unexpected payload shape, data was",
+        result.data === null ? "null" : typeof result.data
+      );
+    }
+
+    return connectionRowsOrNull<RevocableConnection>(result);
+  } catch (error) {
+    console.error(
+      "Error fetching revocable Plaid connections: threw, code",
+      postgrestErrorCode(error) ?? "none"
+    );
+    return null;
+  }
+}
+
+/**
+ * One user's connection row for one item_id, with only the two columns a
+ * revocation reads. The three states are those of getPlaidConnectionByItemId:
+ * `{ ok: false }` is a failed read, including a thrown client construction,
+ * and never an absent row.
+ *
+ * Logs the error CODE only: a row carries a stored token.
+ */
+export async function getRevocableConnectionByItemId(
+  userId: string,
+  itemId: string
+): Promise<ConnectionLookup<RevocableConnection>> {
+  try {
+    const supabase = createServerClient();
+    const result = await supabase
+      .from("plaid_connections")
+      .select("item_id,access_token")
+      .eq("user_id", userId)
+      .eq("item_id", itemId)
+      .maybeSingle();
+
+    if (result.error) {
+      console.error(
+        "Error fetching revocable Plaid connection by item_id: code",
+        postgrestErrorCode(result.error) ?? "none"
+      );
+    }
+
+    return connectionRowOrFailure<RevocableConnection>(result);
+  } catch (error) {
+    console.error(
+      "Error fetching revocable Plaid connection by item_id: threw, code",
+      postgrestErrorCode(error) ?? "none"
+    );
+    return { ok: false } as const;
   }
 }
 
@@ -567,6 +679,8 @@ export function storeResultFromInsert(error: unknown): PlaidConnectionStore {
  * a null, so `db_error=` in the log tells those two apart — one is an environment
  * or transport fault, the other is a query that answered without the count it was
  * asked for. The marker's shape cannot collide with a SQLSTATE or a node errno.
+ * A third value, `"invalid"`, means the error did carry a string code but not
+ * one of a symbolic shape (see postgrestErrorCode); the string is not kept.
  */
 export type PlaidRowDeletion =
   | { ok: true; deleted: number }
@@ -575,18 +689,26 @@ export type PlaidRowDeletion =
 /**
  * The error's `code` and nothing else, for a log line.
  *
- * Total by construction: every non-string, empty or absent code becomes null.
- * Trimmed and capped because the value is interpolated into a single-line log
- * record — a PostgREST code is symbolic ("42501", "PGRST301") and a node code
- * is too ("ENOENT"), but this function must not be the place a multi-line or
- * unbounded string gets into the logs.
+ * Total by construction: an absent or non-string code becomes null. A string
+ * is returned only when it has the shape of a symbolic code — a SQLSTATE
+ * ("42501"), a PostgREST code ("PGRST301"), a node code ("ENOENT"). A string
+ * of any other shape (empty, padded, multi-line, containing `=` or spaces, or
+ * longer than the bound) becomes the literal "invalid" and is never echoed,
+ * not even in part: the value is interpolated into single-line `key=value` log
+ * records, and a cleaned-up fragment of an unexpected string is still
+ * something this function did not vet. The same rule as errorCodeField in
+ * accountDeletion.ts, which keeps its own copy so that module imports no IO.
+ *
+ * Callers that DECIDE on the result compare it with a well-formed SQLSTATE, so
+ * "invalid" is to them a failure with no usable code: it is not 23505 for
+ * storeResultFromInsert, and it is not a definite rejection for
+ * isDefiniteDbRejection (plaidExchange.ts), which re-reads the row instead.
  */
-function postgrestErrorCode(error: unknown): string | null {
+export function postgrestErrorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null;
   const code = (error as Record<string, unknown>).code;
   if (typeof code !== "string") return null;
-  const trimmed = code.trim().slice(0, 32);
-  return trimmed === "" ? null : trimmed;
+  return /^[A-Za-z0-9_]{1,32}$/.test(code) ? code : "invalid";
 }
 
 /**
@@ -612,7 +734,9 @@ function postgrestErrorCode(error: unknown): string | null {
  * The three console.error lines stay. `dbErrorCode` distinguishes the
  * missing-representation case by marker, but a thrown createServerClient and a
  * PostgREST error carrying no code both arrive as null, and these lines are the
- * only trace that separates those two.
+ * only trace that separates those two: the thrown case says "threw". Each line
+ * carries the error's code and never the error itself, whose message or
+ * details can echo a value.
  */
 export async function deletePlaidConnection(
   userId: string,
@@ -628,8 +752,9 @@ export async function deletePlaidConnection(
       .select("id");
 
     if (error) {
-      console.error("Error deleting Plaid connection:", error);
-      return { ok: false, dbErrorCode: postgrestErrorCode(error) };
+      const dbErrorCode = postgrestErrorCode(error);
+      console.error("Error deleting Plaid connection: code", dbErrorCode ?? "none");
+      return { ok: false, dbErrorCode };
     }
 
     // NO REPRESENTATION IS "WE DO NOT KNOW", NOT "ZERO ROWS". `.select("id")`
@@ -660,8 +785,12 @@ export async function deletePlaidConnection(
 
     return { ok: true, deleted: data.length };
   } catch (error) {
-    console.error("Error deleting connection:", error);
-    return { ok: false, dbErrorCode: postgrestErrorCode(error) };
+    const dbErrorCode = postgrestErrorCode(error);
+    console.error(
+      "Error deleting Plaid connection: threw, code",
+      dbErrorCode ?? "none"
+    );
+    return { ok: false, dbErrorCode };
   }
 }
 

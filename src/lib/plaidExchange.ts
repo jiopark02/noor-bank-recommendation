@@ -143,12 +143,15 @@ export type StoredConnectionView = {
 export type ExchangeDeps = {
   /** null means the count could not be read. */
   countConnections: (userId: string) => Promise<number | null>;
-  /** Throws when the read fails; null when there is no such active row. */
+  /**
+   * `{ ok: false }` when the read failed; `connection: null` when there is no
+   * such active row. A throw is treated as a failed read too.
+   */
   findActiveByInstitution: (
     userId: string,
     institutionId: string,
     excludeItemId?: string
-  ) => Promise<StoredConnectionView | null>;
+  ) => Promise<ConnectionLookup<StoredConnectionView>>;
   /** Rejects with the Plaid error when the exchange is refused. */
   exchange: (
     publicToken: string
@@ -302,6 +305,26 @@ async function readOwnItem(
 }
 
 /**
+ * The duplicate-check read. A dependency that throws instead of returning
+ * `{ ok: false }` is read as a failed read, so each caller's fail direction
+ * applies to it too.
+ */
+async function readActiveByInstitution(
+  deps: ExchangeDeps,
+  userId: string,
+  institutionId: string,
+  excludeItemId?: string
+): Promise<ConnectionLookup<StoredConnectionView>> {
+  try {
+    return excludeItemId === undefined
+      ? await deps.findActiveByInstitution(userId, institutionId)
+      : await deps.findActiveByInstitution(userId, institutionId, excludeItemId);
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
  * Revoke an Item that was minted by this request and never stored.
  *
  * There is no row, so revokeAndDeleteConnection does not fit: it decrypts a
@@ -381,23 +404,18 @@ export async function exchangeForUser(
   // Capped here, once, so every answer that falls back to it is capped too.
   const clientInstitutionName = capName(nonEmpty(input.institutionName));
   if (clientInstitutionId) {
-    try {
-      const existing = await deps.findActiveByInstitution(
-        userId,
-        clientInstitutionId
-      );
-      if (existing) {
-        return duplicate(
-          nonEmpty(existing.institution_name) ??
-            clientInstitutionName ??
-            "This bank"
-        );
-      }
-    } catch {
+    const pre = await readActiveByInstitution(deps, userId, clientInstitutionId);
+    if (!pre.ok) {
       emit(
         deps,
         `${userPrefix} dedupe_read=failed stage=pre proceeding=true`,
         "warn"
+      );
+    } else if (pre.connection) {
+      return duplicate(
+        nonEmpty(pre.connection.institution_name) ??
+          clientInstitutionName ??
+          "This bank"
       );
     }
   }
@@ -474,25 +492,24 @@ export async function exchangeForUser(
   // Plaid reports no institution: the row is then stored with a NULL id, and
   // the client's id is never stored in its place.
   if (serverInstitutionId) {
-    let existing: StoredConnectionView | null;
-    try {
-      existing = await deps.findActiveByInstitution(
-        userId,
-        serverInstitutionId,
-        itemId
-      );
-    } catch {
+    const post = await readActiveByInstitution(
+      deps,
+      userId,
+      serverInstitutionId,
+      itemId
+    );
+    if (!post.ok) {
       return refuse(
         "dedupe_read",
         failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE),
         "error"
       );
     }
-    if (existing) {
+    if (post.connection) {
       return refuse(
         "post_duplicate",
         duplicate(
-          nonEmpty(existing.institution_name) ??
+          nonEmpty(post.connection.institution_name) ??
             serverInstitutionName ??
             "This bank"
         ),

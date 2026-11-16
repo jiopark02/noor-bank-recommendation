@@ -123,6 +123,22 @@ function emit(deps: AccountDeletionDeps, line: string): void {
   console.error(line);
 }
 
+/**
+ * The error's `code` and nothing else, bounded for a single log line.
+ *
+ * Never the message, details or hint: a database error's text can echo the
+ * row or the key it refused on. A code of the expected shape (a SQLSTATE or a
+ * PostgREST code) is logged as is; "none" when there is no string code;
+ * "invalid" for a string of any other shape, which is never echoed. Kept in
+ * this module so the decision code imports no client or IO module.
+ */
+function errorCodeField(error: unknown): string {
+  if (typeof error !== "object" || error === null) return "none";
+  const code = (error as Record<string, unknown>).code;
+  if (typeof code !== "string") return "none";
+  return /^[A-Za-z0-9_]{1,32}$/.test(code) ? code : "invalid";
+}
+
 function failure(
   status: number,
   message: string,
@@ -158,8 +174,8 @@ export async function deleteAccountForUser(
 
   // ---------------------------------------------------------------------
   // Step 1b. Read the connections. null means the read failed, and the
-  // distinction from [] is the entire reason getAllPlaidConnections returns a
-  // nullable (see its header).
+  // distinction from [] is the entire reason the connection read returns a
+  // nullable (see getRevocableConnections in plaidApiUtils.ts).
   //
   // A failed read is answered by REFUSING to delete, which is a change from the
   // previous behaviour — it used to log and carry on. Carrying on is no longer
@@ -273,6 +289,36 @@ export async function deleteAccountForUser(
   }
 
   // ---------------------------------------------------------------------
+  // Step 3c. Read the connections again before anything below is spent.
+  //
+  // The gate above counts what step 2 was handed; it cannot see a row that
+  // appeared after step 1b read the list (a connection stored by a concurrent
+  // request). Such a row holds the only copy of its token, so the deletion
+  // stops here with the same answers as the earlier read and the gate: a
+  // failed read is CONNECTION_READ_FAILED, a row still present is
+  // REVOKE_INCOMPLETE.
+  //
+  // Nothing is revoked here. A retry starts again from step 1b, revokes what it
+  // finds, and converges the same way the gate does.
+  // ---------------------------------------------------------------------
+  const afterRevocation = await deps.listConnections(userId);
+  if (afterRevocation === null) {
+    emit(
+      deps,
+      "[account-delete] stopping before user deletion: connection re-read failed"
+    );
+    return failure(500, RETRYABLE_MESSAGE, "CONNECTION_READ_FAILED");
+  }
+  if (afterRevocation.length > 0) {
+    emit(
+      deps,
+      "[account-delete] stopping before user deletion: rows present on re-read " +
+        `count=${afterRevocation.length}`
+    );
+    return failure(500, RETRYABLE_MESSAGE, "REVOKE_INCOMPLETE");
+  }
+
+  // ---------------------------------------------------------------------
   // Step 4. Delete the public.users row. FK ON DELETE CASCADE removes the rows
   // of every table whose user_id references public.users. Tables whose
   // user_id references auth.users instead are cleared by the cascade from
@@ -302,7 +348,13 @@ export async function deleteAccountForUser(
   // ---------------------------------------------------------------------
   const usersResult = await deps.deleteUsersRow(userId);
   if (usersResult.error) {
-    emit(deps, "[account-delete] failed to delete the public.users row");
+    // The database's code tells a foreign-key refusal (a connection row that
+    // appeared after step 3c) from any other failure; the message is not logged.
+    emit(
+      deps,
+      "[account-delete] failed to delete the public.users row " +
+        `route=/api/account/delete code=${errorCodeField(usersResult.error)}`
+    );
     return { status: 500, body: { error: USERS_DELETE_FAILED_MESSAGE } };
   }
   if (usersResult.deletedCount === 0) {

@@ -5,7 +5,7 @@ import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { readNonEmptyString } from "@/lib/requestJson";
 import {
   authenticate,
-  getPlaidConnectionByItemId,
+  getRevocableConnectionByItemId,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
 import {
@@ -33,6 +33,10 @@ import {
  * it. This file is wiring: preconditions, the row lookup, and the mapping from
  * one outcome to one response.
  */
+
+// Literal, because the platform reads it statically. Must equal
+// PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
+export const maxDuration = 300;
 
 /** Retryable by the user: something transient failed and trying again may work. */
 const RETRYABLE_MESSAGE =
@@ -99,11 +103,12 @@ export async function POST(request: NextRequest) {
     // deleted=0-is-success reading in plaidRevocation.ts leans on that.
     //
     // /api/account/delete already refuses on this condition before it revokes
-    // anything (accountDeletion.ts:144); this route had no equivalent. Same code
-    // string as that route, deliberately: one fault, one name in the logs. The
-    // 503 and the message match this route's other configuration branch above
-    // rather than that route's 500, because this route already answers every
-    // configuration fault that way and this body is rendered to the user verbatim.
+    // anything (the admin check in deleteAccountForUser); this route had no
+    // equivalent. Same code string as that route, deliberately: one fault, one
+    // name in the logs. The 503 and the message match this route's other
+    // configuration branch above rather than that route's 500, because this
+    // route already answers every configuration fault that way and this body is
+    // rendered to the user verbatim.
     //
     // Checked before authenticate() because authenticate() would answer first
     // and answer wrong: getAuthenticatedUserIdFromRequest builds a
@@ -133,8 +138,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Scoped by (user_id, item_id), which is UNIQUE — one row or none, and a
-    // forged item_id can only ever name the caller's own connection.
-    const lookup = await getPlaidConnectionByItemId(userId, itemId);
+    // forged item_id can only ever name the caller's own connection. Reads only
+    // the two columns the revocation needs.
+    const lookup = await getRevocableConnectionByItemId(userId, itemId);
 
     // A FAILED READ IS NOT AN ABSENT ROW. This route cannot tell the difference
     // by itself — the helper is the only place that sees the query error — which
@@ -179,6 +185,11 @@ export async function POST(request: NextRequest) {
     // asked to REMOVE the bank is the wrong instruction, and re-linking can mint
     // a duplicate connection row. handlePlaidError stays on the outer catch,
     // where the error is genuinely unexpected.
+    //
+    // One case per failure kind and no `default`: a kind added to
+    // RevokeFailureKind without an answer here fails the `never` check below at
+    // compile time, instead of being absorbed into whichever answer a default
+    // happened to give.
     switch (outcome.failure) {
       case "crypto_config":
         return NextResponse.json(
@@ -209,13 +220,22 @@ export async function POST(request: NextRequest) {
           { error: RETRYABLE_MESSAGE, code: "ROW_DELETE_FAILED" },
           { status: 500 }
         );
-      default:
-        // crypto_row and plaid. The row is untouched either way.
+      case "crypto_row":
+      case "plaid":
+        // The row is untouched either way.
         return NextResponse.json(
           { error: RETRYABLE_MESSAGE, code: "REVOKE_FAILED" },
           { status: 500 }
         );
     }
+    // Compile-time only. At runtime a value outside the union (an unchecked
+    // cast upstream) still gets a named retryable answer, never a bodiless 500.
+    const _exhaustive: never = outcome.failure;
+    void _exhaustive;
+    return NextResponse.json(
+      { error: RETRYABLE_MESSAGE, code: "REVOKE_FAILED" },
+      { status: 500 }
+    );
   } catch (error: unknown) {
     console.error("Error disconnecting bank account:", error);
     return handlePlaidError(error);

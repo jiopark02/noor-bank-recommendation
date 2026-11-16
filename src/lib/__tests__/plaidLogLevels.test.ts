@@ -96,7 +96,7 @@ function exchangeDeps(): ExchangeDeps & {
 } {
   return {
     countConnections: vi.fn(async () => 1),
-    findActiveByInstitution: vi.fn(async () => null),
+    findActiveByInstitution: vi.fn(async () => ({ ok: true as const, connection: null })),
     exchange: vi.fn(async () => ({ accessToken: ACCESS, itemId: ITEM })),
     itemGet: vi.fn(async () => ({
       institutionId: "ins_server",
@@ -131,7 +131,7 @@ describe("[plaid-exchange] levels without an injected log", () => {
     const deps = exchangeDeps();
     deps.findActiveByInstitution
       .mockRejectedValueOnce(new Error("read failed"))
-      .mockResolvedValue(null);
+      .mockResolvedValue({ ok: true as const, connection: null });
     await exchangeForUser(USER, INPUT, deps);
     expect(levelOf("dedupe_read=failed")).toBe("warn");
   });
@@ -150,8 +150,8 @@ describe("[plaid-exchange] levels without an injected log", () => {
     // MUTATION: the post_duplicate refuse passing "error".
     const deps = exchangeDeps();
     deps.findActiveByInstitution.mockResolvedValue({
-      institution_name: "Server Bank",
-      institution_id: "ins_server",
+      ok: true as const,
+      connection: { institution_name: "Server Bank", institution_id: "ins_server" },
     });
     await exchangeForUser(USER, { ...INPUT, institutionId: undefined }, deps);
     expect(levelOf("refused=post_duplicate")).toBe("info");

@@ -15,10 +15,10 @@ import { describe, it, expect } from "vitest";
  * module. So the guarantee has to be a probe over the source.
  *
  * WHY A FILE-LEVEL ALLOW-LIST RATHER THAN A LINE-LEVEL ONE
- * The two helpers in plaidApiUtils that return token-bearing rows use
- * `select("*")`, so the column name does not appear at the query. A probe that
- * looked for `access_token` in queries would therefore find two of the three
- * read paths and miss the ones that matter most. Working from the set of FILES
+ * Some helpers in plaidApiUtils that return token-bearing rows use
+ * `select("*")`, so the column name does not appear at the query; others name
+ * it. A probe that looked for `access_token` in queries would therefore miss
+ * the `select("*")` read paths. Working from the set of FILES
  * that mention the identifier at all is the coarser but honest version: a new
  * read site has to touch a file, and a file that is not on this list fails the
  * test the moment it does.
@@ -86,7 +86,8 @@ const NON_CONSUMING_SITES: Record<string, string> = {
   // The crypto boundary itself.
   "lib/plaidTokenCrypto.ts": "defines the encryption of the column",
   // The single write site, plus the row-shape doc comment.
-  "lib/plaidApiUtils.ts": "the only write site; encrypts before insert",
+  "lib/plaidApiUtils.ts":
+    "the only write site; encrypts before insert; the revocation reads select the column",
   // Selects the stored column and hands the rows to readBankData, which
   // decrypts each one through liveAdapterDeps before any Plaid call.
   "lib/plaidChatState.ts":

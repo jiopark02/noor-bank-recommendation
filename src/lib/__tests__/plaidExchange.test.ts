@@ -60,12 +60,19 @@ type Spied = ExchangeDeps & {
   lines: string[];
 };
 
+/** The three answers of the duplicate-check read. */
+const NO_ACTIVE = { ok: true as const, connection: null };
+const ACTIVE_READ_FAILED = { ok: false as const };
+function activeFound(row: Record<string, unknown>) {
+  return { ok: true as const, connection: row };
+}
+
 /** Deps on which everything succeeds and the user has one unrelated bank. */
 function passingDeps(): Spied {
   const lines: string[] = [];
   return {
     countConnections: vi.fn(async () => 1),
-    findActiveByInstitution: vi.fn(async () => null),
+    findActiveByInstitution: vi.fn(async () => NO_ACTIVE),
     exchange: vi.fn(async () => ({ accessToken: ACCESS_SENTINEL, itemId: NEW_ITEM })),
     itemGet: vi.fn(async () => ({
       institutionId: "ins_server",
@@ -132,7 +139,9 @@ describe("duplicate check before the exchange", () => {
   it("answers 409 without exchanging", async () => {
     // MUTATION: removing the pre-exchange check.
     const deps = passingDeps();
-    deps.findActiveByInstitution.mockResolvedValue({ institution_name: "Old Bank" });
+    deps.findActiveByInstitution.mockResolvedValue(
+      activeFound({ institution_name: "Old Bank" })
+    );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(409);
     expect(out.body.code).toBe("ALREADY_CONNECTED");
@@ -147,6 +156,18 @@ describe("duplicate check before the exchange", () => {
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(deps.exchange).toHaveBeenCalledTimes(1);
     expect(out.status).toBe(200);
+  });
+
+  it("proceeds when the read reports a failure as { ok: false }", async () => {
+    // MUTATION: treating { ok: false } before the exchange as a refusal.
+    const deps = passingDeps();
+    deps.findActiveByInstitution.mockResolvedValueOnce(ACTIVE_READ_FAILED);
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(deps.exchange).toHaveBeenCalledTimes(1);
+    expect(out.status).toBe(200);
+    expect(
+      deps.lines.some((l) => l.includes("dedupe_read=failed stage=pre proceeding=true"))
+    ).toBe(true);
   });
 
   it("skips the client check for an empty institution id and checks Plaid's id after", async () => {
@@ -181,7 +202,9 @@ describe("compensating revocation after the exchange", () => {
     const deps = passingDeps();
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, institutionId: string) =>
-        institutionId === "ins_server" ? { institution_name: "Stored Bank" } : null
+        institutionId === "ins_server"
+          ? activeFound({ institution_name: "Stored Bank" })
+          : NO_ACTIVE
     );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(409);
@@ -197,11 +220,25 @@ describe("compensating revocation after the exchange", () => {
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, _i: string, exclude?: string) => {
         if (exclude) throw new Error("db down");
-        return null;
+        return NO_ACTIVE;
       }
     );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(503);
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
+    expect(deps.store).not.toHaveBeenCalled();
+  });
+
+  it("revokes and answers 503 when the post-exchange read reports { ok: false }", async () => {
+    // MUTATION: storing after a post-exchange { ok: false } (failing open).
+    const deps = passingDeps();
+    deps.findActiveByInstitution.mockImplementation(
+      async (_u: string, _i: string, exclude?: string) =>
+        exclude ? ACTIVE_READ_FAILED : NO_ACTIVE
+    );
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(503);
+    expect(out.body.code).toBe("CONNECTION_CHECK_FAILED");
     expect(deps.itemRemove).toHaveBeenCalledTimes(1);
     expect(deps.store).not.toHaveBeenCalled();
   });
@@ -388,7 +425,8 @@ describe("tokens never leave through logs or responses", () => {
     ["limit", (d) => d.countConnections.mockResolvedValue(CONNECTION_LIMIT)],
     ["itemGet failure", (d) => d.itemGet.mockRejectedValue(new Error(ACCESS_SENTINEL))],
     ["post duplicate", (d) => d.findActiveByInstitution.mockImplementation(
-      async (_u: string, _i: string, e?: string) => (e ? { institution_name: "X" } : null)
+      async (_u: string, _i: string, e?: string) =>
+        e ? activeFound({ institution_name: "X" }) : NO_ACTIVE
     )],
     ["store failure + revoke failure", (d) => {
       d.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null });
@@ -446,7 +484,9 @@ describe("the row is read again only after a store failure that may have committ
     const deps = passingDeps();
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, institutionId: string) =>
-        institutionId === "ins_server" ? { institution_name: "Stored Bank" } : null
+        institutionId === "ins_server"
+          ? activeFound({ institution_name: "Stored Bank" })
+          : NO_ACTIVE
     );
     deps.findOwnItem.mockResolvedValueOnce(NO_ROW).mockResolvedValueOnce(ROW);
     const out = response(await exchangeForUser(USER, INPUT, deps));
@@ -501,13 +541,14 @@ describe("only a store failure that may have committed is re-read", () => {
 
   const preStore: Array<[string, (d: Spied) => void]> = [
     ["post-exchange duplicate", (d) => d.findActiveByInstitution.mockImplementation(
-      async (_u: string, _i: string, e?: string) => (e ? { institution_name: "X" } : null)
+      async (_u: string, _i: string, e?: string) =>
+        e ? activeFound({ institution_name: "X" }) : NO_ACTIVE
     )],
     ["itemGet failure", (d) => d.itemGet.mockRejectedValue(new Error("boom"))],
     ["post-exchange duplicate read failure", (d) => d.findActiveByInstitution.mockImplementation(
       async (_u: string, _i: string, e?: string) => {
         if (e) throw new Error("db down");
-        return null;
+        return NO_ACTIVE;
       }
     )],
   ];
@@ -669,7 +710,7 @@ describe("institution names are cut by code point, including the client's", () =
     // inside duplicate() (either one alone still caps it), or
     // INSTITUTION_NAME_MAX = 79.
     const deps = passingDeps();
-    deps.findActiveByInstitution.mockResolvedValue({ institution_name: null });
+    deps.findActiveByInstitution.mockResolvedValue(activeFound({ institution_name: null }));
     const long = "Z".repeat(120);
     const out = response(
       await exchangeForUser(USER, { ...INPUT, institutionName: long }, deps)
@@ -704,7 +745,7 @@ describe("names in responses are capped even when they were never stored by this
     deps.itemGet.mockResolvedValue({ institutionId: "ins_server", institutionName: plaidName });
     deps.findActiveByInstitution.mockImplementation(
       async (_u: string, _i: string, exclude?: string) =>
-        exclude ? { institution_name: "" } : null
+        exclude ? activeFound({ institution_name: "" }) : NO_ACTIVE
     );
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(409);
