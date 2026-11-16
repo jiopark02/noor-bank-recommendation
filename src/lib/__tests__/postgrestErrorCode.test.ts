@@ -85,7 +85,7 @@ describe("postgrestErrorCode — the decisions made on its result", () => {
   it("still reads a well-formed 23505 as a duplicate, and other SQLSTATEs as before", () => {
     expect(storeResultFromInsert({ code: "23505" })).toEqual({
       ok: false,
-      kind: "duplicate_item",
+      kind: "unique_violation",
       dbErrorCode: "23505",
     });
     expect(storeResultFromInsert({ code: "23514" })).toEqual({

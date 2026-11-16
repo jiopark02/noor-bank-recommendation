@@ -54,6 +54,14 @@ import {
  * possible orphaned Item, which the log line names so it can be cleaned up by
  * hand.
  *
+ * A unique violation (23505) on the insert is decided by the same read, because
+ * it has two causes: a row for this Item that already exists, or an active row
+ * at the same institution under another Item that a concurrent request stored
+ * after step 6. A row for this Item means success and no revocation; no row
+ * means the conflict is with the other Item, so this one is revoked and the
+ * answer is the duplicate 409; two failed reads mean no revocation, 500, and
+ * `refused=store_conflict … revoke=skipped reason=recheck_read_failed`.
+ *
  * Remaining risk: if the re-read finds no row and the Item is revoked, and the
  * original insert commits only after that, a row is left pointing at a revoked
  * Item. Without a lock spanning the insert and the re-read this cannot be
@@ -549,15 +557,37 @@ export async function exchangeForUser(
     return connected(itemId, serverInstitutionId, institutionName);
   }
 
-  if (stored.kind === "duplicate_item") {
-    // 23505 arrives when this user already has a row with this item_id — not
-    // from a race after step 4 (no other request holds this Item), but, for
-    // example, when an earlier ambiguous store failure had in fact committed —
-    // or on a primary-key collision. The code alone does not say which, so the
-    // Item is not revoked, and success is reported only once the row is
-    // actually read back.
-    const confirm = await readOwnItem(deps, userId, itemId);
-    if (confirm.ok && confirm.connection) {
+  if (stored.kind === "unique_violation") {
+    // 23505 has two causes, and the code alone does not say which:
+    //   - this user already has a row with this item_id — not from a race
+    //     after step 4 (no other request holds this Item), but, for example,
+    //     when an earlier ambiguous store failure had in fact committed;
+    //   - this user already has an active row at the same institution under
+    //     another Item, stored by a concurrent request after step 6 read none
+    //     (the unique index on user and institution over active rows).
+    // The user's row for this Item is read to tell them apart; one retry, as
+    // in step 4. The insert was rejected, so it stored nothing itself.
+    //   row present -> the Item is stored: never revoked, answered as success
+    //   row absent  -> the conflict is with another Item: this one has no
+    //                  row, so it is revoked and the answer is the duplicate
+    //   read failed -> nothing is known, so nothing is revoked
+    // A primary-key collision would also arrive as "row absent" and be
+    // answered as a duplicate; revoking is still right, as no row holds the
+    // Item.
+    let confirm = await readOwnItem(deps, userId, itemId);
+    if (!confirm.ok) {
+      confirm = await readOwnItem(deps, userId, itemId);
+    }
+    if (!confirm.ok) {
+      emit(
+        deps,
+        `${prefix} refused=store_conflict db_error=${logField(stored.dbErrorCode)} ` +
+          `revoke=skipped reason=recheck_read_failed`,
+        "error"
+      );
+      return failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
+    }
+    if (confirm.connection) {
       emit(deps, `${prefix} resolved=already_stored stage=insert`, "info");
       return connected(
         itemId,
@@ -565,13 +595,13 @@ export async function exchangeForUser(
         nonEmpty(confirm.connection.institution_name) ?? institutionName
       );
     }
-    emit(
-      deps,
-      `${prefix} refused=store_conflict db_error=${logField(stored.dbErrorCode)} ` +
-        `revoke=skipped`,
-      "error"
+    // The name is Plaid's for the new Item: the row it collided with is at the
+    // same institution and is not read here.
+    return refuse(
+      "store_conflict_institution",
+      duplicate(serverInstitutionName ?? "This bank"),
+      "info"
     );
-    return failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);
   }
 
   const saveFailed = failure(500, "CONNECTION_SAVE_FAILED", SAVE_FAILED_MESSAGE);

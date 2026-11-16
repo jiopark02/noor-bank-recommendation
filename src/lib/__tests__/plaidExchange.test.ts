@@ -343,9 +343,10 @@ describe("an Item this user already has is never revoked", () => {
   });
 
   it("does not revoke on a unique violation once the row is confirmed", async () => {
-    // MUTATION: folding duplicate_item into the generic store failure.
+    // MUTATION: folding unique_violation into the generic store failure, or
+    // revoking on 23505 without reading the row.
     const deps = passingDeps();
-    deps.store.mockResolvedValue({ ok: false, kind: "duplicate_item", dbErrorCode: "23505" });
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
     deps.findOwnItem
       .mockResolvedValueOnce({ ok: true, connection: null })
       .mockResolvedValueOnce({
@@ -358,16 +359,99 @@ describe("an Item this user already has is never revoked", () => {
     expect(deps.itemRemove).not.toHaveBeenCalled();
   });
 
-  it("does not report success on a unique violation whose row cannot be seen", async () => {
-    // MUTATION: answering 200 on duplicate_item without the confirming read.
+  it.each([
+    ["reports a failure", () => ({ ok: false as const })],
+    ["throws", () => {
+      throw new Error("read failed");
+    }],
+  ])("does not revoke on a unique violation when the row read %s twice", async (_n, failedRead) => {
+    // MUTATION: reading a failed row read as "no row" (revoking), or
+    // answering 200 without the confirming read.
     const deps = passingDeps();
-    deps.store.mockResolvedValue({ ok: false, kind: "duplicate_item", dbErrorCode: "23505" });
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    deps.findOwnItem
+      .mockResolvedValueOnce({ ok: true, connection: null })
+      .mockImplementation(async () => failedRead());
     const out = response(await exchangeForUser(USER, INPUT, deps));
     expect(out.status).toBe(500);
+    expect(out.body.code).toBe("CONNECTION_SAVE_FAILED");
     expect(deps.itemRemove).not.toHaveBeenCalled();
+    // Step 4's read, then the confirming read and its one retry.
+    expect(deps.findOwnItem).toHaveBeenCalledTimes(3);
     expect(
-      deps.lines.some((l) => l.includes("refused=store_conflict") && l.includes("revoke=skipped"))
+      deps.lines.some(
+        (l) =>
+          l.includes("refused=store_conflict db_error=23505") &&
+          l.includes("revoke=skipped reason=recheck_read_failed")
+      )
     ).toBe(true);
+  });
+
+  it("does not revoke when the confirming read fails once and the retry finds the row", async () => {
+    // MUTATION: removing the retry of the confirming read.
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    deps.findOwnItem
+      .mockResolvedValueOnce({ ok: true, connection: null })
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({
+        ok: true,
+        connection: { institution_name: "Raced Bank", institution_id: "ins_server" },
+      });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(200);
+    expect(deps.itemRemove).not.toHaveBeenCalled();
+  });
+});
+
+describe("a unique violation with no row for the Item is another Item at the same institution", () => {
+  it("revokes the new Item and answers the duplicate 409 with Plaid's name", async () => {
+    // MUTATION: answering 500 without revoking when the row is absent.
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(409);
+    expect(out.body.code).toBe("ALREADY_CONNECTED");
+    expect(out.body.duplicate).toBe(true);
+    expect(out.body.institutionName).toBe("Server Bank");
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
+    expect(deps.itemRemove).toHaveBeenCalledWith(ACCESS_SENTINEL);
+    expect(
+      deps.lines.some(
+        (l) =>
+          l.includes(`item_id=${NEW_ITEM}`) && l.includes("refused=store_conflict_institution")
+      )
+    ).toBe(true);
+    expect(deps.lines.some((l) => l.includes("compensate=revoked"))).toBe(true);
+  });
+
+  it("answers the same body as the duplicate found before the insert", async () => {
+    // MUTATION: building this 409 by hand instead of through duplicate().
+    const raced = passingDeps();
+    raced.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    const fromInsert = response(await exchangeForUser(USER, INPUT, raced));
+
+    const found = passingDeps();
+    found.findActiveByInstitution.mockImplementation(
+      async (_u: string, _i: string, exclude?: string) =>
+        exclude ? activeFound({ institution_name: "Server Bank" }) : NO_ACTIVE
+    );
+    const fromRead = response(await exchangeForUser(USER, INPUT, found));
+    expect(fromInsert.status).toBe(fromRead.status);
+    expect(fromInsert.body).toEqual(fromRead.body);
+  });
+
+  it("revokes when the confirming read fails once and the retry finds no row", async () => {
+    // MUTATION: treating one failed confirming read as final (no retry).
+    const deps = passingDeps();
+    deps.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+    deps.findOwnItem
+      .mockResolvedValueOnce({ ok: true, connection: null })
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, connection: null });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(409);
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -876,6 +960,23 @@ describe("a minted Item is logged as soon as it exists", () => {
     ["store failure", (d) =>
       d.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null })],
     ["ownership read failure", (d) => d.findOwnItem.mockResolvedValue({ ok: false })],
+    ["unique violation, row present", (d) => {
+      d.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+      d.findOwnItem
+        .mockResolvedValueOnce({ ok: true, connection: null })
+        .mockResolvedValue({
+          ok: true,
+          connection: { institution_name: "Raced Bank", institution_id: "ins_server" },
+        });
+    }],
+    ["unique violation, row absent", (d) =>
+      d.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" })],
+    ["unique violation, row unreadable", (d) => {
+      d.store.mockResolvedValue({ ok: false, kind: "unique_violation", dbErrorCode: "23505" });
+      d.findOwnItem
+        .mockResolvedValueOnce({ ok: true, connection: null })
+        .mockResolvedValue({ ok: false });
+    }],
   ];
 
   it.each(scenarios)("%s: minted comes first and is paired with an outcome", async (_n, arrange) => {
@@ -946,11 +1047,11 @@ describe("storeResultFromInsert", () => {
     expect(storeResultFromInsert(null)).toEqual({ ok: true });
   });
 
-  it("reports 23505 as duplicate_item", () => {
+  it("reports 23505 as unique_violation", () => {
     // MUTATION: removing the 23505 comparison.
     expect(storeResultFromInsert({ code: "23505", message: "dup" })).toEqual({
       ok: false,
-      kind: "duplicate_item",
+      kind: "unique_violation",
       dbErrorCode: "23505",
     });
   });
@@ -968,8 +1069,8 @@ describe("storeResultFromInsert", () => {
     });
   });
 
-  it("reports a foreign key violation as db, not duplicate_item", () => {
-    // MUTATION: treating every class-23 code as duplicate_item, which would
+  it("reports a foreign key violation as db, not unique_violation", () => {
+    // MUTATION: treating every class-23 code as unique_violation, which would
     // skip the revocation of an Item that was never stored.
     expect(storeResultFromInsert({ code: "23503" })).toEqual({
       ok: false,
