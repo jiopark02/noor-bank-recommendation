@@ -18,6 +18,9 @@
 -- and the reverse. Rows with a NULL institution_id and rows whose status is
 -- not 'active' are outside the index and are not constrained by it.
 --
+-- The index must only exist on a database whose every writer tells the two
+-- causes of a 23505 apart. Both orders below follow from that.
+--
 -- Deploy order: deploy the code that handles both causes of a unique
 -- violation on this table's insert (src/lib/plaidExchange.ts reads the user's
 -- row for the Item to tell an existing row for the same Item from another
@@ -25,6 +28,12 @@
 -- that code writes to. Code that reads every 23505 as "the row for this Item
 -- exists" would, on a conflict with another Item, stop without revoking the
 -- Item it just created at Plaid.
+--
+-- Rollback order: to roll the code back to a version that reads every 23505
+-- as the row for this Item, drop the index first; older code on a database
+-- with the index stops on an institution conflict without revoking the Item
+-- it just minted. The same holds for any older build that writes to a
+-- database carrying the index.
 --
 -- An UPDATE can violate the index as well: setting a row's status back to
 -- 'active', or changing its institution_id, fails with 23505 when the user
@@ -58,7 +67,8 @@
 -- Running this file again where it is applied changes nothing: the index is
 -- skipped by name and the closing DO block checks it again.
 --
--- To reverse it (the code above works with or without the index):
+-- To reverse it. The current code in src/lib/plaidExchange.ts works correctly
+-- with or without the index, so dropping it needs no code change:
 --   drop index if exists public.plaid_connections_user_institution_active_key;
 
 begin;
