@@ -27,7 +27,8 @@ import {
  *   2. Duplicate (client id) — read fails open; step 6 backs it up
  *   3. Exchange              — mints the Item
  *   4. Ownership             — does this user already have a row for the Item?
- *   5. itemGet               — Plaid's own institution id and name
+ *   5. itemGet               — Plaid's own institution id and name; an Item
+ *                              Plaid reports no institution id for is refused
  *   6. Duplicate (server id) — read fails closed
  *   7. Store                 — encrypt + insert
  *
@@ -170,7 +171,8 @@ export type ExchangeDeps = {
     accessToken: string,
     itemId: string,
     institutionName: string,
-    institutionId: string | null
+    /** Plaid's own id. Never null: an Item without one is not stored. */
+    institutionId: string
   ) => Promise<PlaidConnectionStore>;
   /** Revokes the Item. Resolves with Plaid's request_id or null. */
   itemRemove: (accessToken: string) => Promise<string | null>;
@@ -488,34 +490,44 @@ export async function exchangeForUser(
     serverInstitutionName ?? clientInstitutionName ?? UNKNOWN_INSTITUTION
   );
 
-  // 6. Duplicate check on Plaid's institution id. Fails closed. Skipped when
-  // Plaid reports no institution: the row is then stored with a NULL id, and
-  // the client's id is never stored in its place.
-  if (serverInstitutionId) {
-    const post = await readActiveByInstitution(
-      deps,
-      userId,
-      serverInstitutionId,
-      itemId
+  // Plaid answered, but with no institution id (null, empty or blank). A row
+  // without one could never take part in duplicate detection, so the Item is
+  // not stored, and the client's id is never stored in its place. The reason
+  // and `source=plaid` keep this apart from `refused=item_get`, where the
+  // lookup itself failed: here the value was missing upstream. The line
+  // carries no institution id and no token.
+  if (serverInstitutionId === null) {
+    return refuse(
+      "institution_id_missing source=plaid",
+      failure(502, "INSTITUTION_ID_MISSING", RETRY_MESSAGE),
+      "error"
     );
-    if (!post.ok) {
-      return refuse(
-        "dedupe_read",
-        failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE),
-        "error"
-      );
-    }
-    if (post.connection) {
-      return refuse(
-        "post_duplicate",
-        duplicate(
-          nonEmpty(post.connection.institution_name) ??
-            serverInstitutionName ??
-            "This bank"
-        ),
-        "info"
-      );
-    }
+  }
+
+  // 6. Duplicate check on Plaid's institution id. Fails closed.
+  const post = await readActiveByInstitution(
+    deps,
+    userId,
+    serverInstitutionId,
+    itemId
+  );
+  if (!post.ok) {
+    return refuse(
+      "dedupe_read",
+      failure(503, "CONNECTION_CHECK_FAILED", RETRY_MESSAGE),
+      "error"
+    );
+  }
+  if (post.connection) {
+    return refuse(
+      "post_duplicate",
+      duplicate(
+        nonEmpty(post.connection.institution_name) ??
+          serverInstitutionName ??
+          "This bank"
+      ),
+      "info"
+    );
   }
 
   // 7. Store.

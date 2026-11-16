@@ -407,15 +407,107 @@ describe("stored values come from Plaid where Plaid has them", () => {
     expect(out.body.institutionName).toBe("Unknown Institution");
   });
 
-  it("stores NULL, never the client's id, when Plaid reports no institution id", async () => {
-    // MUTATION: `serverInstitutionId ?? clientInstitutionId`.
+  it("checks Plaid's institution id, excluding the new Item, before it stores", async () => {
+    // MUTATION: removing the post-exchange duplicate read.
     const deps = passingDeps();
-    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
     await exchangeForUser(USER, INPUT, deps);
-    expect(deps.store.mock.calls[0][4]).toBeNull();
+    expect(deps.findActiveByInstitution).toHaveBeenCalledWith(USER, "ins_server", NEW_ITEM);
+    expect(deps.findActiveByInstitution.mock.invocationCallOrder[1]).toBeLessThan(
+      deps.store.mock.invocationCallOrder[0]
+    );
+  });
+});
+
+describe("an Item Plaid reports no institution id for is refused, not stored", () => {
+  const missing: Array<[string, string | null]> = [
+    ["null", null],
+    ["an empty string", ""],
+    ["a blank string", "   "],
+  ];
+
+  it.each(missing)("does not store when the id is %s, and never falls back to the client's id", async (_n, value) => {
+    // MUTATION: removing the missing-id refusal, or
+    // `serverInstitutionId ?? clientInstitutionId`.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: value, institutionName: "Server Bank" });
+    await exchangeForUser(USER, INPUT, deps);
+    expect(deps.store).not.toHaveBeenCalled();
     // Only the pre-exchange check ran; there is no server id to check with.
     expect(deps.findActiveByInstitution).toHaveBeenCalledTimes(1);
     expect(deps.findActiveByInstitution).toHaveBeenCalledWith(USER, "ins_client");
+  });
+
+  it("revokes the new Item once and answers 502 with the sentence a failed lookup uses", async () => {
+    // MUTATION: answering without the compensating revocation, or adding a
+    // sentence of its own.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(502);
+    expect(out.body.code).toBe("INSTITUTION_ID_MISSING");
+    expect(deps.itemRemove).toHaveBeenCalledTimes(1);
+    expect(deps.itemRemove).toHaveBeenCalledWith(ACCESS_SENTINEL);
+
+    const lookupFailed = passingDeps();
+    lookupFailed.itemGet.mockRejectedValue(new Error("boom"));
+    const failed = response(await exchangeForUser(USER, INPUT, lookupFailed));
+    expect(typeof out.body.error).toBe("string");
+    expect(out.body.error).toBe(failed.body.error);
+  });
+
+  it("logs the missing id as Plaid's, apart from a failed lookup", async () => {
+    // MUTATION: logging this refusal as `refused=item_get`, or dropping
+    // `source=plaid`.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
+    await exchangeForUser(USER, INPUT, deps);
+    expect(
+      deps.lines.some(
+        (l) =>
+          l.includes(`item_id=${NEW_ITEM}`) &&
+          l.includes("refused=institution_id_missing") &&
+          l.includes("source=plaid")
+      )
+    ).toBe(true);
+    expect(deps.lines.some((l) => l.includes("refused=item_get"))).toBe(false);
+
+    const lookupFailed = passingDeps();
+    lookupFailed.itemGet.mockRejectedValue(new Error("boom"));
+    await exchangeForUser(USER, INPUT, lookupFailed);
+    expect(lookupFailed.lines.some((l) => l.includes("refused=item_get"))).toBe(true);
+    expect(lookupFailed.lines.some((l) => l.includes("institution_id_missing"))).toBe(false);
+  });
+
+  it("puts no institution id and no token in any line or in the response", async () => {
+    // MUTATION: interpolating the client's institution id, Plaid's blank
+    // value or a token into the refusal line.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: "   ", institutionName: "Server Bank" });
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    const text = deps.lines.join("\n") + JSON.stringify(out.body);
+    expect(text).not.toContain("ins_client");
+    expect(text).not.toContain(ACCESS_SENTINEL);
+    expect(text).not.toContain(PUBLIC_SENTINEL);
+    expect(deps.lines.some((l) => /source=plaid\s*$/.test(l))).toBe(true);
+  });
+
+  it("keeps the 502 when the revocation itself fails, and logs it like any other", async () => {
+    // MUTATION: dropping the compensate=failed line on this path, or
+    // answering differently when the revocation fails.
+    const deps = passingDeps();
+    deps.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" });
+    deps.itemRemove.mockRejectedValue(plaidRejection("ITEM_LOCKED"));
+    const out = response(await exchangeForUser(USER, INPUT, deps));
+    expect(out.status).toBe(502);
+    expect(out.body.code).toBe("INSTITUTION_ID_MISSING");
+    expect(
+      deps.lines.some(
+        (l) =>
+          l.includes(`item_id=${NEW_ITEM}`) &&
+          l.includes("compensate=failed") &&
+          l.includes("error_code=ITEM_LOCKED")
+      )
+    ).toBe(true);
   });
 });
 
@@ -433,6 +525,8 @@ describe("tokens never leave through logs or responses", () => {
       d.itemRemove.mockRejectedValue(plaidRejection("ITEM_LOCKED"));
     }],
     ["ownership read failure", (d) => d.findOwnItem.mockResolvedValue({ ok: false })],
+    ["missing institution id", (d) =>
+      d.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" })],
     ["existing row", (d) => d.findOwnItem.mockResolvedValue({
       ok: true, connection: { institution_name: "E", institution_id: null },
     })],
@@ -777,6 +871,8 @@ describe("a minted Item is logged as soon as it exists", () => {
   const scenarios: Array<[string, (d: Spied) => void]> = [
     ["success", () => {}],
     ["itemGet failure", (d) => d.itemGet.mockRejectedValue(new Error("boom"))],
+    ["missing institution id", (d) =>
+      d.itemGet.mockResolvedValue({ institutionId: null, institutionName: "Server Bank" })],
     ["store failure", (d) =>
       d.store.mockResolvedValue({ ok: false, kind: "db", dbErrorCode: null })],
     ["ownership read failure", (d) => d.findOwnItem.mockResolvedValue({ ok: false })],

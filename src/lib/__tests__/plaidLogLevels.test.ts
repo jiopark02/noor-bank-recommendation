@@ -157,6 +157,17 @@ describe("[plaid-exchange] levels without an injected log", () => {
     expect(levelOf("refused=post_duplicate")).toBe("info");
   });
 
+  it("an Item Plaid reports no institution id for is refused at error", async () => {
+    // MUTATION: the institution_id_missing refuse passing "info" or "warn".
+    const deps = exchangeDeps();
+    (deps.itemGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      institutionId: null,
+      institutionName: "Server Bank",
+    });
+    await exchangeForUser(USER, INPUT, deps);
+    expect(levelOf("refused=institution_id_missing")).toBe("error");
+  });
+
   it("a failed compensating revoke is an error", async () => {
     // MUTATION: the compensate=failed emit passing "warn" or "info".
     const deps = exchangeDeps();

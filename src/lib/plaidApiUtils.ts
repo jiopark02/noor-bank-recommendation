@@ -228,7 +228,8 @@ export async function getPlaidConnectionsByItemIdAcrossUsers(
  *
  * Used for app-level duplicate detection (same user re-linking a bank they
  * already have). Only rows with a matching non-null institution_id are found,
- * so rows stored with a NULL institution_id never take part.
+ * so a row whose institution_id is NULL never takes part; the exchange path
+ * does not store such rows.
  *
  * Duplicate detection in exchange-token runs it twice, with the same predicate:
  *  - BEFORE the exchange, with the institution_id from the client's Link
@@ -566,6 +567,11 @@ export async function getRevocableConnectionByItemId(
  * throw would bypass that decision entirely. There is no branch here that
  * stores a plaintext token.
  *
+ * `institutionId` is Plaid's own id for the Item and is never null here: the
+ * exchange path refuses an Item Plaid reports no institution id for instead of
+ * storing it, so every row this function writes can take part in duplicate
+ * detection.
+ *
  * The insert asks for no representation: nothing reads the stored row back,
  * and a returned row would carry the ciphertext.
  *
@@ -578,7 +584,7 @@ export async function storePlaidConnection(
   accessToken: string,
   itemId: string,
   institutionName: string,
-  institutionId: string | null
+  institutionId: string
 ): Promise<PlaidConnectionStore> {
   let encryptedAccessToken: string;
   try {
