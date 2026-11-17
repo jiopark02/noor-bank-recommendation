@@ -34,9 +34,11 @@ vi.mock("../supabase", () => ({
 }));
 
 // Imported after the mock is registered (vi.mock is hoisted above it anyway).
+import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 import {
   getAuthenticatedUserFromRequest,
   getAuthenticatedUserIdFromRequest,
+  resolveRequestAuth,
 } from "../apiAuth";
 
 const USER = { id: "user_1", email: "owner@example.com" };
@@ -112,6 +114,90 @@ describe("getAuthenticatedUserFromRequest", () => {
     await expect(
       getAuthenticatedUserFromRequest(request("Bearer tok"))
     ).resolves.toBeNull();
+  });
+});
+
+/**
+ * resolveRequestAuth: the same verification, with the cause kept.
+ *
+ * Mutations of apiAuth.ts and the tests each one turns red:
+ *   AM7 a cause renamed, merged with another, or returned
+ *       for a different case                              -> C1
+ *   AM8 a returned verification error no longer read by
+ *       classifyGetUserFailure                            -> C2
+ *   AM9 a rejected verification read as a refused token   -> C1 (auth_unreachable)
+ *   AM10 the user-returning helper given logic of its own,
+ *        so the two disagree                              -> C3
+ */
+type Arrange = () => void;
+
+const FAILURES: Array<[string, string | undefined, Arrange]> = [
+  ["supabase_unconfigured", "Bearer tok", () => isSupabaseConfiguredMock.mockReturnValue(false)],
+  ["no_header", undefined, () => {}],
+  ["no_header", "", () => {}],
+  ["not_bearer", "Basic abcdefgh", () => {}],
+  ["not_bearer", "bearer tok", () => {}],
+  ["empty_token", "Bearer   ", () => {}],
+  [
+    "client_unavailable",
+    "Bearer tok",
+    () =>
+      createServerClientMock.mockImplementation(() => {
+        throw new Error("Supabase service role key is required");
+      }),
+  ],
+  [
+    "token_rejected",
+    "Bearer tok",
+    () => getUserMock.mockResolvedValue({ data: { user: null }, error: null }),
+  ],
+  [
+    "token_rejected",
+    "Bearer tok",
+    () =>
+      getUserMock.mockResolvedValue({
+        data: { user: null },
+        error: new AuthApiError("invalid JWT", 403, "bad_jwt"),
+      }),
+  ],
+  ["auth_unreachable", "Bearer tok", () => getUserMock.mockRejectedValue(new Error("network"))],
+];
+
+describe("resolveRequestAuth", () => {
+  it.each(FAILURES)("C1 reports %s for the header %j", async (cause, header, arrange) => {
+    arrange();
+    expect(await resolveRequestAuth(request(header))).toEqual({ ok: false, cause });
+  });
+
+  it("C2 a returned error that says nothing about the token is auth_unreachable", async () => {
+    for (const error of [
+      new AuthRetryableFetchError("fetch failed", 0),
+      new AuthRetryableFetchError("bad gateway", 503),
+      new AuthApiError("internal", 500, undefined),
+    ]) {
+      getUserMock.mockResolvedValue({ data: { user: null }, error });
+      expect(await resolveRequestAuth(request("Bearer tok"))).toEqual({
+        ok: false,
+        cause: "auth_unreachable",
+      });
+    }
+  });
+
+  it("C3 the user-returning helper answers the same user, and null for every cause", async () => {
+    const ok = await resolveRequestAuth(request("Bearer tok"));
+    expect(ok).toEqual({ ok: true, user: USER });
+    expect(await getAuthenticatedUserFromRequest(request("Bearer tok"))).toBe(USER);
+
+    for (const [, header, arrange] of FAILURES) {
+      isSupabaseConfiguredMock.mockReset().mockReturnValue(true);
+      getUserMock.mockReset().mockResolvedValue({ data: { user: USER }, error: null });
+      createServerClientMock
+        .mockReset()
+        .mockImplementation(() => ({ auth: { getUser: getUserMock } }));
+      arrange();
+      expect(await getAuthenticatedUserFromRequest(request(header))).toBeNull();
+      expect(await getAuthenticatedUserIdFromRequest(request(header))).toBeNull();
+    }
   });
 });
 
