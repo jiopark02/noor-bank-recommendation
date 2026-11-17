@@ -334,9 +334,13 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
    * exchange makes no new row, so the route's own duplicate answer is what
    * ends the token when it is sent again.
    *
-   * The comparison is with the screen's list as it was at that moment. A
-   * connection made elsewhere (another tab or device) after the screen last
-   * read its list would be read as this one; nothing here can see that.
+   * The comparison is with the screen's list as it was at that moment. Two
+   * connections this token did not make would be read as its own, and
+   * nothing here can see either: one made elsewhere (another tab or device)
+   * after the screen last read its list, and the Item of an earlier token of
+   * this holder whose send got no answer and which was replaced by a new Link
+   * instead of being sent again, when the server stores that Item only after
+   * this token was received and this token's own outcome is unknown too.
    */
   async function sawNewConnection(held: HeldToken, accessToken: string): Promise<boolean> {
     let list: ConnectionSummary[] | null;
