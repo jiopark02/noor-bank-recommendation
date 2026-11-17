@@ -8,7 +8,9 @@ import {
   AddBankButton,
   BankMonogram,
   ConnectBankCard,
+  PlaidExchangeStatus,
   PlaidLinkButton,
+  usePlaidExchange,
 } from "@/components/plaid";
 import { CATEGORY_ICONS } from "@/lib/categoryIcons";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
@@ -160,9 +162,8 @@ export default function MoneyPage() {
     string | null
   >(null);
   const [removingItemId, setRemovingItemId] = useState<string | null>(null);
-  const [addBankNotice, setAddBankNotice] = useState<string | null>(null);
-  // Same pattern as addBankNotice, for the other direction. A failed removal had
-  // no channel to the user at all before this: the hook set its shared `error`,
+  // A failed removal had no channel to the user at all before this: the hook
+  // set its shared `error`,
   // which this page reads only as a boolean, so the bank silently stayed in the
   // list with no explanation.
   const [removeNotice, setRemoveNotice] = useState<string | null>(null);
@@ -390,60 +391,25 @@ export default function MoneyPage() {
     [plaidConnections, fetchData]
   );
 
-  // Add another bank, from the compact button in the connection list (not
-  // ConnectBankCard, the full empty-state card). POST exchange-token, surface
-  // the 409 ALREADY_CONNECTED duplicate case and any other refusal as an inline
-  // notice, and also reload this screen's data on success. ConnectBankCard
-  // reads the response the same way and shows its own notice.
-  const handleAddBankSuccess = useCallback(
-    async (
-      publicToken: string,
-      metadata: { institution: { name: string; institution_id: string } }
-    ) => {
-      if (!userId) return;
-      setAddBankNotice(null);
-      try {
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
-        );
-        const response = await fetch("/api/plaid/exchange-token", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({
-            publicToken,
-            institutionId: metadata.institution.institution_id,
-            institutionName: metadata.institution.name,
-          }),
-        });
+  // A new bank, from the empty-state card or from the compact button in the
+  // connection list. Both hand Link's public token to this one exchange, which
+  // sends it only with a session's access token and keeps it in memory while
+  // it can still be tried again. It lives here, in the screen, because both of
+  // those blocks are unmounted while the connection list reloads.
+  //
+  // fetchData() is called explicitly because adding a second bank leaves
+  // hasActive unchanged, so the hasActive-dependent fetch effect would not
+  // re-run on its own.
+  const handleExchangeConnected = useCallback(() => {
+    handleBankConnected();
+    void fetchData();
+  }, [handleBankConnected, fetchData]);
 
-        const data = asPlainObject(await response.json());
-
-        if (
-          response.status === 409 ||
-          readString(data, "code") === "ALREADY_CONNECTED"
-        ) {
-          const name =
-            readString(data, "institutionName") ||
-            metadata.institution.name ||
-            "This bank";
-          setAddBankNotice(`${name} is already connected.`);
-          return;
-        }
-
-        if (data.success !== true) {
-          throw new Error(readErrorMessage(data) || "Failed to add bank");
-        }
-
-        handleBankConnected();
-        await fetchData();
-      } catch (err) {
-        setAddBankNotice(
-          err instanceof Error ? err.message : "Failed to add bank"
-        );
-      }
-    },
-    [userId, handleBankConnected, fetchData]
-  );
+  const bankExchange = usePlaidExchange({
+    userId,
+    knownConnections: plaidConnections.connections,
+    onConnected: handleExchangeConnected,
+  });
 
   // Only prompt to connect once we've actually determined there is no
   // connection. While the connection check is loading, or if it failed with a
@@ -734,7 +700,7 @@ export default function MoneyPage() {
             {shouldShowConnectCard && (
               <ConnectBankCard
                 userId={userId}
-                onConnected={handleBankConnected}
+                exchange={bankExchange}
               />
             )}
           </motion.div>
@@ -819,13 +785,13 @@ export default function MoneyPage() {
                       key={plaidConnections.connections.length}
                       userId={userId}
                       connectionCount={plaidConnections.connections.length}
-                      onSuccess={handleAddBankSuccess}
+                      onSuccess={bankExchange.onLinkSuccess}
+                      disabled={bankExchange.phase === "exchanging"}
                     />
-                    {addBankNotice && (
-                      <p className="text-xs text-gray-600 mt-2">
-                        {addBankNotice}
-                      </p>
-                    )}
+                    <PlaidExchangeStatus
+                      exchange={bankExchange}
+                      textClassName="text-xs text-gray-600 mt-2"
+                    />
                   </div>
                 )}
               </div>
@@ -907,7 +873,7 @@ export default function MoneyPage() {
               <div className="mt-6">
                 <ConnectBankCard
                   userId={userId}
-                  onConnected={handleBankConnected}
+                  exchange={bankExchange}
                 />
               </div>
             )}

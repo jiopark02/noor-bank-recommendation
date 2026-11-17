@@ -14,6 +14,8 @@ interface AddBankButtonProps {
   /** Every connection in the user's list, whatever its status. */
   connectionCount: number;
   onSuccess: React.ComponentProps<typeof PlaidLinkButton>["onSuccess"];
+  /** Drawn disabled while an earlier connection is still being exchanged. */
+  disabled?: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export function AddBankButton({
   userId,
   connectionCount,
   onSuccess,
+  disabled = false,
 }: AddBankButtonProps) {
   if (isAtConnectionLimit(connectionCount)) {
     return (
@@ -52,6 +55,7 @@ export function AddBankButton({
     <PlaidLinkButton
       userId={userId}
       onSuccess={onSuccess}
+      disabled={disabled}
       className={ADD_BANK_CLASS}
     >
       {ADD_BANK_LABEL}
