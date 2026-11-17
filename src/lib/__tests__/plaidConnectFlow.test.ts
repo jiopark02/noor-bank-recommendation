@@ -41,6 +41,8 @@ import {
  *                                                                 (and plaidConnectListContract.test.ts)
  *   - an Item another token of this holder connected read as
  *     a later token's                                          -> "what this holder already connected"
+ *   - an Item remembered from the list read of a token that
+ *     was replaced meanwhile                                   -> "a replaced token's late list read"
  *   - the session check in run() removed (the read's status no
  *     longer decides)                                          -> "no session in three reads"
  *   - a spent token's refusal shown in Plaid's or the
@@ -1113,6 +1115,60 @@ describe("what this holder already connected", () => {
       canRetry: true,
     });
     expect(slow.hasToken()).toBe(true);
+  });
+});
+
+describe("a replaced token's late list read", () => {
+  it("does not claim the newer token's Item, so the newer token still finds it", async () => {
+    // Both exchanges end with no response, so each is judged from the list.
+    // The list reads stay open until the test answers them, in call order:
+    // the replaced token's first, then the newer token's.
+    const listReads: Array<(rows: ListRow[]) => void> = [];
+    const posts: string[] = [];
+    const racing = createPublicTokenHolder({
+      readSession: async () => session("u1"),
+      sleep: async () => {},
+      now: () => 1_000_000,
+      post: async (_accessToken, payload) => {
+        posts.push(payload.publicToken);
+        throw new TypeError("Failed to fetch");
+      },
+      readConnections: () =>
+        new Promise<ReturnType<typeof readConnectionList>>((resolve) => {
+          listReads.push((rows) =>
+            resolve(readConnectionList({ success: true, connections: rows }))
+          );
+        }),
+    });
+    const untilListReads = async (count: number): Promise<void> => {
+      for (let i = 0; i < 50 && listReads.length < count; i++) await Promise.resolve();
+      expect(listReads).toHaveLength(count);
+    };
+
+    racing.hold("public-old", BANK, "u1", []);
+    const first = racing.send();
+    // The older exchange got no response and its list read is out.
+    await untilListReads(1);
+
+    // The newer token is held before that read answers; its exchange gets no
+    // response either, though the server finished it, and its own list read
+    // goes out.
+    racing.hold("public-new", BANK, "u1", []);
+    const second = racing.send();
+    await untilListReads(2);
+    expect(posts).toEqual(["public-old", "public-new"]);
+
+    // The older read answers first, and the newer token's Item is in it.
+    listReads[0]([row("item-from-new")]);
+    expect(await first).toEqual({ kind: "superseded" });
+    expect(racing.hasToken()).toBe(true);
+
+    // The newer token's own read then finds its Item: had the replaced token
+    // remembered it, this would be a retry notice with the token still held.
+    listReads[1]([row("item-from-new")]);
+    expect(await second).toEqual({ kind: "connected" });
+    expect(racing.hasToken()).toBe(false);
+    expect(posts).toHaveLength(2);
   });
 });
 
