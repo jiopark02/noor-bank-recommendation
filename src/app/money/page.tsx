@@ -48,7 +48,8 @@ import {
   missingBanksNote,
   parseFinanceSummaryResponse,
   parseSummaryTransactions,
-  showsRecurringDate,
+  PAYMENT_PENDING_LABEL,
+  recurringDateLine,
   spendableCashCents,
   spendableCashTile,
   summaryLoadInputs,
@@ -1016,8 +1017,13 @@ export default function MoneyPage() {
                       <div>
                         <p className="font-medium text-black">{item.label}</p>
                         {/* A date already past is not "next": the charge
-                            was expected then and has not been recorded. */}
-                        {item.nextDate && showsRecurringDate(item) && (
+                            was expected then. Whether the line is the date,
+                            the pending label or nothing is decided by
+                            recurringDateLine. */}
+                        {recurringDateLine(item) === "pending" && (
+                          <p className="text-xs text-gray-500">{PAYMENT_PENDING_LABEL}</p>
+                        )}
+                        {item.nextDate && recurringDateLine(item) === "date" && (
                           <p className="text-xs text-gray-500">
                             {item.pastDue ? "Was expected " : "Next expected "}
                             {new Date(

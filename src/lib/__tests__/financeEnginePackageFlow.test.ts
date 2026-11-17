@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { analyzeCashFlow } from "@sungwon0162/cf-engine";
+import { analyzeCashFlow, ENGINE_VERSION } from "@sungwon0162/cf-engine";
 import {
   bankWindow,
   readBankData,
@@ -12,7 +14,11 @@ import {
 import {
   creditUsedCents,
   parseFinanceSummaryResponse,
+  recurringDateLine,
+  safeToSpendHiddenReason,
   SCREEN_SUMMARY_FIELDS,
+  spendableCashTile,
+  type BankView,
   type FieldSpec,
 } from "../bankSummaryView";
 
@@ -26,8 +32,21 @@ import {
  *   - credit utilization computed over every account the adapter
  *     read, or over the copy the engine left out                   -> "copies"
  *   - the adapter keeping a later copy of an account id            -> "copies"
- *   - an empty recurring answer from every bank passed on as $0,
- *     or safe-to-spend shown in that case                          -> "all empty"
+ *   - the installed engine being another version than the one
+ *     package.json pins                                            -> "installed"
+ *   - the cushion the screens name read from anything but the
+ *     amount the figure was computed with                          -> "cushion"
+ *   - a recurring item's payment field left out of the screen
+ *     fields, so it never reaches the screens                      -> "payment"
+ *   - the reason the engine gives when no bank reported a recurring
+ *     charge explained as any other reason, or the cash tile going
+ *     blank in that case                                           -> "all empty"
+ *   - the cash total sent with any other reason                    -> "cash total"
+ *
+ * With every bank's recurring read empty the engine now holds safe-to-spend
+ * back itself, so this file cannot tell the app's own decision for that case
+ * from the engine's. financeSummaryRoute.test.ts holds the app's decision
+ * apart, with an engine answer that does not make it.
  */
 
 const TODAY = "2026-11-11";
@@ -47,6 +66,8 @@ type Script = {
   outflow?: Acct[];
   inflow?: Acct[];
   lastUpdate?: string | null;
+  /** The recurring call fails. */
+  recurringFails?: boolean;
 };
 
 function account(id: string, over: Acct = {}, balances: Acct = {}): Acct {
@@ -150,15 +171,17 @@ function fakePlaid(scripts: Record<string, Script>): PlaidReadCalls {
         data: { accounts: [], transactions: list, total_transactions: list.length, item: {}, request_id: "r" },
       } as never;
     },
-    transactionsRecurringGet: async (req) =>
-      ({
+    transactionsRecurringGet: async (req) => {
+      if (of(req.access_token).recurringFails) throw new Error("recurring read failed");
+      return {
         data: {
           outflow_streams: of(req.access_token).outflow ?? [],
           inflow_streams: of(req.access_token).inflow ?? [],
           updated_datetime: FRESH,
           request_id: "r",
         },
-      }) as never,
+      } as never;
+    },
   };
 }
 
@@ -235,6 +258,109 @@ describe("adapter -> engine package -> summary", () => {
     expect(summary.safeToSpend.amountCents).toBe(engineSafe.amountCents);
     expect(summary.cashFlow.incomeCents).toBe((answer.cashFlow as Record<string, unknown>).incomeCents);
   });
+
+  // "installed". Red if: node_modules holds another version than package.json
+  // pins, so these tests would run against an engine that is not the one
+  // deployed.
+  it("the installed engine is the version package.json pins", () => {
+    const pkg = JSON.parse(
+      readFileSync(fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8")
+    ) as { dependencies: Record<string, string> };
+    expect(ENGINE_VERSION).toBe(pkg.dependencies["@sungwon0162/cf-engine"]);
+  });
+
+  // "cushion". Red if: the amount the screens name comes from a field that
+  // does not follow the cushion the figure was computed with.
+  it("the cushion the screens read is the one the figure was computed with", async () => {
+    const read = await readWith(oneBank());
+    const summary = runCashFlowEngine(read, DATES);
+    type Safe = {
+      status: string;
+      amountCents: number;
+      inputs: { cushionFloor: { cents: number } };
+      policy: { cushionFloorDefaultCents: number };
+    };
+    const safeOf = (profile: Record<string, unknown>) =>
+      (analyzeCashFlow(toPackageInput(read, DATES), profile as never) as unknown as { safeToSpend: Safe })
+        .safeToSpend;
+    const engineSafe = safeOf({});
+    expect(summary.safeToSpend.status).toBe("computed");
+    expect(engineSafe.status).toBe("computed");
+    // The app passes no cushion of its own, so the engine's default is kept.
+    expect(summary.safeToSpend.totals?.cushionFloorCents).toBe(75000);
+    expect(summary.safeToSpend.totals?.cushionFloorCents).toBe(engineSafe.inputs.cushionFloor.cents);
+    expect(summary.safeToSpend.amountCents).toBe(engineSafe.amountCents);
+
+    // The field follows the cushion in use, where the policy's default does
+    // not: with another cushion the figure moves by the difference.
+    const other = safeOf({ cushionFloorCents: { value: 30000, source: "user", asOf: null } });
+    const otherTotals = (other as unknown as { totals: { cushionFloorCents: number } }).totals;
+    expect(otherTotals.cushionFloorCents).toBe(30000);
+    expect(other.policy.cushionFloorDefaultCents).toBe(75000);
+    expect(other.amountCents - engineSafe.amountCents).toBe(45000);
+  });
+});
+
+/*
+ * "payment". What is known about a payment since a passed expected date
+ * reaches the screens as the engine said it.
+ */
+describe("a recurring charge whose expected date has passed", () => {
+  const withCharge = (pending: boolean): Script[] => [
+    {
+      accounts: [account("chk")],
+      transactions: [
+        ...history("chk", "a"),
+        {
+          ...txn("gym-nov", "chk", 40, "2026-11-06", ["PERSONAL_CARE", "PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS"]),
+          pending,
+        },
+      ],
+      outflow: [
+        stream("gym", "chk", 40, {
+          last_date: "2026-10-05",
+          predicted_next_date: "2026-11-05",
+          transaction_ids: ["gym-nov"],
+          personal_finance_category: {
+            primary: "PERSONAL_CARE",
+            detailed: "PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS",
+          },
+        }),
+      ],
+      inflow: [
+        stream("payroll", "chk", -1500, {
+          frequency: "BIWEEKLY",
+          predicted_next_date: "2026-11-20",
+          personal_finance_category: { primary: "INCOME", detailed: "INCOME_WAGES" },
+        }),
+      ],
+    },
+  ];
+
+  it("a pending transaction since then reaches the screens as pending, and draws the pending label", async () => {
+    const read = await readWith(withCharge(true));
+    const answer = analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as {
+      recurring: { items: Array<{ streamId: string; paymentSincePredicted: string | null }> };
+    };
+    const summary = runCashFlowEngine(read, DATES);
+    expect(summary.recurring.items.map((i) => i.streamId)).toEqual(["gym"]);
+    expect(answer.recurring.items[0].paymentSincePredicted).toBe("pending");
+    expect(summary.recurring.items[0].paymentSincePredicted).toBe("pending");
+    expect(summary.recurring.items[0].pastDue).toBe(true);
+    expect(recurringDateLine(summary.recurring.items[0])).toBe("pending");
+  });
+
+  it("the screens carry whatever the engine says for a posted one", async () => {
+    const read = await readWith(withCharge(false));
+    const answer = analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as {
+      recurring: { items: Array<{ paymentSincePredicted: string | null }> };
+    };
+    const summary = runCashFlowEngine(read, DATES);
+    const said = answer.recurring.items[0].paymentSincePredicted;
+    expect(["counted", "unconfirmed"]).toContain(said);
+    expect(summary.recurring.items[0].paymentSincePredicted).toBe(said);
+    expect(recurringDateLine(summary.recurring.items[0])).toBe(said === "counted" ? "none" : "date");
+  });
 });
 
 describe("account copies: the adapter's first copy and the engine's choice together", () => {
@@ -267,34 +393,75 @@ describe("account copies: the adapter's first copy and the engine's choice toget
 });
 
 describe("every bank's recurring read empty", () => {
+  const emptyScripts = (over: Partial<Script> = {}): Script[] => [
+    {
+      accounts: [account("chk")],
+      transactions: history("chk", "a"),
+      outflow: [],
+      inflow: [
+        stream("payroll", "chk", -1500, {
+          frequency: "BIWEEKLY",
+          predicted_next_date: "2026-11-20",
+          personal_finance_category: { primary: "INCOME", detailed: "INCOME_WAGES" },
+        }),
+      ],
+      ...over,
+    },
+  ];
+  const hidden: BankView = { figures: "ready", showSafeToSpend: false, actions: [], missingFrom: [] };
+
+  // "all empty".
   it("recurring charges are unknown, not $0, and safe-to-spend is not shown", async () => {
-    const scripts: Script[] = [
-      {
-        accounts: [account("chk")],
-        transactions: history("chk", "a"),
-        outflow: [],
-        inflow: [
-          stream("payroll", "chk", -1500, {
-            frequency: "BIWEEKLY",
-            predicted_next_date: "2026-11-20",
-            personal_finance_category: { primary: "INCOME", detailed: "INCOME_WAGES" },
-          }),
-        ],
-      },
-    ];
-    const read = await readWith(scripts);
+    const read = await readWith(emptyScripts());
     expect(read.engineConnections.map((c) => c.recurringRead)).toEqual(["empty"]);
 
-    // What the engine itself says, to show the app's decision is what changes it.
+    // What the engine itself says: it holds the figure back, with a reason of
+    // its own for this case.
     const answer = analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as {
       recurring: { totalMonthlyCents: number | null };
       coverage: { safeToSpendShowable: boolean };
+      safeToSpend: { status: string; reason: string | null };
     };
-    expect(answer.recurring.totalMonthlyCents).toBe(0);
-    expect(answer.coverage.safeToSpendShowable).toBe(true);
+    expect(answer.safeToSpend.status).toBe("unavailable");
+    expect(answer.safeToSpend.reason).toBe("recurring_empty_unknown");
+    expect(answer.recurring.totalMonthlyCents).toBeNull();
+    expect(answer.coverage.safeToSpendShowable).toBe(false);
 
     const summary = runCashFlowEngine(read, DATES);
     expect(summary.recurring).toEqual({ totalMonthlyCents: null, items: [] });
     expect(summary.coverage.safeToSpendShowable).toBe(false);
+    // The screens explain it as recurring charges being unknown, and still
+    // show the cash: the account's available balance.
+    expect(safeToSpendHiddenReason(hidden, summary)).toBe("recurring_unknown");
+    expect(summary.cashBalanceCents).toBe(95000);
+    expect(spendableCashTile(summary)).toEqual({ kind: "amount", cents: 95000 });
+  });
+
+  // "cash total". Red if: the cash total is sent whenever the engine has one.
+  it("the cash total is not sent when safe-to-spend is held back for another reason", async () => {
+    const read = await readWith(emptyScripts({ recurringFails: true }));
+    expect(read.engineConnections.map((c) => c.recurringRead)).toEqual(["failed"]);
+    const answer = analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as {
+      safeToSpend: { status: string; reason: string | null };
+      cashBalance: { status: string; value?: { cents: number } };
+    };
+    expect(answer.safeToSpend.status).toBe("unavailable");
+    expect(answer.safeToSpend.reason).toBe("recurring_unavailable");
+    // The engine does have a cash total here; the app does not pass it on.
+    expect(answer.cashBalance.status).toBe("available");
+    expect(answer.cashBalance.value?.cents).toBe(95000);
+
+    const summary = runCashFlowEngine(read, DATES);
+    expect(summary.cashBalanceCents).toBeNull();
+    expect(spendableCashTile(summary)).toEqual({ kind: "unknown" });
+  });
+
+  it("a computed figure carries no separate cash total", async () => {
+    const read = await readWith([
+      { ...emptyScripts()[0], outflow: [stream("netflix", "chk", 15.49)] },
+    ]);
+    const summary = runCashFlowEngine(read, DATES);
+    expect(summary.safeToSpend.status).toBe("computed");
+    expect(summary.cashBalanceCents).toBeNull();
   });
 });

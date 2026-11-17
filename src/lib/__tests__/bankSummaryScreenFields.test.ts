@@ -8,11 +8,12 @@ import {
   NO_CASH_ACCOUNT_HINT,
   NO_CASH_ACCOUNT_LABEL,
   parseFinanceSummaryResponse,
+  PAYMENT_PENDING_LABEL,
   pickFields,
+  recurringDateLine,
   safeToSpendHiddenReason,
   safeToSpendHorizonPhrase,
   safeToSpendLines,
-  showsRecurringDate,
   spendableCashCents,
   spendableCashTile,
   SUMMARY_RESPONSE_FIELDS,
@@ -33,6 +34,8 @@ import {
  *     not computed, or `?? 0` anywhere on that path              -> tile
  *   - a missing checking account drawn as a dash, or an unknown balance
  *     drawn as "No checking account linked"                      -> tile
+ *   - the cash total drawn for any reason but the one where no bank
+ *     reported a recurring charge, or not drawn for that one     -> tile
  *   - an unknown monthly amount drawn as $0.00/mo                 -> items
  *   - "through" used for the next-income horizon, or "until your next
  *     income" for the month-end one                              -> horizon
@@ -46,14 +49,20 @@ import {
  *     body, or reordering them itself                            -> order
  *   - a dashboard answer kept for a bank not read, or one missing -> hidden
  *   - a date the engine filled in with today drawn as "Next expected",
- *     or the money screen drawing a date without showsRecurringDate -> items
- *   - a charge paid on or after its passed date drawn as "Was expected",
- *     or an item without paidSincePredicted read                  -> items
+ *     or the money screen drawing a line without recurringDateLine -> items
+ *   - a payment taken as made still drawn as "Was expected"; a pending
+ *     one drawn as a date, or as nothing; a posted transaction that was
+ *     not taken as the payment hiding the date                    -> items
+ *   - an item without paymentSincePredicted, or with a value the list
+ *     does not name, read                                         -> items
+ *   - the cushion's amount written into the lines instead of passed in,
+ *     or left out of either line that has one                     -> cushion
  */
 
 function screenSummary(over: {
   safeToSpend?: Partial<ScreenSummary["safeToSpend"]>;
   recurring?: Partial<ScreenSummary["recurring"]>;
+  cashBalanceCents?: number | null;
 } = {}): ScreenSummary {
   return {
     coverage: { safeToSpendShowable: true },
@@ -63,15 +72,16 @@ function screenSummary(over: {
       reason: null,
       amountCents: 50000,
       horizon: { to: "2026-11-30", rule: "end_of_calendar_month" },
-      totals: { spendableCashCents: 100000 },
+      totals: { spendableCashCents: 100000, cushionFloorCents: 75000 },
       ...over.safeToSpend,
     },
     recurring: { totalMonthlyCents: 1500, items: [], ...over.recurring },
     creditUtilization: { accounts: [] },
+    cashBalanceCents: over.cashBalanceCents ?? null,
   };
 }
 
-function unavailable(reason: string): ScreenSummary {
+function unavailable(reason: string, cashBalanceCents: number | null = null): ScreenSummary {
   return screenSummary({
     safeToSpend: {
       status: "unavailable",
@@ -80,6 +90,7 @@ function unavailable(reason: string): ScreenSummary {
       horizon: null,
       totals: null,
     },
+    cashBalanceCents,
   });
 }
 
@@ -107,7 +118,7 @@ describe("summary fields that may be null", () => {
             nextDate: "2026-11-20",
             nextDateAssumedToday: false,
             pastDue: false,
-            paidSincePredicted: false,
+            paymentSincePredicted: null,
           },
         ],
       },
@@ -150,28 +161,118 @@ describe("the spendable-cash tile", () => {
   it("a computed status with no totals is not drawn as an amount", () => {
     expect(spendableCashTile(screenSummary({ safeToSpend: { totals: null } }))).toEqual({ kind: "unknown" });
   });
+
+  // Red if: the reason is not looked at, so a cash total that came with any
+  // other reason is drawn; or the total for this reason is not drawn.
+  it("a figure held back only because no bank reported a recurring charge shows the cash total", () => {
+    const tile = spendableCashTile(unavailable("recurring_empty_unknown", 95000));
+    expect(tile).toEqual({ kind: "amount", cents: 95000 });
+    expect(spendableCashCents(tile)).toBe(95000);
+  });
+
+  it("that reason with no cash total draws a dash", () => {
+    expect(spendableCashTile(unavailable("recurring_empty_unknown", null))).toEqual({ kind: "unknown" });
+  });
+
+  it("a cash total that came with any other reason is not drawn", () => {
+    for (const reason of [
+      "stale_balance",
+      "null_balance",
+      "history_incomplete",
+      "recurring_unavailable",
+      "recurring_amount_unknown",
+      "non_usd_present",
+      "x",
+    ]) {
+      expect(spendableCashTile(unavailable(reason, 95000)), reason).toEqual({ kind: "unknown" });
+    }
+    expect(spendableCashTile(unavailable("no_cash_account", 95000))).toEqual({ kind: "no_cash_account" });
+  });
+
+  it("a computed figure shows the cash it was computed from, not the separate total", () => {
+    expect(spendableCashTile(screenSummary({ cashBalanceCents: 1 }))).toEqual({ kind: "amount", cents: 100000 });
+  });
 });
 
 describe("recurring items", () => {
+  type Payment = "counted" | "pending" | "unconfirmed" | null;
+  const passed = (paymentSincePredicted: Payment) => ({
+    nextDate: "2026-11-05",
+    nextDateAssumedToday: false,
+    paymentSincePredicted,
+  });
+
   it("a date the engine filled in with today is not drawn; an expected date is", () => {
-    const unpaid = { paidSincePredicted: false };
-    expect(showsRecurringDate({ nextDate: "2026-11-11", nextDateAssumedToday: true, ...unpaid })).toBe(false);
-    expect(showsRecurringDate({ nextDate: "2026-11-20", nextDateAssumedToday: false, ...unpaid })).toBe(true);
-    expect(showsRecurringDate({ nextDate: null, nextDateAssumedToday: false, ...unpaid })).toBe(false);
+    const none = { paymentSincePredicted: null };
+    expect(recurringDateLine({ nextDate: "2026-11-11", nextDateAssumedToday: true, ...none })).toBe("none");
+    expect(recurringDateLine({ nextDate: "2026-11-20", nextDateAssumedToday: false, ...none })).toBe("date");
+    expect(recurringDateLine({ nextDate: null, nextDateAssumedToday: false, ...none })).toBe("none");
   });
 
-  // Red if: the paid condition is dropped, so a charge already paid after
-  // its passed date still reads "Was expected <date>".
-  it("a passed date the charge was paid on or after is not drawn; an unpaid one is", () => {
-    expect(
-      showsRecurringDate({ nextDate: "2026-11-05", nextDateAssumedToday: false, paidSincePredicted: true })
-    ).toBe(false);
-    expect(
-      showsRecurringDate({ nextDate: "2026-11-05", nextDateAssumedToday: false, paidSincePredicted: false })
-    ).toBe(true);
+  // Red if: a payment taken as made still reads "Was expected <date>".
+  it("a passed date whose payment was taken as made draws no line", () => {
+    expect(recurringDateLine(passed("counted"))).toBe("none");
   });
 
-  it("an item without paidSincePredicted is a failed read", () => {
+  // Red if: a payment that is only pending is drawn as a date (it would read
+  // "Was expected"), or as nothing (it would read as paid).
+  it("a passed date with only a pending payment draws the pending label, not the date", () => {
+    expect(recurringDateLine(passed("pending"))).toBe("pending");
+    expect(PAYMENT_PENDING_LABEL).toBe("Payment pending");
+  });
+
+  // Red if: a posted transaction the engine did not take as the payment
+  // hides the date, as if the charge had been paid.
+  it("a passed date with an unconfirmed payment, or with nothing since, keeps the date", () => {
+    expect(recurringDateLine(passed("unconfirmed"))).toBe("date");
+    expect(recurringDateLine(passed(null))).toBe("date");
+  });
+
+  it("a date the engine filled in, or no date, draws no line whatever the payment says", () => {
+    for (const payment of ["counted", "pending", "unconfirmed", null] as Payment[]) {
+      expect(
+        recurringDateLine({ nextDate: "2026-11-11", nextDateAssumedToday: true, paymentSincePredicted: payment })
+      ).toBe("none");
+      expect(
+        recurringDateLine({ nextDate: null, nextDateAssumedToday: false, paymentSincePredicted: payment })
+      ).toBe("none");
+    }
+  });
+
+  it("an item with a payment value the list does not name is a failed read", () => {
+    const s = screenSummary({
+      recurring: {
+        totalMonthlyCents: 1500,
+        items: [
+          {
+            streamId: "s1",
+            label: "Gym",
+            monthlyCents: 1500,
+            nextDate: "2026-11-05",
+            nextDateAssumedToday: false,
+            pastDue: true,
+            paymentSincePredicted: "maybe",
+          } as never,
+        ],
+      },
+    });
+    expect(parseFinanceSummaryResponse(JSON.parse(JSON.stringify(body(s))))).toBeNull();
+  });
+
+  it("the item list reads paymentSincePredicted, and no longer paidSincePredicted", () => {
+    const item = SUMMARY_RESPONSE_FIELDS.summary.orNull.recurring.items.listOf;
+    expect(Object.keys(item).sort()).toEqual([
+      "label",
+      "monthlyCents",
+      "nextDate",
+      "nextDateAssumedToday",
+      "pastDue",
+      "paymentSincePredicted",
+      "streamId",
+    ]);
+  });
+
+  it("an item without paymentSincePredicted is a failed read", () => {
     const s = screenSummary({
       recurring: {
         totalMonthlyCents: 1500,
@@ -190,14 +291,21 @@ describe("recurring items", () => {
     expect(parseFinanceSummaryResponse(JSON.parse(JSON.stringify(body(s))))).toBeNull();
   });
 
-  it("the money screen draws a charge's date only through showsRecurringDate", () => {
+  it("the money screen draws a charge's line only through recurringDateLine", () => {
     const page = readFileSync(
       fileURLToPath(new URL("../../app/money/page.tsx", import.meta.url)),
       "utf8"
     );
-    expect(page).toContain("{item.nextDate && showsRecurringDate(item) && (");
+    expect(page).toContain('{item.nextDate && recurringDateLine(item) === "date" && (');
+    expect(page).toContain('{recurringDateLine(item) === "pending" && (');
+    // The pending wording comes from the tested constant, never typed in.
+    expect(page).toContain("{PAYMENT_PENDING_LABEL}");
+    expect(page).not.toContain("Payment pending");
+    // Nothing on the page decides from the payment field itself.
+    expect(page).not.toMatch(/paymentSincePredicted|paidSincePredicted/);
     // The date line is drawn in one place only.
     expect(page.match(/Next expected/g) ?? []).toHaveLength(1);
+    expect(page.match(/Was expected/g) ?? []).toHaveLength(1);
   });
 
   it("an item without nextDateAssumedToday is a failed read", () => {
@@ -211,7 +319,7 @@ describe("recurring items", () => {
             monthlyCents: 1500,
             nextDate: "2026-11-20",
             pastDue: false,
-            paidSincePredicted: false,
+            paymentSincePredicted: null,
           } as never,
         ],
       },
@@ -241,23 +349,72 @@ describe("the safe-to-spend horizon in a sentence", () => {
 
 /*
  * The dashboard's safe-to-spend lines. The figure also sets aside money the
- * summary does not itemize, so the lines carry the figure alone; a listed
- * breakdown would not add up to it. The dashboard passes the figure alone
- * (dashboardBankReadErrors.test.ts checks it never reads the
- * uncovered-obligations field), and the field lists no longer carry that
- * field or the itemized totals.
+ * summary does not itemize, so the lines carry no breakdown; a listed
+ * breakdown would not add up to it. The one other amount is the cushion the
+ * figure leaves in the account, passed in from the summary. The dashboard
+ * never reads the uncovered-obligations field
+ * (dashboardBankReadErrors.test.ts), and the field lists carry neither that
+ * field nor the itemized totals.
  *
  * Mutations that turn this block red:
  *   - a negative figure stated as anything but its absolute value  -> shortfall
- *   - the cash, recurring, card or buffer amounts listed again     -> one amount
+ *   - the cash, recurring, card or buffer amounts listed again     -> amounts
+ *   - the cushion's amount written in instead of passed in, or
+ *     left out of the line for a figure of either sign             -> cushion
+ *   - a cushion clause drawn for no cushion (0, or none given)     -> no cushion
  *   - uncoveredObligationsCents or an itemized total listed again  -> field list
  */
 describe("the dashboard's safe-to-spend lines", () => {
   const monthEnd = { to: "2026-11-30", rule: "end_of_calendar_month" };
   const nextIncome = { to: "2026-11-21", rule: "next_income_date" };
+  // Without a cushion: the lines as they read when none is kept.
   const linesFor = (amountCents: number, horizon: { to: string; rule: string }) =>
-    safeToSpendLines(amountCents, horizon);
+    safeToSpendLines(amountCents, horizon, 0);
   const amountsIn = (text: string) => text.match(/\$[\d,]+\.\d{2}/g) ?? [];
+  // Not the engine's default, so an amount written into the lines shows.
+  const CUSHION = 30000;
+
+  it("a figure of 0 or more names the cushion it keeps, with the amount passed in", () => {
+    for (const horizon of [monthEnd, nextIncome]) {
+      const lines = safeToSpendLines(12345, horizon, CUSHION);
+      expect(lines.statement).toBe(linesFor(12345, horizon).statement);
+      expect(lines.answer).toBe(
+        "That's what's left after setting aside upcoming bills, card payments, your usual spending and other expected costs, and keeping a $300.00 cushion in your account."
+      );
+    }
+  });
+
+  it("a negative figure names the cushion too", () => {
+    for (const horizon of [monthEnd, nextIncome]) {
+      const lines = safeToSpendLines(-12345, horizon, CUSHION);
+      expect(lines.statement).toBe(linesFor(-12345, horizon).statement);
+      expect(lines.answer).toBe(
+        "That covers upcoming bills, card payments, your usual spending and other expected costs, plus a $300.00 cushion I'd keep in your account."
+      );
+    }
+  });
+
+  it("the figure and the cushion are the only amounts in the lines", () => {
+    for (const amount of [12345, -12345]) {
+      for (const horizon of [monthEnd, nextIncome]) {
+        const lines = safeToSpendLines(amount, horizon, CUSHION);
+        expect(amountsIn(lines.statement)).toEqual(["$123.45"]);
+        expect(amountsIn(lines.answer)).toEqual(["$300.00"]);
+      }
+    }
+    expect(amountsIn(safeToSpendLines(12345, monthEnd, 75000).answer)).toEqual(["$750.00"]);
+  });
+
+  it("no cushion, 0 or none given, reads as the lines without one", () => {
+    for (const amount of [12345, -12345]) {
+      for (const horizon of [monthEnd, nextIncome]) {
+        expect(safeToSpendLines(amount, horizon, null)).toEqual(linesFor(amount, horizon));
+        const lines = safeToSpendLines(amount, horizon, null);
+        expect(lines.answer).not.toContain("cushion");
+        expect(linesFor(amount, horizon).answer).not.toContain("cushion");
+      }
+    }
+  });
 
   it("a figure of 0 or more, through the month's end", () => {
     expect(linesFor(12345, monthEnd)).toEqual({
@@ -292,13 +449,13 @@ describe("the dashboard's safe-to-spend lines", () => {
     });
   });
 
-  it("the field list carries the figure and the cash it starts from, not a breakdown", () => {
+  it("the field list carries the figure, the cash it starts from and the cushion, not a breakdown", () => {
     const safe = SUMMARY_RESPONSE_FIELDS.summary.orNull.safeToSpend;
     expect(Object.keys(safe).sort()).toEqual(["amountCents", "horizon", "reason", "status", "totals"]);
-    expect(Object.keys(safe.totals.orNull)).toEqual(["spendableCashCents"]);
+    expect(Object.keys(safe.totals.orNull).sort()).toEqual(["cushionFloorCents", "spendableCashCents"]);
   });
 
-  it("the figure is the only amount in the lines", () => {
+  it("without a cushion the figure is the only amount in the lines", () => {
     for (const amount of [12345, -12345]) {
       for (const horizon of [monthEnd, nextIncome]) {
         const lines = linesFor(amount, horizon);
@@ -328,6 +485,7 @@ describe("why safe-to-spend is not shown", () => {
       ["null_balance", "balance_unknown"],
       ["stale_balance", "balance_unknown"],
       ["recurring_unavailable", "recurring_unknown"],
+      ["recurring_empty_unknown", "recurring_unknown"],
       ["recurring_amount_unknown", "recurring_unknown"],
       ["history_incomplete", "history_incomplete"],
       ["non_usd_present", "other"],
@@ -361,7 +519,7 @@ describe("the order recurring charges are drawn in", () => {
     nextDate: "2026-11-20",
     nextDateAssumedToday: false,
     pastDue: false,
-    paidSincePredicted: false,
+    paymentSincePredicted: null,
   });
   // The engine sends its items by stream id; none of these is in the drawn order.
   const fromEngine = [
