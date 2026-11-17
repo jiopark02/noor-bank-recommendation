@@ -215,6 +215,11 @@ describe("dashboard money figures come only from the summary route", () => {
     // read from the uncovered-obligations field, which can be 0 while the
     // figure is negative.
     expect(PAGE.indexOf("safeToSpendLines(")).toBeGreaterThan(gateAt);
+    // The cushion the sentence names is the one the figure was computed
+    // with, read from the summary; the page writes no amount of its own.
+    expect(PAGE).toContain(
+      "safeToSpendLines(s.amountCents ?? 0, s.horizon, s.totals.cushionFloorCents)"
+    );
     expect(PAGE).not.toContain("uncoveredObligationsCents");
   });
 });

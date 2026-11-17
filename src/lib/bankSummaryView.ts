@@ -405,9 +405,10 @@ export const ENGINE_SUMMARY_FIELDS = {
     reason: "string|null",
     amountCents: "number|null",
     // Both are null when the figure could not be computed. Of the totals, only
-    // the cash the figure starts from is read: the figure also sets money
-    // aside that the totals do not itemize, so the screens never list a
-    // breakdown that would not add up to it.
+    // the cash the figure starts from and the cushion it leaves in the account
+    // are read: the figure also sets money aside that the totals do not
+    // itemize, so the screens never list a breakdown that would not add up to
+    // it.
     horizon: {
       orNull: {
         to: "string",
@@ -417,6 +418,7 @@ export const ENGINE_SUMMARY_FIELDS = {
     totals: {
       orNull: {
         spendableCashCents: "number",
+        cushionFloorCents: "number",
       },
     },
   },
@@ -432,8 +434,13 @@ export const ENGINE_SUMMARY_FIELDS = {
         // The engine had no expected date and used today's.
         nextDateAssumedToday: "boolean",
         pastDue: "boolean",
-        // The charge posted on or after its expected date, which has passed.
-        paidSincePredicted: "boolean",
+        // What is known about a payment since an expected date that has
+        // passed: "counted" when the engine took that payment as made,
+        // "pending" when only a pending transaction has appeared, and
+        // "unconfirmed" when a posted transaction has but the engine did not
+        // take it as the payment. null when the date has not passed, or
+        // nothing has appeared since.
+        paymentSincePredicted: { orNull: { oneOf: ["counted", "pending", "unconfirmed"] } },
       },
     },
   },
@@ -454,6 +461,10 @@ export const CREDIT_UTILIZATION_FIELDS = {
 export const SCREEN_SUMMARY_FIELDS = {
   ...ENGINE_SUMMARY_FIELDS,
   creditUtilization: CREDIT_UTILIZATION_FIELDS,
+  // The cash total, sent only when both hold: safe-to-spend was held back
+  // because no bank reported a recurring charge, and every connection was
+  // read. null in every other case.
+  cashBalanceCents: "number|null",
 } as const;
 
 /** What the dashboard, the money screen and this module read from a summary body. */
@@ -713,12 +724,22 @@ export type SpendableCashTile =
  * What the "Spendable cash" tile shows. With no summary (no connection) the
  * zero is true. A summary whose safe-to-spend was not computed shows no
  * amount: the cash it would have used is not known to be complete or fresh.
+ * The one exception is a figure held back only because no bank reported a
+ * recurring charge: the balances are known then, so the tile shows the cash
+ * total the summary carries for that case, when it carries one.
  */
 export function spendableCashTile(summary: ScreenSummary | null): SpendableCashTile {
   if (summary === null) return { kind: "amount", cents: 0 };
   const s = summary.safeToSpend;
   if (s.status === "computed" && s.totals !== null) {
     return { kind: "amount", cents: s.totals.spendableCashCents };
+  }
+  if (
+    s.status !== "computed" &&
+    s.reason === "recurring_empty_unknown" &&
+    summary.cashBalanceCents !== null
+  ) {
+    return { kind: "amount", cents: summary.cashBalanceCents };
   }
   if (s.reason === "no_cash_account") return { kind: "no_cash_account" };
   return { kind: "unknown" };
@@ -773,6 +794,7 @@ export function safeToSpendHiddenReason(
     case "stale_balance":
       return "balance_unknown";
     case "recurring_unavailable":
+    case "recurring_empty_unknown":
     case "recurring_amount_unknown":
       return "recurring_unknown";
     case "history_incomplete":
@@ -832,42 +854,69 @@ export function orderRecurringItems<
 }
 
 /**
- * Whether a recurring charge's expected date is drawn: only a date the engine
- * expected, for a charge not yet paid. A date it filled in with today because
- * it had none is not shown, and neither is a passed date the charge has
- * already been paid on or after.
+ *   date    - draw the charge's expected date
+ *   pending - draw PAYMENT_PENDING_LABEL in place of the date
+ *   none    - draw no line
  */
-export function showsRecurringDate(item: {
+export type RecurringDateLine = "date" | "pending" | "none";
+
+/** Shown in place of a passed expected date while its payment is still pending. */
+export const PAYMENT_PENDING_LABEL = "Payment pending";
+
+/**
+ * The line under a recurring charge's name. A date is drawn only when the
+ * engine expected one: a date it filled in with today because it had none is
+ * not shown. For a date that has passed, the line follows what is known about
+ * the payment since: taken as made, no line; only a pending transaction so
+ * far, the pending label instead of the date; a posted transaction the engine
+ * did not take as the payment, or nothing at all, the date stays.
+ */
+export function recurringDateLine(item: {
   nextDate: string | null;
   nextDateAssumedToday: boolean;
-  paidSincePredicted: boolean;
-}): boolean {
-  return item.nextDate !== null && !item.nextDateAssumedToday && !item.paidSincePredicted;
+  paymentSincePredicted: "counted" | "pending" | "unconfirmed" | null;
+}): RecurringDateLine {
+  if (item.nextDate === null || item.nextDateAssumedToday) return "none";
+  if (item.paymentSincePredicted === "counted") return "none";
+  if (item.paymentSincePredicted === "pending") return "pending";
+  return "date";
 }
 
 /**
- * The dashboard's safe-to-spend lines, after its greeting. The figure is the
- * only amount in them: what it sets aside is named in words, never itemized,
- * because the parts the summary carries do not add up to it. A negative
- * figure is the shortfall, stated as its absolute value.
+ * The dashboard's safe-to-spend lines, after its greeting. What the figure
+ * sets aside is named in words, never itemized, because the parts the summary
+ * carries do not add up to it. A negative figure is the shortfall, stated as
+ * its absolute value.
+ *
+ * The figure is what is left after a cushion is kept in the account, and the
+ * answer says so with the cushion's amount, the only other amount in the
+ * lines. That amount is the one the figure was computed with, passed in; it
+ * is never written here. With no cushion (0, or none given) the answer names
+ * none.
  */
 export function safeToSpendLines(
   amountCents: number,
-  horizon: { to: string; rule: string }
+  horizon: { to: string; rule: string },
+  cushionFloorCents: number | null
 ): { statement: string; answer: string } {
   const reach = safeToSpendHorizonPhrase(horizon);
+  const cushion =
+    cushionFloorCents !== null && cushionFloorCents > 0 ? formatCents(cushionFloorCents) : null;
   if (amountCents >= 0) {
     return {
       statement: `You have about ${formatCents(amountCents)} to spend ${reach}.`,
       answer:
-        "That's what's left after setting aside upcoming bills, card payments, your usual spending and other expected costs.",
+        "That's what's left after setting aside upcoming bills, card payments, your usual spending and other expected costs" +
+        (cushion === null ? "." : `, and keeping a ${cushion} cushion in your account.`),
     };
   }
   return {
     statement: `What I'd set aside ${reach} comes to about ${formatCents(
       -amountCents
     )} more than your cash.`,
-    answer: "That covers upcoming bills, card payments, your usual spending and other expected costs.",
+    answer:
+      "That covers upcoming bills, card payments, your usual spending and other expected costs" +
+      (cushion === null ? "." : `, plus a ${cushion} cushion I'd keep in your account.`),
   };
 }
 
