@@ -8,14 +8,14 @@ import {
   PLAID_CONNECT_SESSION_RETRY,
   PUBLIC_TOKEN_MAX_AGE_MS,
   SESSION_ENDED_MESSAGE,
-  activeInstitutionIds,
+  activeItemIds,
   classifyExchangeResponse,
   createPublicTokenHolder,
   linkTokenRefusalMessage,
   linkTokenSession,
+  readConnectionList,
   readPlaidSession,
   isOutcomeUnknown,
-  type ConnectionSummary,
   type ExchangePayload,
   type ExchangeResponse,
 } from "../plaidConnectFlow";
@@ -34,8 +34,15 @@ import {
  *   - any 503 or any 401 treated as resendable                 -> "which answers leave the token to send again"
  *   - the token kept after an answer that ends it              -> "an answer that ends the token"
  *   - the request sent again by itself after no response       -> "no response: not sent again by itself"
- *   - a bank already active when the token was received
- *     counted as connected by this attempt                     -> "a bank that was already there"
+ *   - a connection already active when the token was received
+ *     counted as connected by this attempt                     -> "a connection that was already there"
+ *   - a list row matched by anything but its Item id, or a
+ *     field read that the list route does not send             -> "a connection that was already there"
+ *                                                                 (and plaidConnectListContract.test.ts)
+ *   - an Item another token of this holder connected read as
+ *     a later token's                                          -> "what this holder already connected"
+ *   - the session check in run() removed (the read's status no
+ *     longer decides)                                          -> "no session in three reads"
  *   - a spent token's refusal shown in Plaid's or the
  *     server's words, or the list not read                     -> "a resend Plaid refuses"
  *   - the server's sentence shown for a resendable answer      -> "which answers leave the token to send again"
@@ -61,6 +68,27 @@ function session(userId: string): SessionReadResult {
 const NONE: SessionReadResult = { status: "none" };
 const TIMED_OUT: SessionReadResult = { status: "unavailable", reason: "timeout", elapsedMs: 3000 };
 
+/**
+ * A row as GET /api/plaid/connections sends it: these four fields and no
+ * institution id. plaidConnectListContract.test.ts holds this shape to the
+ * route's real answer.
+ */
+type ListRow = {
+  itemId: string;
+  institutionName: string;
+  status: string;
+  createdAt: string;
+};
+
+function row(itemId: string, status = "active"): ListRow {
+  return {
+    itemId,
+    institutionName: "Test Bank",
+    status,
+    createdAt: "2026-11-01T00:00:00.000Z",
+  };
+}
+
 /** `bodyRead` defaults to true: the body is the one written here. */
 type Answer =
   | { status: number; body: Record<string, unknown>; bodyRead?: boolean }
@@ -70,7 +98,7 @@ function harness() {
   const clock = { now: 1_000_000 };
   const reads: SessionReadResult[] = [];
   const answers: Answer[] = [];
-  const lists: Array<ConnectionSummary[] | null | "throw"> = [];
+  const lists: Array<ListRow[] | null | "throw"> = [];
   const posts: Array<{ accessToken: string; payload: ExchangePayload }> = [];
   const listReads: string[] = [];
   const readCalls: Array<{ timeoutMs: number; attempt: number }> = [];
@@ -99,7 +127,10 @@ function harness() {
       const next = lists.shift();
       if (next === undefined) throw new Error("test: no list queued");
       if (next === "throw") throw new TypeError("Failed to fetch");
-      return next;
+      if (next === null) return null;
+      // The rows go through the same reader the hook uses, in the body the
+      // list route sends.
+      return readConnectionList({ success: true, connections: next });
     },
   });
 
@@ -116,7 +147,7 @@ const PLAID_REFUSED = {
     errorCode: "SOME_PLAID_CODE",
   },
 };
-const ACTIVE_BANK: ConnectionSummary[] = [{ institutionId: "ins_1", status: "active" }];
+const NEW_ITEM: ListRow[] = [row("item-new")];
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -267,18 +298,39 @@ describe("which answers leave the token to send again", () => {
 
 describe("nothing is sent without a session", () => {
   it("no session in three reads: nothing sent, the token kept", async () => {
-    const h = harness();
-    h.holder.hold(TOKEN, BANK, "u1", []);
-    h.reads.push(TIMED_OUT, TIMED_OUT, TIMED_OUT);
+    // The second shape is a read that says "unavailable" and still carries a
+    // session object. The status decides, not what else the read holds: with
+    // run()'s session check removed, the plain shape ends the same way (the
+    // missing session throws, and send() answers a throw with the retry
+    // notice), so only this shape shows the check is gone, as a request sent.
+    const carryingSession = {
+      ...TIMED_OUT,
+      session: { access_token: "access-u1", user: { id: "u1" } },
+    } as unknown as SessionReadResult;
 
-    expect(await h.holder.send()).toEqual({
-      kind: "notice",
-      message: EXCHANGE_RETRY_MESSAGE,
-      canRetry: true,
-    });
-    expect(h.posts).toEqual([]);
-    expect(h.readCalls.map((c) => c.attempt)).toEqual([1, 2, 3]);
-    expect(h.holder.hasToken()).toBe(true);
+    for (const read of [TIMED_OUT, carryingSession]) {
+      const h = harness();
+      h.holder.hold(TOKEN, BANK, "u1", []);
+      h.reads.push(read, read, read);
+
+      const outcome = await h.holder.send();
+
+      expect(outcome).toEqual({
+        kind: "notice",
+        message: EXCHANGE_RETRY_MESSAGE,
+        canRetry: true,
+      });
+      expect(h.posts).toEqual([]);
+      expect(h.listReads).toEqual([]);
+      expect(h.readCalls.map((c) => c.attempt)).toEqual([1, 2, 3]);
+      expect(h.holder.hasToken()).toBe(true);
+
+      // The token that was kept is the one a later send carries.
+      h.reads.push(session("u1"));
+      h.answers.push(OK);
+      expect(await h.holder.send()).toEqual({ kind: "connected" });
+      expect(h.posts.map((p) => p.payload.publicToken)).toEqual([TOKEN]);
+    }
   });
 
   it("a session that ended: nothing sent, the token dropped", async () => {
@@ -457,12 +509,12 @@ describe("an answer that ends the token", () => {
 });
 
 describe("no response: not sent again by itself", () => {
-  it("one send, one list read; the bank is there now, so it is connected", async () => {
+  it("one send, one list read; a new connection is there now, so it is connected", async () => {
     const h = harness();
     h.holder.hold(TOKEN, BANK, "u1", []);
     h.reads.push(session("u1"));
     h.answers.push("no-response");
-    h.lists.push(ACTIVE_BANK);
+    h.lists.push(NEW_ITEM);
 
     expect(await h.holder.send()).toEqual({ kind: "connected" });
     expect(h.posts).toHaveLength(1);
@@ -470,15 +522,15 @@ describe("no response: not sent again by itself", () => {
     expect(h.holder.hasToken()).toBe(false);
   });
 
-  it.each<[string, ConnectionSummary[] | null | "throw"]>([
-    ["the bank is not in the list", []],
-    ["the bank is there but not active", [{ institutionId: "ins_1", status: "error" }]],
-    ["another bank is active", [{ institutionId: "ins_2", status: "active" }]],
-    ["the list could not be read", null],
-    ["the list read got no response", "throw"],
-  ])("%s: the token is kept and nothing more is sent", async (_label, list) => {
+  it.each<[string, string[], ListRow[] | null | "throw"]>([
+    ["the list is empty", [], []],
+    ["a new connection is there but not active", [], [row("item-new", "error")]],
+    ["only a connection that was active before is there", ["item-old"], [row("item-old")]],
+    ["the list could not be read", [], null],
+    ["the list read got no response", [], "throw"],
+  ])("%s: the token is kept and nothing more is sent", async (_label, atHold, list) => {
     const h = harness();
-    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.holder.hold(TOKEN, BANK, "u1", atHold);
     h.reads.push(session("u1"));
     h.answers.push("no-response");
     h.lists.push(list);
@@ -498,7 +550,7 @@ describe("no response: not sent again by itself", () => {
     h.holder.hold(TOKEN, BANK, "u1", []);
     h.reads.push(session("u1"), session("u1"));
     h.answers.push("no-response");
-    h.lists.push([], ACTIVE_BANK);
+    h.lists.push([], NEW_ITEM);
 
     expect((await h.holder.send()).kind).toBe("notice");
     expect(await h.holder.send()).toEqual({ kind: "connected" });
@@ -518,18 +570,21 @@ describe("no response: not sent again by itself", () => {
     expect(h.posts.map((p) => p.payload.publicToken)).toEqual([TOKEN, TOKEN]);
   });
 
-  it("without an institution id nothing can be matched: never counted as connected", async () => {
+  it("the list decides without an institution id from Link too", async () => {
     const h = harness();
-    h.holder.hold(TOKEN, { name: "Test Bank", institution_id: "" }, "u1", []);
-    h.reads.push(session("u1"));
+    h.holder.hold(TOKEN, { name: "Test Bank", institution_id: "" }, "u1", ["item-old"]);
+    h.reads.push(session("u1"), session("u1"));
     h.answers.push("no-response");
+    h.lists.push([row("item-old")], [row("item-old"), row("item-new")]);
 
     expect(await h.holder.send()).toEqual({
       kind: "notice",
       message: EXCHANGE_RETRY_MESSAGE,
       canRetry: true,
     });
-    expect(h.listReads).toEqual([]);
+    expect(await h.holder.send()).toEqual({ kind: "connected" });
+    expect(h.posts).toHaveLength(1);
+    expect(h.listReads).toHaveLength(2);
   });
 });
 
@@ -606,7 +661,7 @@ describe("a response without a readable body", () => {
       h.holder.hold(TOKEN, BANK, "u1", []);
       h.reads.push(session("u1"));
       h.answers.push({ status, body: { error: { message: "upstream unavailable" } } });
-      h.lists.push(ACTIVE_BANK);
+      h.lists.push(NEW_ITEM);
 
       expect(await h.holder.send()).toEqual({ kind: "connected" });
       expect(h.posts).toHaveLength(1);
@@ -681,7 +736,7 @@ describe("a response without a readable body", () => {
     h.holder.hold(TOKEN, BANK, "u1", []);
     h.reads.push(session("u1"));
     h.answers.push({ status, body: {}, bodyRead: false });
-    h.lists.push(ACTIVE_BANK);
+    h.lists.push(NEW_ITEM);
 
     expect(await h.holder.send()).toEqual({ kind: "connected" });
     expect(h.posts).toHaveLength(1);
@@ -695,7 +750,7 @@ describe("a response without a readable body", () => {
       h.holder.hold(TOKEN, BANK, "u1", []);
       h.reads.push(session("u1"), session("u1"));
       h.answers.push({ status, body: {}, bodyRead: false }, PLAID_REFUSED);
-      h.lists.push([], [], ACTIVE_BANK);
+      h.lists.push([], [], NEW_ITEM);
 
       expect((await h.holder.send()).kind).toBe("notice");
       expect(h.listReads).toHaveLength(1);
@@ -707,18 +762,20 @@ describe("a response without a readable body", () => {
     }
   );
 
-  it("a bank already active when the token was received is not counted as connected", async () => {
+  it("a connection already active when the token was received is not counted as connected", async () => {
     const h = harness();
-    h.holder.hold(TOKEN, BANK, "u1", ["ins_1"]);
+    h.holder.hold(TOKEN, BANK, "u1", ["item-old"]);
     h.reads.push(session("u1"));
     h.answers.push({ status: 502, body: {}, bodyRead: false });
+    h.lists.push([row("item-old")]);
 
     expect(await h.holder.send()).toEqual({
       kind: "notice",
-      message: "Test Bank is already connected.",
-      canRetry: false,
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
     });
-    expect(h.listReads).toEqual([]);
+    expect(h.listReads).toEqual(["access-u1"]);
+    expect(h.holder.hasToken()).toBe(true);
   });
 
   it("a 401 stays resendable: no list read, and the retry sends the same token", async () => {
@@ -825,7 +882,7 @@ describe("a pressed retry is held to the same limits", () => {
 });
 
 describe("a resend Plaid refuses", () => {
-  async function refusedResend(list: ConnectionSummary[] | null | "throw") {
+  async function refusedResend(list: ListRow[] | null | "throw") {
     const h = harness();
     h.holder.hold(TOKEN, BANK, "u1", []);
     h.reads.push(session("u1"), session("u1"));
@@ -837,15 +894,15 @@ describe("a resend Plaid refuses", () => {
     return { h, outcome };
   }
 
-  it("the bank is in the list now: connected", async () => {
-    const { h, outcome } = await refusedResend(ACTIVE_BANK);
+  it("a new connection is in the list now: connected", async () => {
+    const { h, outcome } = await refusedResend(NEW_ITEM);
     expect(outcome).toEqual({ kind: "connected" });
     expect(h.listReads).toHaveLength(3);
     expect(h.holder.hasToken()).toBe(false);
   });
 
-  it.each<[string, ConnectionSummary[] | null | "throw"]>([
-    ["the bank is not in the list", []],
+  it.each<[string, ListRow[] | null | "throw"]>([
+    ["no new connection is in the list", []],
     ["the list could not be read", null],
     ["the list read got no response", "throw"],
   ])("%s: the token is dropped, with our sentence and not Plaid's", async (_label, list) => {
@@ -860,43 +917,87 @@ describe("a resend Plaid refuses", () => {
   });
 });
 
-describe("a bank that was already there when the token was received", () => {
-  it("activeInstitutionIds keeps active rows with an id", () => {
+describe("a connection that was already there when the token was received", () => {
+  it("activeItemIds keeps active rows with an Item id", () => {
     expect(
-      activeInstitutionIds([
-        { institutionId: "ins_1", status: "active" },
-        { institutionId: "ins_2", status: "error" },
-        { institutionId: null, status: "active" },
-        { institutionId: "", status: "active" },
+      activeItemIds([
+        { itemId: "item-1", status: "active" },
+        { itemId: "item-2", status: "error" },
+        { itemId: null, status: "active" },
+        { itemId: "", status: "active" },
         { status: "active" },
       ])
-    ).toEqual(["ins_1"]);
+    ).toEqual(["item-1"]);
   });
 
-  it("no response: not counted as connected, answered as already connected, list not read", async () => {
+  it("readConnectionList reads the Item id and the status of each row, and nothing else", () => {
+    expect(
+      readConnectionList({
+        success: true,
+        connections: [row("item-1"), row("item-2", "error")],
+      })
+    ).toEqual([
+      { itemId: "item-1", status: "active" },
+      { itemId: "item-2", status: "error" },
+    ]);
+    // A row of another shape is kept as a row that matches nothing.
+    expect(
+      readConnectionList({ connections: [null, "x", { itemId: 7, status: 1 }, {}] })
+    ).toEqual([
+      { itemId: null, status: undefined },
+      { itemId: null, status: undefined },
+      { itemId: null, status: undefined },
+      { itemId: null, status: undefined },
+    ]);
+    // A field the list route does not send is not what a row is matched by.
+    expect(
+      activeItemIds(
+        readConnectionList({ connections: [{ institutionId: "ins_1", status: "active" }] }) ?? []
+      )
+    ).toEqual([]);
+    for (const body of [null, undefined, "x", [], {}, { connections: "x" }, { error: "x" }]) {
+      expect(readConnectionList(body), JSON.stringify(body)).toBeNull();
+    }
+  });
+
+  it("the same bank again: not counted as connected, and the route's duplicate answer ends it", async () => {
     const h = harness();
-    h.holder.hold(TOKEN, BANK, "u1", ["ins_1"]);
-    h.reads.push(session("u1"));
-    h.answers.push("no-response");
+    // The bank is already connected as item-old, so this exchange makes no
+    // new row: the list has nothing new, however often it is read.
+    h.holder.hold(TOKEN, BANK, "u1", ["item-old"]);
+    h.reads.push(session("u1"), session("u1"));
+    h.answers.push("no-response", {
+      status: 409,
+      body: { code: "ALREADY_CONNECTED", institutionName: "Server Bank", error: "dup" },
+    });
+    h.lists.push([row("item-old")], [row("item-old")]);
 
     expect(await h.holder.send()).toEqual({
       kind: "notice",
-      message: "Test Bank is already connected.",
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
+    });
+    expect(h.posts).toHaveLength(1);
+    expect(h.holder.hasToken()).toBe(true);
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: "Server Bank is already connected.",
       canRetry: false,
     });
-    expect(h.listReads).toEqual([]);
-    expect(h.posts).toHaveLength(1);
+    expect(h.posts.map((p) => p.payload.publicToken)).toEqual([TOKEN, TOKEN]);
+    expect(h.listReads).toHaveLength(2);
     expect(h.holder.hasToken()).toBe(false);
   });
 
-  it("another bank, active then and now, is never read as this one", async () => {
+  it("another connection, active then and now, is never read as this one", async () => {
     const h = harness();
-    h.holder.hold(TOKEN, BANK, "u1", ["ins_9"]);
+    h.holder.hold(TOKEN, BANK, "u1", ["item-9"]);
     h.reads.push(session("u1"), session("u1"));
     h.answers.push("no-response", PLAID_REFUSED);
-    h.lists.push([], [], [{ institutionId: "ins_9", status: "active" }]);
+    h.lists.push([row("item-9")], [row("item-9")], [row("item-9")]);
     expect((await h.holder.send()).kind).toBe("notice");
-    // Another bank being active says nothing about this one.
+    // A connection that was there before says nothing about this token.
     expect(await h.holder.send()).toEqual({
       kind: "notice",
       message: CONNECTION_TIMED_OUT_MESSAGE,
@@ -904,27 +1005,114 @@ describe("a bank that was already there when the token was received", () => {
     });
   });
 
-  it("a bank that appeared is connected; the list held at receipt is a copy", async () => {
+  it("a connection that appeared is connected; the list held at receipt is a copy", async () => {
     const h = harness();
     const atHold: string[] = [];
     h.holder.hold(TOKEN, BANK, "u1", atHold);
     // The screen's list changing later must not change what was recorded.
-    atHold.push("ins_1");
+    atHold.push("item-new");
     h.reads.push(session("u1"));
     h.answers.push("no-response");
-    h.lists.push(ACTIVE_BANK);
+    h.lists.push(NEW_ITEM);
 
     expect(await h.holder.send()).toEqual({ kind: "connected" });
   });
 
   it("a normal answer is not second-guessed: the server's 200 connects", async () => {
     const h = harness();
-    h.holder.hold(TOKEN, BANK, "u1", ["ins_1"]);
+    h.holder.hold(TOKEN, BANK, "u1", ["item-old"]);
     h.reads.push(session("u1"));
     h.answers.push(OK);
 
     expect(await h.holder.send()).toEqual({ kind: "connected" });
     expect(h.listReads).toEqual([]);
+  });
+});
+
+describe("what this holder already connected", () => {
+  // The screen reloads its list after a connection, and that reload can still
+  // be running, or can have failed, when the next token is received. The list
+  // handed in with that token then lacks the connection just made.
+
+  it("an Item named in an earlier success answer is not a later token's", async () => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"));
+    h.answers.push(OK);
+    expect(await h.holder.send()).toEqual({ kind: "connected" });
+
+    h.holder.hold("public-second", BANK, "u1", []);
+    h.reads.push(session("u1"), session("u1"));
+    h.answers.push("no-response");
+    h.lists.push([row("item-1")], [row("item-1"), row("item-2")]);
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
+    });
+    expect(h.holder.hasToken()).toBe(true);
+    // Its own connection, once it is in the list, still counts.
+    expect(await h.holder.send()).toEqual({ kind: "connected" });
+    expect(h.posts).toHaveLength(2);
+  });
+
+  it("an Item found by an earlier list read is not a later token's", async () => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"));
+    h.answers.push("no-response");
+    h.lists.push([row("item-a")]);
+    expect(await h.holder.send()).toEqual({ kind: "connected" });
+
+    h.holder.hold("public-second", BANK, "u1", []);
+    h.reads.push(session("u1"));
+    h.answers.push("no-response");
+    h.lists.push([row("item-a")]);
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
+    });
+  });
+
+  it("an Item connected by a token that was replaced meanwhile is not the newer token's", async () => {
+    let release: (value: ExchangeResponse) => void = () => {};
+    const slow = createPublicTokenHolder({
+      readSession: async () => session("u1"),
+      sleep: async () => {},
+      now: () => 1_000_000,
+      post: (_accessToken, payload) =>
+        payload.publicToken === "public-old"
+          ? new Promise((resolve) => {
+              release = resolve;
+            })
+          : Promise.reject(new TypeError("Failed to fetch")),
+      readConnections: async () =>
+        readConnectionList({ success: true, connections: [row("item-from-old")] }),
+    });
+
+    slow.hold("public-old", BANK, "u1", []);
+    const first = slow.send();
+    // Until the older request is really out: `release` is set by post().
+    let waiting = true;
+    const sent = release;
+    for (let i = 0; i < 50 && waiting; i++) {
+      await Promise.resolve();
+      waiting = release === sent;
+    }
+    expect(waiting).toBe(false);
+    slow.hold("public-new", BANK, "u1", []);
+    release({ status: 200, body: { success: true, itemId: "item-from-old" }, bodyRead: true });
+    expect(await first).toEqual({ kind: "superseded" });
+
+    expect(await slow.send()).toEqual({
+      kind: "notice",
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
+    });
+    expect(slow.hasToken()).toBe(true);
   });
 });
 
@@ -1000,7 +1188,7 @@ describe("the token goes nowhere but the request body", () => {
     const scripts: Array<{
       reads: SessionReadResult[];
       answers: Answer[];
-      lists: Array<ConnectionSummary[] | null | "throw">;
+      lists: Array<ListRow[] | null | "throw">;
       sends: number;
     }> = [
       { reads: [session("u1")], answers: [OK], lists: [], sends: 1 },

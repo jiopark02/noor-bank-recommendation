@@ -10,8 +10,9 @@ import {
   withFetchTimeout,
 } from "@/lib/screenFetchTimeout";
 import {
-  activeInstitutionIds,
+  activeItemIds,
   createPublicTokenHolder,
+  readConnectionList,
   type ConnectionSummary,
   type ExchangeDeps,
   type LinkInstitution,
@@ -36,7 +37,11 @@ export type PlaidExchangeView = {
 type Options = {
   /** The signed-in user the screen knows, or null. */
   userId: string | null;
-  /** The connection list the screen is showing now. */
+  /**
+   * The connection list the screen is showing now. Its active Item ids are
+   * recorded when Link hands over a token: a connection counts as made by
+   * that token only when its Item id was not among them.
+   */
   knownConnections: ReadonlyArray<ConnectionSummary>;
   onConnected: () => void;
 };
@@ -83,16 +88,9 @@ const liveDeps: ExchangeDeps = {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal,
       });
-      const payload = asPlainObject(await response.json());
-      if (!response.ok || !Array.isArray(payload.connections)) return null;
-      return (payload.connections as unknown[]).map((row): ConnectionSummary => {
-        const fields = asPlainObject(row);
-        return {
-          institutionId:
-            typeof fields.institutionId === "string" ? fields.institutionId : null,
-          status: typeof fields.status === "string" ? fields.status : undefined,
-        };
-      });
+      const body: unknown = await response.json();
+      // Which fields of a row are read is plaidConnectFlow's, not this file's.
+      return response.ok ? readConnectionList(body) : null;
     });
   },
 };
@@ -149,7 +147,7 @@ export function usePlaidExchange({
         publicToken,
         metadata.institution,
         latest.current.userId,
-        activeInstitutionIds(latest.current.knownConnections)
+        activeItemIds(latest.current.knownConnections)
       );
       void run();
     },

@@ -19,6 +19,11 @@ import { describe, it, expect } from "vitest";
  *   - the token kept in the card instead of the screen                  -> "the screen owns the exchange"
  *   - the screen's connection list no longer passed when a token is held -> "the screen owns the exchange"
  *   - the session read under a label shared with other reads            -> "its own label"
+ *   - the hook reading list rows itself, or a list row matched by an
+ *     institution id again                                              -> "the list response is read by the flow's reader"
+ *   - the exchange status drawn twice on one tab                        -> "one exchange is said once on a tab"
+ *   - the progress line drawn with the sentence's classes               -> "the progress line has classes of its own"
+ *                                                                          (rendered in plaidExchangeStatusView.test.ts)
  */
 
 const SRC = fileURLToPath(new URL("../../", import.meta.url));
@@ -195,8 +200,50 @@ describe("the public token stays in memory", () => {
 
     // The list as it was when the token was received goes in with the token.
     expect(HOOK).toMatch(
-      /holder\.hold\(\s*publicToken,\s*metadata\.institution,\s*latest\.current\.userId,\s*activeInstitutionIds\(latest\.current\.knownConnections\)\s*\)/
+      /holder\.hold\(\s*publicToken,\s*metadata\.institution,\s*latest\.current\.userId,\s*activeItemIds\(latest\.current\.knownConnections\)\s*\)/
     );
+  });
+
+  it("the list response is read by the flow's reader, not row by row in the hook", () => {
+    const listRead = HOOK.slice(HOOK.indexOf("async readConnections("), HOOK.indexOf("export function usePlaidExchange("));
+    expect(listRead).toContain('fetch("/api/plaid/connections"');
+    expect(listRead).toMatch(/return response\.ok \? readConnectionList\(body\) : null;/);
+    // No field of a row is named here: plaidConnectListContract.test.ts holds
+    // the reader to what the list route really sends.
+    expect(listRead).not.toMatch(/fields\.|\.itemId|\.status\b|\.map\(/);
+
+    // A list row is matched by its Item id only. The institution id appears
+    // in these files only as what Link reported, sent in the exchange body.
+    expect(HOOK).not.toMatch(/institutionId/i);
+    const flowUses = FLOW.match(/[^\n]*institutionId[^\n]*/g) ?? [];
+    expect(flowUses.map((line) => line.trim())).toEqual([
+      "institutionId: string;",
+      "institutionId: held.institution.institution_id,",
+    ]);
+    expect(FLOW).not.toContain("already_there");
+  });
+
+  it("one exchange is said once on a tab: the list's status steps aside for the card", () => {
+    expect(MONEY.split("<PlaidExchangeStatus").length - 1).toBe(1);
+    expect(MONEY).toMatch(/\{!shouldShowConnectCard && \(\s*<PlaidExchangeStatus\b/);
+    // The card draws its own status, wherever the card is drawn.
+    const card = PLAID_LINK.slice(PLAID_LINK.indexOf("export function ConnectBankCard("));
+    expect(card.split("<PlaidExchangeStatus").length - 1).toBe(1);
+    const cards = MONEY.match(/\{shouldShowConnectCard && \(\s*(<div[^>]*>\s*)?<ConnectBankCard\b/g) ?? [];
+    expect(cards.length).toBe(MONEY.split("<ConnectBankCard").length - 1);
+  });
+
+  it("the progress line has classes of its own, and no caller gives it a failure colour", () => {
+    expect(STATUS).toMatch(/<p className=\{progressClassName\} role="status">/);
+    expect(STATUS).toMatch(/<p className=\{textClassName\} role="alert">/);
+    for (const [file, source] of [
+      ["PlaidLink", PLAID_LINK],
+      ["money", MONEY],
+    ] as const) {
+      for (const passed of source.match(/progressClassName="[^"]*"/g) ?? []) {
+        expect(passed, file).not.toMatch(/red/);
+      }
+    }
   });
 
   it("the status block offers the retry only when the flow says the token is held", () => {

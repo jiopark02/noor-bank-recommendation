@@ -195,25 +195,51 @@ export type ExchangePayload = {
   institutionName: string;
 };
 
-/** The fields of a connection-list row this module reads. */
+/**
+ * The fields of a connection-list row this module reads. Both are fields the
+ * list route (GET /api/plaid/connections) sends for every row. The list
+ * carries no institution id, so a row is never matched to a bank by one.
+ */
 export type ConnectionSummary = {
-  institutionId?: string | null;
+  itemId?: string | null;
   status?: string;
 };
 
 /**
- * The institution ids of the active rows in a connection list. Recorded when a
- * token is held, so a later list read can tell a bank that appeared from one
- * that was already there.
+ * The rows of a connection-list response body, or null when the body is not a
+ * list. This is the only place a list response is read for the exchange, so a
+ * test can hand it what the list route really answers.
  */
-export function activeInstitutionIds(
+export function readConnectionList(body: unknown): ConnectionSummary[] | null {
+  if (typeof body !== "object" || body === null) return null;
+  const rows = (body as Record<string, unknown>).connections;
+  if (!Array.isArray(rows)) return null;
+  const list: ConnectionSummary[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row: unknown = rows[i];
+    const fields: Record<string, unknown> =
+      typeof row === "object" && row !== null ? (row as Record<string, unknown>) : {};
+    list.push({
+      itemId: typeof fields.itemId === "string" ? fields.itemId : null,
+      status: typeof fields.status === "string" ? fields.status : undefined,
+    });
+  }
+  return list;
+}
+
+/**
+ * The Item ids of the active rows in a connection list. Recorded when a token
+ * is held, so a later list read can tell a connection that appeared from the
+ * ones that were already there.
+ */
+export function activeItemIds(
   connections: ReadonlyArray<ConnectionSummary>
 ): string[] {
   const ids: string[] = [];
   for (let i = 0; i < connections.length; i++) {
     const row = connections[i];
-    if (row.status === "active" && typeof row.institutionId === "string" && row.institutionId) {
-      ids.push(row.institutionId);
+    if (row.status === "active" && typeof row.itemId === "string" && row.itemId) {
+      ids.push(row.itemId);
     }
   }
   return ids;
@@ -246,7 +272,7 @@ type HeldToken = {
   /** The user the token belongs to; null until the first session read names one. */
   userId: string | null;
   receivedAt: number;
-  /** Active institution ids when the token was received. */
+  /** The Item ids of the connections that were active when the token was received. */
   activeAtHold: string[];
   /** An earlier send of this token ended with no response. */
   noResponse: boolean;
@@ -257,6 +283,8 @@ export type PublicTokenHolder = {
    * Keeps a token Link just handed over, replacing any held before it.
    * `userId` is the signed-in user the screen knows, or null when it knows
    * none: the token is then bound to the user of the first session read.
+   * `activeAtHold` is the Item ids of the user's active connections as the
+   * screen knows them now (activeItemIds of its list); it is copied.
    */
   hold: (
     publicToken: string,
@@ -269,8 +297,6 @@ export type PublicTokenHolder = {
   hasToken: () => boolean;
   clear: () => void;
 };
-
-type BankSeen = "connected" | "already_there" | "absent";
 
 function retry(): ExchangeOutcome {
   return { kind: "notice", message: EXCHANGE_RETRY_MESSAGE, canRetry: true };
@@ -288,31 +314,49 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
   let current: HeldToken | null = null;
   let inFlight: Promise<ExchangeOutcome> | null = null;
 
-  /**
-   * Whether the bank is connected now, judged from the connection list.
-   *
-   * Only a bank that was not active when the token was received and is active
-   * now counts as connected by this attempt. One that was already active then
-   * proves nothing about this attempt; the exchange route refuses a second
-   * connection to the same bank, so that case is answered the way the route
-   * answers it. Without an institution id nothing can be matched, and a list
-   * that cannot be read says nothing.
-   */
-  async function seeBank(held: HeldToken, accessToken: string): Promise<BankSeen> {
-    const institutionId = held.institution.institution_id;
-    if (!institutionId) return "absent";
-    if (held.activeAtHold.indexOf(institutionId) !== -1) return "already_there";
+  // Item ids this holder knows were connected by a token it held: named in a
+  // success answer, or found by a list read. The screen's list can lag behind
+  // them (its reload may still be running, or may have failed), and such an
+  // Item must not be read as the work of a later token.
+  const connectedHere: string[] = [];
+  const remember = (itemId: string): void => {
+    if (connectedHere.indexOf(itemId) === -1) connectedHere.push(itemId);
+  };
 
+  /**
+   * Whether this token's exchange is known to have connected a bank, judged
+   * from the connection list.
+   *
+   * Yes only when the list now has an active Item that was not active when
+   * the token was received and that no other token of this holder connected.
+   * Everything else is "not known": a list that cannot be read, a list with
+   * nothing new, and a bank that was already connected then. That bank's
+   * exchange makes no new row, so the route's own duplicate answer is what
+   * ends the token when it is sent again.
+   *
+   * The comparison is with the screen's list as it was at that moment. A
+   * connection made elsewhere (another tab or device) after the screen last
+   * read its list would be read as this one; nothing here can see that.
+   */
+  async function sawNewConnection(held: HeldToken, accessToken: string): Promise<boolean> {
     let list: ConnectionSummary[] | null;
     try {
       list = await deps.readConnections(accessToken);
     } catch {
       list = null;
     }
-    if (!list) return "absent";
-    return activeInstitutionIds(list).indexOf(institutionId) !== -1
-      ? "connected"
-      : "absent";
+    if (!list) return false;
+    const fresh: string[] = [];
+    const active = activeItemIds(list);
+    for (let i = 0; i < active.length; i++) {
+      const itemId = active[i];
+      if (held.activeAtHold.indexOf(itemId) === -1 && connectedHere.indexOf(itemId) === -1) {
+        fresh.push(itemId);
+      }
+    }
+    // Only for the token still held: one replaced meanwhile claims nothing.
+    if (current === held) fresh.forEach(remember);
+    return fresh.length > 0;
   }
 
   async function run(held: HeldToken): Promise<ExchangeOutcome> {
@@ -353,15 +397,11 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
     // An earlier send got no response, so the server may have finished the
     // exchange. Look before sending the same token again.
     if (held.noResponse) {
-      const seen = await seeBank(held, accessToken);
+      const connected = await sawNewConnection(held, accessToken);
       if (superseded()) return { kind: "superseded" };
-      if (seen === "connected") {
+      if (connected) {
         drop();
         return { kind: "connected" };
-      }
-      if (seen === "already_there") {
-        drop();
-        return alreadyConnected(undefined, held);
       }
     }
 
@@ -375,6 +415,12 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
     } catch {
       response = null;
     }
+    // An Item the route says it connected is remembered even when its token
+    // was replaced while the request ran: it is not a later token's work.
+    if (response !== null && response.body.success === true) {
+      const itemId = readText(response.body, "itemId");
+      if (itemId) remember(itemId);
+    }
     if (superseded()) return { kind: "superseded" };
 
     if (response === null || isOutcomeUnknown(response)) {
@@ -382,15 +428,11 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
       // request is not sent again from here: the server may have completed
       // it. The connection list is what can tell.
       held.noResponse = true;
-      const seen = await seeBank(held, accessToken);
+      const connected = await sawNewConnection(held, accessToken);
       if (superseded()) return { kind: "superseded" };
-      if (seen === "connected") {
+      if (connected) {
         drop();
         return { kind: "connected" };
-      }
-      if (seen === "already_there") {
-        drop();
-        return alreadyConnected(undefined, held);
       }
       return retry();
     }
@@ -412,12 +454,10 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
     if (kind === "plaid_refused" && held.noResponse) {
       // Plaid refused a token that an earlier, unanswered request may already
       // have spent. The list decides; Plaid's wording is not shown.
-      const seen = await seeBank(held, accessToken);
+      const connected = await sawNewConnection(held, accessToken);
       if (superseded()) return { kind: "superseded" };
       drop();
-      if (seen === "connected") return { kind: "connected" };
-      if (seen === "already_there") return alreadyConnected(undefined, held);
-      return final(CONNECTION_TIMED_OUT_MESSAGE);
+      return connected ? { kind: "connected" } : final(CONNECTION_TIMED_OUT_MESSAGE);
     }
 
     // Every other answer ends this token. The server's sentence is kept: it
