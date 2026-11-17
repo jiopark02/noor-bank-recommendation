@@ -66,17 +66,14 @@ const liveDeps: ExchangeDeps = {
       headers: buildJsonAuthorizedHeaders({ Authorization: `Bearer ${accessToken}` }),
       body: JSON.stringify(payload),
     });
-    let parsed: unknown;
+    // A body that does not arrive or is not JSON is reported, not decided
+    // here: plaidConnectFlow reads the status with that fact.
     try {
-      parsed = await response.json();
-    } catch (err) {
-      // A success whose body did not arrive says nothing usable: treated like
-      // no response, so the connection list decides. A failure without a body
-      // (an unhandled error page) is still a failure.
-      if (response.ok) throw err;
-      parsed = {};
+      const parsed: unknown = await response.json();
+      return { status: response.status, body: asPlainObject(parsed), bodyRead: true };
+    } catch {
+      return { status: response.status, body: {}, bodyRead: false };
     }
-    return { status: response.status, body: asPlainObject(parsed) };
   },
 
   async readConnections(accessToken) {

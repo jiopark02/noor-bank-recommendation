@@ -14,8 +14,10 @@ import {
   linkTokenRefusalMessage,
   linkTokenSession,
   readPlaidSession,
+  isOutcomeUnknown,
   type ConnectionSummary,
   type ExchangePayload,
+  type ExchangeResponse,
 } from "../plaidConnectFlow";
 
 /**
@@ -39,6 +41,11 @@ import {
  *   - the server's sentence shown for a resendable answer      -> "which answers leave the token to send again"
  *   - one of the three sentences changed                       -> "the sentences"
  *   - the token written to a log, to storage or to an outcome  -> "the token goes nowhere but the request body"
+ *   - a 5xx or a 2xx without a readable body read by its status
+ *     (the token ended, or sent again unchecked)               -> "a response without a readable body"
+ *   - a 4xx without a readable body treated as unknown         -> "a response without a readable body"
+ *   - a 5xx with JSON the route did not write read by its
+ *     status, or a 5xx the route did write read as unknown     -> "a response without a readable body"
  */
 
 const TOKEN = "public-sentinel-4be1";
@@ -54,7 +61,10 @@ function session(userId: string): SessionReadResult {
 const NONE: SessionReadResult = { status: "none" };
 const TIMED_OUT: SessionReadResult = { status: "unavailable", reason: "timeout", elapsedMs: 3000 };
 
-type Answer = { status: number; body: Record<string, unknown> } | "no-response";
+/** `bodyRead` defaults to true: the body is the one written here. */
+type Answer =
+  | { status: number; body: Record<string, unknown>; bodyRead?: boolean }
+  | "no-response";
 
 function harness() {
   const clock = { now: 1_000_000 };
@@ -82,7 +92,7 @@ function harness() {
       const next = answers.shift();
       if (!next) throw new Error("test: no answer queued");
       if (next === "no-response") throw new TypeError("Failed to fetch");
-      return next;
+      return { status: next.status, body: next.body, bodyRead: next.bodyRead !== false };
     },
     readConnections: async (accessToken) => {
       listReads.push(accessToken);
@@ -403,7 +413,8 @@ describe("an answer that ends the token", () => {
     const h = harness();
     h.holder.hold(TOKEN, BANK, "u1", []);
     h.reads.push(session("u1"));
-    h.answers.push({ status: 500, body: {} });
+    // A 4xx: a 5xx without the route's sentence is not read as a refusal.
+    h.answers.push({ status: 400, body: {} });
 
     expect(await h.holder.send()).toEqual({
       kind: "notice",
@@ -512,6 +523,241 @@ describe("no response: not sent again by itself", () => {
     h.holder.hold(TOKEN, { name: "Test Bank", institution_id: "" }, "u1", []);
     h.reads.push(session("u1"));
     h.answers.push("no-response");
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
+    });
+    expect(h.listReads).toEqual([]);
+  });
+});
+
+describe("a response without a readable body", () => {
+  const unread = (status: number): ExchangeResponse => ({ status, body: {}, bodyRead: false });
+
+  it("leaves the outcome unknown for a 2xx or a 5xx, and for nothing else", () => {
+    for (const status of [200, 201, 500, 502, 503, 504]) {
+      expect(isOutcomeUnknown(unread(status)), String(status)).toBe(true);
+    }
+    for (const status of [400, 401, 403, 404, 409, 422, 429]) {
+      expect(isOutcomeUnknown(unread(status)), String(status)).toBe(false);
+    }
+    // A body the route wrote is an answer, whatever the status.
+    for (const status of [200, 401, 500, 502, 503, 504]) {
+      expect(
+        isOutcomeUnknown({ status, body: { error: "the route's sentence" }, bodyRead: true }),
+        String(status)
+      ).toBe(false);
+    }
+  });
+
+  it("a 5xx whose JSON body is not the route's leaves the outcome unknown too", () => {
+    const foreign: Array<Record<string, unknown>> = [
+      {},
+      { message: "Service Unavailable" },
+      { error: { code: "502", message: "BAD_GATEWAY" } },
+      { error: null },
+      { code: "AUTH_UNAVAILABLE" },
+    ];
+    for (const status of [500, 502, 503, 504]) {
+      for (const body of foreign) {
+        expect(
+          isOutcomeUnknown({ status, body, bodyRead: true }),
+          `${status} ${JSON.stringify(body)}`
+        ).toBe(true);
+      }
+    }
+    // Below 500 the shape of a body that was read changes nothing.
+    for (const status of [200, 400, 401, 409, 422]) {
+      for (const body of foreign) {
+        expect(
+          isOutcomeUnknown({ status, body, bodyRead: true }),
+          `${status} ${JSON.stringify(body)}`
+        ).toBe(false);
+      }
+    }
+  });
+
+  it.each([502, 503, 504])(
+    "%i with JSON that is not the route's: one send, then the list; not sent again by itself",
+    async (status) => {
+      const h = harness();
+      h.holder.hold(TOKEN, BANK, "u1", []);
+      h.reads.push(session("u1"));
+      h.answers.push({ status, body: { message: "upstream unavailable" } });
+      h.lists.push([]);
+
+      expect(await h.holder.send()).toEqual({
+        kind: "notice",
+        message: EXCHANGE_RETRY_MESSAGE,
+        canRetry: true,
+      });
+      expect(h.posts).toHaveLength(1);
+      expect(h.listReads).toEqual(["access-u1"]);
+      expect(h.holder.hasToken()).toBe(true);
+    }
+  );
+
+  it.each([502, 503, 504])(
+    "%i with JSON that is not the route's: the bank is in the list now, so it is connected",
+    async (status) => {
+      const h = harness();
+      h.holder.hold(TOKEN, BANK, "u1", []);
+      h.reads.push(session("u1"));
+      h.answers.push({ status, body: { error: { message: "upstream unavailable" } } });
+      h.lists.push(ACTIVE_BANK);
+
+      expect(await h.holder.send()).toEqual({ kind: "connected" });
+      expect(h.posts).toHaveLength(1);
+    }
+  );
+
+  it.each<[string, Record<string, unknown>]>([
+    ["no code", { error: "Plaid is not configured" }],
+    ["ADMIN_UNCONFIGURED", { error: "the route's sentence", code: "ADMIN_UNCONFIGURED" }],
+    ["AUTH_UNAVAILABLE", { error: "the route's sentence", code: "AUTH_UNAVAILABLE" }],
+  ])("a 503 the route wrote (%s) stays resendable: no list read", async (_label, body) => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"), session("u1"));
+    h.answers.push({ status: 503, body }, OK);
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
+    });
+    expect(h.listReads).toEqual([]);
+    expect(await h.holder.send()).toEqual({ kind: "connected" });
+    expect(h.posts.map((p) => p.payload.publicToken)).toEqual([TOKEN, TOKEN]);
+    expect(h.listReads).toEqual([]);
+  });
+
+  it.each<[number, Record<string, unknown>]>([
+    [500, { error: "Failed to save connection. Please try again.", code: "CONNECTION_SAVE_FAILED" }],
+    [500, { error: "There was a problem reaching your bank. Please try again." }],
+    [502, { error: "We couldn't add your bank right now.", code: "INSTITUTION_ID_MISSING" }],
+    [503, { error: "We couldn't add your bank right now.", code: "CONNECTION_CHECK_FAILED" }],
+    [503, { error: "We couldn't add your bank right now.", code: "INSTITUTION_LOOKUP_FAILED" }],
+  ])("a %i the route wrote (%j) stays a refusal that ends the token", async (status, body) => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"));
+    h.answers.push({ status, body });
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: body.error,
+      canRetry: false,
+    });
+    expect(h.listReads).toEqual([]);
+    expect(h.posts).toHaveLength(1);
+    expect(h.holder.hasToken()).toBe(false);
+  });
+
+  it.each([502, 503, 504, 500, 200])(
+    "%i: one send, then the list; the token is kept and not sent again by itself",
+    async (status) => {
+      const h = harness();
+      h.holder.hold(TOKEN, BANK, "u1", []);
+      h.reads.push(session("u1"));
+      h.answers.push({ status, body: {}, bodyRead: false });
+      h.lists.push([]);
+
+      expect(await h.holder.send()).toEqual({
+        kind: "notice",
+        message: EXCHANGE_RETRY_MESSAGE,
+        canRetry: true,
+      });
+      expect(h.posts).toHaveLength(1);
+      expect(h.listReads).toEqual(["access-u1"]);
+      expect(h.holder.hasToken()).toBe(true);
+    }
+  );
+
+  it.each([502, 503, 504])("%i: the bank is in the list now, so it is connected", async (status) => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"));
+    h.answers.push({ status, body: {}, bodyRead: false });
+    h.lists.push(ACTIVE_BANK);
+
+    expect(await h.holder.send()).toEqual({ kind: "connected" });
+    expect(h.posts).toHaveLength(1);
+    expect(h.holder.hasToken()).toBe(false);
+  });
+
+  it.each([502, 503, 504])(
+    "%i: a pressed retry reads the list before sending the same token again",
+    async (status) => {
+      const h = harness();
+      h.holder.hold(TOKEN, BANK, "u1", []);
+      h.reads.push(session("u1"), session("u1"));
+      h.answers.push({ status, body: {}, bodyRead: false }, PLAID_REFUSED);
+      h.lists.push([], [], ACTIVE_BANK);
+
+      expect((await h.holder.send()).kind).toBe("notice");
+      expect(h.listReads).toHaveLength(1);
+      // The earlier request may have spent the token: Plaid's refusal of the
+      // resend is settled by the list, as after no response at all.
+      expect(await h.holder.send()).toEqual({ kind: "connected" });
+      expect(h.listReads).toHaveLength(3);
+      expect(h.posts).toHaveLength(2);
+    }
+  );
+
+  it("a bank already active when the token was received is not counted as connected", async () => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", ["ins_1"]);
+    h.reads.push(session("u1"));
+    h.answers.push({ status: 502, body: {}, bodyRead: false });
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: "Test Bank is already connected.",
+      canRetry: false,
+    });
+    expect(h.listReads).toEqual([]);
+  });
+
+  it("a 401 stays resendable: no list read, and the retry sends the same token", async () => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"), session("u1"));
+    h.answers.push({ status: 401, body: {}, bodyRead: false }, OK);
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: EXCHANGE_RETRY_MESSAGE,
+      canRetry: true,
+    });
+    expect(h.listReads).toEqual([]);
+    expect(await h.holder.send()).toEqual({ kind: "connected" });
+    expect(h.posts.map((p) => p.payload.publicToken)).toEqual([TOKEN, TOKEN]);
+    expect(h.listReads).toEqual([]);
+  });
+
+  it("any other 4xx stays a refusal that ends the token", async () => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"));
+    h.answers.push({ status: 404, body: {}, bodyRead: false });
+
+    expect(await h.holder.send()).toEqual({
+      kind: "notice",
+      message: EXCHANGE_FALLBACK_MESSAGE,
+      canRetry: false,
+    });
+    expect(h.listReads).toEqual([]);
+    expect(h.holder.hasToken()).toBe(false);
+  });
+
+  it("a 503 the route wrote, with its body read, keeps its own reading", async () => {
+    const h = harness();
+    h.holder.hold(TOKEN, BANK, "u1", []);
+    h.reads.push(session("u1"));
+    h.answers.push({ status: 503, body: { error: "Plaid is not configured" } });
 
     expect(await h.holder.send()).toEqual({
       kind: "notice",
@@ -685,7 +931,7 @@ describe("a bank that was already there when the token was received", () => {
 describe("holding a newer token", () => {
   it("replaces the older one, and the older send's answer is set aside", async () => {
     const h = harness();
-    let release: (value: { status: number; body: Record<string, unknown> }) => void = () => {};
+    let release: (value: ExchangeResponse) => void = () => {};
     const slow = createPublicTokenHolder({
       readSession: async () => session("u1"),
       sleep: async () => {},
@@ -695,7 +941,7 @@ describe("holding a newer token", () => {
           ? new Promise((resolve) => {
               release = resolve;
             })
-          : Promise.resolve(OK),
+          : Promise.resolve({ ...OK, bodyRead: true }),
       readConnections: async () => [],
     });
 
@@ -704,7 +950,7 @@ describe("holding a newer token", () => {
     await Promise.resolve();
     await Promise.resolve();
     slow.hold("public-new", BANK, "u1", []);
-    release({ status: 500, body: { error: "old failure" } });
+    release({ status: 500, body: { error: "old failure" }, bodyRead: true });
 
     expect(await first).toEqual({ kind: "superseded" });
     expect(slow.hasToken()).toBe(true);

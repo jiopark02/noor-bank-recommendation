@@ -118,6 +118,12 @@ describe("no request is built from a header that may be empty", () => {
     const post = between(HOOK, "usePlaidExchange", "async post(", "async readConnections(");
     expect(post).toContain("Authorization: `Bearer ${accessToken}`");
     expect(HOOK).toContain("createPublicTokenHolder(liveDeps)");
+    // A body that cannot be read is reported to the flow, which decides; the
+    // hook neither throws for it nor reads the status itself.
+    expect(post).toContain("bodyRead: true");
+    expect(post).toContain("bodyRead: false");
+    expect(post).not.toContain("throw");
+    expect(post).not.toContain("response.ok");
   });
 });
 

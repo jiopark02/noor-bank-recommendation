@@ -156,6 +156,37 @@ export function classifyExchangeResponse(
   return "refused";
 }
 
+/** What the exchange request came back with. */
+export type ExchangeResponse = {
+  status: number;
+  /** The parsed body, or an empty object when it could not be read. */
+  body: Record<string, unknown>;
+  /** False when the body did not arrive or was not JSON. */
+  bodyRead: boolean;
+};
+
+/**
+ * Whether a response leaves the exchange's outcome unknown, the same way no
+ * response at all does.
+ *
+ * A success whose body could not be read says nothing usable. A 5xx is the
+ * route's own answer only when it carries the route's `error` sentence, which
+ * every failure the route writes does. Without it — a body that could not be
+ * read, or JSON of another shape — a gateway or the platform is speaking, and
+ * the route may have finished the exchange behind it. Such a response must
+ * neither end the token nor let it be sent again unchecked.
+ *
+ * A 4xx stays an answer, with or without a body: the request was turned away,
+ * so the usual reading of its status applies.
+ */
+export function isOutcomeUnknown(response: ExchangeResponse): boolean {
+  const { status } = response;
+  if (status >= 500) {
+    return !response.bodyRead || typeof response.body.error !== "string";
+  }
+  return !response.bodyRead && status >= 200 && status < 300;
+}
+
 export type LinkInstitution = { name: string; institution_id: string };
 
 export type ExchangePayload = {
@@ -192,12 +223,10 @@ export type ExchangeDeps = PlaidSessionDeps & {
   now: () => number;
   /**
    * Sends the exchange request with this access token. Resolves with whatever
-   * the server answered; rejects when no answer arrived.
+   * came back, saying whether its body could be read; rejects when nothing
+   * came back at all.
    */
-  post: (
-    accessToken: string,
-    payload: ExchangePayload
-  ) => Promise<{ status: number; body: Record<string, unknown> }>;
+  post: (accessToken: string, payload: ExchangePayload) => Promise<ExchangeResponse>;
   /** The user's connection list; null (or a rejection) when it could not be read. */
   readConnections: (accessToken: string) => Promise<ConnectionSummary[] | null>;
 };
@@ -336,7 +365,7 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
       }
     }
 
-    let response: { status: number; body: Record<string, unknown> };
+    let response: ExchangeResponse | null;
     try {
       response = await deps.post(accessToken, {
         publicToken: held.publicToken,
@@ -344,9 +373,14 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
         institutionName: held.institution.name,
       });
     } catch {
-      // No response. The request is not sent again from here: the server may
-      // have completed it. The connection list is what can tell.
-      if (superseded()) return { kind: "superseded" };
+      response = null;
+    }
+    if (superseded()) return { kind: "superseded" };
+
+    if (response === null || isOutcomeUnknown(response)) {
+      // No response, or one that does not say how the exchange ended. The
+      // request is not sent again from here: the server may have completed
+      // it. The connection list is what can tell.
       held.noResponse = true;
       const seen = await seeBank(held, accessToken);
       if (superseded()) return { kind: "superseded" };
@@ -360,7 +394,6 @@ export function createPublicTokenHolder(deps: ExchangeDeps): PublicTokenHolder {
       }
       return retry();
     }
-    if (superseded()) return { kind: "superseded" };
 
     const kind = classifyExchangeResponse(response.status, response.body);
 
