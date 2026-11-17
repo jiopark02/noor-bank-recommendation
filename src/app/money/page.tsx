@@ -788,10 +788,16 @@ export default function MoneyPage() {
                       onSuccess={bankExchange.onLinkSuccess}
                       disabled={bankExchange.phase === "exchanging"}
                     />
-                    <PlaidExchangeStatus
-                      exchange={bankExchange}
-                      textClassName="text-xs text-gray-600 mt-2"
-                    />
+                    {/* The connect card below says the same exchange when it
+                        is drawn (no active connection), so this block is left
+                        out then: one exchange, one status on the tab. */}
+                    {!shouldShowConnectCard && (
+                      <PlaidExchangeStatus
+                        exchange={bankExchange}
+                        textClassName="text-xs text-gray-600 mt-2"
+                        progressClassName="text-xs text-gray-600 mt-2"
+                      />
+                    )}
                   </div>
                 )}
               </div>

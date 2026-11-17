@@ -377,7 +377,9 @@ export function ConnectBankCard({ userId, exchange }: ConnectBankCardProps) {
       </PlaidLinkButton>
 
       {/* Every outcome of the exchange is said here: a refusal used to reach
-          only the console, so the card looked as if nothing happened. */}
+          only the console, so the card looked as if nothing happened. The
+          failure colour is for the sentence it ended with; the progress line
+          keeps the status block's own plain colour. */}
       <PlaidExchangeStatus
         exchange={exchange}
         textClassName="text-sm text-red-500 text-center mt-3"

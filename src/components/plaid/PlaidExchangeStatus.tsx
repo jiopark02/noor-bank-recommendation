@@ -6,8 +6,17 @@ import type { PlaidExchangeView } from "./usePlaidExchange";
 
 interface PlaidExchangeStatusProps {
   exchange: Pick<PlaidExchangeView, "phase" | "notice" | "canRetry" | "retry">;
-  /** Classes for the sentence, so it matches the block it sits in. */
+  /**
+   * Classes for the sentence the exchange ended with, so it matches the block
+   * it sits in.
+   */
   textClassName?: string;
+  /**
+   * Classes for the progress line. Separate from the sentence's, because a
+   * block that colours its sentence as a failure must not colour progress
+   * that way.
+   */
+  progressClassName?: string;
 }
 
 const DEFAULT_TEXT_CLASS = "text-sm text-gray-600 text-center mt-3";
@@ -21,10 +30,11 @@ const DEFAULT_TEXT_CLASS = "text-sm text-gray-600 text-center mt-3";
 export function PlaidExchangeStatus({
   exchange,
   textClassName = DEFAULT_TEXT_CLASS,
+  progressClassName = DEFAULT_TEXT_CLASS,
 }: PlaidExchangeStatusProps) {
   if (exchange.phase === "exchanging") {
     return (
-      <p className={textClassName} role="status">
+      <p className={progressClassName} role="status">
         {EXCHANGE_IN_PROGRESS_LABEL}
       </p>
     );
