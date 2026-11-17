@@ -51,11 +51,14 @@ function calls(source: string, callee: string): string[] {
 
 function unconfiguredBranch(): string {
   const start = ROUTE.indexOf("if (!isPlaidConfigured())");
-  const end = ROUTE.indexOf("const auth =", start);
+  // The next statement after the branch: the service-role key check, which
+  // sends a response of its own.
+  const end = ROUTE.indexOf("if (!isSupabaseAdminConfigured())", start);
   if (start < 0 || end < 0) {
     throw new Error(
       "create-link-token/route.ts: could not bound the unconfigured branch " +
-        "between `if (!isPlaidConfigured())` and `const auth =`; re-point these anchors."
+        "between `if (!isPlaidConfigured())` and `if (!isSupabaseAdminConfigured())`; " +
+        "re-point these anchors."
     );
   }
   return ROUTE.slice(start, end);
