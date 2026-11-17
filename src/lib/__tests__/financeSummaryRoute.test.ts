@@ -27,6 +27,9 @@ import type { NextRequest } from "next/server";
  *   - an engine refusal answered through the generic error path, or
  *     its message (with the input value in it) logged               -> "the engine refuses …"
  *   - an engine answer missing a screen field sent as a summary     -> "the engine refuses …"
+ *   - the app following the engine when every bank's recurring read
+ *     was empty (recurring passed on as $0, or safe-to-spend shown
+ *     because the engine said it could be)                          -> "the app's own decision"
  */
 
 const PLAINTEXT = "access-sandbox-PLAINTEXT-TOKEN-7f3a";
@@ -325,8 +328,11 @@ describe("POST /api/finance/summary — response", () => {
     // Only the fields the screens read: nothing else the engine returns (its
     // input hash included) reaches the browser.
     expect(res.text).not.toMatch(/inputHash|schemaVersion|movableAmount|dataIssues/);
+    // Nor the parts of the answer the screens do not read: the cash indicator
+    // itself (only its total is passed on, under a name of the app's own).
+    expect(res.text).not.toMatch(/advice|monthlyFinances|specVersions|provenance|cashBalance\b/);
     expect(Object.keys(res.json.summary).sort()).toEqual(
-      ["cashFlow", "coverage", "creditUtilization", "recurring", "safeToSpend"]
+      ["cashBalanceCents", "cashFlow", "coverage", "creditUtilization", "recurring", "safeToSpend"]
     );
     // Every bank's recurring read came back empty: recurring charges are
     // unknown, so safe-to-spend is not shown.
@@ -345,6 +351,31 @@ describe("POST /api/finance/summary — response", () => {
     expect(res.json.summary.cashFlow.period.completeness).toBe("complete");
     // An empty stream list is unknown, not $0.
     expect(res.json.summary.recurring.totalMonthlyCents).toBeNull();
+  });
+
+  // Red if: the app's decision for an all-empty recurring read is dropped
+  // and the summary follows whatever the engine answered.
+  it("the app's own decision holds when every bank's recurring read was empty, whatever the engine says", async () => {
+    // The engine's real answer to this read, changed in two places only: it
+    // now says recurring charges come to $0 and safe-to-spend may be shown.
+    await post();
+    const real = await vi.importActual<typeof import("@sungwon0162/cf-engine")>(
+      "@sungwon0162/cf-engine"
+    );
+    const answer = JSON.parse(
+      JSON.stringify(real.analyzeCashFlow(state.engineInputs[0] as never, {}))
+    ) as Record<string, any>;
+    answer.coverage.safeToSpendShowable = true;
+    answer.recurring = { ...answer.recurring, totalMonthlyCents: 0, items: [] };
+    state.engineAnswer = answer;
+
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(state.engineInputs[1].connections.map((c: { recurringRead: string }) => c.recurringRead)).toEqual([
+      "empty",
+    ]);
+    expect(res.json.summary.recurring).toEqual({ totalMonthlyCents: null, items: [] });
+    expect(res.json.summary.coverage).toEqual({ safeToSpendShowable: false });
   });
 
   it("a bank needing re-login is reported with its item id and makes the period incomplete", async () => {

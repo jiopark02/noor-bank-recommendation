@@ -449,7 +449,7 @@ export default function HomePage() {
       };
     }
 
-    const lines = safeToSpendLines(s.amountCents ?? 0, s.horizon);
+    const lines = safeToSpendLines(s.amountCents ?? 0, s.horizon, s.totals.cushionFloorCents);
     return {
       opening: `Good day, ${userName}. ${lines.statement}`,
       question,

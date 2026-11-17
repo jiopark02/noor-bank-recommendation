@@ -69,6 +69,7 @@ import {
 import {
   ENGINE_SUMMARY_FIELDS,
   SCREEN_SUMMARY_FIELDS,
+  banksNotRead,
   pickFields,
   type FieldsOf,
   type ScreenSummary,
@@ -1472,8 +1473,9 @@ export const ENGINE_PROFILE: UserProfile = {};
  * When every connection's recurring read answered with no streams, recurring
  * charges are shown as unknown, never as $0: Plaid needs history to detect a
  * stream, so an empty answer does not prove there are none. "hide" also keeps
- * the safe-to-spend figure off the screens in that case, since it would count
- * no recurring charges at all.
+ * the safe-to-spend figure off the screens in that case. The engine holds the
+ * figure back itself when it is given no outflow stream; this is the app's
+ * own decision, made from the read, and does not depend on the engine's.
  */
 export const SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY: "hide" | "show" = "hide";
 
@@ -1673,20 +1675,60 @@ export function collapsedAccountIds(answer: unknown): Set<string> | null {
   return ids;
 }
 
+/**
+ * The engine's cash total (its cashBalance indicator), or null when the
+ * indicator is unavailable or cannot be read. Only the total is read: the
+ * indicator's per-account entries stay on the server.
+ */
+export function cashBalanceCentsOf(answer: unknown): number | null {
+  if (answer === null || typeof answer !== "object") return null;
+  const indicator = (answer as Record<string, unknown>).cashBalance;
+  if (indicator === null || typeof indicator !== "object") return null;
+  const record = indicator as Record<string, unknown>;
+  if (record.status !== "available") return null;
+  const value = record.value;
+  if (value === null || typeof value !== "object") return null;
+  const cents = (value as Record<string, unknown>).cents;
+  return typeof cents === "number" && isCents(cents) ? cents : null;
+}
+
+/**
+ * The engine's reason for holding safe-to-spend back when it was given no
+ * outflow stream at all.
+ */
+export const RECURRING_EMPTY_REASON = "recurring_empty_unknown";
+
 /** Every connection answered its recurring read, and none returned a stream. */
 export function recurringAllEmpty(connections: EngineConnection[]): boolean {
   return connections.length > 0 && connections.every((c) => c.recurringRead === "empty");
 }
 
 /**
+ * Every connection of the read was read. The same test the screens use to
+ * name the banks their figures leave out (banksNotRead), so a total passed on
+ * under it is never one the screens also call incomplete.
+ */
+export function everyConnectionRead(connections: BankConnectionStatus[]): boolean {
+  return banksNotRead(connections).length === 0;
+}
+
+/**
  * Runs the engine package over a read and returns the summary the screens
- * receive: the fields they read, picked from the engine's answer, with two
+ * receive: the fields they read, picked from the engine's answer, with three
  * decisions of the app's own on top:
  *   - recurring charges are unknown (null, no items) when every connection's
  *     recurring read was empty, and safe-to-spend follows
  *     SAFE_TO_SPEND_WHEN_RECURRING_ALL_EMPTY;
  *   - credit utilization is the app's, over the read's accounts less those
- *     the engine left out as copies.
+ *     the engine left out as copies;
+ *   - the engine's cash total is passed on only when the engine held
+ *     safe-to-spend back for RECURRING_EMPTY_REASON, the one case where the
+ *     screens show cash without a safe-to-spend figure, and every connection
+ *     of the read was read (everyConnectionRead); otherwise it is null. A
+ *     connection that was not read adds nothing to the engine's input, so
+ *     the total would be the cash of the remaining banks only. The engine's
+ *     reason alone does not rule that out: it follows the recurring reads it
+ *     is given, not whether each connection was read.
  * Throws EngineContractBreach when the engine refuses the input, and
  * EngineOutputUnexpected when its answer lacks a field the screens read.
  */
@@ -1728,6 +1770,10 @@ export function runCashFlowEngine(read: BankRead, dates: EngineInputDates): Scre
     safeToSpend: engine.safeToSpend,
     recurring: allEmpty ? { totalMonthlyCents: null, items: [] } : engine.recurring,
     creditUtilization: creditUtilizationOf(creditAccounts, ENGINE_CURRENCY),
+    cashBalanceCents:
+      engine.safeToSpend.reason === RECURRING_EMPTY_REASON && everyConnectionRead(read.connections)
+        ? cashBalanceCentsOf(answer)
+        : null,
   };
   // Picked once more, as a whole, so the app's own parts carry nothing the
   // screens do not read either.

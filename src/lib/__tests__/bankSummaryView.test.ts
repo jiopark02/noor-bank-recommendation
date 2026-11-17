@@ -77,7 +77,7 @@ function summary(
           reason: null,
           amountCents: 75000,
           horizon: { to: "2026-11-30", rule: "end_of_calendar_month" },
-          totals: { spendableCashCents: 100000 },
+          totals: { spendableCashCents: 100000, cushionFloorCents: 75000 },
         }
       : {
           status: "unavailable",
@@ -88,6 +88,7 @@ function summary(
         },
     recurring: { totalMonthlyCents: null, items: [] },
     creditUtilization: creditUtilizationOf(over.accounts ?? [], "USD"),
+    cashBalanceCents: null,
   };
 }
 
@@ -755,6 +756,16 @@ type Path = Array<string | number>;
 
 function nodesOf(spec: FieldSpec, value: unknown, path: Path, out: Array<{ path: Path; spec: FieldSpec }>) {
   if (path.length > 0) out.push({ path, spec });
+  nodesUnder(spec, value, path, out);
+}
+
+/**
+ * The nodes beneath `path`, whose own node is already listed. A field that
+ * may be null is walked through to what it holds when it is not null,
+ * whatever kind of field that is, at the same path: the path stays listed
+ * once, under the spec that allows null.
+ */
+function nodesUnder(spec: FieldSpec, value: unknown, path: Path, out: Array<{ path: Path; spec: FieldSpec }>) {
   if (typeof spec === "string") return;
   const node = spec as { oneOf?: unknown; listOf?: FieldSpec; orNull?: FieldSpec };
   if (node.oneOf !== undefined) return;
@@ -767,10 +778,7 @@ function nodesOf(spec: FieldSpec, value: unknown, path: Path, out: Array<{ path:
   }
   if (node.orNull !== undefined) {
     if (value === null) throw new Error(`the good body is null at ${path.join(".")}; fill it`);
-    const inner = node.orNull as { [field: string]: FieldSpec };
-    for (const key of Object.keys(inner)) {
-      nodesOf(inner[key], (value as Record<string, unknown>)[key], [...path, key], out);
-    }
+    nodesUnder(node.orNull, value, path, out);
     return;
   }
   const fields = spec as { [field: string]: FieldSpec };
@@ -849,7 +857,7 @@ describe("response bodies — every field the screens read is checked", () => {
       reason: null,
       amountCents: 73500,
       horizon: { to: "2026-11-30", rule: "end_of_calendar_month" },
-      totals: { spendableCashCents: 100000 },
+      totals: { spendableCashCents: 100000, cushionFloorCents: 75000 },
     },
     recurring: {
       totalMonthlyCents: 1500,
@@ -861,13 +869,14 @@ describe("response bodies — every field the screens read is checked", () => {
           nextDate: "2026-11-20",
           nextDateAssumedToday: false,
           pastDue: false,
-          paidSincePredicted: false,
+          paymentSincePredicted: "pending",
         },
       ],
     },
     creditUtilization: {
       accounts: [{ accountId: "card", balanceCents: 25000, ratioBasisPoints: 2500 }],
     },
+    cashBalanceCents: 100000,
   });
 
   const goodSummaryBody = () =>
