@@ -4,7 +4,11 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
-import { ConnectBankCard, PlaidLinkButton } from "@/components/plaid";
+import {
+  BankMonogram,
+  ConnectBankCard,
+  PlaidLinkButton,
+} from "@/components/plaid";
 import { CATEGORY_ICONS } from "@/lib/categoryIcons";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
@@ -752,15 +756,18 @@ export default function MoneyPage() {
                       key={conn.itemId}
                       className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
                     >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-black truncate">
-                          {conn.institutionName}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {conn.status === "active"
-                            ? "Connected"
-                            : "Needs attention"}
-                        </p>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <BankMonogram name={conn.institutionName} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-black truncate">
+                            {conn.institutionName}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {conn.status === "active"
+                              ? "Connected"
+                              : "Needs attention"}
+                          </p>
+                        </div>
                       </div>
                       {confirmingRemoveItemId === conn.itemId ? (
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -841,12 +848,15 @@ export default function MoneyPage() {
                     whileHover={{ scale: 1.01 }}
                   >
                     <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium text-black">{account.name}</p>
-                        <p className="text-sm text-gray-500">
-                          {account.institutionName ?? "Your bank"}
-                          {account.mask ? ` · ****${account.mask}` : ""}
-                        </p>
+                      <div className="flex items-start gap-3 min-w-0">
+                        <BankMonogram name={account.institutionName} />
+                        <div className="min-w-0">
+                          <p className="font-medium text-black">{account.name}</p>
+                          <p className="text-sm text-gray-500">
+                            {account.institutionName ?? "Your bank"}
+                            {account.mask ? ` · ****${account.mask}` : ""}
+                          </p>
+                        </div>
                       </div>
                       <div className="text-right">
                         <p
