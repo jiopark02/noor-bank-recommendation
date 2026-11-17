@@ -461,8 +461,9 @@ export const CREDIT_UTILIZATION_FIELDS = {
 export const SCREEN_SUMMARY_FIELDS = {
   ...ENGINE_SUMMARY_FIELDS,
   creditUtilization: CREDIT_UTILIZATION_FIELDS,
-  // The cash total, sent only when safe-to-spend was not computed because no
-  // bank reported a recurring charge; null in every other case.
+  // The cash total, sent only when both hold: safe-to-spend was held back
+  // because no bank reported a recurring charge, and every connection was
+  // read. null in every other case.
   cashBalanceCents: "number|null",
 } as const;
 

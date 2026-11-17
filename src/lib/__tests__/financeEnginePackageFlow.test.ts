@@ -12,6 +12,7 @@ import {
   type StoredConnectionRow,
 } from "../plaidEngineAdapter";
 import {
+  banksNotRead,
   creditUsedCents,
   parseFinanceSummaryResponse,
   recurringDateLine,
@@ -42,6 +43,8 @@ import {
  *     charge explained as any other reason, or the cash tile going
  *     blank in that case                                           -> "all empty"
  *   - the cash total sent with any other reason                    -> "cash total"
+ *   - the cash total sent while a connection of the read was not
+ *     read                                                         -> "partial cash"
  *
  * With every bank's recurring read empty the engine now holds safe-to-spend
  * back itself, so this file cannot tell the app's own decision for that case
@@ -463,5 +466,102 @@ describe("every bank's recurring read empty", () => {
     const summary = runCashFlowEngine(read, DATES);
     expect(summary.safeToSpend.status).toBe("computed");
     expect(summary.cashBalanceCents).toBeNull();
+  });
+});
+
+/*
+ * "partial cash". A connection that was not read adds nothing to the engine's
+ * input, so a cash total over such a read is the cash of the remaining banks
+ * only. It is never sent.
+ */
+describe("a connection of the read was not read", () => {
+  const emptyBank = (): Script => ({
+    accounts: [account("chk")],
+    transactions: history("chk", "a"),
+    outflow: [],
+    inflow: [
+      stream("payroll", "chk", -1500, {
+        frequency: "BIWEEKLY",
+        predicted_next_date: "2026-11-20",
+        personal_finance_category: { primary: "INCOME", detailed: "INCOME_WAGES" },
+      }),
+    ],
+  });
+  type Said = {
+    safeToSpend: { status: string; reason: string | null };
+    cashBalance: { status: string; value?: { cents: number } };
+  };
+
+  it("one bank fails, the other reports no recurring charge: no cash total, and the tile shows no amount", async () => {
+    // The second bank's first data call fails, so nothing of it is read.
+    const plaid = fakePlaid({ TOKEN_0: emptyBank(), TOKEN_1: { accounts: [account("chk-2")] } });
+    const accountsGet = plaid.accountsGet;
+    plaid.accountsGet = async (req, ...rest) => {
+      if (req.access_token === "TOKEN_1") throw new Error("accounts read failed");
+      return accountsGet(req, ...rest);
+    };
+    const read = await readBankData(
+      "user-1",
+      [row(0, "First Bank"), row(1, "Second Bank")],
+      { accounts: true, transactions: true, recurring: true },
+      DATES.readWindow,
+      { plaid, decrypt: (s) => s.replace("CIPHER_", "TOKEN_") }
+    );
+    expect(read.connections.map((c) => c.status)).toEqual(["ok", "failed"]);
+    expect(read.engineConnections.map((c) => c.recurringRead)).toEqual(["empty", null]);
+    expect(read.accounts.map((a) => a.accountId)).toEqual(["chk"]);
+    // The screens name the bank the figures leave out.
+    expect(banksNotRead(read.connections)).toEqual(["Second Bank"]);
+
+    // What the engine itself says here: its reason is not the one the cash
+    // total goes out with, though it does have a total, of the first bank only.
+    const answer = analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as Said;
+    expect(answer.safeToSpend.status).toBe("unavailable");
+    expect(answer.safeToSpend.reason).toBe("history_incomplete");
+    expect(answer.cashBalance.status).toBe("available");
+    expect(answer.cashBalance.value?.cents).toBe(95000);
+
+    const summary = runCashFlowEngine(read, DATES);
+    expect(summary.cashBalanceCents).toBeNull();
+    expect(spendableCashTile(summary)).toEqual({ kind: "unknown" });
+  });
+
+  // Red if: the cash total is sent on the engine's reason alone. The read is
+  // built by hand, as one the adapter does not produce: the bank that was not
+  // read is absent from what the engine is given, so the engine answers as if
+  // the first bank were the only one.
+  it("the engine's reason alone does not send the cash total", async () => {
+    const whole = await readWith([emptyBank()]);
+    const sent = runCashFlowEngine(whole, DATES);
+    expect(sent.safeToSpend.reason).toBe("recurring_empty_unknown");
+    expect(sent.cashBalanceCents).toBe(95000);
+
+    const read = {
+      ...whole,
+      connections: [
+        ...whole.connections,
+        { itemId: "item-1", institutionName: "Second Bank", status: "failed" as const },
+      ],
+    };
+    expect(banksNotRead(read.connections)).toEqual(["Second Bank"]);
+    const answer = analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as Said;
+    expect(answer.safeToSpend.reason).toBe("recurring_empty_unknown");
+    expect(answer.cashBalance.value?.cents).toBe(95000);
+
+    const summary = runCashFlowEngine(read, DATES);
+    expect(summary.safeToSpend.reason).toBe("recurring_empty_unknown");
+    expect(summary.cashBalanceCents).toBeNull();
+    expect(spendableCashTile(summary)).toEqual({ kind: "unknown" });
+  });
+
+  it("each state of a connection that was not read holds the total back", async () => {
+    const whole = await readWith([emptyBank()]);
+    for (const status of ["failed", "login_required", "syncing"] as const) {
+      const read = {
+        ...whole,
+        connections: [...whole.connections, { itemId: "item-1", institutionName: "Second Bank", status }],
+      };
+      expect(runCashFlowEngine(read, DATES).cashBalanceCents).toBeNull();
+    }
   });
 });

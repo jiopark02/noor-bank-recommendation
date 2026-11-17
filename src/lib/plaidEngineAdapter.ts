@@ -69,6 +69,7 @@ import {
 import {
   ENGINE_SUMMARY_FIELDS,
   SCREEN_SUMMARY_FIELDS,
+  banksNotRead,
   pickFields,
   type FieldsOf,
   type ScreenSummary,
@@ -1703,6 +1704,15 @@ export function recurringAllEmpty(connections: EngineConnection[]): boolean {
 }
 
 /**
+ * Every connection of the read was read. The same test the screens use to
+ * name the banks their figures leave out (banksNotRead), so a total passed on
+ * under it is never one the screens also call incomplete.
+ */
+export function everyConnectionRead(connections: BankConnectionStatus[]): boolean {
+  return banksNotRead(connections).length === 0;
+}
+
+/**
  * Runs the engine package over a read and returns the summary the screens
  * receive: the fields they read, picked from the engine's answer, with three
  * decisions of the app's own on top:
@@ -1713,7 +1723,12 @@ export function recurringAllEmpty(connections: EngineConnection[]): boolean {
  *     the engine left out as copies;
  *   - the engine's cash total is passed on only when the engine held
  *     safe-to-spend back for RECURRING_EMPTY_REASON, the one case where the
- *     screens show cash without a safe-to-spend figure; otherwise it is null.
+ *     screens show cash without a safe-to-spend figure, and every connection
+ *     of the read was read (everyConnectionRead); otherwise it is null. A
+ *     connection that was not read adds nothing to the engine's input, so
+ *     the total would be the cash of the remaining banks only. The engine's
+ *     reason alone does not rule that out: it follows the recurring reads it
+ *     is given, not whether each connection was read.
  * Throws EngineContractBreach when the engine refuses the input, and
  * EngineOutputUnexpected when its answer lacks a field the screens read.
  */
@@ -1756,7 +1771,9 @@ export function runCashFlowEngine(read: BankRead, dates: EngineInputDates): Scre
     recurring: allEmpty ? { totalMonthlyCents: null, items: [] } : engine.recurring,
     creditUtilization: creditUtilizationOf(creditAccounts, ENGINE_CURRENCY),
     cashBalanceCents:
-      engine.safeToSpend.reason === RECURRING_EMPTY_REASON ? cashBalanceCentsOf(answer) : null,
+      engine.safeToSpend.reason === RECURRING_EMPTY_REASON && everyConnectionRead(read.connections)
+        ? cashBalanceCentsOf(answer)
+        : null,
   };
   // Picked once more, as a whole, so the app's own parts carry nothing the
   // screens do not read either.
