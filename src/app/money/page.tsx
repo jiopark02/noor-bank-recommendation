@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
 import {
+  AddBankButton,
   BankMonogram,
   ConnectBankCard,
   PlaidLinkButton,
@@ -811,15 +812,14 @@ export default function MoneyPage() {
                     {/* Keyed on the count so the button remounts when a bank
                         is added or removed, which clears an error sentence
                         left from an earlier attempt (a limit refusal, say).
-                        The button asks for a link token only when pressed. */}
-                    <PlaidLinkButton
+                        The button asks for a link token only when pressed,
+                        and is drawn disabled at the connection limit. */}
+                    <AddBankButton
                       key={plaidConnections.connections.length}
                       userId={userId}
+                      connectionCount={plaidConnections.connections.length}
                       onSuccess={handleAddBankSuccess}
-                      className="w-full py-3 border border-gray-300 text-black font-medium rounded-xl disabled:opacity-50 transition-all"
-                    >
-                      + Add another bank
-                    </PlaidLinkButton>
+                    />
                     {addBankNotice && (
                       <p className="text-xs text-gray-600 mt-2">
                         {addBankNotice}
