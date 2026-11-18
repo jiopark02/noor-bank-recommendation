@@ -350,11 +350,6 @@ body {
   background-color: var(--noor-gray-100);
 }
 
-/* Safe Area */
-.pb-safe {
-  padding-bottom: calc(5rem + env(safe-area-inset-bottom));
-}
-
 /* Checkbox - Refined */
 .checkbox {
   width: 1.25rem;
