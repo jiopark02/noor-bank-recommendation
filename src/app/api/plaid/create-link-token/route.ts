@@ -7,18 +7,26 @@ import {
   isPlaidConfigured,
 } from "@/lib/plaid";
 import {
-  authenticate,
+  authenticateWithCause,
   countPlaidConnections,
   handlePlaidError,
+  plaidAuthRefusal,
 } from "@/lib/plaidApiUtils";
 import { resolvePlaidWebhookUrl } from "@/lib/plaidWebhookConfig";
 import { linkLimitRefusal } from "@/lib/plaidExchange";
-import { createAdminClient } from "@/lib/supabase";
+import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
 import {
   claimLinkTokenIssue,
   linkTokenClaimRefusal,
   resolveLinkTokenLimitMode,
 } from "@/lib/plaidLinkTokenLimit";
+
+/**
+ * A fault in our configuration. Worded without "try again", as in
+ * /api/plaid/relink: retrying does not change a missing key.
+ */
+const SERVER_FAULT_MESSAGE =
+  "Something went wrong on our end. Please check back in a moment.";
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,13 +46,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Authenticate user (extract userId from request)
-    const auth = await authenticate(request);
-    if (!auth) {
+    // The service-role key must exist before the token is verified: verifying
+    // builds a server client, which cannot be built without the key, and that
+    // would come back as "no user" — a 401 that blames the caller's session
+    // for our configuration. Same status, code and message as the same gate in
+    // /api/plaid/relink. It reads configuration only.
+    if (!isSupabaseAdminConfigured()) {
       return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
+        { error: SERVER_FAULT_MESSAGE, code: "ADMIN_UNCONFIGURED" },
+        { status: 503 }
       );
+    }
+
+    // Authenticate user (extract userId from request)
+    const auth = await authenticateWithCause(request);
+    if (!auth.ok) {
+      return plaidAuthRefusal("create-link-token", auth.cause);
     }
 
     const { userId } = auth;

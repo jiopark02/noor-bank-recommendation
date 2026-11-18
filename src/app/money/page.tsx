@@ -4,7 +4,14 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
-import { ConnectBankCard, PlaidLinkButton } from "@/components/plaid";
+import {
+  AddBankButton,
+  BankMonogram,
+  ConnectBankCard,
+  PlaidExchangeStatus,
+  PlaidLinkButton,
+  usePlaidExchange,
+} from "@/components/plaid";
 import { CATEGORY_ICONS } from "@/lib/categoryIcons";
 import { usePlaidConnections } from "@/hooks/usePlaidConnections";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
@@ -43,7 +50,8 @@ import {
   missingBanksNote,
   parseFinanceSummaryResponse,
   parseSummaryTransactions,
-  showsRecurringDate,
+  PAYMENT_PENDING_LABEL,
+  recurringDateLine,
   spendableCashCents,
   spendableCashTile,
   summaryLoadInputs,
@@ -154,9 +162,8 @@ export default function MoneyPage() {
     string | null
   >(null);
   const [removingItemId, setRemovingItemId] = useState<string | null>(null);
-  const [addBankNotice, setAddBankNotice] = useState<string | null>(null);
-  // Same pattern as addBankNotice, for the other direction. A failed removal had
-  // no channel to the user at all before this: the hook set its shared `error`,
+  // A failed removal had no channel to the user at all before this: the hook
+  // set its shared `error`,
   // which this page reads only as a boolean, so the bank silently stayed in the
   // list with no explanation.
   const [removeNotice, setRemoveNotice] = useState<string | null>(null);
@@ -384,60 +391,25 @@ export default function MoneyPage() {
     [plaidConnections, fetchData]
   );
 
-  // Add another bank, from the compact button in the connection list (not
-  // ConnectBankCard, the full empty-state card). POST exchange-token, surface
-  // the 409 ALREADY_CONNECTED duplicate case and any other refusal as an inline
-  // notice, and also reload this screen's data on success. ConnectBankCard
-  // reads the response the same way and shows its own notice.
-  const handleAddBankSuccess = useCallback(
-    async (
-      publicToken: string,
-      metadata: { institution: { name: string; institution_id: string } }
-    ) => {
-      if (!userId) return;
-      setAddBankNotice(null);
-      try {
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
-        );
-        const response = await fetch("/api/plaid/exchange-token", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({
-            publicToken,
-            institutionId: metadata.institution.institution_id,
-            institutionName: metadata.institution.name,
-          }),
-        });
+  // A new bank, from the empty-state card or from the compact button in the
+  // connection list. Both hand Link's public token to this one exchange, which
+  // sends it only with a session's access token and keeps it in memory while
+  // it can still be tried again. It lives here, in the screen, because both of
+  // those blocks are unmounted while the connection list reloads.
+  //
+  // fetchData() is called explicitly because adding a second bank leaves
+  // hasActive unchanged, so the hasActive-dependent fetch effect would not
+  // re-run on its own.
+  const handleExchangeConnected = useCallback(() => {
+    handleBankConnected();
+    void fetchData();
+  }, [handleBankConnected, fetchData]);
 
-        const data = asPlainObject(await response.json());
-
-        if (
-          response.status === 409 ||
-          readString(data, "code") === "ALREADY_CONNECTED"
-        ) {
-          const name =
-            readString(data, "institutionName") ||
-            metadata.institution.name ||
-            "This bank";
-          setAddBankNotice(`${name} is already connected.`);
-          return;
-        }
-
-        if (data.success !== true) {
-          throw new Error(readErrorMessage(data) || "Failed to add bank");
-        }
-
-        handleBankConnected();
-        await fetchData();
-      } catch (err) {
-        setAddBankNotice(
-          err instanceof Error ? err.message : "Failed to add bank"
-        );
-      }
-    },
-    [userId, handleBankConnected, fetchData]
-  );
+  const bankExchange = usePlaidExchange({
+    userId,
+    knownConnections: plaidConnections.connections,
+    onConnected: handleExchangeConnected,
+  });
 
   // Only prompt to connect once we've actually determined there is no
   // connection. While the connection check is loading, or if it failed with a
@@ -728,7 +700,7 @@ export default function MoneyPage() {
             {shouldShowConnectCard && (
               <ConnectBankCard
                 userId={userId}
-                onConnected={handleBankConnected}
+                exchange={bankExchange}
               />
             )}
           </motion.div>
@@ -752,15 +724,18 @@ export default function MoneyPage() {
                       key={conn.itemId}
                       className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
                     >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-black truncate">
-                          {conn.institutionName}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {conn.status === "active"
-                            ? "Connected"
-                            : "Needs attention"}
-                        </p>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <BankMonogram name={conn.institutionName} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-black truncate">
+                            {conn.institutionName}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {conn.status === "active"
+                              ? "Connected"
+                              : "Needs attention"}
+                          </p>
+                        </div>
                       </div>
                       {confirmingRemoveItemId === conn.itemId ? (
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -804,19 +779,24 @@ export default function MoneyPage() {
                     {/* Keyed on the count so the button remounts when a bank
                         is added or removed, which clears an error sentence
                         left from an earlier attempt (a limit refusal, say).
-                        The button asks for a link token only when pressed. */}
-                    <PlaidLinkButton
+                        The button asks for a link token only when pressed,
+                        and is drawn disabled at the connection limit. */}
+                    <AddBankButton
                       key={plaidConnections.connections.length}
                       userId={userId}
-                      onSuccess={handleAddBankSuccess}
-                      className="w-full py-3 border border-gray-300 text-black font-medium rounded-xl disabled:opacity-50 transition-all"
-                    >
-                      + Add another bank
-                    </PlaidLinkButton>
-                    {addBankNotice && (
-                      <p className="text-xs text-gray-600 mt-2">
-                        {addBankNotice}
-                      </p>
+                      connectionCount={plaidConnections.connections.length}
+                      onSuccess={bankExchange.onLinkSuccess}
+                      disabled={bankExchange.phase === "exchanging"}
+                    />
+                    {/* The connect card below says the same exchange when it
+                        is drawn (no active connection), so this block is left
+                        out then: one exchange, one status on the tab. */}
+                    {!shouldShowConnectCard && (
+                      <PlaidExchangeStatus
+                        exchange={bankExchange}
+                        textClassName="text-xs text-gray-600 mt-2"
+                        progressClassName="text-xs text-gray-600 mt-2"
+                      />
                     )}
                   </div>
                 )}
@@ -841,12 +821,15 @@ export default function MoneyPage() {
                     whileHover={{ scale: 1.01 }}
                   >
                     <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium text-black">{account.name}</p>
-                        <p className="text-sm text-gray-500">
-                          {account.institutionName ?? "Your bank"}
-                          {account.mask ? ` · ****${account.mask}` : ""}
-                        </p>
+                      <div className="flex items-start gap-3 min-w-0">
+                        <BankMonogram name={account.institutionName} />
+                        <div className="min-w-0">
+                          <p className="font-medium text-black">{account.name}</p>
+                          <p className="text-sm text-gray-500">
+                            {account.institutionName ?? "Your bank"}
+                            {account.mask ? ` · ****${account.mask}` : ""}
+                          </p>
+                        </div>
                       </div>
                       <div className="text-right">
                         <p
@@ -896,7 +879,7 @@ export default function MoneyPage() {
               <div className="mt-6">
                 <ConnectBankCard
                   userId={userId}
-                  onConnected={handleBankConnected}
+                  exchange={bankExchange}
                 />
               </div>
             )}
@@ -1006,8 +989,13 @@ export default function MoneyPage() {
                       <div>
                         <p className="font-medium text-black">{item.label}</p>
                         {/* A date already past is not "next": the charge
-                            was expected then and has not been recorded. */}
-                        {item.nextDate && showsRecurringDate(item) && (
+                            was expected then. Whether the line is the date,
+                            the pending label or nothing is decided by
+                            recurringDateLine. */}
+                        {recurringDateLine(item) === "pending" && (
+                          <p className="text-xs text-gray-500">{PAYMENT_PENDING_LABEL}</p>
+                        )}
+                        {item.nextDate && recurringDateLine(item) === "date" && (
                           <p className="text-xs text-gray-500">
                             {item.pastDue ? "Was expected " : "Next expected "}
                             {new Date(
