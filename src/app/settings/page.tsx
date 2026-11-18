@@ -182,7 +182,9 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      // z-[60]: above the bottom tab bar (z-50), which comes later in the page
+      // and would otherwise be painted over the sheet's buttons.
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
       onClick={onClose}
     >
@@ -191,7 +193,10 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 40 }}
         transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-        className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+        // Height: 90vh where dvh is not supported, 90dvh where it is, so the
+        // sheet stays inside the visible viewport and scrolls inside itself.
+        // Bottom padding adds the device's bottom safe area to the p-6 value.
+        className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] max-h-[90vh] supports-[height:100dvh]:max-h-[90dvh] overflow-y-auto"
         style={{ fontFamily: FONT }}
         onClick={(e) => e.stopPropagation()}
       >
