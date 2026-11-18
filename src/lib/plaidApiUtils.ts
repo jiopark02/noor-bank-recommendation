@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "./supabase";
-import { getAuthenticatedUserIdFromRequest } from "./apiAuth";
+import { getAuthenticatedUserIdFromRequest, resolveRequestAuth } from "./apiAuth";
+import type { AuthFailureCause } from "./authFailureCause";
 import { getPlaidErrorCode, getPlaidErrorStatus } from "./plaidErrorRedaction";
 import { asPlainObject, readRequestJson } from "@/lib/requestJson";
 import {
@@ -32,6 +33,63 @@ export async function authenticate(
   } catch {
     return null;
   }
+}
+
+export type PlaidAuthResult =
+  | { ok: true; userId: string; body: Record<string, unknown> }
+  | { ok: false; cause: AuthFailureCause };
+
+/**
+ * authenticate(), with the reason kept when there is no user. For the routes
+ * that answer an unreachable auth server differently from a refused token.
+ * As in authenticate(), userId comes only from the token and any userId in the
+ * body is dropped.
+ */
+export async function authenticateWithCause(
+  request: NextRequest
+): Promise<PlaidAuthResult> {
+  const auth = await resolveRequestAuth(request);
+  if (!auth.ok) {
+    return { ok: false, cause: auth.cause };
+  }
+
+  const raw = await readRequestJson(request);
+  const body: Record<string, unknown> = { ...asPlainObject(raw) };
+  delete body.userId;
+
+  return { ok: true, userId: auth.user.id, body };
+}
+
+/** The routes that log why a request was not authenticated. */
+export type PlaidAuthRoute = "exchange-token" | "create-link-token";
+
+const AUTH_UNAVAILABLE_MESSAGE =
+  "We couldn't confirm your sign-in right now. Please try again in a moment.";
+
+/**
+ * The answer to a request authenticateWithCause refused, and its log line.
+ *
+ * The line is built from two code-defined constants and nothing else: this
+ * function is not given the request, so no header, token, body or user id can
+ * reach it. Anyone can make these requests without signing in, so the line
+ * must stay a fixed string per route and cause.
+ *
+ * An auth server that could not be reached is ours to report, not the
+ * caller's session: 503 with a code. Every other cause keeps the 401 the
+ * routes have always sent.
+ */
+export function plaidAuthRefusal(
+  route: PlaidAuthRoute,
+  cause: AuthFailureCause
+): NextResponse {
+  console.warn(`[plaid-auth] route=${route} refused=${cause}`);
+  if (cause === "auth_unreachable") {
+    return NextResponse.json(
+      { error: AUTH_UNAVAILABLE_MESSAGE, code: "AUTH_UNAVAILABLE" },
+      { status: 503 }
+    );
+  }
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 
 /**

@@ -6,13 +6,15 @@ import {
 } from "@/lib/plaid";
 import { readNonEmptyString, readString } from "@/lib/requestJson";
 import {
-  authenticate,
+  authenticateWithCause,
   countPlaidConnections,
   getActivePlaidConnectionByInstitution,
   getPlaidConnectionByItemId,
+  plaidAuthRefusal,
   storePlaidConnection,
   handlePlaidError,
 } from "@/lib/plaidApiUtils";
+import { isSupabaseAdminConfigured } from "@/lib/supabase";
 import { isPlaidTokenCryptoConfigured } from "@/lib/plaidTokenCrypto";
 import { liveRevocationDeps } from "@/lib/plaidRevocation";
 import { exchangeForUser, INSTITUTION_NAME_MAX } from "@/lib/plaidExchange";
@@ -20,6 +22,13 @@ import { exchangeForUser, INSTITUTION_NAME_MAX } from "@/lib/plaidExchange";
 // Literal, because the platform reads it statically. Must equal
 // PLAID_REVOKE_ROUTE_MAX_DURATION_SECONDS (plaidRevocation.ts); a test holds it.
 export const maxDuration = 300;
+
+/**
+ * A fault in our configuration. Worded without "try again", as in
+ * /api/plaid/relink: retrying does not change a missing key.
+ */
+const SERVER_FAULT_MESSAGE =
+  "Something went wrong on our end. Please check back in a moment.";
 
 /**
  * The body's institution id, cut to the institution name's cap in code points
@@ -55,9 +64,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const auth = await authenticate(request);
-    if (!auth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // The service-role key must exist before the token is verified: verifying
+    // builds a server client, which cannot be built without the key, and that
+    // would come back as "no user" — a 401 that blames the caller's session
+    // for our configuration. Same status, code and message as the same gate in
+    // /api/plaid/relink. It reads configuration only.
+    if (!isSupabaseAdminConfigured()) {
+      return NextResponse.json(
+        { error: SERVER_FAULT_MESSAGE, code: "ADMIN_UNCONFIGURED" },
+        { status: 503 }
+      );
+    }
+
+    const auth = await authenticateWithCause(request);
+    if (!auth.ok) {
+      return plaidAuthRefusal("exchange-token", auth.cause);
     }
 
     const { userId, body } = auth;

@@ -162,7 +162,8 @@ export type SessionReadLabel =
   | "money-mount"
   | "chat-mount"
   | "login-mount"
-  | "auth-callback";
+  | "auth-callback"
+  | "plaid-connect";
 
 type SessionReadLogFields = {
   label: SessionReadLabel;

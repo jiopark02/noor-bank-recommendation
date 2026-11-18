@@ -2,7 +2,13 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
+import { readSession } from "@/lib/supabase-browser";
+import { waitMs } from "@/lib/sessionFlow";
+import {
+  linkTokenRefusalMessage,
+  linkTokenSession,
+  readPlaidSession,
+} from "@/lib/plaidConnectFlow";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 import {
   BANK_SCREEN_FETCH_TIMEOUT_MS,
@@ -22,6 +28,8 @@ import {
   LinkSessionState,
   LinkTokenResult,
 } from "./linkSession";
+import { PlaidExchangeStatus } from "./PlaidExchangeStatus";
+import type { PlaidExchangeView } from "./usePlaidExchange";
 
 type LinkInstitutionMetadata = {
   institution: { name: string; institution_id: string };
@@ -33,13 +41,27 @@ type LinkInstitutionMetadata = {
  */
 async function requestNewLinkToken(): Promise<LinkTokenResult> {
   try {
-    const plaidHeaders = buildJsonAuthorizedHeaders(
-      await getSupabaseBearerHeaders()
+    // The session is read until it answers, and the request is made only with
+    // its access token: without one nothing is sent, so the route never sees
+    // this request without an Authorization header. The read sits outside the
+    // limit below, which is for the server's answer.
+    const session = linkTokenSession(
+      await readPlaidSession({
+        readSession: (timeoutMs, attempt) =>
+          readSession(timeoutMs, "plaid-connect", attempt),
+        sleep: waitMs,
+      })
     );
+    if (!session.ok) {
+      return { ok: false, message: session.message };
+    }
+    const plaidHeaders = buildJsonAuthorizedHeaders({
+      Authorization: `Bearer ${session.accessToken}`,
+    });
     // The request and its body read run under the bank screens' limit, so a
     // request that never answers ends as a failed attempt, not a button that
     // stays busy.
-    const data = await withFetchTimeout(
+    const { status, data } = await withFetchTimeout(
       BANK_SCREEN_FETCH_TIMEOUT_MS,
       async (signal) => {
         const response = await fetch("/api/plaid/create-link-token", {
@@ -48,7 +70,10 @@ async function requestNewLinkToken(): Promise<LinkTokenResult> {
           body: JSON.stringify({}),
           signal,
         });
-        return asPlainObject(await response.json());
+        return {
+          status: response.status,
+          data: asPlainObject(await response.json()),
+        };
       }
     );
 
@@ -58,7 +83,12 @@ async function requestNewLinkToken(): Promise<LinkTokenResult> {
     }
     return {
       ok: false,
-      message: readErrorMessage(data) || LINK_TOKEN_FALLBACK_MESSAGE,
+      // A refusal over the sign-in gets a sentence of ours, not the route's
+      // "Unauthorized"; every other refusal keeps the route's wording.
+      message:
+        linkTokenRefusalMessage(status, data) ||
+        readErrorMessage(data) ||
+        LINK_TOKEN_FALLBACK_MESSAGE,
     };
   } catch (err) {
     console.error("Error fetching link token:", err);
@@ -116,6 +146,8 @@ interface PlaidLinkButtonProps {
   className?: string;
   children?: React.ReactNode;
   linkTokenOverride?: string;
+  /** Drawn disabled, whatever the session's phase (an exchange is running). */
+  disabled?: boolean;
 }
 
 export function PlaidLinkButton({
@@ -125,6 +157,7 @@ export function PlaidLinkButton({
   className,
   children,
   linkTokenOverride,
+  disabled = false,
 }: PlaidLinkButtonProps) {
   const [sessionState, setSessionState] =
     useState<LinkSessionState>(IDLE_LINK_SESSION);
@@ -179,7 +212,7 @@ export function PlaidLinkButton({
     <>
       <motion.button
         onClick={() => session.click()}
-        disabled={!userId || phase !== "idle"}
+        disabled={disabled || !userId || phase !== "idle"}
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         className={
@@ -235,82 +268,15 @@ export function PlaidLinkButton({
 // Connect card component - Functional version
 interface ConnectBankCardProps {
   userId: string;
-  onConnected?: () => void;
+  /**
+   * The screen's exchange (usePlaidExchange). It is owned by the screen and
+   * not by this card: the card is unmounted while the connection list reloads
+   * and on a tab change, and a public token held here would be lost with it.
+   */
+  exchange: PlaidExchangeView;
 }
 
-const CONNECT_FALLBACK_MESSAGE =
-  "We couldn't connect your bank. Please try again.";
-
-export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
-  // What the user is told when a connection did not go through. Every refusal
-  // the exchange route sends — duplicate, connection limit, a failed save —
-  // used to reach only the console, so the card looked as if nothing happened.
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const handleSuccess = useCallback(
-    async (
-      publicToken: string,
-      metadata: { institution: { name: string; institution_id: string } }
-    ) => {
-      setNotice(null);
-      try {
-        // Exchange public token for access token
-        const plaidHeaders = buildJsonAuthorizedHeaders(
-          await getSupabaseBearerHeaders()
-        );
-        const response = await fetch("/api/plaid/exchange-token", {
-          method: "POST",
-          headers: plaidHeaders,
-          body: JSON.stringify({
-            publicToken,
-            institutionId: metadata.institution.institution_id,
-            institutionName: metadata.institution.name,
-          }),
-        });
-
-        const data = asPlainObject(await response.json());
-
-        // Same reading as the money screen's add-bank handler: the status or
-        // the code, and the server's institution name when it sent one.
-        if (
-          response.status === 409 ||
-          readString(data, "code") === "ALREADY_CONNECTED"
-        ) {
-          const name =
-            readString(data, "institutionName") ||
-            metadata.institution.name ||
-            "This bank";
-          setNotice(`${name} is already connected.`);
-          return;
-        }
-
-        if (data.success === true) {
-          const itemId = readString(data, "itemId");
-          if (!itemId) {
-            console.error("Failed to exchange token:", readErrorMessage(data));
-            setNotice(CONNECT_FALLBACK_MESSAGE);
-            return;
-          }
-          // Nothing about the connection is kept in the browser: the parent
-          // re-reads connection state from the server.
-          onConnected?.();
-        } else {
-          console.error(
-            "Failed to exchange token:",
-            readErrorMessage(data) ?? data
-          );
-          // The server's wording when it sent one: it already distinguishes the
-          // connection limit from a retryable failure.
-          setNotice(readErrorMessage(data) || CONNECT_FALLBACK_MESSAGE);
-        }
-      } catch (err) {
-        console.error("Error exchanging token:", err);
-        setNotice(CONNECT_FALLBACK_MESSAGE);
-      }
-    },
-    [userId, onConnected]
-  );
-
+export function ConnectBankCard({ userId, exchange }: ConnectBankCardProps) {
   return (
     <motion.div
       className="noor-card p-6"
@@ -388,7 +354,8 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
 
       <PlaidLinkButton
         userId={userId}
-        onSuccess={handleSuccess}
+        onSuccess={exchange.onLinkSuccess}
+        disabled={exchange.phase === "exchanging"}
         className="w-full py-4 bg-black text-white font-medium rounded-xl hover:bg-gray-900 transition-all"
       >
         <span className="flex items-center justify-center gap-2">
@@ -409,11 +376,14 @@ export function ConnectBankCard({ userId, onConnected }: ConnectBankCardProps) {
         </span>
       </PlaidLinkButton>
 
-      {notice && (
-        <p className="text-sm text-red-500 text-center mt-3" role="alert">
-          {notice}
-        </p>
-      )}
+      {/* Every outcome of the exchange is said here: a refusal used to reach
+          only the console, so the card looked as if nothing happened. The
+          failure colour is for the sentence it ended with; the progress line
+          keeps the status block's own plain colour. */}
+      <PlaidExchangeStatus
+        exchange={exchange}
+        textClassName="text-sm text-red-500 text-center mt-3"
+      />
     </motion.div>
   );
 }

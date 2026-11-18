@@ -56,7 +56,8 @@ describe("money screen reads the finance summary", () => {
     const fetched = (PAGE.match(/\bfetch(?:OrFail)?\(\s*"([^"]+)"/g) ?? []).map((m) =>
       m.replace(/\bfetch(?:OrFail)?\(\s*"/, "").replace(/"$/, "")
     );
-    expect(fetched.sort()).toEqual(["/api/finance/summary", "/api/plaid/exchange-token"].sort());
+    // The token exchange is not made from the page: usePlaidExchange makes it.
+    expect(fetched).toEqual(["/api/finance/summary"]);
   });
 
   // Red if: the summary request stops naming the browser's time zone, so the
@@ -125,7 +126,8 @@ describe("money screen reads the finance summary", () => {
       expect(helper).toMatch(/catch\s*\{\s*throw new Error\(message\);\s*\}/);
       expect(helper).not.toContain(".message");
     }
-    expect(PAGE.match(/\bfetch\(/g) ?? []).toHaveLength(2);
+    // The one fetch left in the page is the call inside fetchOrFail.
+    expect(PAGE.match(/\bfetch\(/g) ?? []).toHaveLength(1);
     const loadSummary = slice("const loadSummary = useCallback(", "const fetchData =");
     expect(loadSummary).toMatch(/fetchOrFail\(\s*"\/api\/finance\/summary"[\s\S]*?BANK_DATA_LOAD_FAILED\s*\)/);
     expect(loadSummary).toContain("readJsonOrFail(res, BANK_DATA_LOAD_FAILED)");
