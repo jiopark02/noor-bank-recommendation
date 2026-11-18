@@ -1030,9 +1030,9 @@ export default function SurveyPage() {
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
-              className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden"
+              className="bg-white rounded-2xl max-w-md w-full flex flex-col max-h-[80vh] supports-[height:100dvh]:max-h-[80dvh] overflow-hidden"
             >
-              <div className="p-6 border-b border-gray-100">
+              <div className="shrink-0 p-6 border-b border-gray-100">
                 <div className="flex justify-between items-center">
                   <h2 className="text-xl font-semibold">
                     {t("survey.terms.title")}
@@ -1057,7 +1057,7 @@ export default function SurveyPage() {
                   </button>
                 </div>
               </div>
-              <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <div className="p-6 min-h-0 overflow-y-auto">
                 <div className="prose prose-sm text-gray-600">
                   <p className="mb-4">Last updated: January 2026</p>
                   <h3 className="text-base font-medium text-gray-900 mb-2">
@@ -1102,7 +1102,7 @@ export default function SurveyPage() {
                   </p>
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-100">
+              <div className="shrink-0 p-6 border-t border-gray-100">
                 <button
                   onClick={() => setShowTermsModal(false)}
                   className="w-full py-3 bg-black text-white rounded-xl font-medium"
@@ -1128,9 +1128,9 @@ export default function SurveyPage() {
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
-              className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden"
+              className="bg-white rounded-2xl max-w-md w-full flex flex-col max-h-[80vh] supports-[height:100dvh]:max-h-[80dvh] overflow-hidden"
             >
-              <div className="p-6 border-b border-gray-100">
+              <div className="shrink-0 p-6 border-b border-gray-100">
                 <div className="flex justify-between items-center">
                   <h2 className="text-xl font-semibold">
                     {t("survey.privacy.title")}
@@ -1155,7 +1155,7 @@ export default function SurveyPage() {
                   </button>
                 </div>
               </div>
-              <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <div className="p-6 min-h-0 overflow-y-auto">
                 <div className="prose prose-sm text-gray-600">
                   <p className="mb-4">Last updated: January 2026</p>
                   <h3 className="text-base font-medium text-gray-900 mb-2">
@@ -1199,7 +1199,7 @@ export default function SurveyPage() {
                   </p>
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-100">
+              <div className="shrink-0 p-6 border-t border-gray-100">
                 <button
                   onClick={() => setShowPrivacyModal(false)}
                   className="w-full py-3 bg-black text-white rounded-xl font-medium"

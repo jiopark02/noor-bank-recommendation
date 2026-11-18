@@ -1,57 +1,96 @@
 import { NextRequest } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { createServerClient, createAdminClient, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  classifyGetUserFailure,
+  type AuthFailureCause,
+} from "@/lib/authFailureCause";
+
+export type RequestAuthResult =
+  | { ok: true; user: User }
+  | { ok: false; cause: AuthFailureCause };
+
+function refused(cause: AuthFailureCause): RequestAuthResult {
+  return { ok: false, cause };
+}
 
 /**
- * Resolve the authenticated Supabase user from a Bearer access token.
- * Do not trust client-supplied identity in body or query string.
+ * Resolve the authenticated Supabase user from a Bearer access token, and say
+ * why when there is none. Do not trust client-supplied identity in body or
+ * query string.
  *
- * Every failure returns null: Supabase not configured, no Bearer token, a
- * verification error (even when a user object comes back with it), no user,
- * or a throw.
+ * Never throws. The causes are listed in authFailureCause.ts; a verification
+ * error refuses the request even when a user object comes back with it.
  *
  * ⚠️ isSupabaseConfigured() does not cover createServerClient() below. The
  * predicate asks about the URL and the anon key; the constructor also requires
- * the service role key and throws without it. That throw is caught here and
- * reported as null, which its callers answer with a 401 — so a deployment
- * missing only the service role key looks to the user like a sign-in problem.
- * Fail-closed is the right direction; the misleading status is the cost.
+ * the service role key and throws without it. That throw is reported as
+ * "client_unavailable". A route that must not answer it as a sign-in problem
+ * checks isSupabaseAdminConfigured() before calling this.
  *
  * Supabase is reached only inside the function body. Some tests mock the
  * supabase module with a partial set of exports and import this file
  * transitively; a module-scope call would break them.
  */
-export async function getAuthenticatedUserFromRequest(
+export async function resolveRequestAuth(
   request: NextRequest
-): Promise<User | null> {
+): Promise<RequestAuthResult> {
   if (!isSupabaseConfigured()) {
-    return null;
+    return refused("supabase_unconfigured");
   }
 
   const authHeader = request.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ")
-    ? authHeader.slice(7).trim()
-    : "";
-
+  if (!authHeader) {
+    return refused("no_header");
+  }
+  if (!authHeader.startsWith("Bearer ")) {
+    return refused("not_bearer");
+  }
+  const token = authHeader.slice(7).trim();
   if (!token) {
-    return null;
+    return refused("empty_token");
+  }
+
+  let supabase: ReturnType<typeof createServerClient>;
+  try {
+    supabase = createServerClient();
+  } catch {
+    return refused("client_unavailable");
   }
 
   try {
-    const supabase = createServerClient();
     const {
       data: { user },
       error,
     } = await supabase.auth.getUser(token);
 
-    if (error || !user) {
-      return null;
+    if (error) {
+      return refused(classifyGetUserFailure(error));
+    }
+    if (!user) {
+      return refused("token_rejected");
     }
 
-    return user;
+    return { ok: true, user };
   } catch {
-    return null;
+    // auth-js returns its own errors in the error field; a throw is anything
+    // else, and says nothing about the token.
+    return refused("auth_unreachable");
   }
+}
+
+/**
+ * The user resolveRequestAuth resolves, or null for every failure, whatever
+ * its cause. Callers answer null with a 401 — so a deployment missing only the
+ * service role key looks to the user like a sign-in problem unless the route
+ * checks for the key first. Fail-closed is the right direction; the misleading
+ * status is the cost.
+ */
+export async function getAuthenticatedUserFromRequest(
+  request: NextRequest
+): Promise<User | null> {
+  const result = await resolveRequestAuth(request);
+  return result.ok ? result.user : null;
 }
 
 /**

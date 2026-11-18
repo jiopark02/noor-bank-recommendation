@@ -25,6 +25,7 @@ const state = {
 
 vi.mock("@/lib/apiAuth", () => ({
   getAuthenticatedUserIdFromRequest: async () => "user-1",
+  resolveRequestAuth: async () => ({ ok: true, user: { id: "user-1" } }),
 }));
 
 vi.mock("@/lib/supabase", () => ({
@@ -35,7 +36,9 @@ vi.mock("@/lib/supabase", () => ({
     throw new Error("admin client must not be used in this test");
   },
   isSupabaseConfigured: () => false,
-  isSupabaseAdminConfigured: () => false,
+  // The route answers 503 before authenticating when this is false; that gate
+  // is executed in plaidConnectAuthGate.test.ts.
+  isSupabaseAdminConfigured: () => true,
 }));
 
 vi.mock("@/lib/plaidApiUtils", async (importOriginal) => ({
