@@ -30,6 +30,10 @@ import type { NextRequest } from "next/server";
  *   - the app following the engine when every bank's recurring read
  *     was empty (recurring passed on as $0, or safe-to-spend shown
  *     because the engine said it could be)                          -> "the app's own decision"
+ *   - an unreadable next step answered as a failed summary          -> "a next step that cannot be read"
+ *   - a candidate sent whole, or any part of it beyond its kind
+ *     and amount                                                    -> "only its kind and amount"
+ *   - the next step, or its amount, written to the log              -> "is not written to the log"
  */
 
 const PLAINTEXT = "access-sandbox-PLAINTEXT-TOKEN-7f3a";
@@ -332,8 +336,21 @@ describe("POST /api/finance/summary — response", () => {
     // itself (only its total is passed on, under a name of the app's own).
     expect(res.text).not.toMatch(/advice|monthlyFinances|specVersions|provenance|cashBalance\b/);
     expect(Object.keys(res.json.summary).sort()).toEqual(
-      ["cashBalanceCents", "cashFlow", "coverage", "creditUtilization", "recurring", "safeToSpend"]
+      [
+        "cashBalanceCents",
+        "cashFlow",
+        "coverage",
+        "creditUtilization",
+        "nextAction",
+        "recurring",
+        "safeToSpend",
+      ]
     );
+    // Safe-to-spend was not computed, so the engine's pick has no amount.
+    expect(res.json.summary.nextAction).toEqual({
+      reason: "data_incomplete",
+      pick: { kind: "fix_connection", amountCents: null },
+    });
     // Every bank's recurring read came back empty: recurring charges are
     // unknown, so safe-to-spend is not shown.
     expect(res.json.summary.coverage).toEqual({ safeToSpendShowable: false });
@@ -512,6 +529,193 @@ describe("POST /api/finance/summary — response", () => {
     await post({ includeTransactions: true });
     expect(state.plaidCalls).toBe(without.calls);
     expect(state.transactionWindows).toEqual(without.windows);
+  });
+});
+
+/*
+ * The next step the engine picked. Each case starts from the engine's real
+ * answer to the default read and changes only its advice.
+ */
+describe("POST /api/finance/summary — the next step", () => {
+  const UNREADABLE = "[finance-engine] next_action=unreadable";
+  const PICKED = { pick: "pay_card:card:acct-SECRET", reason: "best" };
+
+  async function realAnswer(): Promise<Record<string, any>> {
+    state.engineAnswer = undefined;
+    state.engineInputs = [];
+    await post();
+    const real = await vi.importActual<typeof import("@sungwon0162/cf-engine")>(
+      "@sungwon0162/cf-engine"
+    );
+    return JSON.parse(
+      JSON.stringify(real.analyzeCashFlow(state.engineInputs[0] as never, {}))
+    ) as Record<string, any>;
+  }
+
+  function candidate(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: "pay_card:card:acct-SECRET",
+      kind: "pay_card",
+      entity: { kind: "obligation", id: "card:acct-SECRET" },
+      amountCents: 123457,
+      basis: "measured_card_interest",
+      valueTier: "surplus",
+      comparableCents: 77,
+      suppressed: null,
+      provenance: { source: "measured_transactions", asOf: null },
+      assumptions: ["some_assumption"],
+      measuredAprBp: 2399,
+      destination: "sav-SECRET",
+      ...over,
+    };
+  }
+
+  function clearLogs(): void {
+    for (const method of [console.log, console.warn, console.error]) {
+      (method as unknown as { mockClear: () => void }).mockClear();
+    }
+  }
+
+  function logged(): string[] {
+    const lines: string[] = [];
+    for (const method of [console.log, console.warn, console.error]) {
+      const calls = (method as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+      for (const call of calls) lines.push(call.map(String).join(" "));
+    }
+    return lines;
+  }
+
+  it("sends only its kind and amount, with the engine's reason", async () => {
+    const answer = await realAnswer();
+    answer.advice = { ...answer.advice, ...PICKED, candidates: [candidate()] };
+    state.engineAnswer = answer;
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(res.json.summary.nextAction).toEqual({
+      reason: "best",
+      pick: { kind: "pay_card", amountCents: 123457 },
+    });
+    expect(res.text).not.toMatch(/advice|provenance/);
+    expect(res.text).not.toMatch(
+      /candidates|policy|basis|valueTier|comparableCents|suppressed|assumptions|entity|measuredAprBp|destination/
+    );
+    // A candidate's id can carry an account id; neither it nor any other id
+    // the candidate names is sent.
+    expect(res.text).not.toMatch(/SECRET|pay_card:/);
+  });
+
+  it("is not written to the log", async () => {
+    const answer = await realAnswer();
+    answer.advice = { ...answer.advice, ...PICKED, candidates: [candidate()] };
+    state.engineAnswer = answer;
+    clearLogs();
+    const res = await post();
+    expect(res.status).toBe(200);
+    const text = logged().join("\n");
+    expect(text).toContain("[finance-summary] date_basis=");
+    expect(text).not.toMatch(/123457|pay_card|SECRET|next_action/);
+  });
+
+  it("nothing picked is sent as no pick", async () => {
+    const answer = await realAnswer();
+    answer.advice = { ...answer.advice, pick: null, reason: "nothing_to_do", candidates: [] };
+    state.engineAnswer = answer;
+    clearLogs();
+    const res = await post();
+    expect(res.json.summary.nextAction).toEqual({ reason: "nothing_to_do", pick: null });
+    expect(logged().join("\n")).not.toContain(UNREADABLE);
+  });
+
+  // Red if: an advice that cannot be read fails the whole summary, or is
+  // passed on as it came.
+  it("a next step that cannot be read is sent as null, and the figures are sent as they are", async () => {
+    const good = await post();
+    expect(good.status).toBe(200);
+    type Answer = Record<string, any>;
+    const broken: Array<[string, (answer: Answer) => void]> = [
+      [
+        "no advice",
+        (a) => {
+          delete a.advice;
+        },
+      ],
+      [
+        "advice not an object",
+        (a) => {
+          a.advice = "best";
+        },
+      ],
+      [
+        "an unknown reason",
+        (a) => {
+          a.advice = { ...PICKED, reason: "brand_new_reason", candidates: [candidate()] };
+        },
+      ],
+      [
+        "the picked id names no candidate",
+        (a) => {
+          a.advice = { ...PICKED, candidates: [candidate({ id: "other" })] };
+        },
+      ],
+      [
+        "the picked id names two candidates",
+        (a) => {
+          a.advice = { ...PICKED, candidates: [candidate(), candidate()] };
+        },
+      ],
+      [
+        "an unknown kind",
+        (a) => {
+          a.advice = { ...PICKED, candidates: [candidate({ kind: "brand_new_kind" })] };
+        },
+      ],
+      [
+        "an amount that is not whole cents",
+        (a) => {
+          a.advice = { ...PICKED, candidates: [candidate({ amountCents: 10.5 })] };
+        },
+      ],
+      [
+        "an amount that is a string",
+        (a) => {
+          a.advice = { ...PICKED, candidates: [candidate({ amountCents: "123457" })] };
+        },
+      ],
+      [
+        "a picked candidate marked as held back",
+        (a) => {
+          a.advice = { ...PICKED, candidates: [candidate({ suppressed: "snoozed" })] };
+        },
+      ],
+      [
+        "nothing picked under a reason that says something was",
+        (a) => {
+          a.advice = { pick: null, reason: "best", candidates: [] };
+        },
+      ],
+      [
+        "candidates not a list",
+        (a) => {
+          a.advice = { ...PICKED, candidates: {} };
+        },
+      ],
+    ];
+    for (const [name, change] of broken) {
+      const answer = await realAnswer();
+      change(answer);
+      state.engineAnswer = answer;
+      clearLogs();
+      const res = await post();
+      expect(res.status, name).toBe(200);
+      expect(res.json.summary.nextAction, name).toBeNull();
+      expect({ ...res.json.summary, nextAction: null }, name).toEqual({
+        ...good.json.summary,
+        nextAction: null,
+      });
+      const about = logged().filter((line) => line.indexOf("next_action") >= 0);
+      expect(about, name).toEqual([UNREADABLE]);
+      expect(res.text, name).not.toMatch(/SECRET|123457|brand_new/);
+    }
   });
 });
 

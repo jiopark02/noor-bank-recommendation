@@ -22,7 +22,9 @@ import {
   summaryLoadInputs,
   summaryPeriodNote,
   SUMMARY_RESPONSE_FIELDS,
+  SUMMARY_NEXT_ACTION_FIELDS,
   SUMMARY_TRANSACTIONS_FIELDS,
+  parseSummaryNextAction,
   transactionListView,
   utilizationPercent,
   type BankView,
@@ -751,6 +753,8 @@ describe("bankActionLines — a failed re-link request", () => {
  *   - a field that may not be null accepting null (e.g. "string" checked as
  *     `value === null || typeof value === "string"`) -> "each listed field,
  *     missing or mistyped"
+ *   - the next step listed with the figures, so a bad one fails them
+ *     -> "a bad next step fails only the next step"
  */
 type Path = Array<string | number>;
 
@@ -812,11 +816,17 @@ function edited(body: unknown, path: Path, edit: (parent: Record<string | number
   return copy;
 }
 
-function checksEveryField(spec: FieldSpec, good: unknown, parse: (v: unknown) => unknown) {
+function checksEveryField(
+  spec: FieldSpec,
+  good: unknown,
+  parse: (v: unknown) => unknown,
+  // A floor on the fields walked, so a walk that finds next to nothing fails.
+  moreThan = 10
+) {
   expect(parse(good)).not.toBeNull();
   const nodes: Array<{ path: Path; spec: FieldSpec }> = [];
   nodesOf(spec, good, [], nodes);
-  expect(nodes.length).toBeGreaterThan(10);
+  expect(nodes.length).toBeGreaterThan(moreThan);
   for (const { path, spec: fieldSpec } of nodes) {
     const label = path.join(".");
     if (typeof path[path.length - 1] === "string") {
@@ -877,6 +887,7 @@ describe("response bodies — every field the screens read is checked", () => {
       accounts: [{ accountId: "card", balanceCents: 25000, ratioBasisPoints: 2500 }],
     },
     cashBalanceCents: 100000,
+    nextAction: { reason: "best", pick: { kind: "review_recurring", amountCents: 1549 } },
   });
 
   const goodSummaryBody = () =>
@@ -931,6 +942,90 @@ describe("response bodies — every field the screens read is checked", () => {
       goodSummaryBody(),
       parseSummaryTransactions
     );
+  });
+
+  // The next step is checked apart from the figures, field by field.
+  it("next step: each listed field, missing or mistyped, fails the next step", () => {
+    checksEveryField(
+      { summary: { nextAction: SUMMARY_NEXT_ACTION_FIELDS } },
+      goodSummaryBody(),
+      parseSummaryNextAction,
+      5
+    );
+    expect(parseSummaryNextAction(goodSummaryBody())).toEqual({
+      reason: "best",
+      pick: { kind: "review_recurring", amountCents: 1549 },
+    });
+  });
+
+  // Red if: the next step is listed with the figures, so a body whose next
+  // step is missing or wrong is a failed read of everything.
+  it("a bad next step fails only the next step, never the figures", () => {
+    type Loose = Record<string, any>;
+    const bad: Array<(next: Loose, summary: Loose) => void> = [
+      (_next, summary) => {
+        delete summary.nextAction;
+      },
+      (_next, summary) => {
+        summary.nextAction = "not-an-object";
+      },
+      (next) => {
+        delete next.reason;
+      },
+      (next) => {
+        next.reason = "not-a-listed-value";
+      },
+      (next) => {
+        delete next.pick;
+      },
+      (next) => {
+        next.pick = "not-an-object";
+      },
+      (next) => {
+        delete next.pick.kind;
+      },
+      (next) => {
+        next.pick.kind = "not-a-listed-value";
+      },
+      (next) => {
+        delete next.pick.amountCents;
+      },
+      (next) => {
+        next.pick.amountCents = "1";
+      },
+    ];
+    for (let i = 0; i < bad.length; i++) {
+      const body = goodSummaryBody();
+      bad[i](body.summary.nextAction, body.summary);
+      expect(parseSummaryNextAction(body), `case ${i}`).toBeNull();
+      const figures = parseFinanceSummaryResponse(body);
+      expect(figures, `case ${i}`).not.toBeNull();
+      expect(figures?.summary?.safeToSpend.amountCents, `case ${i}`).toBe(73500);
+    }
+  });
+
+  it("a next step of null, a pick of null and a body with no summary all read as they are", () => {
+    const none = goodSummaryBody();
+    none.summary.nextAction = null;
+    expect(parseSummaryNextAction(none)).toBeNull();
+    expect(parseFinanceSummaryResponse(none)).not.toBeNull();
+
+    const nothing = goodSummaryBody();
+    nothing.summary.nextAction = { reason: "nothing_to_do", pick: null };
+    expect(parseSummaryNextAction(nothing)).toEqual({ reason: "nothing_to_do", pick: null });
+
+    expect(parseSummaryNextAction({ ...goodSummaryBody(), summary: null })).toBeNull();
+    expect(parseSummaryNextAction(null)).toBeNull();
+  });
+
+  it("only the listed fields of a next step are returned", () => {
+    const body = goodSummaryBody();
+    body.summary.nextAction.candidates = [{ id: "x" }];
+    body.summary.nextAction.pick.basis = "x";
+    expect(parseSummaryNextAction(body)).toEqual({
+      reason: "best",
+      pick: { kind: "review_recurring", amountCents: 1549 },
+    });
   });
 
   it("fields that are not listed are ignored", () => {

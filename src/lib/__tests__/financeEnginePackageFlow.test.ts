@@ -18,6 +18,7 @@ import {
   recurringDateLine,
   safeToSpendHiddenReason,
   SCREEN_SUMMARY_FIELDS,
+  SUMMARY_NEXT_ACTION_FIELDS,
   spendableCashTile,
   type BankView,
   type FieldSpec,
@@ -45,6 +46,10 @@ import {
  *   - the cash total sent with any other reason                    -> "cash total"
  *   - the cash total sent while a connection of the read was not
  *     read                                                         -> "partial cash"
+ *   - the next step read from the first candidate instead of the
+ *     one the engine picked                                        -> "the pick"
+ *   - anything else about the candidates (their ids included)
+ *     passed on with the next step                                 -> "only the screen fields"
  *
  * With every bank's recurring read empty the engine now holds safe-to-spend
  * back itself, so this file cannot tell the app's own decision for that case
@@ -251,7 +256,13 @@ describe("adapter -> engine package -> summary", () => {
     const answer = analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as Record<string, unknown>;
     // The engine does send more than the screens read; none of it is passed on.
     expect(typeof answer.inputHash).toBe("string");
-    expect(unlistedPaths(SCREEN_SUMMARY_FIELDS, summary)).toEqual([]);
+    // The next step has a field list of its own, beside the screen fields.
+    expect(
+      unlistedPaths(
+        { ...SCREEN_SUMMARY_FIELDS, nextAction: { orNull: SUMMARY_NEXT_ACTION_FIELDS } },
+        summary
+      )
+    ).toEqual([]);
     expect(JSON.stringify(summary)).not.toContain(answer.inputHash as string);
     const body = { success: true, connections: [], accounts: [], summary };
     expect(parseFinanceSummaryResponse(JSON.parse(JSON.stringify(body)))).not.toBeNull();
@@ -301,6 +312,102 @@ describe("adapter -> engine package -> summary", () => {
     expect(otherTotals.cushionFloorCents).toBe(30000);
     expect(other.policy.cushionFloorDefaultCents).toBe(75000);
     expect(other.amountCents - engineSafe.amountCents).toBe(45000);
+  });
+});
+
+/*
+ * The next step the engine picks, with no record of what the user was shown
+ * or answered handed to it: the summary carries the picked candidate's kind
+ * and amount and the engine's reason, and nothing else about the candidates.
+ */
+describe("the next step the engine picked", () => {
+  type Said = {
+    advice: {
+      pick: string | null;
+      reason: string;
+      candidates: Array<{
+        id: string;
+        kind: string;
+        amountCents: number | null;
+        suppressed: string | null;
+      }>;
+    };
+    safeToSpend: { status: string; amountCents: number | null };
+  };
+  const said = (read: Awaited<ReturnType<typeof readWith>>) =>
+    analyzeCashFlow(toPackageInput(read, DATES), {}) as unknown as Said;
+  const payroll = () =>
+    stream("payroll", "chk", -1500, {
+      frequency: "BIWEEKLY",
+      predicted_next_date: "2026-11-20",
+      personal_finance_category: { primary: "INCOME", detailed: "INCOME_WAGES" },
+    });
+
+  it("a recurring charge worth a look: the summary carries its kind, amount and reason only", async () => {
+    const read = await readWith([
+      {
+        accounts: [account("chk"), card("card", 300, null)],
+        transactions: history("chk", "a"),
+        outflow: [stream("netflix", "chk", 15.49)],
+        inflow: [payroll()],
+      },
+    ]);
+    const answer = said(read);
+    expect(answer.advice.pick).toBe("review_recurring:hh");
+    const summary = runCashFlowEngine(read, DATES);
+    expect(summary.nextAction).toEqual({
+      reason: "best",
+      pick: { kind: "review_recurring", amountCents: 1549 },
+    });
+    expect(JSON.stringify(summary)).not.toContain("review_recurring:hh");
+  });
+
+  it("safe-to-spend not computed: the engine's pick has no amount", async () => {
+    const read = await readWith([
+      {
+        accounts: [account("chk")],
+        transactions: history("chk", "a"),
+        outflow: [],
+        inflow: [payroll()],
+      },
+    ]);
+    const answer = said(read);
+    expect(answer.safeToSpend.status).toBe("unavailable");
+    expect(answer.advice.pick).toBe("fix_connection:hh");
+    expect(runCashFlowEngine(read, DATES).nextAction).toEqual({
+      reason: "data_incomplete",
+      pick: { kind: "fix_connection", amountCents: null },
+    });
+  });
+
+  // "the pick". Red if: the next step is read from the first candidate. The
+  // first one here is held back by the engine as too small to mention.
+  it("the next step is the candidate the engine picked, not the first one it lists", async () => {
+    const read = await readWith([
+      {
+        accounts: [account("chk")],
+        transactions: history("chk", "a"),
+        outflow: [stream("netflix", "chk", 5)],
+        inflow: [payroll()],
+      },
+    ]);
+    const answer = said(read);
+    expect(
+      answer.advice.candidates.map((c) => ({
+        kind: c.kind,
+        amountCents: c.amountCents,
+        suppressed: c.suppressed,
+      }))
+    ).toEqual([
+      { kind: "review_recurring", amountCents: 500, suppressed: "below_minimum" },
+      { kind: "safe_spend", amountCents: answer.safeToSpend.amountCents, suppressed: null },
+    ]);
+    expect(answer.advice.pick).toBe("safe_spend:hh");
+    expect(answer.safeToSpend.amountCents).toBeGreaterThan(0);
+    expect(runCashFlowEngine(read, DATES).nextAction).toEqual({
+      reason: "best",
+      pick: { kind: "safe_spend", amountCents: answer.safeToSpend.amountCents },
+    });
   });
 });
 

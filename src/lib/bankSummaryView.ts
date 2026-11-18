@@ -18,6 +18,9 @@
 //   - The transaction list is checked apart from the figures: a missing or
 //     wrong-shaped list fails the list only, never the figures, and is never
 //     drawn as an empty list.
+//   - The next step the engine picked is checked apart from the figures too:
+//     a missing or wrong-shaped one means no next step is shown, and the
+//     figures stay.
 // Data issues in the summary (for example, transactions in Plaid's catch-all
 // category) are information about the figures, not a connection problem: they
 // create no action and do not hide safe-to-spend.
@@ -492,6 +495,37 @@ export const SUMMARY_RESPONSE_FIELDS = {
  */
 export const SUMMARY_TRANSACTIONS_FIELDS = { listOf: TRANSACTION_FIELDS } as const;
 
+/** The kinds of next step the cash-flow engine can pick. */
+export const NEXT_ACTION_KINDS = [
+  "fix_connection",
+  "cover_bills",
+  "move_to_checking",
+  "move_to_emergency",
+  "pay_card",
+  "review_recurring",
+  "safe_spend",
+] as const;
+
+/**
+ * The one next step the engine picked, the `nextAction` field of a summary:
+ * why it was picked, and the picked step's kind and amount. `pick` is null
+ * when the engine picked nothing. Checked apart from SCREEN_SUMMARY_FIELDS,
+ * like the transaction list: a bad next step must not fail the figures.
+ * Nothing else the engine says about its candidates is sent.
+ */
+export const SUMMARY_NEXT_ACTION_FIELDS = {
+  reason: { oneOf: ["best", "kept_current", "data_incomplete", "nothing_to_do"] },
+  pick: {
+    orNull: {
+      kind: { oneOf: NEXT_ACTION_KINDS },
+      // null for a step that has no amount.
+      amountCents: "number|null",
+    },
+  },
+} as const;
+
+export type ScreenNextAction = FieldsOf<typeof SUMMARY_NEXT_ACTION_FIELDS>;
+
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
 /** The engine's part of a summary, as the screens read it. */
 export type EngineSummaryFields = FieldsOf<typeof ENGINE_SUMMARY_FIELDS>;
@@ -506,6 +540,13 @@ export type RouteBodiesSatisfyScreenFields = Holds<
 /** Compile-time only: each transaction the route sends has every listed field. */
 export type RouteTransactionsSatisfyScreenFields = Holds<
   [DisplayTransaction] extends [ScreenTransaction] ? true : false
+>;
+
+/** Compile-time only: the next step the route declares it sends fits its field list. */
+export type RouteNextActionSatisfiesScreenFields = Holds<
+  [NonNullable<FinanceSummaryResponse["summary"]>["nextAction"]] extends [ScreenNextAction | null]
+    ? true
+    : false
 >;
 
 /** True only for `any`. */
@@ -648,6 +689,20 @@ export function parseSummaryTransactions(body: unknown): ScreenTransaction[] | n
   if (!isRecord(body)) return null;
   const list = body.transactions;
   return fitsFields(SUMMARY_TRANSACTIONS_FIELDS, list) ? (list as ScreenTransaction[]) : null;
+}
+
+/**
+ * The next step a summary body carries, or null when the body has no
+ * summary, the summary carries no next step, or the next step has a missing
+ * or wrongly typed field. Only the listed fields are returned. null never
+ * changes how the figures are read.
+ */
+export function parseSummaryNextAction(body: unknown): ScreenNextAction | null {
+  if (!isRecord(body) || !isRecord(body.summary)) return null;
+  const next = body.summary.nextAction;
+  if (next === null || next === undefined) return null;
+  const picked = pickFields(SUMMARY_NEXT_ACTION_FIELDS, next);
+  return picked.ok ? (picked.value as ScreenNextAction) : null;
 }
 
 /** Shown in place of the transaction list when the list could not be read. */

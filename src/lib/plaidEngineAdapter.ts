@@ -68,10 +68,13 @@ import {
 } from "@sungwon0162/cf-engine";
 import {
   ENGINE_SUMMARY_FIELDS,
+  NEXT_ACTION_KINDS,
   SCREEN_SUMMARY_FIELDS,
+  SUMMARY_NEXT_ACTION_FIELDS,
   banksNotRead,
   pickFields,
   type FieldsOf,
+  type ScreenNextAction,
   type ScreenSummary,
 } from "@/lib/bankSummaryView";
 import {
@@ -157,6 +160,13 @@ export interface BankWindow {
 
 export type BankCompleteness = Completeness;
 
+/**
+ * A summary as the route sends it: the screen fields, plus the one next step
+ * the engine picked. `nextAction` is null when the engine's answer about it
+ * could not be read; the figures are sent either way.
+ */
+export type RouteSummary = ScreenSummary & { nextAction: ScreenNextAction | null };
+
 /** Body of a successful POST /api/finance/summary. */
 export interface FinanceSummaryResponse {
   success: true;
@@ -172,9 +182,10 @@ export interface FinanceSummaryResponse {
   /**
    * null when no connection could be read. Exactly the fields the screens
    * read (SCREEN_SUMMARY_FIELDS), picked from the engine's answer plus the
-   * app's credit utilization; nothing else the engine returns is sent.
+   * app's credit utilization, and the next step the engine picked
+   * (SUMMARY_NEXT_ACTION_FIELDS); nothing else the engine returns is sent.
    */
-  summary: ScreenSummary | null;
+  summary: RouteSummary | null;
 }
 
 // ---- dependencies -------------------------------------------------------------
@@ -1640,6 +1651,29 @@ export type EngineResultSatisfiesScreenFields = Holds<
   [CfResult] extends [FieldsOf<typeof ENGINE_SUMMARY_FIELDS>] ? true : false
 >;
 
+/**
+ * Compile-time only: the parts of the engine's advice nextActionOf reads are
+ * in the package's declared result, and every kind and reason it declares is
+ * one the screens have a field value for. A kind or reason the package adds
+ * fails here.
+ */
+export type EngineAdviceSatisfiesNextAction = Holds<
+  [CfResult["advice"]] extends [
+    {
+      pick: string | null;
+      reason: ScreenNextAction["reason"];
+      candidates: {
+        id: string;
+        kind: (typeof NEXT_ACTION_KINDS)[number];
+        amountCents: number | null;
+        suppressed: string | null;
+      }[];
+    },
+  ]
+    ? true
+    : false
+>;
+
 /** The one place the engine is called. Its answer is unknown until checked. */
 function callEngine(input: CfInput): unknown {
   try {
@@ -1693,6 +1727,49 @@ export function cashBalanceCentsOf(answer: unknown): number | null {
 }
 
 /**
+ * The next step the engine picked, from its answer's `advice`: the reason,
+ * and the picked candidate's kind and amount. Nothing else about the
+ * candidates is read, and their ids, which can carry an account id, stay on
+ * the server.
+ *
+ * null when that cannot be read as one consistent pick:
+ *   - the advice is not an object, or its reason is not a known one;
+ *   - nothing is picked under a reason that says something was;
+ *   - the picked id names no candidate, or more than one;
+ *   - the picked candidate's kind is not a known one, its amount is neither
+ *     null nor a safe integer of cents, or it is marked as held back.
+ */
+export function nextActionOf(answer: unknown): ScreenNextAction | null {
+  if (answer === null || typeof answer !== "object") return null;
+  const advice = (answer as Record<string, unknown>).advice;
+  if (advice === null || typeof advice !== "object") return null;
+  const record = advice as Record<string, unknown>;
+  const reason = oneOf(record.reason, SUMMARY_NEXT_ACTION_FIELDS.reason.oneOf);
+  if (reason === null) return null;
+  if (record.pick === null) {
+    return reason === "nothing_to_do" || reason === "data_incomplete"
+      ? { reason, pick: null }
+      : null;
+  }
+  if (typeof record.pick !== "string" || !Array.isArray(record.candidates)) return null;
+  let picked: Record<string, unknown> | null = null;
+  for (let i = 0; i < record.candidates.length; i++) {
+    const candidate: unknown = record.candidates[i];
+    if (candidate === null || typeof candidate !== "object") return null;
+    if ((candidate as Record<string, unknown>).id !== record.pick) continue;
+    if (picked !== null) return null;
+    picked = candidate as Record<string, unknown>;
+  }
+  if (picked === null) return null;
+  const kind = oneOf(picked.kind, NEXT_ACTION_KINDS);
+  if (kind === null) return null;
+  if (picked.suppressed !== null) return null;
+  const amountCents = picked.amountCents;
+  if (!(amountCents === null || isCents(amountCents))) return null;
+  return { reason, pick: { kind, amountCents } };
+}
+
+/**
  * The engine's reason for holding safe-to-spend back when it was given no
  * outflow stream at all.
  */
@@ -1729,10 +1806,13 @@ export function everyConnectionRead(connections: BankConnectionStatus[]): boolea
  *     the total would be the cash of the remaining banks only. The engine's
  *     reason alone does not rule that out: it follows the recurring reads it
  *     is given, not whether each connection was read.
+ * The next step the engine picked (nextActionOf) is added beside them. One
+ * that cannot be read is sent as null and logged as a fixed line with no
+ * value in it; it never fails the figures.
  * Throws EngineContractBreach when the engine refuses the input, and
  * EngineOutputUnexpected when its answer lacks a field the screens read.
  */
-export function runCashFlowEngine(read: BankRead, dates: EngineInputDates): ScreenSummary {
+export function runCashFlowEngine(read: BankRead, dates: EngineInputDates): RouteSummary {
   const answer = callEngine(toPackageInput(read, dates));
   const picked = pickFields(ENGINE_SUMMARY_FIELDS, answer);
   if (!picked.ok) throw new EngineOutputUnexpected("summary fields");
@@ -1779,5 +1859,9 @@ export function runCashFlowEngine(read: BankRead, dates: EngineInputDates): Scre
   // screens do not read either.
   const checked = pickFields(SCREEN_SUMMARY_FIELDS, summary);
   if (!checked.ok) throw new EngineOutputUnexpected("screen summary");
-  return checked.value as ScreenSummary;
+  // Picked by its own list, so only the listed fields of it are sent.
+  const next = pickFields({ orNull: SUMMARY_NEXT_ACTION_FIELDS }, nextActionOf(answer));
+  const nextAction = next.ok ? (next.value as ScreenNextAction | null) : null;
+  if (nextAction === null) console.warn("[finance-engine] next_action=unreadable");
+  return { ...(checked.value as ScreenSummary), nextAction };
 }
