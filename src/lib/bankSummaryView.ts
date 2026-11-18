@@ -18,6 +18,9 @@
 //   - The transaction list is checked apart from the figures: a missing or
 //     wrong-shaped list fails the list only, never the figures, and is never
 //     drawn as an empty list.
+//   - The next step the engine picked is checked apart from the figures too:
+//     a missing or wrong-shaped one means no next step is shown, and the
+//     figures stay.
 // Data issues in the summary (for example, transactions in Plaid's catch-all
 // category) are information about the figures, not a connection problem: they
 // create no action and do not hide safe-to-spend.
@@ -492,6 +495,37 @@ export const SUMMARY_RESPONSE_FIELDS = {
  */
 export const SUMMARY_TRANSACTIONS_FIELDS = { listOf: TRANSACTION_FIELDS } as const;
 
+/** The kinds of next step the cash-flow engine can pick. */
+export const NEXT_ACTION_KINDS = [
+  "fix_connection",
+  "cover_bills",
+  "move_to_checking",
+  "move_to_emergency",
+  "pay_card",
+  "review_recurring",
+  "safe_spend",
+] as const;
+
+/**
+ * The one next step the engine picked, the `nextAction` field of a summary:
+ * why it was picked, and the picked step's kind and amount. `pick` is null
+ * when the engine picked nothing. Checked apart from SCREEN_SUMMARY_FIELDS,
+ * like the transaction list: a bad next step must not fail the figures.
+ * Nothing else the engine says about its candidates is sent.
+ */
+export const SUMMARY_NEXT_ACTION_FIELDS = {
+  reason: { oneOf: ["best", "kept_current", "data_incomplete", "nothing_to_do"] },
+  pick: {
+    orNull: {
+      kind: { oneOf: NEXT_ACTION_KINDS },
+      // null for a step that has no amount.
+      amountCents: "number|null",
+    },
+  },
+} as const;
+
+export type ScreenNextAction = FieldsOf<typeof SUMMARY_NEXT_ACTION_FIELDS>;
+
 export type ScreenSummaryResponse = FieldsOf<typeof SUMMARY_RESPONSE_FIELDS>;
 /** The engine's part of a summary, as the screens read it. */
 export type EngineSummaryFields = FieldsOf<typeof ENGINE_SUMMARY_FIELDS>;
@@ -506,6 +540,13 @@ export type RouteBodiesSatisfyScreenFields = Holds<
 /** Compile-time only: each transaction the route sends has every listed field. */
 export type RouteTransactionsSatisfyScreenFields = Holds<
   [DisplayTransaction] extends [ScreenTransaction] ? true : false
+>;
+
+/** Compile-time only: the next step the route declares it sends fits its field list. */
+export type RouteNextActionSatisfiesScreenFields = Holds<
+  [NonNullable<FinanceSummaryResponse["summary"]>["nextAction"]] extends [ScreenNextAction | null]
+    ? true
+    : false
 >;
 
 /** True only for `any`. */
@@ -648,6 +689,20 @@ export function parseSummaryTransactions(body: unknown): ScreenTransaction[] | n
   if (!isRecord(body)) return null;
   const list = body.transactions;
   return fitsFields(SUMMARY_TRANSACTIONS_FIELDS, list) ? (list as ScreenTransaction[]) : null;
+}
+
+/**
+ * The next step a summary body carries, or null when the body has no
+ * summary, the summary carries no next step, or the next step has a missing
+ * or wrongly typed field. Only the listed fields are returned. null never
+ * changes how the figures are read.
+ */
+export function parseSummaryNextAction(body: unknown): ScreenNextAction | null {
+  if (!isRecord(body) || !isRecord(body.summary)) return null;
+  const next = body.summary.nextAction;
+  if (next === null || next === undefined) return null;
+  const picked = pickFields(SUMMARY_NEXT_ACTION_FIELDS, next);
+  return picked.ok ? (picked.value as ScreenNextAction) : null;
 }
 
 /** Shown in place of the transaction list when the list could not be read. */
@@ -930,4 +985,104 @@ export function safeToSpendHorizonPhrase(horizon: { to: string; rule: string }):
   return horizon.rule === "next_income_date"
     ? `until your next income on ${day}`
     : `through ${day}`;
+}
+
+// ---- the next step --------------------------------------------------------------
+
+/**
+ *   line   - draw this one sentence at the top of the dashboard
+ *   hidden - draw nothing
+ */
+export type NextActionCard = { kind: "hidden" } | { kind: "line"; text: string };
+
+/** A bank was not read: the steps for each bank are drawn with the figures. */
+export const NEXT_ACTION_BANK_NEEDS_ATTENTION =
+  "A bank connection needs your attention. See the steps below.";
+export const NEXT_ACTION_NOT_ENOUGH_DATA =
+  "There isn't enough bank data yet to suggest a next step.";
+export const NEXT_ACTION_NOTHING_TO_MOVE =
+  "Nothing needs moving right now. Your spending number is below.";
+
+/**
+ * The dashboard's next-step line, from the step the engine picked. The app
+ * writes every sentence; the engine supplies only the kind and the amount,
+ * which is the only amount a sentence names. A sentence never names a
+ * product, an institution or an account, never states a rate or an expected
+ * return, and never says the app moves money: any move is the user's own.
+ *
+ * Nothing is drawn unless the figures are ready, and nothing when the engine
+ * picked no step: that it has nothing to suggest does not mean nothing is
+ * wrong, so it is not put into words.
+ *
+ * By kind:
+ *   - The step the engine picks when it could not compute safe-to-spend is
+ *     worded from what the screen already decided, never decided again here:
+ *     a bank that was not read (view.actions) points at the steps drawn for
+ *     each bank. With every bank read, the line asks for a checking account
+ *     exactly when the spendable-cash tile does (spendableCashTile), so the
+ *     two never disagree about whether one is linked; any other reason gets
+ *     the general line.
+ *   - Every other step is drawn only with an amount above zero.
+ *   - A step whose amount comes from the balances behind safe-to-spend is
+ *     drawn only where the safe-to-spend figure itself may be: with the
+ *     figure held back, a bank that was not read could change the amount.
+ *   - The step that is the safe-to-spend figure names no amount: the
+ *     dashboard states that figure once already.
+ *   - A recurring-charges step names a monthly amount, so it is drawn only
+ *     while recurring charges are known and every bank was read: a bank that
+ *     was not read (view.actions, the same test the per-bank steps are drawn
+ *     under) may hold charges the amount leaves out.
+ */
+export function nextActionCard(
+  view: BankView,
+  summary: ScreenSummary | null,
+  next: ScreenNextAction | null
+): NextActionCard {
+  const hidden: NextActionCard = { kind: "hidden" };
+  const line = (text: string): NextActionCard => ({ kind: "line", text });
+  if (view.figures !== "ready" || summary === null || next === null) return hidden;
+  const pick = next.pick;
+  if (pick === null) return hidden;
+  const notShown = safeToSpendHiddenReason(view, summary);
+
+  if (pick.kind === "fix_connection") {
+    // Safe-to-spend is shown, so the screen has no missing data to name.
+    if (notShown === null) return hidden;
+    if (view.actions.length > 0) return line(NEXT_ACTION_BANK_NEEDS_ATTENTION);
+    if (spendableCashTile(summary).kind === "no_cash_account") return line(NO_CASH_ACCOUNT_HINT);
+    return line(NEXT_ACTION_NOT_ENOUGH_DATA);
+  }
+
+  if (pick.amountCents === null || pick.amountCents <= 0) return hidden;
+  const amount = formatCents(pick.amountCents);
+
+  if (pick.kind === "review_recurring") {
+    if (view.actions.length > 0 || summary.recurring.totalMonthlyCents === null) return hidden;
+    return line(
+      `About ${amount} a month goes to subscriptions and other optional recurring charges. ` +
+        "It's worth checking you still want them all."
+    );
+  }
+
+  const horizon = summary.safeToSpend.horizon;
+  if (!view.showSafeToSpend || notShown !== null || horizon === null) return hidden;
+  if (pick.kind === "safe_spend") return line(NEXT_ACTION_NOTHING_TO_MOVE);
+  const due =
+    `Bills and payments coming up ${safeToSpendHorizonPhrase(horizon)} come to about ${amount} ` +
+    "more than the cash in your checking.";
+  switch (pick.kind) {
+    case "cover_bills":
+      return line(`${due} Adding ${amount} before then would cover them.`);
+    case "move_to_checking":
+      return line(`${due} You could move ${amount} over from your savings to cover them.`);
+    case "move_to_emergency":
+      return line(
+        `You have about ${amount} beyond what your bills and usual spending need. ` +
+          "You could move it into savings as an emergency cushion."
+      );
+    case "pay_card":
+      return line(`You could put about ${amount} toward your credit card balance.`);
+    default:
+      return hidden;
+  }
 }

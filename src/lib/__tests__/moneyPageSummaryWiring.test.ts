@@ -350,9 +350,8 @@ describe("the field lists name only fields that are read", () => {
     code(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8"));
 
   it("each listed field name is read somewhere", async () => {
-    const { SUMMARY_RESPONSE_FIELDS, SUMMARY_TRANSACTIONS_FIELDS } = await import(
-      "../bankSummaryView"
-    );
+    const { SUMMARY_RESPONSE_FIELDS, SUMMARY_TRANSACTIONS_FIELDS, SUMMARY_NEXT_ACTION_FIELDS } =
+      await import("../bankSummaryView");
     const view = read("../bankSummaryView.ts");
     const listStart = view.indexOf("const CONNECTION_FIELDS =");
     const listEnd = view.indexOf("export type ScreenSummaryResponse");
@@ -375,6 +374,10 @@ describe("the field lists name only fields that are read", () => {
     };
     walk(SUMMARY_RESPONSE_FIELDS);
     walk(SUMMARY_TRANSACTIONS_FIELDS);
+    // The next step's fields sit under the summary's `nextAction`.
+    walk({ nextAction: SUMMARY_NEXT_ACTION_FIELDS });
+    expect(names.has("nextAction")).toBe(true);
+    expect(names.has("pick")).toBe(true);
     expect(names.size).toBeGreaterThan(20);
 
     const unread = Array.from(names).filter((n) => !new RegExp(`\\.${n}\\b`).test(readers));
