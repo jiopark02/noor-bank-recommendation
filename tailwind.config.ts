@@ -32,9 +32,6 @@ const config: Config = {
         'noor': '12px',
         'noor-lg': '16px',
       },
-      spacing: {
-        'safe-bottom': 'env(safe-area-inset-bottom)',
-      },
     },
   },
   plugins: [],
