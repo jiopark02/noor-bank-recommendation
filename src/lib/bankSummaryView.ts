@@ -986,3 +986,98 @@ export function safeToSpendHorizonPhrase(horizon: { to: string; rule: string }):
     ? `until your next income on ${day}`
     : `through ${day}`;
 }
+
+// ---- the next step --------------------------------------------------------------
+
+/**
+ *   line   - draw this one sentence at the top of the dashboard
+ *   hidden - draw nothing
+ */
+export type NextActionCard = { kind: "hidden" } | { kind: "line"; text: string };
+
+/** A bank was not read: the steps for each bank are drawn with the figures. */
+export const NEXT_ACTION_BANK_NEEDS_ATTENTION =
+  "A bank connection needs your attention. See the steps below.";
+export const NEXT_ACTION_NOT_ENOUGH_DATA =
+  "There isn't enough bank data yet to suggest a next step.";
+export const NEXT_ACTION_NOTHING_TO_MOVE =
+  "Nothing needs moving right now. Your spending number is below.";
+
+/**
+ * The dashboard's next-step line, from the step the engine picked. The app
+ * writes every sentence; the engine supplies only the kind and the amount,
+ * which is the only amount a sentence names. A sentence never names a
+ * product, an institution or an account, never states a rate or an expected
+ * return, and never says the app moves money: any move is the user's own.
+ *
+ * Nothing is drawn unless the figures are ready, and nothing when the engine
+ * picked no step: that it has nothing to suggest does not mean nothing is
+ * wrong, so it is not put into words.
+ *
+ * By kind:
+ *   - The step the engine picks when it could not compute safe-to-spend is
+ *     worded from what the screen already decided, never decided again here:
+ *     a bank that was not read (view.actions) points at the steps drawn for
+ *     each bank, and otherwise the line follows safeToSpendHiddenReason.
+ *   - A step whose amount comes from the balances behind safe-to-spend is
+ *     drawn only where the safe-to-spend figure itself may be: with the
+ *     figure held back, a bank that was not read could change the amount.
+ *   - The step that is the safe-to-spend figure names no amount: the
+ *     dashboard states that figure once already.
+ *   - A recurring-charges step names a monthly amount, so it is drawn only
+ *     while recurring charges are known.
+ */
+export function nextActionCard(
+  view: BankView,
+  summary: ScreenSummary | null,
+  next: ScreenNextAction | null
+): NextActionCard {
+  const hidden: NextActionCard = { kind: "hidden" };
+  const line = (text: string): NextActionCard => ({ kind: "line", text });
+  if (view.figures !== "ready" || summary === null || next === null) return hidden;
+  const pick = next.pick;
+  if (pick === null) return hidden;
+  const notShown = safeToSpendHiddenReason(view, summary);
+
+  if (pick.kind === "fix_connection") {
+    // Safe-to-spend is shown, so the screen has no missing data to name.
+    if (notShown === null) return hidden;
+    if (view.actions.length > 0) return line(NEXT_ACTION_BANK_NEEDS_ATTENTION);
+    if (notShown === "no_cash_account") return line(NO_CASH_ACCOUNT_HINT);
+    return line(NEXT_ACTION_NOT_ENOUGH_DATA);
+  }
+
+  const amount =
+    pick.amountCents !== null && pick.amountCents > 0 ? formatCents(pick.amountCents) : null;
+
+  if (pick.kind === "review_recurring") {
+    if (amount === null || summary.recurring.totalMonthlyCents === null) return hidden;
+    return line(
+      `About ${amount} a month goes to subscriptions and other optional recurring charges. ` +
+        "It's worth checking you still want them all."
+    );
+  }
+
+  const horizon = summary.safeToSpend.horizon;
+  if (!view.showSafeToSpend || notShown !== null || horizon === null) return hidden;
+  if (pick.kind === "safe_spend") return line(NEXT_ACTION_NOTHING_TO_MOVE);
+  if (amount === null) return hidden;
+  const due =
+    `Bills and payments coming up ${safeToSpendHorizonPhrase(horizon)} come to about ${amount} ` +
+    "more than the cash in your checking.";
+  switch (pick.kind) {
+    case "cover_bills":
+      return line(`${due} Adding ${amount} before then would cover them.`);
+    case "move_to_checking":
+      return line(`${due} You could move ${amount} over from your savings to cover them.`);
+    case "move_to_emergency":
+      return line(
+        `You have about ${amount} beyond what your bills and usual spending need. ` +
+          "You could move it into savings as an emergency cushion."
+      );
+    case "pay_card":
+      return line(`You could put about ${amount} toward your credit card balance.`);
+    default:
+      return hidden;
+  }
+}

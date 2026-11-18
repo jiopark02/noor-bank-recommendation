@@ -143,8 +143,9 @@ describe("dashboard bank reads: a wrong-shaped 2xx is a failed read", () => {
     // check moves after the state is set.
     const setAt = FETCH_LIVE.indexOf("setBank(parsed)");
     expect(setAt).toBeGreaterThan(-1);
+    // The body is held once, so the next step can be read from the same one.
     expect(FETCH_LIVE).toMatch(
-      /const parsed = parseFinanceSummaryResponse\(\s*await readJsonOrFail\(summaryRes, BANK_DATA_LOAD_FAILED\)\s*\);/
+      /const body = await readJsonOrFail\(summaryRes, BANK_DATA_LOAD_FAILED\);\s*const parsed = parseFinanceSummaryResponse\(body\);/
     );
     const check = /if \(parsed === null\) \{\s*throw new Error\(BANK_DATA_LOAD_FAILED\);/;
     expect(FETCH_LIVE).toMatch(check);
@@ -229,7 +230,11 @@ describe("dashboard money figures come only from the summary route", () => {
  * inside MoneyFigure (no amount while loading or after a failed load) or a
  * recurring item's row value, from a list that is emptied when a load starts
  * and filled only from a ready answer. The assistant text above the markup
- * builds its amounts only past the safe-to-spend gate (checked above).
+ * builds its amounts only past the safe-to-spend gate (checked above). The
+ * next-step line is the one other place an amount can appear: the page draws
+ * the sentence nextActionCard returns and formats nothing itself, and when
+ * that sentence may carry an amount is executed in
+ * bankSummaryNextActionCard.test.ts.
  *
  * Mutations that turn this block red:
  *   - any figure moved out of MoneyFigure
@@ -278,6 +283,63 @@ describe("dashboard: no amount drawn while loading or after a failure", () => {
     expect(FETCH_LIVE.match(/setBank\((?!null\))/g) ?? []).toEqual(["setBank("]);
     expect(FETCH_LIVE).toContain("setBank(parsed);");
     expect(elsewhere.match(/setBank\((?!null\))/g) ?? []).toEqual([]);
+  });
+});
+
+/*
+ * The next-step line at the top of the dashboard.
+ *
+ * Mutations that turn this block red:
+ *   - the line, or whether it is drawn, decided in the page instead of by
+ *     nextActionCard
+ *   - the line moved below the assistant card
+ *   - a button or link put on the line (a bank that needs attention already
+ *     has its buttons with the figures; a second set would decide the same
+ *     thing twice)
+ *   - the next step kept from an earlier load when a new one starts
+ *   - the next step read from anywhere but the summary body just checked
+ */
+describe("dashboard: the next-step line", () => {
+  const JSX = slice(PAGE, "<PageLayout>", "</PageLayout>");
+  const OPEN = '{nextStep.kind === "line" && (';
+
+  it("draws only what nextActionCard returns", () => {
+    expect(PAGE).toContain("const nextStep = nextActionCard(view, summary, nextAction);");
+    expect(PAGE.match(/\bnextActionCard\(/g) ?? []).toHaveLength(1);
+    expect(JSX.match(/nextStep\.\w+/g) ?? []).toEqual(["nextStep.kind", "nextStep.text"]);
+    expect(JSX).toContain("{nextStep.text}");
+    // The page reads no field of the next step itself.
+    expect(PAGE).not.toMatch(/\bnextAction\s*\??\.\s*\w/);
+    expect(PAGE).not.toMatch(/\.pick\b/);
+  });
+
+  it("sits above the assistant card, with no button or link of its own", () => {
+    const openAt = JSX.indexOf(OPEN);
+    const assistantAt = JSX.indexOf("AI Assistant");
+    expect(openAt).toBeGreaterThan(-1);
+    expect(assistantAt).toBeGreaterThan(openAt);
+    expect(JSX.indexOf("{nextStep.text}")).toBeLessThan(assistantAt);
+    // Nothing is drawn in the section before it.
+    const sectionAt = JSX.indexOf("<section");
+    expect(sectionAt).toBeGreaterThan(-1);
+    expect(JSX.slice(sectionAt, openAt)).toMatch(/^<section[^>]*>\s*$/);
+
+    const card = JSX.slice(openAt, JSX.indexOf(")}", openAt));
+    expect(card).toContain("{nextStep.text}");
+    expect(card).not.toMatch(/<Link\b|<button\b|<a\b|href=|onClick=/);
+    expect(card).not.toMatch(/\bformat\w*\(/);
+  });
+
+  it("drops the previous next step before the request, and sets it only from the checked body", () => {
+    const reset = FETCH_LIVE.slice(0, FETCH_LIVE.indexOf("await "));
+    expect(reset).toContain("setNextAction(null);");
+    expect(PAGE.match(/setNextAction\((?!null\))[^)]*\)+;/g) ?? []).toEqual([
+      "setNextAction(parseSummaryNextAction(body));",
+    ]);
+    const setAt = FETCH_LIVE.indexOf("setNextAction(parseSummaryNextAction(body));");
+    expect(setAt).toBeGreaterThan(FETCH_LIVE.indexOf("setBank(parsed);"));
+    expect(setAt).toBeGreaterThan(FETCH_LIVE.search(/if \(parsed === null\) \{/));
+    expect(PAGE).toContain("useState<ScreenNextAction | null>(null)");
   });
 });
 

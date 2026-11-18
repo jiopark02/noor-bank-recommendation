@@ -37,7 +37,9 @@ import {
   formatMonthlyOrUnknown,
   formatSpending,
   missingBanksNote,
+  nextActionCard,
   parseFinanceSummaryResponse,
+  parseSummaryNextAction,
   safeToSpendHiddenReason,
   safeToSpendLines,
   spendableCashCents,
@@ -46,6 +48,7 @@ import {
   NO_CASH_ACCOUNT_HINT,
   NO_CASH_ACCOUNT_LABEL,
   type MoneyDisplayState,
+  type ScreenNextAction,
   type ScreenSummaryResponse,
 } from "@/lib/bankSummaryView";
 
@@ -137,6 +140,9 @@ export default function HomePage() {
   // comes from it; the screen only formats. Typed by the fields bankSummaryView
   // checks, so a field read here that is not checked there is a type error.
   const [bank, setBank] = useState<ScreenSummaryResponse | null>(null);
+  // The next step the same answer carries, checked apart from the figures:
+  // null when the answer has none or it could not be read.
+  const [nextAction, setNextAction] = useState<ScreenNextAction | null>(null);
 
   useEffect(() => {
     // Bank data is never kept in browser storage; every figure comes from the
@@ -289,6 +295,7 @@ export default function HomePage() {
     setHasMoneyData(false);
     setMoneyError(null);
     setBank(null);
+    setNextAction(null);
 
     try {
       const plaidHeaders = buildJsonAuthorizedHeaders(
@@ -318,14 +325,16 @@ export default function HomePage() {
         // A 2xx body of the wrong shape is a failed read, never an empty one:
         // read as empty it would show $0.00 as if it were the user's real
         // figure.
-        const parsed = parseFinanceSummaryResponse(
-          await readJsonOrFail(summaryRes, BANK_DATA_LOAD_FAILED)
-        );
+        const body = await readJsonOrFail(summaryRes, BANK_DATA_LOAD_FAILED);
+        const parsed = parseFinanceSummaryResponse(body);
         if (parsed === null) {
           throw new Error(BANK_DATA_LOAD_FAILED);
         }
 
         setBank(parsed);
+        // Read from the same body, after the figures: a next step that could
+        // not be read is null here and changes nothing above.
+        setNextAction(parseSummaryNextAction(body));
         setHasMoneyData(true);
       });
     } catch (err) {
@@ -361,6 +370,9 @@ export default function HomePage() {
   const summary = view.figures === "ready" && bank ? bank.summary : null;
   const missingNote = missingBanksNote(view.missingFrom);
   const periodNote = summaryPeriodNote(view, bank);
+  // Whether a next step is drawn, and its sentence, are decided by
+  // nextActionCard; the page draws the text it returns and nothing else.
+  const nextStep = nextActionCard(view, summary, nextAction);
 
   // Engine figures as they arrived. With no connection the zeros are true.
   // The spendable-cash amount is null (a dash) when safe-to-spend was not
@@ -525,6 +537,20 @@ export default function HomePage() {
       </motion.header>
 
       <section className="flex flex-col gap-6">
+        {nextStep.kind === "line" && (
+          <motion.div
+            className="noor-card p-6 md:p-8 w-full"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+          >
+            <h2 className="text-sm font-medium text-gray-500">Next step</h2>
+            <p className="mt-2 text-base text-black leading-relaxed">
+              {nextStep.text}
+            </p>
+          </motion.div>
+        )}
+
         <motion.div
           className="noor-card p-6 md:p-8 flex flex-col w-full min-h-[420px]"
           initial={{ opacity: 0, y: 12 }}
