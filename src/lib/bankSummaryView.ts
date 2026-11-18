@@ -1018,14 +1018,20 @@ export const NEXT_ACTION_NOTHING_TO_MOVE =
  *   - The step the engine picks when it could not compute safe-to-spend is
  *     worded from what the screen already decided, never decided again here:
  *     a bank that was not read (view.actions) points at the steps drawn for
- *     each bank, and otherwise the line follows safeToSpendHiddenReason.
+ *     each bank. With every bank read, the line asks for a checking account
+ *     exactly when the spendable-cash tile does (spendableCashTile), so the
+ *     two never disagree about whether one is linked; any other reason gets
+ *     the general line.
+ *   - Every other step is drawn only with an amount above zero.
  *   - A step whose amount comes from the balances behind safe-to-spend is
  *     drawn only where the safe-to-spend figure itself may be: with the
  *     figure held back, a bank that was not read could change the amount.
  *   - The step that is the safe-to-spend figure names no amount: the
  *     dashboard states that figure once already.
  *   - A recurring-charges step names a monthly amount, so it is drawn only
- *     while recurring charges are known.
+ *     while recurring charges are known and every bank was read: a bank that
+ *     was not read (view.actions, the same test the per-bank steps are drawn
+ *     under) may hold charges the amount leaves out.
  */
 export function nextActionCard(
   view: BankView,
@@ -1043,15 +1049,15 @@ export function nextActionCard(
     // Safe-to-spend is shown, so the screen has no missing data to name.
     if (notShown === null) return hidden;
     if (view.actions.length > 0) return line(NEXT_ACTION_BANK_NEEDS_ATTENTION);
-    if (notShown === "no_cash_account") return line(NO_CASH_ACCOUNT_HINT);
+    if (spendableCashTile(summary).kind === "no_cash_account") return line(NO_CASH_ACCOUNT_HINT);
     return line(NEXT_ACTION_NOT_ENOUGH_DATA);
   }
 
-  const amount =
-    pick.amountCents !== null && pick.amountCents > 0 ? formatCents(pick.amountCents) : null;
+  if (pick.amountCents === null || pick.amountCents <= 0) return hidden;
+  const amount = formatCents(pick.amountCents);
 
   if (pick.kind === "review_recurring") {
-    if (amount === null || summary.recurring.totalMonthlyCents === null) return hidden;
+    if (view.actions.length > 0 || summary.recurring.totalMonthlyCents === null) return hidden;
     return line(
       `About ${amount} a month goes to subscriptions and other optional recurring charges. ` +
         "It's worth checking you still want them all."
@@ -1061,7 +1067,6 @@ export function nextActionCard(
   const horizon = summary.safeToSpend.horizon;
   if (!view.showSafeToSpend || notShown !== null || horizon === null) return hidden;
   if (pick.kind === "safe_spend") return line(NEXT_ACTION_NOTHING_TO_MOVE);
-  if (amount === null) return hidden;
   const due =
     `Bills and payments coming up ${safeToSpendHorizonPhrase(horizon)} come to about ${amount} ` +
     "more than the cash in your checking.";

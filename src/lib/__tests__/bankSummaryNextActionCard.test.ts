@@ -5,13 +5,17 @@ import {
   NEXT_ACTION_NOTHING_TO_MOVE,
   NEXT_ACTION_NOT_ENOUGH_DATA,
   NO_CASH_ACCOUNT_HINT,
+  decideBankView,
   formatCents,
+  missingBanksNote,
   nextActionCard,
   safeToSpendHorizonPhrase,
+  spendableCashTile,
   type BankView,
   type NextActionCard,
   type ScreenNextAction,
   type ScreenSummary,
+  type ScreenSummaryResponse,
 } from "../bankSummaryView";
 
 /**
@@ -31,6 +35,12 @@ import {
  *                                                   -> "no step picked"
  *   - a sentence saying the app moves money, or stating a rate
  *                                                   -> "what no sentence says"
+ *   - the checking-account line chosen by anything but the test the
+ *     spendable-cash tile uses                      -> "asks for a checking account exactly when the tile does"
+ *   - the safe-to-spend step drawn without looking at its amount
+ *                                                   -> "the safe-to-spend step is drawn only with an amount above zero"
+ *   - the recurring-charges step drawn while a bank was not read
+ *                                                   -> "is not drawn while a bank was not read"
  */
 
 type Kind = (typeof NEXT_ACTION_KINDS)[number];
@@ -166,15 +176,88 @@ describe("nextActionCard — when a line is drawn", () => {
   it("the recurring-charges step follows whether recurring charges are known, not the safe-to-spend gate", () => {
     const text = textOf(nextActionCard(HELD_BACK, computed(), picked("review_recurring")));
     expect(text).toContain(A);
-    expect(nextActionCard(BANK_NOT_READ, computed(), picked("review_recurring")).kind).toBe("line");
     expect(
       nextActionCard(READY, computed({ recurringKnown: false }), picked("review_recurring"))
     ).toEqual(HIDDEN);
+  });
+
+  // Red if: the safe-to-spend step is drawn whatever amount came with it.
+  it("the safe-to-spend step is drawn only with an amount above zero", () => {
+    expect(nextActionCard(READY, computed(), picked("safe_spend", 1))).toEqual({
+      kind: "line",
+      text: NEXT_ACTION_NOTHING_TO_MOVE,
+    });
+    for (const amount of [null, 0, -1, -500]) {
+      expect(nextActionCard(READY, computed(), picked("safe_spend", amount)), String(amount)).toEqual(HIDDEN);
+    }
+  });
+
+  // Red if: the recurring-charges step stops looking at the banks that were
+  // not read. The view comes from decideBankView, so the test the card uses
+  // is held to the one the screen draws its per-bank steps and its
+  // missing-bank line under.
+  it("the recurring-charges step is not drawn while a bank was not read", () => {
+    const response = (second: "ok" | "login_required" | "syncing" | "failed"): ScreenSummaryResponse => ({
+      connections: [
+        { itemId: "item-1", institutionName: "Bank 1", status: "ok" },
+        { itemId: "item-2", institutionName: "Bank 2", status: second },
+      ],
+      accounts: [],
+      summary: computed(),
+    });
+    const viewOf = (r: ScreenSummaryResponse): BankView =>
+      decideBankView({ hasActiveConnection: true, fetchState: "loaded", response: r });
+
+    const allRead = viewOf(response("ok"));
+    expect(allRead.actions).toEqual([]);
+    expect(missingBanksNote(allRead.missingFrom)).toBeNull();
+    expect(textOf(nextActionCard(allRead, computed(), picked("review_recurring")))).toContain(A);
+
+    for (const status of ["login_required", "syncing", "failed"] as const) {
+      const view = viewOf(response(status));
+      // Both marks of a bank that was not read are on the screen.
+      expect(view.actions.length, status).toBeGreaterThan(0);
+      expect(missingBanksNote(view.missingFrom), status).not.toBeNull();
+      expect(nextActionCard(view, computed(), picked("review_recurring")), status).toEqual(HIDDEN);
+    }
   });
 });
 
 describe("nextActionCard — the step picked when safe-to-spend could not be computed", () => {
   const next = picked("fix_connection", null);
+
+  // Red if: the line is chosen from the grouped reason safe-to-spend is not
+  // shown for, which also covers a checking account that is linked but has no
+  // balance to spend.
+  it("asks for a checking account exactly when the tile does", () => {
+    const reasons = [
+      "no_cash_account",
+      "no_spendable_balance",
+      "null_balance",
+      "stale_balance",
+      "recurring_empty_unknown",
+      "recurring_unavailable",
+      "recurring_amount_unknown",
+      "history_incomplete",
+      "non_usd_account",
+    ];
+    let asked = 0;
+    for (const reason of reasons) {
+      const summary = notComputed(reason);
+      const tileAsks = spendableCashTile(summary).kind === "no_cash_account";
+      const text = textOf(nextActionCard(HELD_BACK, summary, next));
+      expect(text === NO_CASH_ACCOUNT_HINT, reason).toBe(tileAsks);
+      if (!tileAsks) expect(text, reason).toBe(NEXT_ACTION_NOT_ENOUGH_DATA);
+      if (tileAsks) asked++;
+    }
+    expect(asked).toBe(1);
+    // A checking account that is linked but has nothing to spend is not a
+    // missing one.
+    expect(nextActionCard(HELD_BACK, notComputed("no_spendable_balance"), next)).toEqual({
+      kind: "line",
+      text: NEXT_ACTION_NOT_ENOUGH_DATA,
+    });
+  });
 
   it("follows what the screen already decided: a bank that was not read points at its steps", () => {
     expect(nextActionCard(BANK_NOT_READ, notComputed("history_incomplete"), next)).toEqual({

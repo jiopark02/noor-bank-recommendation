@@ -34,6 +34,8 @@ import type { NextRequest } from "next/server";
  *   - a candidate sent whole, or any part of it beyond its kind
  *     and amount                                                    -> "only its kind and amount"
  *   - the next step, or its amount, written to the log              -> "is not written to the log"
+ *   - the next step read from a candidate's place in the list,
+ *     not from the picked id                                        -> "the candidate the picked id names"
  */
 
 const PLAINTEXT = "access-sandbox-PLAINTEXT-TOKEN-7f3a";
@@ -602,6 +604,35 @@ describe("POST /api/finance/summary — the next step", () => {
     // A candidate's id can carry an account id; neither it nor any other id
     // the candidate names is sent.
     expect(res.text).not.toMatch(/SECRET|pay_card:/);
+  });
+
+  // Red if: the candidate is taken by its place in the list instead of by
+  // the picked id. Neither candidate is held back, so no other check stands
+  // in for this one.
+  it("is the candidate the picked id names, wherever it sits among the candidates", async () => {
+    const first = candidate({ id: "move_to_emergency:hh", kind: "move_to_emergency", amountCents: 50001 });
+    const second = candidate({ id: "pay_card:card:acct-SECRET", kind: "pay_card", amountCents: 123457 });
+    expect(first.suppressed).toBeNull();
+    expect(second.suppressed).toBeNull();
+
+    const answer = await realAnswer();
+    answer.advice = { ...answer.advice, pick: second.id, reason: "best", candidates: [first, second] };
+    state.engineAnswer = answer;
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(res.json.summary.nextAction).toEqual({
+      reason: "best",
+      pick: { kind: "pay_card", amountCents: 123457 },
+    });
+
+    // The same two the other way round, picking the one that is now last.
+    answer.advice = { ...answer.advice, pick: first.id, reason: "best", candidates: [second, first] };
+    state.engineAnswer = answer;
+    const swapped = await post();
+    expect(swapped.json.summary.nextAction).toEqual({
+      reason: "best",
+      pick: { kind: "move_to_emergency", amountCents: 50001 },
+    });
   });
 
   it("is not written to the log", async () => {

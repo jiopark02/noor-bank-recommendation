@@ -265,6 +265,7 @@ export default function HomePage() {
 
         if (!hasActiveConnection) {
           setBank(null);
+          setNextAction(null);
         }
       } catch (err) {
         if (cancelled) return;
@@ -287,6 +288,7 @@ export default function HomePage() {
   const fetchLiveMoneyData = useCallback(async () => {
     if (!userId || !hasBankConnection) {
       setBank(null);
+      setNextAction(null);
       return;
     }
 
@@ -349,6 +351,7 @@ export default function HomePage() {
         setMoneyError(null);
         setHasBankConnection(false);
         setBank(null);
+        setNextAction(null);
       } else {
         setMoneyError(message);
       }

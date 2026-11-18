@@ -298,6 +298,7 @@ describe("dashboard: no amount drawn while loading or after a failure", () => {
  *     thing twice)
  *   - the next step kept from an earlier load when a new one starts
  *   - the next step read from anywhere but the summary body just checked
+ *   - the summary dropped somewhere without the next step it came with
  */
 describe("dashboard: the next-step line", () => {
   const JSX = slice(PAGE, "<PageLayout>", "</PageLayout>");
@@ -340,6 +341,23 @@ describe("dashboard: the next-step line", () => {
     expect(setAt).toBeGreaterThan(FETCH_LIVE.indexOf("setBank(parsed);"));
     expect(setAt).toBeGreaterThan(FETCH_LIVE.search(/if \(parsed === null\) \{/));
     expect(PAGE).toContain("useState<ScreenNextAction | null>(null)");
+  });
+
+  // Red if: a place that drops the summary keeps the next step that came
+  // with it.
+  it("drops the next step wherever the summary is dropped", () => {
+    const dropped = PAGE.match(/setBank\(null\);/g) ?? [];
+    const together = PAGE.match(/setBank\(null\);\s*setNextAction\(null\);/g) ?? [];
+    expect(dropped.length).toBeGreaterThan(0);
+    expect(together.length).toBe(dropped.length);
+    // And never the other way round: the next step is dropped nowhere else.
+    expect((PAGE.match(/setNextAction\(null\);/g) ?? []).length).toBe(dropped.length);
+    // Each region that drops the summary is covered: the connection check,
+    // the summary load's early return and reset, and its no-connection answer.
+    expect(MOUNT_EFFECT).toMatch(/setBank\(null\);\s*setNextAction\(null\);/);
+    expect(FETCH_LIVE.match(/setBank\(null\);\s*setNextAction\(null\);/g) ?? []).toHaveLength(
+      (FETCH_LIVE.match(/setBank\(null\);/g) ?? []).length
+    );
   });
 });
 
