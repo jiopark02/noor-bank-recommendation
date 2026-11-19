@@ -757,6 +757,29 @@ describe("bankActionLines — a failed re-link request", () => {
       expect(lines.map((l) => l.action)).toEqual(view.actions);
     }
   });
+
+  it("a Link that closed with an error, and a sign-in the route did not confirm, each get their sentence on that bank's line only", () => {
+    const sentences = {
+      link_exit_error: "We couldn't finish re-linking Bank 3. Please try again.",
+      sign_in_unconfirmed: "We couldn't confirm your sign-in. Try again.",
+    } as const;
+    for (const kind of ["link_exit_error", "sign_in_unconfirmed"] as const) {
+      const lines = bankActionLines(view.actions, { itemId: "item-3", kind });
+      expect(lines.map((l) => [l.action.itemId, l.relinkError]), kind).toEqual([
+        ["item-2", null],
+        ["item-3", sentences[kind]],
+        ["item-4", null],
+      ]);
+      expect(lines.map((l) => l.action)).toEqual(view.actions);
+      // Not that bank's line: nothing is attached anywhere.
+      expect(
+        bankActionLines(view.actions, { itemId: "item-4", kind }).every(
+          (l) => l.relinkError === null
+        ),
+        kind
+      ).toBe(true);
+    }
+  });
 });
 
 /*
