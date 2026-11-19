@@ -366,10 +366,19 @@ export default function MoneyPage() {
   }, [handleBankConnected, fetchData]);
 
   // A re-link token serves one Link session. Closing Link drops it, so the
-  // re-link button comes back and the next press asks for a new token.
-  const handleRelinkExit = useCallback(() => {
-    setRelinkToken(null);
-  }, []);
+  // re-link button comes back and the next press asks for a new token. When
+  // Link closed reporting an error, that bank's line says the re-link did not
+  // finish; when the user closed it, nothing is said. Whether there was an
+  // error is all this screen is told about the exit.
+  const handleRelinkExit = useCallback(
+    (exitedWithError: boolean) => {
+      setRelinkToken(null);
+      if (exitedWithError && relinkItemId) {
+        setRelinkNotice({ itemId: relinkItemId, kind: "link_exit_error" });
+      }
+    },
+    [relinkItemId]
+  );
 
   // Remove a single connection. The route now revokes the Plaid Item first and
   // deletes the row only if that succeeded, so a failure means the bank is still

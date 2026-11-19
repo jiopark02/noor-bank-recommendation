@@ -9,6 +9,7 @@ import {
   linkTokenSession,
   readPlaidSession,
 } from "@/lib/plaidConnectFlow";
+import { linkExitedWithError } from "@/lib/plaidRelinkFlow";
 import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
 import {
   BANK_SCREEN_FETCH_TIMEOUT_MS,
@@ -99,7 +100,8 @@ async function requestNewLinkToken(): Promise<LinkTokenResult> {
 interface LinkSessionRunnerProps {
   token: string;
   onSuccess: PlaidLinkOnSuccess;
-  onExit: () => void;
+  /** Told only whether Link closed reporting an error. */
+  onExit: (exitedWithError: boolean) => void;
   onStartFailed: () => void;
 }
 
@@ -108,6 +110,10 @@ interface LinkSessionRunnerProps {
  * keyed on the token): usePlaidLink keeps its previous handler in state after
  * that handler is destroyed, so reusing one instance across tokens can report
  * `ready` with an `open` that does nothing.
+ *
+ * Link's exit callback is given an error (null when the user closed Link) and
+ * details of the session. Only whether there was an error leaves this
+ * component; the details are not received at all.
  */
 function LinkSessionRunner({
   token,
@@ -119,8 +125,8 @@ function LinkSessionRunner({
   const config: PlaidLinkOptions = {
     token,
     onSuccess,
-    onExit: () => {
-      onExit();
+    onExit: (exitError) => {
+      onExit(linkExitedWithError(exitError));
     },
   };
   const { open, ready, error } = usePlaidLink(config);
@@ -142,7 +148,11 @@ function LinkSessionRunner({
 interface PlaidLinkButtonProps {
   userId: string;
   onSuccess: (publicToken: string, metadata: LinkInstitutionMetadata) => void;
-  onExit?: () => void;
+  /**
+   * Link closed without succeeding. The argument says only whether Link
+   * reported an error; false is the user closing it.
+   */
+  onExit?: (exitedWithError: boolean) => void;
   className?: string;
   children?: React.ReactNode;
   linkTokenOverride?: string;
@@ -196,10 +206,13 @@ export function PlaidLinkButton({
     [session, onSuccess]
   );
 
-  const handleExit = useCallback(() => {
-    session.finished();
-    onExit?.();
-  }, [session, onExit]);
+  const handleExit = useCallback(
+    (exitedWithError: boolean) => {
+      session.finished();
+      onExit?.(exitedWithError);
+    },
+    [session, onExit]
+  );
 
   const handleStartFailed = useCallback(() => {
     session.failed(LINK_START_FAILED_MESSAGE);

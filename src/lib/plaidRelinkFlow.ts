@@ -1,8 +1,9 @@
 // =============================================================================
 // What the browser does when the user asks to re-link a bank: whether the
-// request for an update-mode link token is sent, and which sentence a refusal
-// becomes. No React, no network and no Supabase client here: the hook supplies
-// those, so every decision below runs in a test without a DOM.
+// request for an update-mode link token is sent, which sentence a refusal
+// becomes, and what is kept when Link closes. No React, no network and no
+// Supabase client here: the hook and the Link button supply those, so every
+// decision below runs in a test without a DOM.
 //
 // The request goes out only with a session's access token. Without one nothing
 // is sent, so the route never sees a re-link request without an Authorization
@@ -27,13 +28,15 @@ import {
  *   token_refused - Plaid refused the stored token for this bank; asking again
  *                   cannot help, the bank has to be removed and connected anew.
  *   not_linked    - the user has no connection row for this bank any more.
- *   start_failed  - everything else: worth another try.
+ *   start_failed  - everything else before Link opened: worth another try.
+ *   link_exit_error - Link opened and closed reporting an error.
  */
 export type RelinkNoticeKind =
   | "session_ended"
   | "token_refused"
   | "not_linked"
-  | "start_failed";
+  | "start_failed"
+  | "link_exit_error";
 
 /** A notice for one bank, shown on that bank's line only. */
 export type RelinkNotice = { itemId: string; kind: RelinkNoticeKind };
@@ -131,6 +134,19 @@ export async function requestRelinkToken(
   }
 }
 
+/**
+ * Whether Link closed reporting an error, from the first argument of its exit
+ * callback: an error object, or null when the user closed it.
+ *
+ * This is all that is kept of that callback's arguments. The value is compared
+ * with null and no property of it is read, so nothing Link says about the
+ * error, the bank or the session can reach a log, storage or a request from
+ * here on: the rest of the app sees a boolean.
+ */
+export function linkExitedWithError(error: unknown): boolean {
+  return error !== null && error !== undefined;
+}
+
 /** The sentence for a notice, naming the bank where the sentence has a place for it. */
 export function relinkNoticeMessage(
   kind: RelinkNoticeKind,
@@ -143,6 +159,8 @@ export function relinkNoticeMessage(
       return `We can't re-link ${institutionName}. Remove it under Accounts, then connect it again.`;
     case "not_linked":
       return "This bank is no longer linked. Refresh the page to see your current banks.";
+    case "link_exit_error":
+      return `We couldn't finish re-linking ${institutionName}. Please try again.`;
     default:
       return `We couldn't start re-linking ${institutionName}. Please try again in a moment.`;
   }

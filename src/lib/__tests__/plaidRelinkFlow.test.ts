@@ -2,14 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { SessionReadResult } from "../supabase-browser";
 import {
   classifyRelinkResponse,
+  linkExitedWithError,
   relinkNoticeMessage,
   requestRelinkToken,
   type RelinkResponse,
 } from "../plaidRelinkFlow";
 
 /**
- * plaidRelinkFlow, executed: whether the re-link request is sent, and which
- * notice a refusal becomes. Every dependency is a fake that records its calls,
+ * plaidRelinkFlow, executed: whether the re-link request is sent, which notice
+ * a refusal becomes, and what is kept when Link closes. Every dependency is a fake that records its calls,
  * so "was not sent" is observed.
  *
  * The bodies below are written here. That they are what the route really
@@ -28,6 +29,9 @@ import {
  *   - a 404 or a 500 given another notice                       -> "an absent row", "everything else"
  *   - a rejected request, or an answer with no token, thrown    -> "never throws"
  *   - a sentence changed, or the server's own sentence shown    -> "the sentences"
+ *   - Link closing with an error read as the user closing it,
+ *     or the reverse                                            -> "an error is true"
+ *   - a property of Link's exit error read                      -> "no property of the error is read"
  */
 
 function session(accessToken: string): SessionReadResult {
@@ -290,6 +294,9 @@ describe("the sentences", () => {
     expect(relinkNoticeMessage("start_failed", "Bank 2")).toBe(
       "We couldn't start re-linking Bank 2. Please try again in a moment."
     );
+    expect(relinkNoticeMessage("link_exit_error", "Bank 2")).toBe(
+      "We couldn't finish re-linking Bank 2. Please try again."
+    );
   });
 
   it("no sentence is the server's own", () => {
@@ -300,8 +307,56 @@ describe("the sentences", () => {
       READ_FAILED.body.error,
       UNCODED_500.body.error,
     ];
-    for (const kind of ["session_ended", "token_refused", "not_linked", "start_failed"] as const) {
+    for (const kind of [
+      "session_ended",
+      "token_refused",
+      "not_linked",
+      "start_failed",
+      "link_exit_error",
+    ] as const) {
       expect(served).not.toContain(relinkNoticeMessage(kind, "Bank 2"));
     }
+  });
+});
+
+describe("what is kept when Link closes", () => {
+  it("an error is true; the user closing Link is false", () => {
+    expect(
+      linkExitedWithError({
+        error_type: "ITEM_ERROR",
+        error_code: "SOME_CODE",
+        error_message: "sentinel message",
+        display_message: "sentinel display",
+      })
+    ).toBe(true);
+    expect(linkExitedWithError({})).toBe(true);
+    expect(linkExitedWithError(null)).toBe(false);
+    expect(linkExitedWithError(undefined)).toBe(false);
+  });
+
+  it("no property of the error is read", () => {
+    const touched: string[] = [];
+    const refuse = (trap: string) => {
+      touched.push(trap);
+      throw new Error(`test: the exit error was touched (${trap})`);
+    };
+    const guarded = new Proxy(
+      {},
+      {
+        get: (_target, key) => refuse(`get ${String(key)}`),
+        has: (_target, key) => refuse(`has ${String(key)}`),
+        ownKeys: () => refuse("ownKeys"),
+        getOwnPropertyDescriptor: (_target, key) => refuse(`describe ${String(key)}`),
+        getPrototypeOf: () => refuse("getPrototypeOf"),
+      }
+    );
+    expect(linkExitedWithError(guarded)).toBe(true);
+    expect(touched).toEqual([]);
+  });
+
+  it("the answer is a boolean and carries nothing of the error", () => {
+    const answer = linkExitedWithError({ error_message: "sentinel message" });
+    expect(typeof answer).toBe("boolean");
+    expect(JSON.stringify(answer)).toBe("true");
   });
 });
