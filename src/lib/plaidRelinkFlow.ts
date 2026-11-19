@@ -44,12 +44,11 @@ export type RelinkDeps = PlaidSessionDeps & {
 };
 
 /**
- * The Plaid codes that mean the stored token no longer names an Item this app
- * can use. Which of them Plaid sends for a removed Item, and with which
- * status, has not been observed here, so both are read the same way and the
- * status is not consulted.
+ * The one Plaid code read as "remove this bank and connect it again". Its
+ * status is not consulted: which status Plaid sends with it on this call has
+ * not been observed here.
  */
-const TOKEN_REFUSED_CODES = ["INVALID_ACCESS_TOKEN", "ITEM_NOT_FOUND"];
+const TOKEN_REFUSED_CODE = "ITEM_NOT_FOUND";
 
 function readText(body: Record<string, unknown>, key: string): string | undefined {
   const value = body[key];
@@ -59,26 +58,46 @@ function readText(body: Record<string, unknown>, key: string): string | undefine
 /**
  * What a refusal from the re-link route means.
  *
- * The Plaid code is read first, because the route answers one of those codes
- * with the same 401 it uses for a request it could not authenticate. A 401 is
- * about the session only when the route's Plaid error mapping left no mark on
- * it (`errorType` / `errorCode`).
+ * The Plaid code is read first, because the route answers some Plaid codes
+ * with the same 401 it uses for a request it could not authenticate.
+ *
+ * token_refused tells the user to remove the bank and connect it again, so it
+ * is given only for a code the removal can get past. Removing a bank revokes
+ * its Item at Plaid first and keeps the bank when that fails; the one Plaid
+ * rejection the removal accepts as "already gone" is ITEM_NOT_FOUND. A token
+ * Plaid rejects as INVALID_ACCESS_TOKEN would be rejected by the removal too
+ * and the bank would stay, so that code is not sent down that road: it is a
+ * failed start like any other Plaid refusal. If the removal comes to accept
+ * another code, that code can be read as token_refused here, and not before.
+ * (The removal looks at more than the code, which the browser cannot see, so
+ * even after this notice it can still answer "try again".)
+ *
+ * A 401 the route's Plaid error mapping left no mark on (`errorType` /
+ * `errorCode`) is the route saying it did not authenticate the request. That
+ * is not read as an ended session: the route answers the same way when the
+ * auth server gave it no usable answer, and this request went out only after
+ * the browser read a session. Only that read, in requestRelinkToken, says a
+ * session has ended.
+ *
+ * A 404 is the bank no longer linked only when it carries no mark either: the
+ * route's own 404 is the absent row, while a marked one is Plaid's status
+ * passed through.
  */
 export function classifyRelinkResponse(
   status: number,
   body: Record<string, unknown>
 ): RelinkNoticeKind {
   const errorCode = readText(body, "errorCode");
-  if (errorCode !== undefined && TOKEN_REFUSED_CODES.indexOf(errorCode) !== -1) {
+  if (errorCode === TOKEN_REFUSED_CODE) {
     return "token_refused";
   }
-  if (
-    status === 401 &&
-    errorCode === undefined &&
-    readText(body, "errorType") === undefined
-  ) {
-    return "session_ended";
+  // Anything else the Plaid error mapping marked is Plaid's refusal, under
+  // whatever status it came (the mapping passes some of Plaid's own statuses
+  // through). The two statuses read below are the route's own answers only.
+  if (errorCode !== undefined || readText(body, "errorType") !== undefined) {
+    return "start_failed";
   }
+  if (status === 401) return "sign_in_unconfirmed";
   if (status === 404) return "not_linked";
   return "start_failed";
 }
@@ -90,6 +109,8 @@ export function classifyRelinkResponse(
  * The session is read until it answers, and the request is made only with its
  * access token. A read that gave no answer is not "the session ended" — a
  * valid session can produce it — so it is a failed start, and nothing is sent.
+ * "The session ended" is said here and nowhere else, and only for a read that
+ * answered that there is none.
  */
 export async function requestRelinkToken(
   deps: RelinkDeps,

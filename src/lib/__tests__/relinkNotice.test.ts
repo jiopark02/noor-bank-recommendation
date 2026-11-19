@@ -1,7 +1,21 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { relinkNoticeMessage } from "../relinkNotice";
+import { LINK_SIGN_IN_UNCONFIRMED_MESSAGE } from "../plaidConnectFlow";
+import {
+  RELINK_SIGN_IN_UNCONFIRMED_MESSAGE,
+  relinkNoticeMessage,
+  type RelinkNoticeKind,
+} from "../relinkNotice";
+
+const ALL_KINDS: RelinkNoticeKind[] = [
+  "session_ended",
+  "sign_in_unconfirmed",
+  "token_refused",
+  "not_linked",
+  "start_failed",
+  "link_exit_error",
+];
 
 /**
  * relinkNotice: the sentence for each kind of re-link notice, executed, and a
@@ -18,6 +32,10 @@ import { relinkNoticeMessage } from "../relinkNotice";
  *
  * Mutations that turn this file red:
  *   - a sentence changed, or a kind given another kind's sentence -> "the sentences"
+ *   - the unconfirmed sign-in worded apart from the sentence a new
+ *     connection shows for the same answer                         -> "the words a new connection uses"
+ *   - a kind other than the ended session told to sign in again,
+ *     or one other than the refused token told to remove the bank  -> "only the ended session", "only the refused token"
  *   - an import, a re-export or a require added to relinkNotice.ts -> "imports nothing"
  *   - bankSummaryView.ts importing the sentence from the re-link
  *     flow again, or any other module at runtime                   -> "bankSummaryView imports"
@@ -65,6 +83,47 @@ describe("the sentences", () => {
     );
     expect(relinkNoticeMessage("link_exit_error", "Bank 2")).toBe(
       "We couldn't finish re-linking Bank 2. Please try again."
+    );
+  });
+
+  it("a request the route did not authenticate is told in the words a new connection uses", () => {
+    expect(relinkNoticeMessage("sign_in_unconfirmed", "Bank 2")).toBe(
+      "We couldn't confirm your sign-in. Try again."
+    );
+    // The sentence is written out in relinkNotice.ts, which imports nothing;
+    // this holds it equal to the one the connection flow shows.
+    expect(RELINK_SIGN_IN_UNCONFIRMED_MESSAGE).toBe(LINK_SIGN_IN_UNCONFIRMED_MESSAGE);
+    expect(relinkNoticeMessage("sign_in_unconfirmed", "Bank 2")).toBe(
+      LINK_SIGN_IN_UNCONFIRMED_MESSAGE
+    );
+  });
+
+  it("only the ended session is told to sign in again", () => {
+    for (const kind of ALL_KINDS) {
+      const sentence = relinkNoticeMessage(kind, "Bank 2");
+      expect(/sign in again|session ended/i.test(sentence), kind).toBe(kind === "session_ended");
+    }
+  });
+
+  it("only the refused token is told to remove the bank", () => {
+    for (const kind of ALL_KINDS) {
+      const sentence = relinkNoticeMessage(kind, "Bank 2");
+      expect(/remove/i.test(sentence), kind).toBe(kind === "token_refused");
+    }
+  });
+
+  it("every kind has a sentence of its own", () => {
+    const sentences = ALL_KINDS.map((kind) => relinkNoticeMessage(kind, "Bank 2"));
+    for (const sentence of sentences) {
+      expect(typeof sentence).toBe("string");
+      expect(sentence.length).toBeGreaterThan(0);
+    }
+    expect(sentences.filter((s, i) => sentences.indexOf(s) !== i)).toEqual([]);
+  });
+
+  it("a value outside the kinds is told as a failed start, never left blank", () => {
+    expect(relinkNoticeMessage("not_a_kind" as RelinkNoticeKind, "Bank 2")).toBe(
+      relinkNoticeMessage("start_failed", "Bank 2")
     );
   });
 });

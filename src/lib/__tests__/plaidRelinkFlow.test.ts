@@ -22,13 +22,19 @@ import { relinkNoticeMessage } from "../relinkNotice";
  *   - a session read that gave no answer told as an ended
  *     session                                                   -> "nothing is sent without a session"
  *   - the request sent with anything but the session's token    -> "the request carries the session's token"
- *   - every 401 read as the session's                           -> "a 401 from Plaid's refusal"
+ *   - every 401 read as the sign-in's                           -> "a 401 from Plaid's INVALID_ACCESS_TOKEN"
  *   - every 401 read as Plaid's                                 -> "a 401 with no Plaid mark"
- *   - a 401 read as the session's on a missing errorType
+ *   - a 401 read as the sign-in's on a missing errorType
  *     alone, whatever code it carries                           -> "a 401 carrying only a code"
- *   - ITEM_NOT_FOUND dropped from the refused codes, or the
+ *   - an unmarked 401, or any other answer from the route,
+ *     told as an ended session                                  -> "a 401 with no Plaid mark", "no answer from the route"
+ *   - INVALID_ACCESS_TOKEN told as the refused token (remove
+ *     the bank), under any status or errorType                  -> "INVALID_ACCESS_TOKEN is never the refused token"
+ *   - ITEM_NOT_FOUND no longer the refused token, or the
  *     status decided before the code                            -> "ITEM_NOT_FOUND, whatever its status"
  *   - a 404 or a 500 given another notice                       -> "an absent row", "everything else"
+ *   - a 404 Plaid's status passed through read as the absent
+ *     row                                                       -> "a 404 carrying a Plaid mark"
  *   - a rejected request, or an answer with no token, thrown    -> "never throws"
  *   - a sentence changed, or the server's own sentence shown    -> "the sentences"
  *   - Link closing with an error read as the user closing it,
@@ -170,15 +176,17 @@ describe("the request carries the session's token", () => {
 });
 
 describe("which notice a refusal becomes", () => {
-  it("a 401 with no Plaid mark is the session's", () => {
-    expect(classifyRelinkResponse(UNAUTHORIZED.status, UNAUTHORIZED.body)).toBe("session_ended");
-    expect(classifyRelinkResponse(401, {})).toBe("session_ended");
+  it("a 401 with no Plaid mark is an unconfirmed sign-in, not an ended session", () => {
+    expect(classifyRelinkResponse(UNAUTHORIZED.status, UNAUTHORIZED.body)).toBe(
+      "sign_in_unconfirmed"
+    );
+    expect(classifyRelinkResponse(401, {})).toBe("sign_in_unconfirmed");
   });
 
-  it("a 401 from Plaid's refusal of the token is not the session's", () => {
+  it("a 401 from Plaid's INVALID_ACCESS_TOKEN is a failed start: not the sign-in's, not the refused token", () => {
     expect(
       classifyRelinkResponse(INVALID_ACCESS_TOKEN.status, INVALID_ACCESS_TOKEN.body)
-    ).toBe("token_refused");
+    ).toBe("start_failed");
   });
 
   it("ITEM_NOT_FOUND is the token's refusal, whatever its status", () => {
@@ -201,11 +209,62 @@ describe("which notice a refusal becomes", () => {
     expect(classifyRelinkResponse(401, { errorType: "PLAID_ERROR" })).toBe("start_failed");
   });
 
-  it("a 401 carrying only a code, and not one of the refused-token codes, is not the session's", () => {
+  it("a 401 carrying only a code, and not the refused-token code, is not the sign-in's", () => {
     // No errorType here: the code alone marks the answer as Plaid's.
     expect(
       classifyRelinkResponse(401, { error: "x", errorCode: "SOME_OTHER_PLAID_CODE" })
     ).toBe("start_failed");
+  });
+
+  it("INVALID_ACCESS_TOKEN is never the refused token, whatever its status or its errorType", () => {
+    // The removal that token_refused sends the user to does not get past this
+    // code, so it must not be told as "remove it, then connect it again".
+    for (const status of [400, 401, 404, 500]) {
+      for (const errorType of ["ITEM_LOGIN_REQUIRED", "PLAID_ERROR", undefined]) {
+        const body: Record<string, unknown> = { error: "x", errorCode: "INVALID_ACCESS_TOKEN" };
+        if (errorType !== undefined) body.errorType = errorType;
+        expect(classifyRelinkResponse(status, body), `${status} ${errorType}`).toBe(
+          "start_failed"
+        );
+      }
+    }
+  });
+
+  it("a 404 carrying a Plaid mark is Plaid's refusal, not the absent row", () => {
+    expect(
+      classifyRelinkResponse(404, {
+        error: "There was a problem reaching your bank. Please try again.",
+        errorType: "PLAID_ERROR",
+        errorCode: "SOME_PLAID_CODE",
+      })
+    ).toBe("start_failed");
+    expect(classifyRelinkResponse(404, { errorType: "PLAID_ERROR" })).toBe("start_failed");
+    expect(classifyRelinkResponse(404, { errorCode: "SOME_PLAID_CODE" })).toBe("start_failed");
+  });
+
+  it("no answer from the route is told as an ended session", async () => {
+    const answers: Answer[] = [
+      UNAUTHORIZED,
+      { status: 401, body: {} },
+      INVALID_ACCESS_TOKEN,
+      itemNotFound(401),
+      NOT_FOUND,
+      READ_FAILED,
+      UNCODED_500,
+      { status: 403, body: { error: "Forbidden" } },
+      "no-response",
+    ];
+    for (const answer of answers) {
+      const { deps, posts } = harness([session("access-1")], [answer]);
+      const result = await requestRelinkToken(deps, "item-1");
+      expect(result, JSON.stringify(answer)).not.toEqual({ ok: false, kind: "session_ended" });
+      expect(posts).toHaveLength(1);
+    }
+    for (const status of [400, 401, 403, 404, 429, 500, 503]) {
+      for (const body of [{}, { error: "Unauthorized" }, { errorType: "PLAID_ERROR" }]) {
+        expect(classifyRelinkResponse(status, body), `${status}`).not.toBe("session_ended");
+      }
+    }
   });
 
   it("an absent row is the bank no longer linked", () => {
@@ -254,8 +313,8 @@ describe("which notice a refusal becomes", () => {
 
   it("the request's result is the notice for the answer it got", async () => {
     const cases: Array<[Answer, string]> = [
-      [UNAUTHORIZED, "session_ended"],
-      [INVALID_ACCESS_TOKEN, "token_refused"],
+      [UNAUTHORIZED, "sign_in_unconfirmed"],
+      [INVALID_ACCESS_TOKEN, "start_failed"],
       [itemNotFound(400), "token_refused"],
       [NOT_FOUND, "not_linked"],
       [READ_FAILED, "start_failed"],

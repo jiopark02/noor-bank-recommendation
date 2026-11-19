@@ -13,12 +13,15 @@ import { classifyRelinkResponse } from "../plaidRelinkFlow";
  * browser uses, so the two cannot drift apart unseen.
  *
  * Which code and status Plaid really sends for a token it refuses on this call
- * is a live check. Both codes the browser reads as a refused token are
- * injected here.
+ * is a live check. The two codes a refused token may come back with are
+ * injected here: the browser reads ITEM_NOT_FOUND as a refused token and
+ * INVALID_ACCESS_TOKEN as a failed start.
  *
  * Mutations that turn this file red:
  *   - the route's own 401 given a Plaid mark, or Plaid's 401
  *     sent without its code                                    -> "two different 401s"
+ *   - the route's own 401 read as an ended session, or
+ *     INVALID_ACCESS_TOKEN read as a refused token             -> "two different 401s"
  *   - ITEM_NOT_FOUND no longer read as a refused token         -> "ITEM_NOT_FOUND"
  *   - a failed read or a failed decrypt answered as an absent
  *     row, or as a refused token                               -> "a failed read", "a failed decrypt"
@@ -119,22 +122,22 @@ afterEach(() => {
 });
 
 describe("relink — two different 401s", () => {
-  it("a request that is not authenticated: a 401 with no Plaid mark, read as the session's", async () => {
+  it("a request that is not authenticated: a 401 with no Plaid mark, read as an unconfirmed sign-in", async () => {
     state.userId = null;
     const res = await post();
     expect(res.status).toBe(401);
     expect(res.json).toEqual({ error: "Unauthorized" });
-    expect(classifyRelinkResponse(res.status, res.json)).toBe("session_ended");
+    expect(classifyRelinkResponse(res.status, res.json)).toBe("sign_in_unconfirmed");
     expect(state.linkTokenCalls).toBe(0);
   });
 
-  it("Plaid refusing the stored token: a 401 carrying its code, read as the token's", async () => {
+  it("Plaid answering INVALID_ACCESS_TOKEN: a 401 carrying its code, read as a failed start", async () => {
     state.plaidRejection = plaidRejection(400, "INVALID_ACCESS_TOKEN", "INVALID_INPUT");
     const res = await post();
     expect(res.status).toBe(401);
     expect(res.json.errorCode).toBe("INVALID_ACCESS_TOKEN");
     expect(typeof res.json.errorType).toBe("string");
-    expect(classifyRelinkResponse(res.status, res.json)).toBe("token_refused");
+    expect(classifyRelinkResponse(res.status, res.json)).toBe("start_failed");
   });
 });
 
