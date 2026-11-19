@@ -2,9 +2,11 @@
 // What the dashboard and the money screen may show from a finance summary.
 //
 // Pure and client-safe: besides types it imports only the sentence for a
-// failed re-link (plaidRelinkFlow), which is a pure function too. Both screens
-// decide through here, so the rules below are executed by tests rather than
-// read from page source:
+// failed re-link, from relinkNotice.ts, which itself imports nothing. This
+// file is loaded on the server too, so it must not import, directly or through
+// another file, anything that reads the session. Both screens decide through
+// here, so the rules below are executed by tests rather than read from page
+// source:
 //   - A figure is shown only for a summary that arrived in this load; while
 //     loading, or after a failed load, no dollar amount is drawn.
 //   - Safe-to-spend is shown only when the engine says it may be: every bank
@@ -36,7 +38,7 @@ import type {
   DisplayTransaction,
   FinanceSummaryResponse,
 } from "./plaidEngineAdapter";
-import { relinkNoticeMessage, type RelinkNotice } from "./plaidRelinkFlow";
+import { relinkNoticeMessage, type RelinkNotice } from "./relinkNotice";
 
 /**
  *   ready       - a summary for a connected bank arrived; show its numbers.

@@ -3,10 +3,10 @@ import type { SessionReadResult } from "../supabase-browser";
 import {
   classifyRelinkResponse,
   linkExitedWithError,
-  relinkNoticeMessage,
   requestRelinkToken,
   type RelinkResponse,
 } from "../plaidRelinkFlow";
+import { relinkNoticeMessage } from "../relinkNotice";
 
 /**
  * plaidRelinkFlow, executed: whether the re-link request is sent, which notice
