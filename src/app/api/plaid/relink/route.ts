@@ -121,7 +121,6 @@ export async function POST(request: NextRequest) {
         client_name: "Noor",
         country_codes: PLAID_COUNTRY_CODES,
         language: "en",
-        redirect_uri: process.env.PLAID_REDIRECT_URI,
         access_token: accessToken, // This makes it an "update" mode link
       });
 

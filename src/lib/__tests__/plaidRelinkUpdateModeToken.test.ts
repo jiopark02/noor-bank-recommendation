@@ -13,6 +13,7 @@ import type { NextRequest } from "next/server";
  *   - `products` sent again on the update-mode request             -> "no products"
  *   - the stored (encrypted) value sent instead of the decrypted one -> "decrypted token"
  *   - client_user_id taken from anything but the verified user      -> "verified user"
+ *   - a redirect_uri field on the update-mode request again         -> "no redirect_uri"
  */
 
 const state = {
@@ -96,5 +97,17 @@ describe("relink — the update-mode link token request", () => {
   it("names the verified user, never a user named in the body", async () => {
     await post({ itemId: "item-1", userId: "someone-else" });
     expect(state.linkTokenCalls[0].user).toEqual({ client_user_id: "user-1" });
+  });
+
+  it("sends no redirect_uri, whatever the environment holds", async () => {
+    process.env.PLAID_REDIRECT_URI = "https://noor.test/oauth-return";
+    try {
+      const res = await post({ itemId: "item-1" });
+      expect(res.status).toBe(200);
+      expect(state.linkTokenCalls).toHaveLength(1);
+      expect("redirect_uri" in state.linkTokenCalls[0]).toBe(false);
+    } finally {
+      delete process.env.PLAID_REDIRECT_URI;
+    }
   });
 });
