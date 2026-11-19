@@ -174,7 +174,7 @@ describe("the screens' requests run under the limit", () => {
       "hook relink",
       "/api/plaid/relink",
       "await response.json()",
-      "if (!ok)"
+      "return requestRelinkToken("
     );
   });
 

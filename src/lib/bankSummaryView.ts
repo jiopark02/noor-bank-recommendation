@@ -1,9 +1,10 @@
 // =============================================================================
 // What the dashboard and the money screen may show from a finance summary.
 //
-// Pure and client-safe: it imports types only. Both screens decide through
-// here, so the rules below are executed by tests rather than read from page
-// source:
+// Pure and client-safe: besides types it imports only the sentence for a
+// failed re-link (plaidRelinkFlow), which is a pure function too. Both screens
+// decide through here, so the rules below are executed by tests rather than
+// read from page source:
 //   - A figure is shown only for a summary that arrived in this load; while
 //     loading, or after a failed load, no dollar amount is drawn.
 //   - Safe-to-spend is shown only when the engine says it may be: every bank
@@ -35,6 +36,7 @@ import type {
   DisplayTransaction,
   FinanceSummaryResponse,
 } from "./plaidEngineAdapter";
+import { relinkNoticeMessage, type RelinkNotice } from "./plaidRelinkFlow";
 
 /**
  *   ready       - a summary for a connected bank arrived; show its numbers.
@@ -305,26 +307,28 @@ export function describeBankAction(action: BankAction): string {
 
 export interface BankActionLine {
   action: BankAction;
-  /** Shown under this line only: the re-link request for this bank failed. */
+  /** Shown under this line only: the re-link of this bank did not go through. */
   relinkError: string | null;
 }
 
 /**
- * The action lines to draw, with a failed re-link request attached to the
- * line of the bank it was for. A failed re-link request is about that bank
- * only: every line stays, including that bank's re-link line (so it can be
- * tried again), and it does not touch the figures — it is never an input to
- * summaryLoadInputs or decideBankView.
+ * The action lines to draw, with a failed re-link attached to the line of the
+ * bank it was for, in the sentence for why it failed. A failed re-link is
+ * about that bank only: every line stays, including that bank's re-link line
+ * (so it can be tried again), and it does not touch the figures — it is never
+ * an input to summaryLoadInputs or decideBankView.
  */
 export function bankActionLines(
   actions: BankAction[],
-  relinkFailedItemId: string | null
+  relinkNotice: RelinkNotice | null
 ): BankActionLine[] {
   return actions.map((action) => ({
     action,
     relinkError:
-      action.kind === "relink" && action.itemId === relinkFailedItemId
-        ? `We couldn't start re-linking ${action.institutionName}. Please try again in a moment.`
+      relinkNotice !== null &&
+      action.kind === "relink" &&
+      action.itemId === relinkNotice.itemId
+        ? relinkNoticeMessage(relinkNotice.kind, action.institutionName)
         : null,
   }));
 }
