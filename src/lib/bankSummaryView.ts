@@ -21,6 +21,9 @@
 //   - The next step the engine picked is checked apart from the figures too:
 //     a missing or wrong-shaped one means no next step is shown, and the
 //     figures stay.
+//   - A linked bank's status label on the money screen says what the summary
+//     of this load read from that bank; with no summary, or no match for the
+//     bank in it, no label is drawn.
 // Data issues in the summary (for example, transactions in Plaid's catch-all
 // category) are information about the figures, not a connection problem: they
 // create no action and do not hide safe-to-spend.
@@ -324,6 +327,72 @@ export function bankActionLines(
         ? `We couldn't start re-linking ${action.institutionName}. Please try again in a moment.`
         : null,
   }));
+}
+
+// ---- the linked-bank list -------------------------------------------------------
+
+export const CONNECTION_STATUS_LABEL_OK = "Connected";
+export const CONNECTION_STATUS_LABEL_LOGIN_REQUIRED = "Sign-in needed";
+export const CONNECTION_STATUS_LABEL_SYNCING = "Importing";
+export const CONNECTION_STATUS_LABEL_FAILED = "Couldn't reach";
+
+/**
+ * The short label for what a summary said about one connection, or null for
+ * any value that is not one of the summary's statuses. Decided by a switch,
+ * never by a lookup in an object: a value such as "constructor" has no label.
+ */
+export function connectionStatusLabel(status: string): string | null {
+  switch (status) {
+    case "ok":
+      return CONNECTION_STATUS_LABEL_OK;
+    case "login_required":
+      return CONNECTION_STATUS_LABEL_LOGIN_REQUIRED;
+    case "syncing":
+      return CONNECTION_STATUS_LABEL_SYNCING;
+    case "failed":
+      return CONNECTION_STATUS_LABEL_FAILED;
+    default:
+      return null;
+  }
+}
+
+export interface LinkedBankRow {
+  itemId: string;
+  institutionName: string;
+  /** null: draw no status line for this bank. */
+  statusLabel: string | null;
+}
+
+/**
+ * The rows of the money screen's linked-bank list: one row for every listed
+ * connection, in the list's order, whatever is known about it. A row is never
+ * left out, so every listed bank keeps its place and its remove control.
+ *
+ * A row's status label says what the summary of this load read from that bank,
+ * matched by item id. It is null when there is no summary (still loading, or
+ * the load failed), when the summary names no connection with that item id,
+ * and when the status it names is not one this module knows. The stored status
+ * of a listed connection is not an input: the parameter type does not carry
+ * it.
+ */
+export function linkedBankRows(
+  connections: ReadonlyArray<{ itemId: string; institutionName: string }>,
+  response: ScreenSummaryResponse | null
+): LinkedBankRow[] {
+  const rows: LinkedBankRow[] = [];
+  for (let i = 0; i < connections.length; i++) {
+    const itemId = connections[i].itemId;
+    let statusLabel: string | null = null;
+    if (response !== null) {
+      for (let j = 0; j < response.connections.length; j++) {
+        if (response.connections[j].itemId !== itemId) continue;
+        statusLabel = connectionStatusLabel(response.connections[j].status);
+        break;
+      }
+    }
+    rows.push({ itemId, institutionName: connections[i].institutionName, statusLabel });
+  }
+  return rows;
 }
 
 // ---- response shape -----------------------------------------------------------

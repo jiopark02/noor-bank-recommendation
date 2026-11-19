@@ -47,6 +47,7 @@ import {
   formatMonthlyOrUnknown,
   formatSpending,
   isNoActiveConnectionMessage,
+  linkedBankRows,
   missingBanksNote,
   parseFinanceSummaryResponse,
   parseSummaryTransactions,
@@ -245,8 +246,10 @@ export default function MoneyPage() {
               if (!requestGate.isCurrent(token)) return;
               const errText = readString(data, "error") ?? null;
               if (isNoActiveConnectionMessage(errText)) {
-                // Re-pull authoritative connection state from the DB, which is
-                // the only place connection state lives.
+                // Re-pull the connection list, which the server reads from the
+                // database, the only place the list of linked banks lives. A
+                // bank's status line is not taken from that list: it comes from
+                // a summary that loaded.
                 refetchConnections();
               }
               throw new Error(readErrorMessage(data) || BANK_DATA_LOAD_FAILED);
@@ -719,38 +722,42 @@ export default function MoneyPage() {
               <div className="noor-card p-5 mb-4">
                 <h3 className="font-medium text-black mb-3">Linked banks</h3>
                 <div className="space-y-1">
-                  {plaidConnections.connections.map((conn) => (
+                  {/* One row per listed connection. The status line says what
+                      the summary of this load read from that bank, and is left
+                      out when the summary has nothing to say about it. The
+                      remove control is drawn for every row. */}
+                  {linkedBankRows(plaidConnections.connections, bank).map((row) => (
                     <div
-                      key={conn.itemId}
+                      key={row.itemId}
                       className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <BankMonogram name={conn.institutionName} />
+                        <BankMonogram name={row.institutionName} />
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-black truncate">
-                            {conn.institutionName}
+                            {row.institutionName}
                           </p>
-                          <p className="text-xs text-gray-500">
-                            {conn.status === "active"
-                              ? "Connected"
-                              : "Needs attention"}
-                          </p>
+                          {row.statusLabel !== null && (
+                            <p className="text-xs text-gray-500">
+                              {row.statusLabel}
+                            </p>
+                          )}
                         </div>
                       </div>
-                      {confirmingRemoveItemId === conn.itemId ? (
+                      {confirmingRemoveItemId === row.itemId ? (
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <button
-                            onClick={() => handleRemoveConnection(conn.itemId)}
-                            disabled={removingItemId === conn.itemId}
+                            onClick={() => handleRemoveConnection(row.itemId)}
+                            disabled={removingItemId === row.itemId}
                             className="text-xs font-medium text-red-600 px-2 py-1 rounded disabled:opacity-50"
                           >
-                            {removingItemId === conn.itemId
+                            {removingItemId === row.itemId
                               ? "Removing…"
                               : "Confirm"}
                           </button>
                           <button
                             onClick={() => setConfirmingRemoveItemId(null)}
-                            disabled={removingItemId === conn.itemId}
+                            disabled={removingItemId === row.itemId}
                             className="text-xs text-gray-500 px-2 py-1 rounded disabled:opacity-50"
                           >
                             Cancel
@@ -759,7 +766,7 @@ export default function MoneyPage() {
                       ) : (
                         <button
                           onClick={() =>
-                            setConfirmingRemoveItemId(conn.itemId)
+                            setConfirmingRemoveItemId(row.itemId)
                           }
                           className="text-xs font-medium text-gray-600 hover:text-red-600 px-2.5 py-1 rounded border border-gray-200 flex-shrink-0"
                         >

@@ -384,3 +384,47 @@ describe("the field lists name only fields that are read", () => {
     expect(unread).toEqual([]);
   });
 });
+
+/*
+ * The linked-bank list on the accounts tab: its rows and their status labels
+ * come from linkedBankRows (executed by linkedBankRows.test.ts), over the
+ * connection list and the summary of this load. The page decides no label of
+ * its own, and draws the remove control for every row.
+ *
+ * Mutations that turn this block red:
+ *   - a label decided in the page from the listed connection's stored status
+ *   - the rows mapped from the connection list directly
+ *   - the remove control drawn only for a row with (or without) a label
+ */
+describe("money screen: linked banks", () => {
+  const LINKED = slice("Linked banks</h3>", "{removeNotice && (");
+
+  it("takes rows and labels from linkedBankRows over the summary of this load", () => {
+    expect(LINKED).toContain("linkedBankRows(plaidConnections.connections, bank).map((row) => (");
+    expect(LINKED.match(/\.map\(/g) ?? []).toHaveLength(1);
+    expect(PAGE).not.toContain("Needs attention");
+    expect(PAGE).not.toMatch(/\bconn\b/);
+    expect(LINKED).not.toMatch(/\.status\b/);
+    expect(LINKED).not.toMatch(/"Connected"|"active"/);
+  });
+
+  it("draws the remove control for every row, whatever its label", () => {
+    const controls = LINKED.indexOf("{confirmingRemoveItemId === row.itemId ? (");
+    expect(controls).toBeGreaterThan(0);
+    // The label is read in the status line only, before the controls.
+    const statusLine = LINKED.slice(0, controls);
+    expect(statusLine.match(/statusLabel/g) ?? []).toHaveLength(2);
+    expect(statusLine).toContain("{row.statusLabel !== null && (");
+    expect(statusLine).toContain("{row.statusLabel}");
+    const rest = LINKED.slice(controls);
+    expect(rest).not.toContain("statusLabel");
+    // Nothing between the row's opening and its controls, and nothing inside
+    // them, makes the controls conditional on anything but the confirm step.
+    expect(rest).not.toContain("&&");
+    expect(rest.match(/ \? \(| : \(/g) ?? []).toHaveLength(2);
+    expect(rest).toMatch(
+      /\) : \(\s*<button\s+onClick=\{\(\) =>\s*setConfirmingRemoveItemId\(row\.itemId\)\s*\}\s*className="[^"]*"\s*>\s*Remove permanently/
+    );
+    expect(rest).toContain("handleRemoveConnection(row.itemId)");
+  });
+});
