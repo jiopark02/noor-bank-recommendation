@@ -24,6 +24,8 @@ import {
  *   - the request sent with anything but the session's token    -> "the request carries the session's token"
  *   - every 401 read as the session's                           -> "a 401 from Plaid's refusal"
  *   - every 401 read as Plaid's                                 -> "a 401 with no Plaid mark"
+ *   - a 401 read as the session's on a missing errorType
+ *     alone, whatever code it carries                           -> "a 401 carrying only a code"
  *   - ITEM_NOT_FOUND dropped from the refused codes, or the
  *     status decided before the code                            -> "ITEM_NOT_FOUND, whatever its status"
  *   - a 404 or a 500 given another notice                       -> "an absent row", "everything else"
@@ -197,6 +199,13 @@ describe("which notice a refusal becomes", () => {
       })
     ).toBe("start_failed");
     expect(classifyRelinkResponse(401, { errorType: "PLAID_ERROR" })).toBe("start_failed");
+  });
+
+  it("a 401 carrying only a code, and not one of the refused-token codes, is not the session's", () => {
+    // No errorType here: the code alone marks the answer as Plaid's.
+    expect(
+      classifyRelinkResponse(401, { error: "x", errorCode: "SOME_OTHER_PLAID_CODE" })
+    ).toBe("start_failed");
   });
 
   it("an absent row is the bank no longer linked", () => {
