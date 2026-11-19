@@ -207,8 +207,11 @@ describe("money screen reads the finance summary", () => {
     expect(inputs).not.toContain("relink");
 
     const handleRelink = slice("const handleRelink = useCallback(", "const handleRelinkSuccess");
-    expect(handleRelink).toMatch(/catch \(err\) \{[^}]*setRelinkFailedItemId\(itemId\);/);
-    expect(PAGE).toContain("bankActionLines(view.actions, relinkFailedItemId)");
+    expect(handleRelink).toContain("setRelinkNotice({ itemId, kind: result.kind });");
+    expect(handleRelink).toMatch(
+      /catch \(err\) \{[^}]*setRelinkNotice\(\{ itemId, kind: "start_failed" \}\);/
+    );
+    expect(PAGE).toContain("bankActionLines(view.actions, relinkNotice)");
   });
 
   it("every figure in the balance and 90-day cards is guarded", () => {

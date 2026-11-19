@@ -12,6 +12,8 @@ import { describe, it, expect } from "vitest";
  *   - the token exchange requested from a screen or a component again   -> "one place asks"
  *   - a bank-connection request built from getSupabaseBearerHeaders()   -> "no request is built from a header that may be empty"
  *   - the link-token request made before the session check              -> "the link token is asked for only with a session"
+ *   - the re-link request built from getSupabaseBearerHeaders() again,
+ *     or made outside the flow that reads the session first             -> "the re-link token is asked for only through the flow"
  *   - the exchange request given a time limit                           -> "the exchange has no time limit"
  *   - the public token, or anything else, written to browser storage
  *     or a cookie from these files                                      -> "no browser storage"
@@ -57,6 +59,7 @@ const STATUS = code(read("components/plaid/PlaidExchangeStatus.tsx"));
 const PLAID_LINK = code(read("components/plaid/PlaidLink.tsx"));
 const FLOW = code(read("lib/plaidConnectFlow.ts"));
 const MONEY = code(read("app/money/page.tsx"));
+const CONNECTIONS_HOOK = code(read("hooks/usePlaidConnections.ts"));
 
 function between(source: string, file: string, from: string, to: string): string {
   const start = source.indexOf(from);
@@ -117,6 +120,31 @@ describe("no request is built from a header that may be empty", () => {
     );
     expect(request).toContain("Authorization: `Bearer ${session.accessToken}`");
     expect(request.split("fetch(").length - 1).toBe(1);
+  });
+
+  it("the re-link token is asked for only through the flow, with the access token it hands over", () => {
+    // The flow reads the session before it calls `post`
+    // (plaidRelinkFlow.test.ts runs that); here, that the hook's request is
+    // the flow's `post` and takes its header from the flow's token.
+    const relink = between(
+      CONNECTIONS_HOOK,
+      "usePlaidConnections",
+      "const relink =",
+      "return {\n    connections,"
+    );
+    expect(relink).not.toContain("getSupabaseBearerHeaders");
+    expect(relink).not.toContain("getSessionSafe");
+    expect(relink).toContain("const post = (accessToken: string, id: string) =>");
+    expect(relink).toContain("Authorization: `Bearer ${accessToken}`");
+    expect(relink).toContain('readSession(timeoutMs, "plaid-connect", attempt)');
+    expect(relink.split("fetch(").length - 1).toBe(1);
+    expect(relink.indexOf("return requestRelinkToken(")).toBeGreaterThan(relink.indexOf("fetch("));
+    expect(relink).toMatch(/return requestRelinkToken\(\s*\{[^}]*\bpost,\s*\},\s*itemId\s*\);/);
+    // The re-link route is asked from the hook and nowhere else.
+    const askingRelink = clientSources().filter((path) =>
+      /fetch\(\s*"\/api\/plaid\/relink"/.test(code(read(path)))
+    );
+    expect(askingRelink).toEqual(["hooks/usePlaidConnections.ts"]);
   });
 
   it("the exchange is sent with the access token the flow hands over", () => {

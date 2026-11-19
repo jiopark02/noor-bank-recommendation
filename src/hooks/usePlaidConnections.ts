@@ -1,7 +1,12 @@
 import { useState, useCallback, useEffect } from "react";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
-import { getSupabaseBearerHeaders } from "@/lib/supabase-browser";
-import { asPlainObject, readErrorMessage, readString } from "@/lib/requestJson";
+import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
+import { waitMs } from "@/lib/sessionFlow";
+import {
+  requestRelinkToken,
+  type RelinkTokenResult,
+} from "@/lib/plaidRelinkFlow";
+import { asPlainObject, readErrorMessage } from "@/lib/requestJson";
 import { clearPlaidLocalState } from "@/lib/validation";
 import { createRequestGate } from "@/lib/bankSummaryView";
 import {
@@ -179,51 +184,50 @@ export function usePlaidConnections(userId: string | null) {
 
   // Ask for a link token to repair one connection's login.
   //
-  // A failure is THROWN TO THE CALLER, never written into the shared `error`,
-  // for the same reason as disconnect: `error` means "loading the connection
-  // list failed", and the money screen reads it to mark every figure as
-  // unknown. A failed re-link request concerns one bank, and the caller shows
-  // it next to that bank.
+  // A failure is RETURNED TO THE CALLER as the kind of notice to show, never
+  // thrown and never written into the shared `error`, for the same reason as
+  // disconnect: `error` means "loading the connection list failed", and the
+  // money screen reads it to mark every figure as unknown. A failed re-link
+  // request concerns one bank, and the caller shows it next to that bank.
+  //
+  // The session is read first (requestRelinkToken) and the request is built
+  // from its access token only, so it never goes out without an Authorization
+  // header.
   const relink = useCallback(
-    async (itemId: string): Promise<string> => {
-      if (!userId) {
-        throw new Error("Please log in first");
-      }
-
-      const plaidHeaders = buildJsonAuthorizedHeaders(
-        await getSupabaseBearerHeaders()
-      );
+    (itemId: string): Promise<RelinkTokenResult> => {
       // The request and its body read run under the screen's limit, so a
       // re-link request that never answers ends as a failed re-link for that
-      // bank, not a button left on "Preparing re-link...".
-      const { ok, payload } = await withFetchTimeout(
-        BANK_SCREEN_FETCH_TIMEOUT_MS,
-        async (signal) => {
-          const response = await fetch("/api/plaid/relink", {
-            method: "POST",
-            headers: plaidHeaders,
-            body: JSON.stringify({ itemId }),
-            signal,
-          });
-          return {
-            ok: response.ok,
-            payload: asPlainObject(await response.json()),
-          };
-        }
-      );
-      if (!ok) {
-        throw new Error(
-          readErrorMessage(payload) || "Failed to create relink token"
+      // bank, not a button left on "Preparing re-link...". The session read
+      // sits outside the limit, which is for the server's answer.
+      const post = (accessToken: string, id: string) =>
+        withFetchTimeout(
+          BANK_SCREEN_FETCH_TIMEOUT_MS,
+          async (signal) => {
+            const response = await fetch("/api/plaid/relink", {
+              method: "POST",
+              headers: buildJsonAuthorizedHeaders({
+                Authorization: `Bearer ${accessToken}`,
+              }),
+              body: JSON.stringify({ itemId: id }),
+              signal,
+            });
+            return {
+              status: response.status,
+              body: asPlainObject(await response.json()),
+            };
+          }
         );
-      }
-
-      const linkToken = readString(payload, "linkToken");
-      if (!linkToken) {
-        throw new Error("Failed to create relink token");
-      }
-      return linkToken;
+      return requestRelinkToken(
+        {
+          readSession: (timeoutMs, attempt) =>
+            readSession(timeoutMs, "plaid-connect", attempt),
+          sleep: waitMs,
+          post,
+        },
+        itemId
+      );
     },
-    [userId]
+    []
   );
 
   return {

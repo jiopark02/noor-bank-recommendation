@@ -33,6 +33,7 @@ import {
   BANK_SCREEN_FETCH_TIMEOUT_MS,
   withFetchTimeout,
 } from "@/lib/screenFetchTimeout";
+import type { RelinkNotice } from "@/lib/plaidRelinkFlow";
 import {
   DISPLAY_WINDOW_LABEL,
   bankActionLines,
@@ -153,11 +154,10 @@ export default function MoneyPage() {
   const [relinkItemId, setRelinkItemId] = useState<string | null>(null);
   const [relinkToken, setRelinkToken] = useState<string | null>(null);
   const [isPreparingRelink, setIsPreparingRelink] = useState(false);
-  // The bank whose re-link request failed. Shown next to that bank only; it is
-  // not a failed load, and the figures and other banks' lines stay.
-  const [relinkFailedItemId, setRelinkFailedItemId] = useState<string | null>(
-    null
-  );
+  // The bank whose re-link did not go through, and why. Shown next to that
+  // bank only; it is not a failed load, and the figures and other banks' lines
+  // stay.
+  const [relinkNotice, setRelinkNotice] = useState<RelinkNotice | null>(null);
   // Connection management (accounts tab): inline-confirm remove + add-bank notice.
   const [confirmingRemoveItemId, setConfirmingRemoveItemId] = useState<
     string | null
@@ -294,7 +294,7 @@ export default function MoneyPage() {
     setError(null);
     setBank(null);
     setTransactionList(null);
-    setRelinkFailedItemId(null);
+    setRelinkNotice(null);
     setIsLoadingData(true);
 
     try {
@@ -328,18 +328,24 @@ export default function MoneyPage() {
 
   // Re-link one bank: the item id comes from the connection the summary
   // reported as needing a new login, never from a position in a list. A failed
-  // request is recorded against that bank only.
+  // request is recorded against that bank only, with the reason the hook
+  // returned. The hook does not throw; the catch is for a broken contract.
   const handleRelink = useCallback(
     async (itemId: string) => {
       try {
         setRelinkItemId(itemId);
         setRelinkToken(null);
-        setRelinkFailedItemId(null);
+        setRelinkNotice(null);
         setIsPreparingRelink(true);
-        setRelinkToken(await plaidConnections.relink(itemId));
+        const result = await plaidConnections.relink(itemId);
+        if (result.ok) {
+          setRelinkToken(result.token);
+        } else {
+          setRelinkNotice({ itemId, kind: result.kind });
+        }
       } catch (err) {
         console.error("Relink failed:", err);
-        setRelinkFailedItemId(itemId);
+        setRelinkNotice({ itemId, kind: "start_failed" });
       } finally {
         setIsPreparingRelink(false);
       }
@@ -360,10 +366,19 @@ export default function MoneyPage() {
   }, [handleBankConnected, fetchData]);
 
   // A re-link token serves one Link session. Closing Link drops it, so the
-  // re-link button comes back and the next press asks for a new token.
-  const handleRelinkExit = useCallback(() => {
-    setRelinkToken(null);
-  }, []);
+  // re-link button comes back and the next press asks for a new token. When
+  // Link closed reporting an error, that bank's line says the re-link did not
+  // finish; when the user closed it, nothing is said. Whether there was an
+  // error is all this screen is told about the exit.
+  const handleRelinkExit = useCallback(
+    (exitedWithError: boolean) => {
+      setRelinkToken(null);
+      if (exitedWithError && relinkItemId) {
+        setRelinkNotice({ itemId: relinkItemId, kind: "link_exit_error" });
+      }
+    },
+    [relinkItemId]
+  );
 
   // Remove a single connection. The route now revokes the Plaid Item first and
   // deletes the row only if that succeeded, so a failure means the bank is still
@@ -552,7 +567,7 @@ export default function MoneyPage() {
 
       {view.actions.length > 0 && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
-          {bankActionLines(view.actions, relinkFailedItemId).map(
+          {bankActionLines(view.actions, relinkNotice).map(
             ({ action, relinkError }) => (
             <div key={action.itemId}>
               <p className="text-sm text-amber-900">
