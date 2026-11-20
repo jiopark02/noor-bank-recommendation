@@ -106,6 +106,7 @@ const NON_CONSUMING_SITES: Record<string, string> = {
   "app/auth/callback/page.tsx": "Supabase session access_token, not Plaid",
   "app/survey/page.tsx": "Supabase session access_token, not Plaid",
   "lib/plaidConnectFlow.ts": "Supabase session access_token, not Plaid",
+  "lib/householdClient.ts": "Supabase session access_token, not Plaid",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

@@ -54,3 +54,62 @@ export const HOUSEHOLD_MESSAGES: Record<HouseholdCode, string> = {
 export function householdRoleLabel(role: "owner" | "member"): string {
   return role === "owner" ? "Manager" : "Member";
 }
+
+/** Everything else the household screens show. */
+export const HOUSEHOLD_UI = {
+  settingsSection: "Household",
+  settingsRowLabel: "Household",
+  settingsRowDescription: "Share Noor with one other person",
+
+  title: "Household",
+  alone: "You're the only person in your household.",
+  explainer: "A household is two people at most. The Manager can invite one other person.",
+  you: "You",
+  emailLabel: "Their email address",
+  createButton: "Create invite link",
+  creating: "Creating…",
+  formNote:
+    "They need a Noor account with this email. We don't send an email — you share the link yourself.",
+  linkCreated: "Invite link created",
+  copyLink: "Copy link",
+  copied: "Copied",
+  linkNote:
+    "This link works once and expires in 24 hours. We can't show it again after you leave this page.",
+  linkSignInNote: "Ask them to sign in to Noor first, then open the link.",
+  pendingPrefix: "Invite pending for",
+  expiresPrefix: "Expires",
+  cancelInvite: "Cancel invite",
+  newLink: "Create a new link",
+  newLinkNote: "Creating a new link turns off the old one.",
+  cancelled: "Invite cancelled.",
+  memberCannotInvite: "Only the Manager can invite someone.",
+  full: "Your household already has two people.",
+  leaveButton: "Leave household",
+  leaveTitle: "Leave this household?",
+  leaveBody: "You'll go back to a household of your own. The other person stays in this one.",
+  leaveManagerNote: "They'll become the Manager.",
+  leaveConfirm: "Leave",
+  leaveStay: "Stay",
+  leftHousehold: "You left the household.",
+
+  acceptTitle: "Join a household",
+  checking: "Checking your invite…",
+  invitedNamed: (name: string) => `${name} invited you to join their household.`,
+  invitedUnnamed: "You've been invited to join a household.",
+  joinMoves: "Joining moves you out of your current household.",
+  joinButton: "Join household",
+  joining: "Joining…",
+  notNow: "Not now",
+  joined: "You've joined the household.",
+  goToHousehold: "Go to Household",
+  leaveCurrentButton: "Leave my current household",
+  leavingCurrent: "Leaving…",
+  leftPrevious: "You left your previous household.",
+  openLinkAgain: "Open the invite link again to continue.",
+  tryAgain: "Try again",
+
+  sessionEnded: "Your session has ended. Please sign in again.",
+  sessionUnconfirmed: "We couldn't confirm you're signed in. Try again.",
+  reload: "Reload",
+  network: "We couldn't reach Noor. Check your connection and try again.",
+} as const;

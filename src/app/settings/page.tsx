@@ -15,6 +15,7 @@ import {
 } from '@/lib/supabase-browser';
 import { runSignOut } from '@/lib/sessionFlow';
 import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supabaseAuthHeaders';
+import { HOUSEHOLD_UI } from '@/lib/householdCopy';
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
 const ACCENT = '#5B4EE8';
@@ -170,6 +171,11 @@ const Ico = {
   warning: (
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
+  ),
+  home: (
+    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12l9-8 9 8M5 10v10h5v-6h4v6h5V10" />
     </svg>
   ),
 };
@@ -518,6 +524,19 @@ export default function SettingsPage() {
           </div>
         </div>
       </motion.div>
+
+      {/* ── HOUSEHOLD ── */}
+      <SectionLabel>{HOUSEHOLD_UI.settingsSection}</SectionLabel>
+      <SettingsCard>
+        <SettingsRow
+          icon={Ico.home}
+          label={HOUSEHOLD_UI.settingsRowLabel}
+          description={HOUSEHOLD_UI.settingsRowDescription}
+          chevron
+          last
+          onClick={() => router.push('/settings/household')}
+        />
+      </SettingsCard>
 
       {/* ── SECURITY ── */}
       {/* Password changes go through the email reset flow; there is no

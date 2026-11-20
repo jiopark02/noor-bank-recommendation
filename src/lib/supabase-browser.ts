@@ -163,7 +163,9 @@ export type SessionReadLabel =
   | "chat-mount"
   | "login-mount"
   | "auth-callback"
-  | "plaid-connect";
+  | "plaid-connect"
+  | "household-mount"
+  | "household-accept";
 
 type SessionReadLogFields = {
   label: SessionReadLabel;
