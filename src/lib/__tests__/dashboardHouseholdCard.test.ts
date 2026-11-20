@@ -22,6 +22,7 @@ import { BANK_SCREEN_FETCH_TIMEOUT_MS } from "../screenFetchTimeout";
  * Mutations and the test each one turns red:
  *   a two-person household offered the invite link, or a one-person one not  -> T-D1
  *   a failed, ended, unreachable or malformed answer drawn as a household     -> T-D1
+ *   a non-2xx answer whose body has a household's shape drawn as a household  -> T-D1
  *   the Manager label lost from the owner's line                              -> T-D1
  *   the card's load awaited in, or called from, the page's mount effect or
  *     the money load; the card given props, or placed inside a money branch   -> T-D2
@@ -100,6 +101,29 @@ describe("dashboard household card: what it shows", () => {
     ["a 200 with no members", view([])],
   ])("T-D1 %s is unavailable, never a household", (_label, outcome) => {
     expect(householdCardView(outcome)).toEqual({ kind: "unavailable" });
+  });
+
+  // The same body a 200 carries for a one-person household. The 200 control
+  // below proves the body alone would be drawn, so only the status can be
+  // what keeps these unavailable.
+  const HOUSEHOLD_BODY = { household: { role: "owner", members: [SELF_OWNER], invite: INVITE, maxMembers: 2 } };
+
+  it("T-D1 the household-shaped body used below is drawn when it comes with a 200", () => {
+    expect(householdCardView(answer(200, HOUSEHOLD_BODY)).kind).toBe("ready");
+  });
+
+  it.each<[string, number]>([
+    ["a 300", 300],
+    ["a 401", 401],
+    ["a 500", 500],
+    ["a 503", 503],
+  ])("T-D1 %s carrying a household-shaped body is unavailable, never a household", (_label, status) => {
+    expect(householdCardView(answer(status, HOUSEHOLD_BODY))).toEqual({ kind: "unavailable" });
+  });
+
+  it("T-D1 a 500 carrying a household-shaped body is unavailable through the card's load too", async () => {
+    const http: HouseholdHttp = async () => ({ status: 500, json: HOUSEHOLD_BODY });
+    expect(await loadHouseholdCard(async () => SESSION, http)).toEqual({ kind: "unavailable" });
   });
 });
 
