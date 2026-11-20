@@ -174,10 +174,8 @@ export async function viewHousehold(
     // Display still works without the repair; the next read tries again.
     logLine(log, "view", "repair_failed", repaired.code);
   }
-  const pruned = await store.pruneExpired();
-  if (!pruned.ok) {
-    logLine(log, "view", "prune_failed", pruned.code);
-  }
+  // Expired invites are not deleted here (the prune cron route does that);
+  // readView asks only for an invite whose expiry is still ahead.
   const read = await store.readView(identity.id);
   if (!read.ok) {
     logLine(log, "view", "read_failed", read.code);

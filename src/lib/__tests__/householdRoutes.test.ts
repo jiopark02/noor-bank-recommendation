@@ -327,3 +327,32 @@ describe("logs through the routes", () => {
     }
   });
 });
+
+describe("the view through the route", () => {
+  it("T-R1 (route) GET /api/household ensures and repairs for the caller and calls no prune", async () => {
+    setFake({
+      rpc: {
+        household_ensure_for_user: { data: "hh-1", error: null },
+        household_repair_owner: { data: "ok", error: null },
+        household_invites_prune_expired: { data: 0, error: null },
+      },
+      tables: {
+        household_members: [
+          { data: { household_id: "hh-1", role: "owner" }, error: null },
+          { data: [{ user_id: USER_ID, role: "owner" }], error: null },
+        ],
+        users: [{ data: [{ id: USER_ID, first_name: NAME }], error: null }],
+        household_invites: [{ data: null, error: null }],
+      },
+    });
+    const r = await send(CALLS[0], undefined);
+    expect(r.status).toBe(200);
+    expect(state.fake.rpcCalls.map(([fn]) => fn)).toEqual([
+      "household_ensure_for_user",
+      "household_repair_owner",
+    ]);
+    for (const [, args] of state.fake.rpcCalls) {
+      expect(args).toEqual({ p_user_id: USER_ID });
+    }
+  });
+});
