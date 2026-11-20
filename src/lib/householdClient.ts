@@ -70,7 +70,13 @@ export function householdRequestSession(
 
 export type HouseholdHttp = (
   path: string,
-  init: { method: "GET" | "POST" | "DELETE"; accessToken: string; body?: unknown }
+  init: {
+    method: "GET" | "POST" | "DELETE";
+    accessToken: string;
+    body?: unknown;
+    /** Aborts the request and its body read. */
+    signal?: AbortSignal;
+  }
 ) => Promise<{ status: number; json: unknown } | null>;
 
 export type HouseholdOutcome =
@@ -87,11 +93,12 @@ export async function householdCall(
   http: HouseholdHttp,
   path: string,
   method: "GET" | "POST" | "DELETE",
-  body?: unknown
+  body?: unknown,
+  signal?: AbortSignal
 ): Promise<HouseholdOutcome> {
   const session = householdRequestSession(read);
   if (!session.ok) return { kind: "session", reason: session.reason };
-  const answer = await http(path, { method, accessToken: session.accessToken, body });
+  const answer = await http(path, { method, accessToken: session.accessToken, body, signal });
   if (answer === null) return { kind: "network" };
   const json = answer.json;
   return {
@@ -104,7 +111,7 @@ export async function householdCall(
 }
 
 /** fetch, with the token in the Authorization header and the body as JSON. */
-export const browserHouseholdHttp: HouseholdHttp = async (path, { method, accessToken, body }) => {
+export const browserHouseholdHttp: HouseholdHttp = async (path, { method, accessToken, body, signal }) => {
   try {
     const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
     if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -113,6 +120,7 @@ export const browserHouseholdHttp: HouseholdHttp = async (path, { method, access
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
+      signal,
     });
     const json = await res.json().catch(() => ({}));
     return { status: res.status, json };
@@ -212,6 +220,92 @@ export function householdLoadView(
   if (data) return "ready";
   if (loadError !== null) return "failed";
   return "loading";
+}
+
+// ---------------------------------------------------------------------------
+// The dashboard's household card
+// ---------------------------------------------------------------------------
+
+/**
+ * How long the dashboard's household card waits for its answer, session read
+ * included, before it shows that the household could not be loaded.
+ * GET /api/household calls the auth server and the database and no other
+ * provider, so this is not tied to BANK_SCREEN_FETCH_TIMEOUT_MS, which is
+ * sized for Plaid's calls. The card blocks nothing else on the screen; this
+ * only bounds how long its placeholder stays.
+ */
+export const HOUSEHOLD_CARD_FETCH_TIMEOUT_MS = 15_000;
+
+export type HouseholdCardView =
+  | { kind: "loading" }
+  | { kind: "unavailable" }
+  | {
+      kind: "ready";
+      members: MemberLine[];
+      /** The open invite; the server sends it to the Manager only. */
+      invite: { email: string; expiresAt: string } | null;
+      /** A one-person household gets a way to the household screen to invite. */
+      showInviteLink: boolean;
+    };
+
+/**
+ * The card for one GET /api/household outcome. Anything but a 2xx answer in
+ * the view's shape is "unavailable", never an empty or one-person household.
+ */
+export function householdCardView(outcome: HouseholdOutcome): HouseholdCardView {
+  if (!isOk(outcome)) return { kind: "unavailable" };
+  const data = readHouseholdData(outcome.body);
+  if (!data || data.members.length === 0) return { kind: "unavailable" };
+  return {
+    kind: "ready",
+    members: data.members,
+    invite: data.invite,
+    showInviteLink: data.members.length === 1,
+  };
+}
+
+/**
+ * Reads the session and the household for the card, under one time limit.
+ * When the limit passes first, the request is aborted and the answer is
+ * "unavailable", whether or not the request honours the abort. Never
+ * rejects.
+ */
+export function loadHouseholdCard(
+  read: () => Promise<SessionReadResult>,
+  http: HouseholdHttp,
+  timeoutMs: number = HOUSEHOLD_CARD_FETCH_TIMEOUT_MS
+): Promise<HouseholdCardView> {
+  const controller = new AbortController();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (view: HouseholdCardView) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(view);
+    };
+    const timer = setTimeout(() => {
+      controller.abort();
+      finish({ kind: "unavailable" });
+    }, timeoutMs);
+    (async () => {
+      try {
+        const session = await read();
+        if (controller.signal.aborted) return;
+        const outcome = await householdCall(
+          session,
+          http,
+          "/api/household",
+          "GET",
+          undefined,
+          controller.signal
+        );
+        finish(householdCardView(outcome));
+      } catch {
+        finish({ kind: "unavailable" });
+      }
+    })();
+  });
 }
 
 // ---------------------------------------------------------------------------
