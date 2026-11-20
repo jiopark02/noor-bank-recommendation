@@ -140,6 +140,27 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     orderColumn: "id",
     orderKeyType: "uuid",
   },
+  // Invites the user created, read by invited_by: the address they entered,
+  // the household and the two times. token_hash is not exported; it names the
+  // invite to the database and is nothing the user entered. Invites made to
+  // the user by someone else are not read here.
+  {
+    key: "household_invites",
+    table: "household_invites",
+    columns: "id, household_id, invitee_email, created_at, expires_at",
+    filterColumn: "invited_by",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // One row per user, keyed by user_id, which the output leaves out.
+  {
+    key: "household_invite_issues",
+    table: "household_invite_issues",
+    columns: "window_start, window_count",
+    filterColumn: "user_id",
+    orderColumn: "user_id",
+    orderKeyType: "uuid",
+  },
 ];
 
 export type ExportRow = Record<string, unknown>;

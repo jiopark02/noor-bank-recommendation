@@ -280,6 +280,8 @@ describe("account export: what each section reads", () => {
     household_members: "user_id",
     share_grants: "owner_user_id",
     goals: "owner_user_id",
+    household_invites: "invited_by",
+    household_invite_issues: "user_id",
   };
 
   /** Each table's primary key, the column the keyset pages on. */
@@ -298,6 +300,8 @@ describe("account export: what each section reads", () => {
     household_members: "id",
     share_grants: "id",
     goals: "id",
+    household_invites: "id",
+    household_invite_issues: "user_id",
   };
 
   it("E5 the file carries exactly these top-level keys", async () => {
@@ -321,6 +325,8 @@ describe("account export: what each section reads", () => {
         "household_members",
         "share_grants",
         "goals",
+        "household_invites",
+        "household_invite_issues",
       ].sort()
     );
   });
@@ -556,6 +562,7 @@ describe("account export: explicit column lists match the schema", () => {
     "household_members",
     "share_grants",
     "goals",
+    "household_invite_issues",
   ];
 
   for (const table of EXPLICIT) {

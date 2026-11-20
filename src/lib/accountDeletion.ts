@@ -339,7 +339,13 @@ export async function deleteAccountForUser(
   // user is deleted), so the trigger function is SECURITY DEFINER, owned by
   // the owner of households: it deletes the household whoever issued the
   // delete, and neither service_role nor any client role holds DELETE on
-  // households.
+  // households. Two more tables from migration
+  // 20261120120000_household_invites_and_membership_changes.sql (whether it
+  // is applied is live state) cascade from public.users here: the
+  // household_invites rows the user created, by invited_by, and the user's
+  // household_invite_issues row, by user_id. When the deleted user was the
+  // owner of a household that keeps a member, nothing promotes that member
+  // here; household_repair_owner does on the household's next read.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to

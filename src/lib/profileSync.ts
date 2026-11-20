@@ -45,8 +45,8 @@ export { DEFAULT_FIRST_NAME } from "./defaultFirstName";
  * with the verified token's id; it returns the existing household or creates
  * one. Its failure is logged and does not change the answer: the profile was
  * written, and the callback treats a failed sync as a reason to fall back to
- * other names, which a household fault should not cause. No route reads
- * households yet; one that does is meant to call the same ensure first, so a
+ * other names, which a household fault should not cause. GET /api/household
+ * and invite creation call the same ensure before they read or write, so a
  * creation missed here is made up there. No call is made on any refusal or
  * failed write.
  *
