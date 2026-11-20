@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase";
-import { getAuthenticatedUserFromRequest } from "@/lib/apiAuth";
+import { resolveRequestAuth } from "@/lib/apiAuth";
 import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
 import {
   HOUSEHOLD_BODY_MAX_BYTES,
@@ -18,8 +18,12 @@ import { HOUSEHOLD_CODES, HOUSEHOLD_MESSAGES } from "@/lib/householdCopy";
  * What every /api/household route does first, in this order:
  *   1. without the service-role key, 503 ADMIN_UNCONFIGURED, before any
  *      token is read (otherwise the missing key reads as a 401);
- *   2. the bearer token verified with the auth server; anything else is 401
- *      { error: "Unauthorized" }, before any body is read or store built.
+ *   2. the bearer token verified with the auth server (resolveRequestAuth),
+ *      before any body is read or store built. An auth server that gave no
+ *      usable answer (auth_unreachable) is ours to report, not the caller's
+ *      session: 503 AUTH_UNAVAILABLE, logged as one fixed line. Every other
+ *      cause is 401 { error: "Unauthorized" }, unlogged, as the Plaid
+ *      connection routes do (plaidAuthRefusal).
  * The identity is the verified user's id, email and whether that email is
  * confirmed; nothing from the request body names a user.
  *
@@ -54,10 +58,22 @@ export async function householdGate(
       }),
     };
   }
-  const user = await getAuthenticatedUserFromRequest(request);
-  if (!user) {
+  const auth = await resolveRequestAuth(request);
+  if (!auth.ok) {
+    if (auth.cause === "auth_unreachable") {
+      // A fixed line: nothing from the request reaches it.
+      console.warn("[household] route=gate outcome=auth_unavailable");
+      return {
+        ok: false,
+        response: respond(503, {
+          error: HOUSEHOLD_MESSAGES.AUTH_UNAVAILABLE,
+          code: HOUSEHOLD_CODES.AUTH_UNAVAILABLE,
+        }),
+      };
+    }
     return { ok: false, response: respond(401, { error: "Unauthorized" }) };
   }
+  const user = auth.user;
   return {
     ok: true,
     context: {

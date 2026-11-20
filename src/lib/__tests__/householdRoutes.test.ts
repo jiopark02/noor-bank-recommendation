@@ -2,18 +2,23 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 import { makeFakeClient, type FakeOptions } from "./householdFakeClient";
 
 /**
  * The /api/household routes, executed. The real routes, householdGate, the
- * real getAuthenticatedUserFromRequest, the decisions and the store run;
- * faked are the supabase module's configuration predicates, the auth
- * server's getUser and the service-role client (householdFakeClient.ts).
+ * real resolveRequestAuth, the decisions and the store run; faked are the
+ * supabase module's configuration predicates, the auth server's getUser and
+ * the service-role client (householdFakeClient.ts).
  *
  * Mutations and the test each one turns red:
  *   a route's gate call removed, or a route reading the body first  -> T-A1
+ *   every refusal answered 503                                       -> T-A1
  *   a seventh route, or a method added or removed under household    -> T-A2
  *   the service-role gate removed or moved below authentication      -> T-A3
+ *   an unreachable auth server answered 401                          -> T-A4
+ *   the 503 given another code or message, or reaching the store     -> T-A4
+ *   the gate's log line removed, or given the request's values       -> T-G3
  *   a body userId or email passed to a call                          -> T-I1
  *   a token, address, name or id added to a log line                 -> T-G1 (routes)
  */
@@ -25,6 +30,7 @@ const OTHER_ID = "sentinel-other-id-88";
 const INVITEE = "sentinel.invitee@example.test";
 const TOKEN = "sentinelToken" + "y".repeat(30);
 const NAME = "Sentinelname";
+const SENTINEL_AUTH_ERROR = "sentinel-auth-error-text-41";
 
 const state = {
   adminConfigured: true,
@@ -35,6 +41,8 @@ const state = {
   getUserCalls: 0,
   adminClientCalls: 0,
   fake: makeFakeClient(),
+  /** When set, getUser answers this instead of state.user. */
+  authAnswer: null as { data: { user: null }; error: unknown } | "throw" | null,
 };
 
 vi.mock("@/lib/supabase", () => ({
@@ -42,6 +50,8 @@ vi.mock("@/lib/supabase", () => ({
     auth: {
       getUser: async () => {
         state.getUserCalls++;
+        if (state.authAnswer === "throw") throw new Error(SENTINEL_AUTH_ERROR);
+        if (state.authAnswer !== null) return state.authAnswer;
         return state.user
           ? { data: { user: state.user }, error: null }
           : { data: { user: null }, error: null };
@@ -115,6 +125,7 @@ beforeEach(() => {
   state.user = { id: USER_ID, email: USER_EMAIL, email_confirmed_at: "2026-01-01T00:00:00Z" };
   state.getUserCalls = 0;
   state.adminClientCalls = 0;
+  state.authAnswer = null;
   setFake({});
   process.env.HOUSEHOLD_INVITE_LIMIT_MODE = "off";
   spies.length = 0;
@@ -182,6 +193,53 @@ describe("the gate on every household route", () => {
     expect(r.json.code).toBe("ADMIN_UNCONFIGURED");
     expect(state.getUserCalls).toBe(0);
     expect(state.adminClientCalls).toBe(0);
+  });
+});
+
+const UNREACHABLE: Array<[string, { data: { user: null }; error: unknown } | "throw"]> = [
+  ["no response", { data: { user: null }, error: new AuthRetryableFetchError(SENTINEL_AUTH_ERROR, 0) }],
+  ["a gateway error", { data: { user: null }, error: new AuthRetryableFetchError(SENTINEL_AUTH_ERROR, 503) }],
+  ["a 500", { data: { user: null }, error: new AuthApiError(SENTINEL_AUTH_ERROR, 500, undefined) }],
+  ["a throw", "throw"],
+];
+
+describe("an auth server that gave no usable answer", () => {
+  it.each(CALLS)("T-A4 $method /api/household/$path: 503 AUTH_UNAVAILABLE, nothing else runs, token refusals stay 401", async (call) => {
+    for (const [label, answer] of UNREACHABLE) {
+      state.authAnswer = answer;
+      setFake({});
+      state.adminClientCalls = 0;
+      const r = await send(call, { token: TOKEN, email: INVITEE });
+      expect(r.status, label).toBe(503);
+      expect(r.json, label).toEqual({
+        error: "We couldn't confirm your sign-in right now. Please try again in a moment.",
+        code: "AUTH_UNAVAILABLE",
+      });
+      expect(r.cache, label).toBe("private, no-store");
+      expect(state.fake.rpcCalls, label).toEqual([]);
+      expect(state.fake.queries, label).toEqual([]);
+      expect(state.adminClientCalls, label).toBe(0);
+    }
+    // A token the auth server answered for and refused is still the caller's 401.
+    state.authAnswer = {
+      data: { user: null },
+      error: new AuthApiError(SENTINEL_AUTH_ERROR, 403, "bad_jwt"),
+    };
+    const refused = await send(call, { token: TOKEN });
+    expect(refused.status).toBe(401);
+    expect(refused.json).toEqual({ error: "Unauthorized" });
+  });
+
+  it("T-G3 the gate logs one fixed line for an unreachable auth server and nothing from the request", async () => {
+    state.authAnswer = "throw";
+    await send(CALLS[4], { token: TOKEN, email: INVITEE });
+    const text = consoleText();
+    expect(text.split("\n").filter((l) => l.includes("[household]"))).toEqual([
+      "[household] route=gate outcome=auth_unavailable",
+    ]);
+    for (const secret of [SENTINEL_BEARER, TOKEN, INVITEE, SENTINEL_AUTH_ERROR, USER_ID]) {
+      expect(text, secret).not.toContain(secret);
+    }
   });
 });
 

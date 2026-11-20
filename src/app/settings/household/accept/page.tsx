@@ -14,6 +14,8 @@ import {
 import { clearLocalAuthState } from "@/lib/validation";
 import { HOUSEHOLD_MESSAGES, HOUSEHOLD_UI } from "@/lib/householdCopy";
 import {
+  acceptOutcomeUnknown,
+  acceptUnknownAfterPreview,
   afterAccept,
   afterLeave,
   afterPreview,
@@ -32,6 +34,9 @@ import {
  * request and of the accept request, and accepting happens only on the
  * button press. When the person must first leave a household with someone
  * else in it, leaving here returns to the join step with the same token.
+ * When an accept ends without a definite answer, the retry's preview reads a
+ * missing invite as "could not confirm whether you joined", not as an
+ * invalid link.
  */
 
 /** Removes the fragment (and the token in it) from the address bar. */
@@ -48,6 +53,10 @@ const BUTTON = "w-full py-3 rounded-xl text-[14px] font-medium";
 export default function HouseholdAcceptPage() {
   const router = useRouter();
   const tokenRef = useRef<string | null>(null);
+  // An accept on this screen ended without telling whether it took effect
+  // (acceptOutcomeUnknown). Kept beside the token, read by the next preview
+  // (afterPreview) and updated after it (acceptUnknownAfterPreview).
+  const acceptUnknownRef = useRef(false);
   const mountedRef = useRef(false);
   const [view, setView] = useState<AcceptView>({ kind: "checking" });
   const [sessionDelayed, setSessionDelayed] = useState(false);
@@ -128,7 +137,9 @@ export default function HouseholdAcceptPage() {
       { token }
     );
     if (!mountedRef.current) return;
-    apply(afterPreview(outcome));
+    const acceptUnknown = acceptUnknownRef.current;
+    acceptUnknownRef.current = acceptUnknownAfterPreview(outcome, acceptUnknown);
+    apply(afterPreview(outcome, acceptUnknown));
   };
 
   // Runs only from the join button.
@@ -148,6 +159,7 @@ export default function HouseholdAcceptPage() {
       { token }
     );
     if (!mountedRef.current) return;
+    acceptUnknownRef.current = acceptOutcomeUnknown(outcome);
     apply(afterAccept(outcome, inviterFirstName));
   };
 
@@ -163,6 +175,7 @@ export default function HouseholdAcceptPage() {
       "POST"
     );
     if (!mountedRef.current) return;
+    acceptUnknownRef.current = false;
     apply(afterLeave(outcome, inviterFirstName));
   };
 
@@ -241,6 +254,19 @@ export default function HouseholdAcceptPage() {
         {view.kind === "joined" && (
           <div>
             <p className="text-gray-800 mb-6">{HOUSEHOLD_UI.joined}</p>
+            <button
+              type="button"
+              onClick={() => router.push("/settings/household")}
+              className={`${BUTTON} bg-black text-white`}
+            >
+              {HOUSEHOLD_UI.goToHousehold}
+            </button>
+          </div>
+        )}
+
+        {view.kind === "join-unconfirmed" && (
+          <div>
+            <p className="text-gray-800 mb-6">{HOUSEHOLD_UI.joinUnconfirmed}</p>
             <button
               type="button"
               onClick={() => router.push("/settings/household")}

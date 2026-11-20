@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionReadResult } from "../supabase-browser";
 import {
   INVITE_FRAGMENT_KEY,
+  acceptOutcomeUnknown,
+  acceptUnknownAfterPreview,
+  cancelButtonLabel,
+  createButtonLabel,
+  leaveConfirmLabel,
   afterAccept,
   afterLeave,
   afterPreview,
@@ -34,6 +39,11 @@ import {
  *   the link's fragment key renamed                                   -> T-C9
  *   leaving sending the person to "open the link again"               -> T-C11
  *   a failed leave dropping the token, or not showing its sentence    -> T-C11
+ *   the retry's preview 404 read as "invalid" after an unknown accept -> T-C12
+ *   a gate 503 or a definite 409 counted as an unknown accept         -> T-C12
+ *   a preview 200 not clearing the doubt                             -> T-C12
+ *   a 503 AUTH_UNAVAILABLE dropping the token or the retry           -> T-C13
+ *   a progress label shown on a button whose action is not running   -> T-C14
  */
 
 const TOKEN = "A".repeat(20) + "b".repeat(20) + "-_9";
@@ -226,5 +236,116 @@ describe("the accept screen", () => {
       "You're already in a household with someone else. Leave it to join this one."
     );
     expect(HOUSEHOLD_UI.leftPrevious).toBe("You left your previous household.");
+  });
+});
+
+/** The accept screen's steps, run in the order the screen runs them. */
+async function joinThenRetry(
+  acceptAnswer: { status: number; json: unknown } | null,
+  previewAnswers: Array<{ status: number; json: unknown } | null>
+) {
+  const accept = await householdCall(SESSION, async () => acceptAnswer, "/api/household/invite/accept", "POST", {
+    token: TOKEN,
+  });
+  const acceptStep = afterAccept(accept, "Alex");
+  let unknown = acceptOutcomeUnknown(accept);
+  let step = acceptStep;
+  for (const answer of previewAnswers) {
+    const preview = await householdCall(SESSION, async () => answer, "/api/household/invite/preview", "POST", {
+      token: TOKEN,
+    });
+    step = afterPreview(preview, unknown);
+    unknown = acceptUnknownAfterPreview(preview, unknown);
+  }
+  return { acceptStep, step, unknown };
+}
+
+const GONE = { status: 404, json: { error: "x", code: "INVITE_UNAVAILABLE" } };
+const STILL_THERE = { status: 200, json: { inviterFirstName: "Alex" } };
+const INVALID_LINK = {
+  view: { kind: "failed", message: HOUSEHOLD_MESSAGES.INVITE_UNAVAILABLE, retry: false },
+  keepToken: false,
+};
+
+describe("an accept whose result is unknown", () => {
+  it("T-C12 no answer to the accept, then a retry whose preview finds no invite: could not confirm, go to the household", async () => {
+    for (const [label, acceptAnswer] of [
+      ["network", null],
+      ["a 500 with no code", { status: 500, json: {} }],
+      ["a 504 from the platform", { status: 504, json: {} }],
+      ["SERVER_ERROR", { status: 500, json: { error: "x", code: "SERVER_ERROR" } }],
+    ] as const) {
+      const { acceptStep, step, unknown } = await joinThenRetry(acceptAnswer, [GONE]);
+      expect(acceptStep.keepToken, label).toBe(true);
+      expect(acceptStep.view.kind, label).toBe("failed");
+      expect(step, label).toEqual({ view: { kind: "join-unconfirmed" }, keepToken: false });
+      expect(unknown, label).toBe(false);
+    }
+    expect(HOUSEHOLD_UI.joinUnconfirmed).toBe(
+      "We couldn't confirm whether you joined. Check your household."
+    );
+    expect(HOUSEHOLD_UI.goToHousehold).toBe("Go to Household");
+
+    // A preview that fails again keeps the doubt for the next try.
+    const twice = await joinThenRetry(null, [null, GONE]);
+    expect(twice.step).toEqual({ view: { kind: "join-unconfirmed" }, keepToken: false });
+
+    // The invite is still there: the accept did not commit, and the doubt is gone.
+    const notCommitted = await joinThenRetry(null, [STILL_THERE, GONE]);
+    expect(notCommitted.step).toEqual(INVALID_LINK);
+
+    // Answers that settle the accept leave a later 404 meaning what it says.
+    for (const [label, acceptAnswer] of [
+      ["409 HOUSEHOLD_CHANGED", { status: 409, json: { error: "x", code: "HOUSEHOLD_CHANGED" } }],
+      ["503 AUTH_UNAVAILABLE", { status: 503, json: { error: "x", code: "AUTH_UNAVAILABLE" } }],
+      ["503 ADMIN_UNCONFIGURED", { status: 503, json: { error: "x", code: "ADMIN_UNCONFIGURED" } }],
+    ] as const) {
+      const { step, unknown } = await joinThenRetry(acceptAnswer, [GONE]);
+      expect(step, label).toEqual(INVALID_LINK);
+      expect(unknown, label).toBe(false);
+    }
+
+    // Before any accept, the preview's 404 is the invalid-link sentence.
+    expect(afterPreview(coded(404, "INVITE_UNAVAILABLE"))).toEqual(INVALID_LINK);
+    expect(acceptOutcomeUnknown({ kind: "session", reason: "unconfirmed" })).toBe(false);
+  });
+});
+
+describe("an auth server that gave no answer", () => {
+  it("T-C13 a 503 AUTH_UNAVAILABLE keeps the token and offers a retry, with the sign-in sentence", () => {
+    const outcome = coded(503, "AUTH_UNAVAILABLE");
+    const sentence = HOUSEHOLD_MESSAGES.AUTH_UNAVAILABLE;
+    expect(sentence).toBe("We couldn't confirm your sign-in right now. Please try again in a moment.");
+    expect(householdMessage(outcome)).toBe(sentence);
+    for (const step of [afterPreview(outcome), afterAccept(outcome, "Alex")]) {
+      expect(step).toEqual({ view: { kind: "failed", message: sentence, retry: true }, keepToken: true });
+    }
+    expect(afterLeave(outcome, "Alex")).toEqual({
+      view: { kind: "must-leave", inviterFirstName: "Alex", error: sentence },
+      keepToken: true,
+    });
+    expect(householdMessage(outcome)).not.toBe(HOUSEHOLD_UI.sessionEnded);
+  });
+});
+
+describe("the household screen's buttons", () => {
+  it("T-C14 only the running action's button shows progress", () => {
+    expect(createButtonLabel(null, false)).toBe("Create invite link");
+    expect(createButtonLabel(null, true)).toBe("Create a new link");
+    expect(createButtonLabel("create", true)).toBe("Creating…");
+    expect(cancelButtonLabel(null)).toBe("Cancel invite");
+    expect(cancelButtonLabel("cancel")).toBe("Cancelling…");
+    expect(leaveConfirmLabel(null)).toBe("Leave");
+    expect(leaveConfirmLabel("leave")).toBe("Leaving…");
+    for (const other of ["cancel", "leave"] as const) {
+      expect(createButtonLabel(other, false), other).toBe("Create invite link");
+      expect(createButtonLabel(other, true), other).toBe("Create a new link");
+    }
+    for (const other of ["create", "leave"] as const) {
+      expect(cancelButtonLabel(other), other).toBe("Cancel invite");
+    }
+    for (const other of ["create", "cancel"] as const) {
+      expect(leaveConfirmLabel(other), other).toBe("Leave");
+    }
   });
 });

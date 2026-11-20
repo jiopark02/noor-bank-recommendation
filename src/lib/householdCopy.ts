@@ -22,6 +22,7 @@ export const HOUSEHOLD_CODES = {
   ADMIN_UNCONFIGURED: "ADMIN_UNCONFIGURED",
   SERVER_ERROR: "SERVER_ERROR",
   REQUEST_TOO_LARGE: "REQUEST_TOO_LARGE",
+  AUTH_UNAVAILABLE: "AUTH_UNAVAILABLE",
 } as const;
 
 export type HouseholdCode = (typeof HOUSEHOLD_CODES)[keyof typeof HOUSEHOLD_CODES];
@@ -48,6 +49,7 @@ export const HOUSEHOLD_MESSAGES: Record<HouseholdCode, string> = {
   ADMIN_UNCONFIGURED: SERVER_FAULT_MESSAGE,
   SERVER_ERROR: SERVER_FAULT_MESSAGE,
   REQUEST_TOO_LARGE: "Request is too large.",
+  AUTH_UNAVAILABLE: "We couldn't confirm your sign-in right now. Please try again in a moment.",
 };
 
 /** The role as shown on screen. */
@@ -79,6 +81,7 @@ export const HOUSEHOLD_UI = {
   pendingPrefix: "Invite pending for",
   expiresPrefix: "Expires",
   cancelInvite: "Cancel invite",
+  cancelling: "Cancelling…",
   newLink: "Create a new link",
   newLinkNote: "Creating a new link turns off the old one.",
   cancelled: "Invite cancelled.",
@@ -101,6 +104,7 @@ export const HOUSEHOLD_UI = {
   joining: "Joining…",
   notNow: "Not now",
   joined: "You've joined the household.",
+  joinUnconfirmed: "We couldn't confirm whether you joined. Check your household.",
   goToHousehold: "Go to Household",
   leaveCurrentButton: "Leave my current household",
   leavingCurrent: "Leaving…",

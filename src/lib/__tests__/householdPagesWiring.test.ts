@@ -13,6 +13,10 @@ import { describe, expect, it } from "vitest";
  *   the token or anything else written to localStorage/sessionStorage   -> T-C5
  *   "unavailable" signing out, or the mount read not through readSession -> T-C7
  *   the settings row removed, or placed inside a settings handler        -> T-C10
+ *   the retry's preview not given the accept-unknown flag, or the flag
+ *     not set from the accept / not updated after the preview          -> T-C12 (page)
+ *   the unconfirmed-join view missing its sentence or its button      -> T-C12 (page)
+ *   a shared busy label, or a handler starting another action's label  -> T-C14 (page)
  */
 
 function read(relativePath: string): string {
@@ -129,6 +133,45 @@ describe("household screens", () => {
       expect(slice(SETTINGS, from, to)).not.toContain("household");
     }
     expect(SETTINGS).toContain("<SectionLabel>{HOUSEHOLD_UI.settingsSection}</SectionLabel>");
+  });
+
+  it("T-C12 (page) the accept-unknown flag is set by the accept, read and updated by the retry's preview, and has its own view", () => {
+    expect(ACCEPT).toContain("const acceptUnknownRef = useRef(false);");
+    const join = slice(ACCEPT, "const handleJoin = async", "const handleLeaveCurrent = async");
+    expect(join).toContain(
+      "acceptUnknownRef.current = acceptOutcomeUnknown(outcome); apply(afterAccept(outcome, inviterFirstName));"
+    );
+    const retry = slice(ACCEPT, "const handleRetry = async", "const handleJoin = async");
+    expect(retry).toContain(
+      "const acceptUnknown = acceptUnknownRef.current; acceptUnknownRef.current = acceptUnknownAfterPreview(outcome, acceptUnknown); apply(afterPreview(outcome, acceptUnknown));"
+    );
+    const leave = slice(ACCEPT, "const handleLeaveCurrent = async", "if (sessionDelayed) {");
+    expect(leave).toContain("acceptUnknownRef.current = false;");
+    const view = slice(ACCEPT, '{view.kind === "join-unconfirmed" && (', ")}");
+    expect(view).toContain("{HOUSEHOLD_UI.joinUnconfirmed}");
+    expect(ACCEPT).toContain(
+      '{view.kind === "join-unconfirmed" && ( <div> <p className="text-gray-800 mb-6">{HOUSEHOLD_UI.joinUnconfirmed}</p> <button type="button" onClick={() => router.push("/settings/household")} className={`${BUTTON} bg-black text-white`} > {HOUSEHOLD_UI.goToHousehold} </button>'
+    );
+  });
+
+  it("T-C14 (page) each button's label comes from its own action", () => {
+    expect(HOUSEHOLD).toContain("const [busy, setBusy] = useState<HouseholdBusyAction>(null);");
+    expect(HOUSEHOLD).not.toMatch(/busy \?/);
+    expect(HOUSEHOLD).not.toContain("HOUSEHOLD_UI.creating");
+    expect(HOUSEHOLD).toContain("{createButtonLabel(busy, data.invite !== null)}");
+    expect(HOUSEHOLD).toContain("{cancelButtonLabel(busy)}");
+    expect(HOUSEHOLD).toContain("{leaveConfirmLabel(busy)}");
+    for (const [handler, next, action] of [
+      ["const handleCreateInvite = async", "const handleCancelInvite = async", "create"],
+      ["const handleCancelInvite = async", "const handleLeave = async", "cancel"],
+      ["const handleLeave = async", "const handleCopy = async", "leave"],
+    ]) {
+      const body = slice(HOUSEHOLD, handler, next);
+      expect(body, action).toContain(`setBusy('${action}');`);
+      expect(body, action).toContain("setBusy(null);");
+      expect(count(body, "setBusy("), action).toBe(2);
+    }
+    expect(count(HOUSEHOLD, "disabled={busy !== null")).toBe(3);
   });
 
   it("each screen keeps the bottom nav last in its flow", () => {

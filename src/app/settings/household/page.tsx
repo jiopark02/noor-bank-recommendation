@@ -16,11 +16,15 @@ import { HOUSEHOLD_UI } from '@/lib/householdCopy';
 import {
   browserHouseholdHttp,
   buildInviteLink,
+  cancelButtonLabel,
+  createButtonLabel,
   householdCall,
+  leaveConfirmLabel,
   householdMessage,
   isOk,
   memberLineText,
   readHouseholdData,
+  type HouseholdBusyAction,
   type HouseholdData,
 } from '@/lib/householdClient';
 
@@ -39,7 +43,9 @@ export default function HouseholdPage() {
   const [sessionDelayed, setSessionDelayed] = useState(false);
   const [data, setData] = useState<HouseholdData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // The action in flight. Every button is disabled while one runs; only the
+  // running action's button shows its progress label.
+  const [busy, setBusy] = useState<HouseholdBusyAction>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
@@ -95,7 +101,7 @@ export default function HouseholdPage() {
   }, [router, load]);
 
   const handleCreateInvite = async () => {
-    setBusy(true);
+    setBusy('create');
     setError(null);
     setNotice(null);
     setCopied(false);
@@ -113,12 +119,12 @@ export default function HouseholdPage() {
         setError(householdMessage(outcome));
       }
     } finally {
-      if (mountedRef.current) setBusy(false);
+      if (mountedRef.current) setBusy(null);
     }
   };
 
   const handleCancelInvite = async () => {
-    setBusy(true);
+    setBusy('cancel');
     setError(null);
     setNotice(null);
     try {
@@ -133,12 +139,12 @@ export default function HouseholdPage() {
         setError(householdMessage(outcome));
       }
     } finally {
-      if (mountedRef.current) setBusy(false);
+      if (mountedRef.current) setBusy(null);
     }
   };
 
   const handleLeave = async () => {
-    setBusy(true);
+    setBusy('leave');
     setError(null);
     setNotice(null);
     try {
@@ -154,7 +160,7 @@ export default function HouseholdPage() {
         setError(householdMessage(outcome));
       }
     } finally {
-      if (mountedRef.current) setBusy(false);
+      if (mountedRef.current) setBusy(null);
     }
   };
 
@@ -310,11 +316,11 @@ export default function HouseholdPage() {
                   <button
                     type="button"
                     onClick={handleCancelInvite}
-                    disabled={busy}
+                    disabled={busy !== null}
                     className="mt-3 w-full py-2.5 rounded-xl text-[14px] font-medium disabled:opacity-40"
                     style={{ background: 'rgba(0,0,0,0.06)', color: '#000' }}
                   >
-                    {HOUSEHOLD_UI.cancelInvite}
+                    {cancelButtonLabel(busy)}
                   </button>
                 </div>
               )}
@@ -338,11 +344,11 @@ export default function HouseholdPage() {
               <button
                 type="button"
                 onClick={handleCreateInvite}
-                disabled={busy || email.trim() === ''}
+                disabled={busy !== null || email.trim() === ''}
                 className="mt-3 w-full py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
                 style={{ background: ACCENT }}
               >
-                {busy ? HOUSEHOLD_UI.creating : data.invite ? HOUSEHOLD_UI.newLink : HOUSEHOLD_UI.createButton}
+                {createButtonLabel(busy, data.invite !== null)}
               </button>
               <p className="text-[12px] mt-2" style={{ color: 'rgba(0,0,0,0.45)' }}>
                 {HOUSEHOLD_UI.formNote}
@@ -385,11 +391,11 @@ export default function HouseholdPage() {
                     <button
                       type="button"
                       onClick={handleLeave}
-                      disabled={busy}
+                      disabled={busy !== null}
                       className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
                       style={{ background: '#EF4444' }}
                     >
-                      {HOUSEHOLD_UI.leaveConfirm}
+                      {leaveConfirmLabel(busy)}
                     </button>
                   </div>
                 </div>

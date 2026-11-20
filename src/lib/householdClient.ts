@@ -197,12 +197,46 @@ export type AcceptView =
   | { kind: "ready"; inviterFirstName: string | null; notice: string | null }
   | { kind: "joining"; inviterFirstName: string | null }
   | { kind: "joined" }
+  | { kind: "join-unconfirmed" }
   | { kind: "must-leave"; inviterFirstName: string | null; error: string | null }
   | { kind: "leaving"; inviterFirstName: string | null }
   | { kind: "failed"; message: string; retry: boolean };
 
 /** The next view, and whether the screen keeps the invite token for it. */
 export type AcceptStep = { view: AcceptView; keepToken: boolean };
+
+/**
+ * Answers the household gate gives before any database call: the accept
+ * that got one cannot have joined anyone.
+ */
+const GATE_CODES: HouseholdCode[] = [
+  HOUSEHOLD_CODES.ADMIN_UNCONFIGURED,
+  HOUSEHOLD_CODES.AUTH_UNAVAILABLE,
+];
+
+/**
+ * Whether an accept that ended this way may have joined the person. The
+ * network failing, or a 5xx that is not a gate answer, says nothing about
+ * whether the database call committed. Every other answer is definite.
+ */
+export function acceptOutcomeUnknown(outcome: HouseholdOutcome): boolean {
+  if (outcome.kind === "network") return true;
+  if (outcome.kind !== "answer" || outcome.status < 500) return false;
+  const code = outcomeCode(outcome);
+  return code === null || GATE_CODES.indexOf(code) === -1;
+}
+
+/**
+ * The accept-unknown flag after a preview. A 200 means the invite still
+ * exists, so the earlier accept did not commit: cleared. A failure that
+ * keeps the token for another try keeps the flag for that try. Anything else
+ * ends the flow: cleared.
+ */
+export function acceptUnknownAfterPreview(outcome: HouseholdOutcome, acceptUnknown: boolean): boolean {
+  if (!acceptUnknown) return false;
+  const step = afterPreview(outcome, acceptUnknown);
+  return step.view.kind === "failed" && step.keepToken;
+}
 
 /** "Alex invited you…", or the sentence with no name. */
 export function invitedSentence(inviterFirstName: string | null): string {
@@ -220,7 +254,15 @@ function failedStep(outcome: HouseholdOutcome): AcceptStep {
   return { view: { kind: "failed", message: householdMessage(outcome), retry }, keepToken: retry };
 }
 
-export function afterPreview(outcome: HouseholdOutcome): AcceptStep {
+/**
+ * After a preview. acceptUnknown says an earlier accept on this screen ended
+ * without a definite answer. Then a 404 INVITE_UNAVAILABLE is what a
+ * committed accept looks like (the invite is deleted when it is used), so the
+ * screen says it could not confirm and points to the household, instead of
+ * calling the link invalid. A 200 means the invite still exists, so that
+ * accept did not commit and the doubt is cleared.
+ */
+export function afterPreview(outcome: HouseholdOutcome, acceptUnknown = false): AcceptStep {
   if (isOk(outcome)) {
     const name = outcome.body.inviterFirstName;
     return {
@@ -232,9 +274,17 @@ export function afterPreview(outcome: HouseholdOutcome): AcceptStep {
       keepToken: true,
     };
   }
+  if (acceptUnknown && outcomeCode(outcome) === HOUSEHOLD_CODES.INVITE_UNAVAILABLE) {
+    return { view: { kind: "join-unconfirmed" }, keepToken: false };
+  }
   return failedStep(outcome);
 }
 
+/**
+ * After an accept. Whether a failure may still have joined the person is a
+ * separate question, answered by acceptOutcomeUnknown; the screen keeps that
+ * answer for the next preview.
+ */
 export function afterAccept(outcome: HouseholdOutcome, inviterFirstName: string | null): AcceptStep {
   if (isOk(outcome)) return { view: { kind: "joined" }, keepToken: false };
   if (outcomeCode(outcome) === HOUSEHOLD_CODES.MUST_LEAVE_FIRST) {
@@ -264,4 +314,25 @@ export function afterLeave(outcome: HouseholdOutcome, inviterFirstName: string |
     view: { kind: "must-leave", inviterFirstName, error: householdMessage(outcome) },
     keepToken: true,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The household screen's buttons while an action runs
+// ---------------------------------------------------------------------------
+
+/** The action the household screen is running, if any. */
+export type HouseholdBusyAction = "create" | "cancel" | "leave" | null;
+
+/** "Creating…" only while creating; otherwise the button's own label. */
+export function createButtonLabel(busy: HouseholdBusyAction, hasInvite: boolean): string {
+  if (busy === "create") return HOUSEHOLD_UI.creating;
+  return hasInvite ? HOUSEHOLD_UI.newLink : HOUSEHOLD_UI.createButton;
+}
+
+export function cancelButtonLabel(busy: HouseholdBusyAction): string {
+  return busy === "cancel" ? HOUSEHOLD_UI.cancelling : HOUSEHOLD_UI.cancelInvite;
+}
+
+export function leaveConfirmLabel(busy: HouseholdBusyAction): string {
+  return busy === "leave" ? HOUSEHOLD_UI.leavingCurrent : HOUSEHOLD_UI.leaveConfirm;
 }
