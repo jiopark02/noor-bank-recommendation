@@ -22,8 +22,11 @@ import { HOUSEHOLD_CODES, HOUSEHOLD_MESSAGES } from "@/lib/householdCopy";
  *      before any body is read or store built. An auth server that gave no
  *      usable answer (auth_unreachable) is ours to report, not the caller's
  *      session: 503 AUTH_UNAVAILABLE, logged as one fixed line. Every other
- *      cause is 401 { error: "Unauthorized" }, unlogged, as the Plaid
- *      connection routes do (plaidAuthRefusal).
+ *      cause is 401 { error: "Unauthorized" } and is not logged. The split
+ *      by cause (503 for auth_unreachable, 401 for the rest) is the one the
+ *      Plaid connection routes make (plaidAuthRefusal); the logging is not:
+ *      plaidAuthRefusal logs every refusal, 401s included, and this gate
+ *      logs only the 503.
  * The identity is the verified user's id, email and whether that email is
  * confirmed; nothing from the request body names a user.
  *
