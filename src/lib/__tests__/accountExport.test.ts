@@ -29,6 +29,11 @@ import {
 
 const USER = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
+/** The caller with no confirmed address: no section is read by an address. */
+const UNCONFIRMED = { id: USER, email: null, emailConfirmed: false };
+/** The caller with a confirmed address, as the auth server might return it. */
+const CONFIRMED = { id: USER, email: " Person@Example.TEST ", emailConfirmed: true };
+const CONFIRMED_ADDRESS = "person@example.test";
 
 function uuidFor(i: number): string {
   return `00000000-0000-4000-8000-${i.toString(16).padStart(12, "0")}`;
@@ -143,7 +148,7 @@ async function exportOf(
   pageSize?: number
 ) {
   const fake = fakeReader(rowsByTable, sections, options);
-  const result = await buildAccountExport(USER, fake.readPage, {
+  const result = await buildAccountExport(UNCONFIRMED, fake.readPage, {
     sections,
     pageSize,
   });
@@ -220,12 +225,23 @@ describe("account export: keyset page boundaries", () => {
   });
 
   it("E3 no rows: every section is present as an empty array after one read each", async () => {
-    const { result, calls } = await exportOf({}, EXPORT_SECTIONS);
+    // A confirmed address, so the sections read by it are read too. Two
+    // sections can read one table, so reads are counted per table and filter
+    // column. An unconfirmed caller's address sections are covered elsewhere.
+    const fake = fakeReader({}, EXPORT_SECTIONS);
+    const result = await buildAccountExport(CONFIRMED, fake.readPage);
+    const calls = fake.calls;
     expect(result.status).toBe(200);
     for (const section of EXPORT_SECTIONS) {
       expect(result.body[section.key], section.key).toEqual([]);
-      expect(callsFor(calls, section.table), section.table).toHaveLength(1);
+      expect(
+        calls.filter(
+          (c) => c.table === section.table && c.filterColumn === section.filterColumn
+        ),
+        section.key
+      ).toHaveLength(1);
     }
+    expect(calls).toHaveLength(EXPORT_SECTIONS.length);
   });
 });
 
@@ -255,7 +271,7 @@ describe("account export: failure", () => {
         error: null,
       };
     };
-    const result = await buildAccountExport(USER, readPage, {
+    const result = await buildAccountExport(UNCONFIRMED, readPage, {
       sections: [MESSAGES],
     });
     expect(result.status).toBe(500);
@@ -264,7 +280,7 @@ describe("account export: failure", () => {
 });
 
 describe("account export: what each section reads", () => {
-  /** The filter column each table is read by. */
+  /** The filter column each section is read by, keyed by section. */
   const EXPECTED_FILTER: Record<string, string> = {
     users: "id",
     survey_responses: "user_id",
@@ -282,7 +298,12 @@ describe("account export: what each section reads", () => {
     goals: "owner_user_id",
     household_invites: "invited_by",
     household_invite_issues: "user_id",
+    joint_goals_created: "created_by",
+    household_invites_received: "invitee_email",
   };
+
+  /** The sections read by the caller's confirmed address; every other is read by their id. */
+  const BY_ADDRESS = ["household_invites_received"];
 
   /** Each table's primary key, the column the keyset pages on. */
   const EXPECTED_ORDER: Record<string, string> = {
@@ -327,6 +348,8 @@ describe("account export: what each section reads", () => {
         "goals",
         "household_invites",
         "household_invite_issues",
+        "joint_goals_created",
+        "household_invites_received",
       ].sort()
     );
   });
@@ -357,14 +380,23 @@ describe("account export: what each section reads", () => {
     }
   });
 
-  it("E7 every read is filtered by the caller's id, on the column the table keys users by", async () => {
-    const { calls } = await exportOf({}, EXPORT_SECTIONS);
+  it("E7 every read is filtered by the caller's id, or by their confirmed address where the section says so, on the expected column", async () => {
+    const fake = fakeReader({}, EXPORT_SECTIONS);
+    await buildAccountExport(CONFIRMED, fake.readPage);
+    const calls = fake.calls;
     expect(calls.length).toBe(EXPORT_SECTIONS.length);
-    for (const call of calls) {
-      expect(call.userId, call.table).toBe(USER);
-      expect(call.filterColumn, call.table).toBe(EXPECTED_FILTER[call.table]);
+    for (const section of EXPORT_SECTIONS) {
+      const call = calls.find(
+        (c) => c.table === section.table && c.filterColumn === section.filterColumn
+      );
+      expect(call, section.key).toBeDefined();
+      expect(call?.userId, section.key).toBe(USER);
+      expect(call?.filterColumn, section.key).toBe(EXPECTED_FILTER[section.key]);
+      expect(call?.filterValue, section.key).toBe(
+        BY_ADDRESS.indexOf(section.key) === -1 ? USER : CONFIRMED_ADDRESS
+      );
     }
-    expect(EXPORT_SECTIONS.map((s) => s.table).sort()).toEqual(
+    expect(EXPORT_SECTIONS.map((s) => s.key).sort()).toEqual(
       Object.keys(EXPECTED_FILTER).sort()
     );
   });
@@ -669,9 +701,48 @@ describe("account export: the production page reader", () => {
     select: "*",
     filterColumn: "user_id",
     userId: USER,
+    filterValue: USER,
     orderColumn: "id",
     limit: EXPORT_PAGE_SIZE,
   };
+
+  it("E11 the filter compares filterValue, not userId; a fixed equality is added when the section has one", async () => {
+    const calls: Call[] = [];
+    const read = makeSupabasePageReader(
+      fakeClient(calls) as unknown as Parameters<typeof makeSupabasePageReader>[0]
+    );
+    await read({
+      ...base,
+      table: "household_invites",
+      filterColumn: "invitee_email",
+      filterValue: CONFIRMED_ADDRESS,
+    });
+    expect(calls).toEqual([
+      ["from", "household_invites"],
+      ["select", "*"],
+      ["eq", "invitee_email", CONFIRMED_ADDRESS],
+      ["order", "id", { ascending: true }],
+      ["limit", EXPORT_PAGE_SIZE],
+    ]);
+
+    calls.length = 0;
+    await read({
+      ...base,
+      table: "goals",
+      filterColumn: "created_by",
+      extraEq: { column: "kind", value: "joint" },
+      afterKey: uuidFor(3),
+    });
+    expect(calls).toEqual([
+      ["from", "goals"],
+      ["select", "*"],
+      ["eq", "created_by", USER],
+      ["eq", "kind", "joint"],
+      ["gt", "id", uuidFor(3)],
+      ["order", "id", { ascending: true }],
+      ["limit", EXPORT_PAGE_SIZE],
+    ]);
+  });
 
   it("E11 a first page filters, orders ascending and limits; a later page adds gt on the last key", async () => {
     const calls: Call[] = [];
@@ -710,25 +781,26 @@ describe("account export route: identity", () => {
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/.*$/gm, "");
 
-  it("E12 the caller's id comes from the verified token, before any client is built, and nowhere else", () => {
+  it("E12 the caller's id, address and confirmation come from the verified token, before any client is built, and nowhere else", () => {
     const auth = ROUTE.indexOf(
-      "const authUserId = await getAuthenticatedUserIdFromRequest(request);"
+      "const user = await getAuthenticatedUserFromRequest(request);"
     );
-    const unauthorized = ROUTE.indexOf("if (!authUserId)");
+    const unauthorized = ROUTE.indexOf("if (!user)");
     const admin = ROUTE.indexOf("createAdminClient()");
     expect(auth).toBeGreaterThan(-1);
     expect(unauthorized).toBeGreaterThan(auth);
     expect(admin).toBeGreaterThan(unauthorized);
     expect(ROUTE.slice(unauthorized, admin)).toContain("status: 401");
 
-    expect(ROUTE).toMatch(/buildAccountExport\(\s*authUserId,/);
-    expect(ROUTE).not.toMatch(/request\.(json|text|formData|body)|searchParams/);
+    expect(ROUTE).not.toMatch(/request\.(json|text|formData|body|nextUrl|url)|searchParams/);
+    expect(ROUTE).not.toContain("getAuthenticatedUserIdFromRequest");
 
-    // One call, with exactly the id and the reader and no options: a third
-    // argument could replace the sections, the page size or the clock.
+    // One call, with exactly the token's id, address and confirmation and
+    // the reader, and no options: a third argument could replace the
+    // sections, the page size or the clock.
     expect(ROUTE.split("buildAccountExport(").length - 1).toBe(1);
     expect(ROUTE).toMatch(
-      /buildAccountExport\(\s*authUserId,\s*makeSupabasePageReader\(admin\),?\s*\)/
+      /buildAccountExport\(\s*\{\s*id: user\.id,\s*email: typeof user\.email === "string" \? user\.email : null,\s*emailConfirmed: Boolean\(user\.email_confirmed_at\),?\s*\},\s*makeSupabasePageReader\(admin\),?\s*\)/
     );
     expect(ROUTE).not.toMatch(/\b(sections|pageSize|EXPORT_SECTIONS)\b/);
   });
