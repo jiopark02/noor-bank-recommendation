@@ -109,7 +109,8 @@ export type PreviewInvite = {
 export type HouseholdStore = {
   ensure(userId: string): Promise<boolean>;
   repairOwner(userId: string): Promise<StoreText>;
-  pruneExpired(): Promise<{ ok: true } | { ok: false; code: string }>;
+  /** Deletes every expired invite; answers how many rows it deleted. */
+  pruneExpired(): Promise<{ ok: true; deleted: number } | { ok: false; code: string }>;
   readView(userId: string): Promise<{ ok: true; view: HouseholdView } | { ok: false; code: string }>;
   claim(userId: string): Promise<HouseholdInviteClaimResult>;
   createInvite(userId: string, email: string, tokenHash: string, ttlSeconds: number): Promise<StoreText>;
@@ -441,6 +442,28 @@ export async function leaveHousehold(
       logLine(log, "leave", "bad_answer");
       return SERVER_ERROR();
   }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/cron/prune-household-invites
+// ---------------------------------------------------------------------------
+
+/**
+ * Deletes every expired invite in one call. A failed call answers 500, so a
+ * run that deleted nothing because it failed never reads as a success. The
+ * log line carries the outcome and either the deleted count or an error code.
+ */
+export async function pruneHouseholdInvites(
+  store: Pick<HouseholdStore, "pruneExpired">,
+  log: HouseholdLog
+): Promise<HouseholdResult> {
+  const pruned = await store.pruneExpired();
+  if (!pruned.ok) {
+    log(`[household-prune] outcome=failed code=${logSafeCode(pruned.code)}`);
+    return { status: 500, body: { success: false, error: "Prune failed" } };
+  }
+  log(`[household-prune] outcome=ok deleted=${pruned.deleted}`);
+  return { status: 200, body: { success: true, deleted: pruned.deleted } };
 }
 
 /** The answer for a body over HOUSEHOLD_BODY_MAX_BYTES. */
