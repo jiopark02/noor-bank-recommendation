@@ -187,6 +187,33 @@ export function readHouseholdData(body: Record<string, unknown>): HouseholdData 
   return { role: h.role, members, invite, maxMembers };
 }
 
+/**
+ * A list key for a member that does not depend on the order the members came
+ * in: "self" for the caller, "other-<n>" for the n-th other member. The view
+ * carries no member id, and none is added for this.
+ */
+export function memberKey(members: MemberLine[], index: number): string {
+  if (members[index]?.self) return "self";
+  let n = 0;
+  for (let i = 0; i < index; i++) {
+    if (!members[i].self) n++;
+  }
+  return `other-${n}`;
+}
+
+/**
+ * What the household screen draws: its data once there is any, the load
+ * error when the first load failed, and a loading line before either.
+ */
+export function householdLoadView(
+  data: HouseholdData | null,
+  loadError: string | null
+): "loading" | "failed" | "ready" {
+  if (data) return "ready";
+  if (loadError !== null) return "failed";
+  return "loading";
+}
+
 // ---------------------------------------------------------------------------
 // The accept screen
 // ---------------------------------------------------------------------------
