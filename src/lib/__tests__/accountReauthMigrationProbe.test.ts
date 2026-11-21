@@ -33,6 +33,8 @@ import path from "path";
  *   the cascade FK on user_id removed, pointed at public.users, or its check -> R11
  *   the DO block, a function in it, or the transaction removed    -> R12
  *   the header's order sentence or reversal removed               -> R13
+ *   the session not stored on verification, not compared by a check
+ *   path, a null session accepted, or the pairing constraint dropped -> R14
  */
 
 const MIGRATION = path.resolve(
@@ -44,8 +46,8 @@ const raw = readFileSync(MIGRATION, "utf8").replace(/\r\n/g, "\n");
 const sql = raw.replace(/--[^\n]*/g, "");
 
 const ISSUE = "public.account_reauth_issue(uuid, text, text, integer, integer, integer)";
-const VERIFY = "public.account_reauth_verify(uuid, text, text, integer)";
-const CHECK = "public.account_reauth_check(uuid, text, integer, boolean)";
+const VERIFY = "public.account_reauth_verify(uuid, text, text, uuid, integer)";
+const CHECK = "public.account_reauth_check(uuid, text, uuid, integer, boolean)";
 const FNS = [ISSUE, VERIFY, CHECK];
 
 function occurrences(needle: string): number {
@@ -175,12 +177,29 @@ describe("account reauth codes migration", () => {
     expect(consume).toBeGreaterThan(-1);
     const consuming = body.slice(consume, body.indexOf("return v_ok;", consume));
     expect(consuming).toMatch(
-      /with consumed as \(\s+update public\.account_reauth_codes c\s+set verified_at = null,\s+expires_at = pg_catalog\.now\(\)\s+where c\.user_id = p_user_id\s+and c\.purpose = p_purpose\s+and c\.verified_at is not null\s+and c\.verified_at > pg_catalog\.now\(\) - v_window\s+returning true\s+\)/
+      /with consumed as \(\s+update public\.account_reauth_codes c\s+set verified_at = null,\s+verified_session_id = null,\s+expires_at = pg_catalog\.now\(\)\s+where c\.user_id = p_user_id\s+and c\.purpose = p_purpose\s+and c\.verified_session_id = p_session_id\s+and c\.verified_at is not null\s+and c\.verified_at > pg_catalog\.now\(\) - v_window\s+returning true\s+\)/
     );
     expect(consuming).not.toMatch(/\bselect exists \(\s+select 1\s+from public\.account_reauth_codes/);
     const reading = body.slice(body.indexOf("return v_ok;", consume) + 1);
     expect(reading).toContain("and c.purpose = p_purpose");
     expect(reading).toContain("and c.verified_at > pg_catalog.now() - v_window");
+  });
+
+  it("R14 a verification records its session, and only the same session's check passes", () => {
+    expect(sql).toContain("  verified_session_id uuid,\n");
+    expect(sql).toMatch(
+      /constraint account_reauth_codes_verified_session_check\s+check \(\(verified_at is null\) = \(verified_session_id is null\)\)/
+    );
+    const verify = functionBody("account_reauth_verify");
+    expect(verify).toContain("or p_session_id is null");
+    expect(verify).toMatch(
+      /if v_hash = p_code_hash then\s+update public\.account_reauth_codes c\s+set verified_at = pg_catalog\.now\(\),\s+verified_session_id = p_session_id\s+where c\.user_id = p_user_id;/
+    );
+    const check = functionBody("account_reauth_check");
+    expect(check).toContain("or p_session_id is null");
+    // Both the consuming and the reading path compare the session.
+    expect(check.split("and c.verified_session_id = p_session_id").length - 1).toBe(2);
+    expect(doBlock()).toContain("k.conname = 'account_reauth_codes_verified_session_check'");
   });
 
   it("R10 a new code replaces the old one's hash, lifetime, attempts and verification", () => {
@@ -191,6 +210,7 @@ describe("account reauth codes migration", () => {
     expect(set).toContain("expires_at = excluded.expires_at,");
     expect(set).toContain("attempts = 0,");
     expect(set).toContain("verified_at = null,");
+    expect(set).toContain("verified_session_id = null,");
     expect(occurrences("on conflict (user_id) do update")).toBe(1);
     expect(body).toContain("select exists (select 1 from issued) into v_issued;");
   });

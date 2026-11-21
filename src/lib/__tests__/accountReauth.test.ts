@@ -12,6 +12,7 @@ import {
   hashReauthCode,
   requireRecentReauth,
   resolveAccountReauthMode,
+  sessionIdFromVerifiedToken,
   startReauth,
   verifyReauth,
   type ReauthDeps,
@@ -35,6 +36,10 @@ import type { BuiltEmail } from "../emailConfirmation";
  *   a gate that passes on an error, a throw or a non-boolean     -> A9
  *   the export check not used up, or the delete check used up    -> A10
  *   the code, key, hash or address in a log line or a body       -> A11
+ *   a session id read loosely (case, spaces, any string)          -> A13
+ *   verify or the gate going on without a session, or the mode off
+ *   asking for one                                                -> A14
+ *   the session left out of the verify or check arguments          -> A8, A10
  */
 
 const USER = "sentinel-user-id-6a1f";
@@ -80,7 +85,9 @@ function harness(options: {
   return { deps, order, rpcCalls, sent, logs };
 }
 
-const IDENTITY = { id: USER, email: ADDRESS };
+const SESSION = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+const IDENTITY = { id: USER, email: ADDRESS, sessionId: SESSION };
+const CALLER = { userId: USER, sessionId: SESSION };
 
 describe("ACCOUNT_REAUTH_MODE", () => {
   it("A1 only the exact value off turns reauthentication off", () => {
@@ -105,7 +112,7 @@ describe("ACCOUNT_REAUTH_MODE", () => {
         mode: resolveAccountReauthMode(raw),
         answers: { account_reauth_check: { data: false, error: null } },
       });
-      const result = await requireRecentReauth(h.deps, USER, "delete_account");
+      const result = await requireRecentReauth(h.deps, CALLER,"delete_account");
       if (raw === "off") {
         expect(result, JSON.stringify(raw)).toEqual({ ok: true });
         expect(h.rpcCalls, JSON.stringify(raw)).toEqual([]);
@@ -233,7 +240,7 @@ describe("startReauth", () => {
     }
     for (const email of [null, "", "  "]) {
       const h = harness({ answers: { account_reauth_issue: { data: "issued", error: null } } });
-      expect((await startReauth(h.deps, { id: USER, email }, "delete_account")).status).toBe(409);
+      expect((await startReauth(h.deps, { id: USER, email, sessionId: SESSION }, "delete_account")).status).toBe(409);
       expect(h.rpcCalls).toEqual([]);
       expect(h.sent).toEqual([]);
     }
@@ -270,6 +277,7 @@ describe("verifyReauth", () => {
         p_user_id: USER,
         p_purpose: "export_data",
         p_code_hash: hashReauthCode(h.deps.key!, "export_data", USER, CODE),
+        p_session_id: SESSION,
         p_max_attempts: REAUTH_MAX_ATTEMPTS,
       });
     }
@@ -297,7 +305,7 @@ describe("requireRecentReauth", () => {
     ];
     for (const [answer, ok, status] of cases) {
       const h = harness({ answers: { account_reauth_check: answer } });
-      const result = await requireRecentReauth(h.deps, USER, "delete_account");
+      const result = await requireRecentReauth(h.deps, CALLER,"delete_account");
       expect(result.ok, JSON.stringify(answer)).toBe(ok);
       if (!result.ok) {
         expect(result.status).toBe(status);
@@ -305,7 +313,7 @@ describe("requireRecentReauth", () => {
       }
     }
     const built = harness({ rpcBuildThrows: true });
-    const result = await requireRecentReauth(built.deps, USER, "export_data");
+    const result = await requireRecentReauth(built.deps, CALLER, "export_data");
     expect(result.ok).toBe(false);
     expect(!result.ok && result.status).toBe(503);
   });
@@ -316,19 +324,72 @@ describe("requireRecentReauth", () => {
       ["delete_account", false],
     ] as const) {
       const h = harness({ answers: { account_reauth_check: { data: true, error: null } } });
-      await requireRecentReauth(h.deps, USER, purpose);
+      await requireRecentReauth(h.deps, CALLER, purpose);
       expect(h.rpcCalls).toEqual([
         {
           fn: "account_reauth_check",
           args: {
             p_user_id: USER,
             p_purpose: purpose,
+            p_session_id: SESSION,
             p_window_seconds: REAUTH_VERIFIED_WINDOW_SECONDS,
             p_consume: consume,
           },
         },
       ]);
     }
+  });
+});
+
+describe("the session", () => {
+  function token(payload: unknown): string {
+    const encode = (value: string) =>
+      Buffer.from(value, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+    return `${encode('{"alg":"HS256","typ":"JWT"}')}.${encode(body)}.sig`;
+  }
+
+  it("A13 reads session_id from the token's payload, and nothing that is not a lowercase UUID", () => {
+    expect(sessionIdFromVerifiedToken(token({ sub: USER, session_id: SESSION }))).toBe(SESSION);
+    const refused: string[] = [
+      token({ sub: USER }),
+      token({ session_id: SESSION.toUpperCase() }),
+      token({ session_id: `${SESSION} ` }),
+      token({ session_id: "not-a-uuid" }),
+      token({ session_id: 7 }),
+      token({ session_id: null }),
+      token("not json"),
+      token("[]"),
+      "only.two",
+      "a.b.c.d",
+      "",
+      `${token({ session_id: SESSION }).split(".")[0]}..sig`,
+    ];
+    for (const value of refused) {
+      expect(sessionIdFromVerifiedToken(value), value).toBeNull();
+    }
+  });
+
+  it("A14 without a session, verify and the gate refuse 403 with no rpc; the mode off still passes the gate", async () => {
+    const h = harness({
+      answers: {
+        account_reauth_verify: { data: "verified", error: null },
+        account_reauth_check: { data: true, error: null },
+      },
+    });
+    const verified = await verifyReauth(h.deps, { ...IDENTITY, sessionId: null }, "delete_account", CODE);
+    expect(verified.status).toBe(403);
+    expect(verified.body.code).toBe("REAUTH_SESSION_UNAVAILABLE");
+    for (const purpose of ["delete_account", "export_data"] as const) {
+      const gate = await requireRecentReauth(h.deps, { userId: USER, sessionId: null }, purpose);
+      expect(gate.ok).toBe(false);
+      expect(!gate.ok && gate.status).toBe(403);
+      expect(!gate.ok && gate.body.code).toBe("REAUTH_SESSION_UNAVAILABLE");
+    }
+    expect(h.rpcCalls).toEqual([]);
+    const off = harness({ mode: "off" });
+    expect(await requireRecentReauth(off.deps, { userId: USER, sessionId: null }, "delete_account")).toEqual({ ok: true });
+    expect(off.rpcCalls).toEqual([]);
   });
 });
 
@@ -351,7 +412,7 @@ describe("nothing secret leaves", () => {
         for (const purpose of ["delete_account", "export_data"] as const) {
           outputs.push(JSON.stringify(await startReauth(h.deps, IDENTITY, purpose)));
           outputs.push(JSON.stringify(await verifyReauth(h.deps, IDENTITY, purpose, CODE)));
-          outputs.push(JSON.stringify(await requireRecentReauth(h.deps, USER, purpose)));
+          outputs.push(JSON.stringify(await requireRecentReauth(h.deps, CALLER,purpose)));
         }
         outputs.push(...h.logs);
       }

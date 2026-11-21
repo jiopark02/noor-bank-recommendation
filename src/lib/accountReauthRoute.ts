@@ -8,6 +8,7 @@ import {
   REAUTH_MESSAGES,
   deriveReauthCodeKey,
   resolveAccountReauthMode,
+  sessionIdFromVerifiedToken,
   type ReauthDeps,
   type ReauthIdentity,
   type ReauthResult,
@@ -39,6 +40,18 @@ function liveRpc(): ReauthRpc {
   return (fn, args) => client.rpc(fn, args);
 }
 
+/**
+ * The session id of the request's bearer token. Call only after
+ * resolveRequestAuth has accepted the request: it verified exactly this value,
+ * the Authorization header past "Bearer ", trimmed. Null when the header is
+ * absent or the token carries no well-formed session id.
+ */
+export function verifiedRequestSessionId(request: NextRequest): string | null {
+  const header = request.headers.get("authorization") || "";
+  if (!header.startsWith("Bearer ")) return null;
+  return sessionIdFromVerifiedToken(header.slice(7).trim());
+}
+
 /** The mode, the derived key, the service-role rpc and the mailer. */
 export function liveReauthDeps(): ReauthDeps {
   return {
@@ -67,8 +80,8 @@ export function liveReauthGateDeps(): Pick<ReauthDeps, "mode" | "rpc" | "log"> {
  *   2. the bearer token verified (resolveRequestAuth). An auth server that
  *      gave no usable answer is 503; every other cause is 401;
  *   3. the body read under REAUTH_BODY_MAX_BYTES.
- * The identity is the verified user's id and address; nothing from the body
- * names a user or an address.
+ * The identity is the verified user's id and address and the token's session
+ * id; nothing from the body names a user, an address or a session.
  */
 export async function reauthRouteGate(
   request: NextRequest,
@@ -129,6 +142,7 @@ export async function reauthRouteGate(
     identity: {
       id: auth.user.id,
       email: typeof auth.user.email === "string" ? auth.user.email : null,
+      sessionId: verifiedRequestSessionId(request),
     },
     body,
   };

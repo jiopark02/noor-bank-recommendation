@@ -14,9 +14,21 @@ import type { NextRequest } from "next/server";
  *   the service-role check moved below authentication             -> T2
  *   a code that verifies with another purpose or another user     -> T3
  *   the code, key, hash, address or bearer token in a log or body -> T4
+ *   the session taken from the body, or verify going on without one -> T5
  */
 
-const BEARER = "sentinel-bearer-token-b71e";
+const SESSION = "5e1d0c9b-8a7f-4e6d-9c5b-4a3f2e1d0c9b";
+const BODY_SESSION = "11111111-2222-4333-8444-555555555555";
+
+function jwtWith(payload: Record<string, unknown>): string {
+  const encode = (value: string) =>
+    Buffer.from(value, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${encode('{"alg":"HS256","typ":"JWT"}')}.${encode(JSON.stringify(payload))}.sentinel-signature-b71e`;
+}
+
+/** The auth server is faked and accepts any token; its payload carries the session. */
+const BEARER = jwtWith({ sub: "sentinel-sub", session_id: SESSION });
+const BEARER_NO_SESSION = jwtWith({ sub: "sentinel-sub" });
 const USER_ID = "sentinel-user-id-4c22";
 const USER_EMAIL = "sentinel.owner@example.test";
 const BODY_EMAIL = "sentinel.attacker@example.test";
@@ -89,7 +101,8 @@ vi.mock("@/lib/email", () => ({
 
 async function post(
   path: "start" | "verify",
-  body: unknown
+  body: unknown,
+  bearer: string = BEARER
 ): Promise<{ status: number; json: Record<string, unknown>; text: string; cache: string | null }> {
   const mod =
     path === "start"
@@ -98,7 +111,7 @@ async function post(
   const res = await mod.POST(
     new Request(`https://noor.test/api/account/reauth/${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${BEARER}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
       body: JSON.stringify(body),
     }) as unknown as NextRequest
   );
@@ -205,6 +218,29 @@ describe("reauth routes", () => {
     expect(right.status).toBe(200);
   });
 
+  it("T5 verify sends the session of the verified token, never one from the body", async () => {
+    await post("start", { purpose: "delete_account" });
+    const verified = await post("verify", {
+      purpose: "delete_account",
+      code: emailedCode(),
+      sessionId: BODY_SESSION,
+      session_id: BODY_SESSION,
+    });
+    expect(verified.status).toBe(200);
+    const verifyCalls = state.rpcCalls.filter((c) => c.fn === "account_reauth_verify");
+    expect(verifyCalls.map((c) => c.args.p_session_id)).toEqual([SESSION]);
+  });
+
+  it("T5 a token without a session id cannot verify, and no rpc is made", async () => {
+    await post("start", { purpose: "delete_account" });
+    const code = emailedCode();
+    state.rpcCalls = [];
+    const res = await post("verify", { purpose: "delete_account", code, sessionId: BODY_SESSION }, BEARER_NO_SESSION);
+    expect(res.status).toBe(403);
+    expect(res.json.code).toBe("REAUTH_SESSION_UNAVAILABLE");
+    expect(state.rpcCalls).toEqual([]);
+  });
+
   it("T4 no log line or answer carries the code, the key, the hash, the address or the bearer token", async () => {
     const bodies: string[] = [];
     bodies.push((await post("start", { purpose: "delete_account" })).text);
@@ -219,7 +255,7 @@ describe("reauth routes", () => {
     const key = deriveReauthCodeKey(SECRET)!;
     const hashes = state.rpcCalls.map((c) => String(c.args.p_code_hash));
     const all = bodies.join("\n") + "\n" + consoleText();
-    for (const secret of [code, key.toString("hex"), key.toString("base64"), SECRET, USER_EMAIL, BEARER, USER_ID, ...hashes]) {
+    for (const secret of [code, key.toString("hex"), key.toString("base64"), SECRET, USER_EMAIL, BEARER, USER_ID, SESSION, ...hashes]) {
       expect(all, secret).not.toContain(secret);
     }
   });

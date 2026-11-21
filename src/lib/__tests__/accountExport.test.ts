@@ -614,11 +614,13 @@ describe("account export: explicit column lists match the schema", () => {
    * exported to the person who shared or was asked.
    * account_reauth_codes.code_hash: the keyed hash of a one-time code,
    * nothing the user entered or can use.
+   * account_reauth_codes.verified_session_id: an internal session
+   * identifier, nothing the user can use.
    */
   const NOT_EXPORTED: Readonly<Record<string, readonly string[]>> = {
     share_grants: ["grantee_user_id"],
     share_prompt_answers: ["grantee_user_id"],
-    account_reauth_codes: ["code_hash"],
+    account_reauth_codes: ["code_hash", "verified_session_id"],
   };
 
   for (const table of EXPLICIT) {
@@ -689,9 +691,10 @@ describe("account export: explicit column lists match the schema", () => {
     expect(JSON.stringify(result.body)).not.toContain(GRANTEE);
   });
 
-  it("E21 the account_reauth_codes row carries no code_hash and only the caller's row, executed", async () => {
+  it("E21 the account_reauth_codes row carries no code_hash, no verified_session_id and only the caller's row, executed", async () => {
     const HASH = "sentinel-code-hash-5e0b";
     const OTHER_HASH = "sentinel-other-hash-91c2";
+    const SESSION_ID = "44444444-4444-4444-8444-444444444444";
     const { result } = await exportOf(
       {
         account_reauth_codes: [
@@ -702,6 +705,7 @@ describe("account export: explicit column lists match the schema", () => {
             expires_at: "2026-11-21T00:10:00Z",
             attempts: 1,
             verified_at: "2026-11-21T00:02:00Z",
+            verified_session_id: SESSION_ID,
             window_start: "2026-11-21T00:00:00Z",
             window_count: 1,
           },
@@ -712,6 +716,7 @@ describe("account export: explicit column lists match the schema", () => {
             expires_at: "2026-11-21T00:10:00Z",
             attempts: 0,
             verified_at: null,
+            verified_session_id: null,
             window_start: "2026-11-21T00:00:00Z",
             window_count: 1,
           },
@@ -721,6 +726,8 @@ describe("account export: explicit column lists match the schema", () => {
     );
     expect(result.status).toBe(200);
     const rows = result.body.account_reauth_codes as ExportRow[];
+    expect(Object.keys(rows[0])).not.toContain("verified_session_id");
+    expect(JSON.stringify(result.body)).not.toContain(SESSION_ID);
     expect(rows).toEqual([
       {
         purpose: "export_data",

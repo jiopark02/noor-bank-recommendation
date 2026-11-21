@@ -16,18 +16,25 @@
 --                          'verified', 'refused' or 'locked'. An attempt is
 --                          counted only on a code that is current: same
 --                          purpose, not expired, not yet verified, under the
---                          attempt limit.
---   account_reauth_check   true while a verification for the purpose is
---                          younger than the window. With p_consume it also
---                          ends the code, in the same statement, so one
---                          verification answers one check.
+--                          attempt limit. A verification records the sign-in
+--                          session that made it.
+--   account_reauth_check   true while a verification for the purpose, made by
+--                          the same sign-in session, is younger than the
+--                          window. With p_consume it also ends the code, in
+--                          the same statement, so one verification answers one
+--                          check.
+--
+-- The session is the session_id claim of the access token the application
+-- verified with the auth server; a verification made in one session does not
+-- answer for another.
 --
 -- Every count, lifetime and window is an argument: the application holds the
 -- values, and this file holds none. A function refuses an argument that is
 -- null or out of range with SQLSTATE 22023 rather than deciding on it.
 --
 -- What a row holds: the user id, the purpose, the code's hash, three
--- timestamps and two counts. No email address, no code.
+-- timestamps, two counts and the id of the session that verified it. No
+-- email address, no code.
 --
 -- Access: service role only. RLS is on with no policies; every privilege on
 -- the table and EXECUTE on the functions is revoked from PUBLIC, anon and
@@ -51,8 +58,8 @@
 --
 -- To reverse it (after the application code that calls the functions and
 -- exports the table is reverted and deployed):
---   drop function if exists public.account_reauth_check(uuid, text, integer, boolean);
---   drop function if exists public.account_reauth_verify(uuid, text, text, integer);
+--   drop function if exists public.account_reauth_check(uuid, text, uuid, integer, boolean);
+--   drop function if exists public.account_reauth_verify(uuid, text, text, uuid, integer);
 --   drop function if exists public.account_reauth_issue(uuid, text, text, integer, integer, integer);
 --   drop table if exists public.account_reauth_codes;
 
@@ -67,12 +74,15 @@ create table if not exists public.account_reauth_codes (
   expires_at    timestamptz not null,
   attempts      int not null,
   verified_at   timestamptz,
+  verified_session_id uuid,
   window_start  timestamptz not null,
   window_count  int not null,
   constraint account_reauth_codes_purpose_check
     check (purpose in ('delete_account', 'export_data')),
   constraint account_reauth_codes_counts_check
-    check (attempts >= 0 and window_count >= 1)
+    check (attempts >= 0 and window_count >= 1),
+  constraint account_reauth_codes_verified_session_check
+    check ((verified_at is null) = (verified_session_id is null))
 );
 
 revoke all on table public.account_reauth_codes from public, anon, authenticated;
@@ -115,17 +125,18 @@ begin
   with issued as (
     insert into public.account_reauth_codes as c
       (user_id, purpose, code_hash, expires_at, attempts, verified_at,
-       window_start, window_count)
+       verified_session_id, window_start, window_count)
     values
       (p_user_id, p_purpose, p_code_hash,
        pg_catalog.now() + pg_catalog.make_interval(secs => p_ttl_seconds),
-       0, null, pg_catalog.now(), 1)
+       0, null, null, pg_catalog.now(), 1)
     on conflict (user_id) do update
        set purpose = excluded.purpose,
            code_hash = excluded.code_hash,
            expires_at = excluded.expires_at,
            attempts = 0,
            verified_at = null,
+           verified_session_id = null,
            window_start = case
              when c.window_start <= pg_catalog.now() - v_window
                then pg_catalog.now()
@@ -158,6 +169,7 @@ create or replace function public.account_reauth_verify(
   p_user_id uuid,
   p_purpose text,
   p_code_hash text,
+  p_session_id uuid,
   p_max_attempts integer
 )
 returns text
@@ -173,6 +185,7 @@ begin
   if p_user_id is null
      or p_purpose is null or p_purpose not in ('delete_account', 'export_data')
      or p_code_hash is null or pg_catalog.length(p_code_hash) = 0
+     or p_session_id is null
      or p_max_attempts is null or p_max_attempts < 1 then
     raise exception 'account_reauth_verify: invalid arguments'
       using errcode = '22023';
@@ -206,7 +219,8 @@ begin
 
   if v_hash = p_code_hash then
     update public.account_reauth_codes c
-       set verified_at = pg_catalog.now()
+       set verified_at = pg_catalog.now(),
+           verified_session_id = p_session_id
      where c.user_id = p_user_id;
     return 'verified';
   end if;
@@ -218,14 +232,15 @@ begin
 end
 $$;
 
-revoke all on function public.account_reauth_verify(uuid, text, text, integer)
+revoke all on function public.account_reauth_verify(uuid, text, text, uuid, integer)
   from public, anon, authenticated;
-grant execute on function public.account_reauth_verify(uuid, text, text, integer)
+grant execute on function public.account_reauth_verify(uuid, text, text, uuid, integer)
   to service_role;
 
 create or replace function public.account_reauth_check(
   p_user_id uuid,
   p_purpose text,
+  p_session_id uuid,
   p_window_seconds integer,
   p_consume boolean
 )
@@ -241,6 +256,7 @@ declare
 begin
   if p_user_id is null
      or p_purpose is null or p_purpose not in ('delete_account', 'export_data')
+     or p_session_id is null
      or p_window_seconds is null or p_window_seconds < 1
      or p_consume is null then
     raise exception 'account_reauth_check: invalid arguments'
@@ -255,9 +271,11 @@ begin
     with consumed as (
       update public.account_reauth_codes c
          set verified_at = null,
+             verified_session_id = null,
              expires_at = pg_catalog.now()
        where c.user_id = p_user_id
          and c.purpose = p_purpose
+         and c.verified_session_id = p_session_id
          and c.verified_at is not null
          and c.verified_at > pg_catalog.now() - v_window
       returning true
@@ -271,6 +289,7 @@ begin
       from public.account_reauth_codes c
      where c.user_id = p_user_id
        and c.purpose = p_purpose
+       and c.verified_session_id = p_session_id
        and c.verified_at is not null
        and c.verified_at > pg_catalog.now() - v_window
   ) into v_ok;
@@ -278,9 +297,9 @@ begin
 end
 $$;
 
-revoke all on function public.account_reauth_check(uuid, text, integer, boolean)
+revoke all on function public.account_reauth_check(uuid, text, uuid, integer, boolean)
   from public, anon, authenticated;
-grant execute on function public.account_reauth_check(uuid, text, integer, boolean)
+grant execute on function public.account_reauth_check(uuid, text, uuid, integer, boolean)
   to service_role;
 
 do $$
@@ -288,8 +307,8 @@ declare
   v_table regclass := 'public.account_reauth_codes'::regclass;
   v_fns regprocedure[] := array[
     'public.account_reauth_issue(uuid, text, text, integer, integer, integer)'::regprocedure,
-    'public.account_reauth_verify(uuid, text, text, integer)'::regprocedure,
-    'public.account_reauth_check(uuid, text, integer, boolean)'::regprocedure
+    'public.account_reauth_verify(uuid, text, text, uuid, integer)'::regprocedure,
+    'public.account_reauth_check(uuid, text, uuid, integer, boolean)'::regprocedure
   ];
   v_fn regprocedure;
   v_privileges text[] := array[
@@ -396,7 +415,21 @@ begin
       'public.account_reauth_codes: the table owner lacks DELETE, so the cascade from auth.users would fail';
   end if;
 
-  -- 6. Each function: no EXECUTE for anon, authenticated or PUBLIC, EXECUTE
+  -- 6. A verification always names its session: the check constraint that
+  --    holds verified_at and verified_session_id set or unset together. A
+  --    table created before this file, without it, fails here.
+  if not exists (
+    select 1
+      from pg_constraint k
+     where k.conrelid = v_table
+       and k.contype = 'c'
+       and k.conname = 'account_reauth_codes_verified_session_check'
+  ) then
+    raise exception
+      'public.account_reauth_codes: verified_at and verified_session_id are not held together';
+  end if;
+
+  -- 7. Each function: no EXECUTE for anon, authenticated or PUBLIC, EXECUTE
   --    for service_role, SECURITY INVOKER, empty search_path.
   foreach v_fn in array v_fns loop
     if has_function_privilege('anon', v_fn, 'EXECUTE')

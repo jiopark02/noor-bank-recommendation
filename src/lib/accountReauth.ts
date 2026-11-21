@@ -22,6 +22,14 @@ import type { BuiltEmail } from "@/lib/emailConfirmation";
  * Every failure to decide is closed: a check that cannot be made refuses the
  * action (503), and a code that cannot be hashed or stored is not sent.
  *
+ * THE SESSION
+ * A verification answers only for the sign-in session that made it. The
+ * session is the session_id claim of the bearer token the route has just had
+ * the auth server accept (sessionIdFromVerifiedToken); the claim is read from
+ * that same string, never from the body. A token without a well-formed
+ * session id gets 403 REAUTH_SESSION_UNAVAILABLE from verify and from the
+ * gate, and no rpc is made.
+ *
  * THE HASH KEY
  * The stored hash is an HMAC keyed by a key derived (HKDF-SHA256) from the
  * service-role key under the fixed label REAUTH_CODE_KEY_LABEL, which nothing
@@ -99,6 +107,30 @@ export function generateReauthCode(): string {
   return ("000000" + String(n)).slice(-REAUTH_CODE_DIGITS);
 }
 
+const SESSION_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The session_id claim of a bearer token, or null when the token is not
+ * three dot-separated parts, its payload is not JSON, or the claim is not a
+ * lowercase UUID. Only call this on a token the auth server has just
+ * accepted: the payload is trusted because that server verified this exact
+ * string, not because of anything checked here.
+ */
+export function sessionIdFromVerifiedToken(token: string): string | null {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[1].length === 0) return null;
+  let payload: unknown;
+  try {
+    const json = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    payload = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof payload !== "object" || payload === null) return null;
+  const value = (payload as { session_id?: unknown }).session_id;
+  return typeof value === "string" && SESSION_ID_SHAPE.test(value) ? value : null;
+}
+
 const CODE_SHAPE = /^[0-9]{6}$/;
 
 export function normalizeReauthCode(value: unknown): string | null {
@@ -118,6 +150,7 @@ export const REAUTH_CODES = {
   REAUTH_CODE_INVALID: "REAUTH_CODE_INVALID",
   REAUTH_CODE_REJECTED: "REAUTH_CODE_REJECTED",
   REAUTH_LOCKED: "REAUTH_LOCKED",
+  REAUTH_SESSION_UNAVAILABLE: "REAUTH_SESSION_UNAVAILABLE",
 } as const;
 
 export type ReauthCode = (typeof REAUTH_CODES)[keyof typeof REAUTH_CODES];
@@ -133,6 +166,7 @@ export const REAUTH_MESSAGES: Record<ReauthCode, string> = {
   REAUTH_CODE_INVALID: "Enter the 6-digit code from the email.",
   REAUTH_CODE_REJECTED: "That code didn't work. Check it, or request a new one.",
   REAUTH_LOCKED: "Too many tries for this code. Request a new one.",
+  REAUTH_SESSION_UNAVAILABLE: "Please sign out, sign in again, and then try again.",
 };
 
 export type ReauthResult = { status: number; body: Record<string, unknown> };
@@ -174,7 +208,12 @@ async function callRpc(
 }
 
 /** The verified caller, from the token only. */
-export type ReauthIdentity = { id: string; email: string | null };
+export type ReauthIdentity = {
+  id: string;
+  email: string | null;
+  /** The token's session_id claim, or null when it has none in the expected form. */
+  sessionId: string | null;
+};
 
 export type ReauthDeps = {
   mode: AccountReauthMode;
@@ -327,6 +366,10 @@ export async function verifyReauth(
   if (code === null) {
     return refusal(400, REAUTH_CODES.REAUTH_CODE_INVALID);
   }
+  if (identity.sessionId === null) {
+    deps.log("[account-reauth] route=verify outcome=no_session");
+    return refusal(403, REAUTH_CODES.REAUTH_SESSION_UNAVAILABLE);
+  }
   if (deps.key === null) {
     deps.log("[account-reauth] route=verify outcome=unavailable cause=no_key");
     return refusal(503, REAUTH_CODES.REAUTH_UNAVAILABLE);
@@ -336,6 +379,7 @@ export async function verifyReauth(
     p_user_id: identity.id,
     p_purpose: purpose,
     p_code_hash: hashReauthCode(deps.key, purpose, identity.id, code),
+    p_session_id: identity.sessionId,
     p_max_attempts: REAUTH_MAX_ATTEMPTS,
   });
   if (!answer.ok) {
@@ -362,20 +406,25 @@ export type ReauthGateResult = { ok: true } | { ok: false; status: number; body:
 
 /**
  * The gate for an account action. Passes when the mode is off, or when the
- * database reports a verification for this purpose inside the window. For
- * export_data the check also uses the verification up, so one verification
- * answers one export; account deletion only reads it, since a deletion that
- * stops part-way is retried.
+ * database reports a verification for this purpose, made by this request's
+ * session, inside the window. For export_data the check also uses the
+ * verification up, so one verification answers one export; account deletion
+ * only reads it, since a deletion that stops part-way is retried.
  */
 export async function requireRecentReauth(
   deps: Pick<ReauthDeps, "mode" | "rpc" | "log">,
-  userId: string,
+  caller: { userId: string; sessionId: string | null },
   purpose: ReauthPurpose
 ): Promise<ReauthGateResult> {
   if (deps.mode === "off") return { ok: true };
+  if (caller.sessionId === null) {
+    deps.log(`[account-reauth] route=gate purpose=${purpose} outcome=no_session`);
+    return { ok: false, ...refusal(403, REAUTH_CODES.REAUTH_SESSION_UNAVAILABLE) };
+  }
   const answer = await callRpc(deps.rpc, "account_reauth_check", {
-    p_user_id: userId,
+    p_user_id: caller.userId,
     p_purpose: purpose,
+    p_session_id: caller.sessionId,
     p_window_seconds: REAUTH_VERIFIED_WINDOW_SECONDS,
     p_consume: purpose === "export_data",
   });

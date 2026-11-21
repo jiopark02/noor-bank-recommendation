@@ -14,7 +14,11 @@ import {
 } from "@/lib/plaidRevocation";
 import { deleteAccountForUser } from "@/lib/accountDeletion";
 import { requireRecentReauth } from "@/lib/accountReauth";
-import { liveReauthGateDeps, reauthResponse } from "@/lib/accountReauthRoute";
+import {
+  liveReauthGateDeps,
+  reauthResponse,
+  verifiedRequestSessionId,
+} from "@/lib/accountReauthRoute";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +33,11 @@ export const maxDuration = 300;
  * request body — it is neither accepted nor trusted.
  *
  * Before anything else the route requires a recent email-code verification
- * for "delete_account" (requireRecentReauth, accountReauth.ts): 403
- * REAUTH_REQUIRED without one, 503 REAUTH_CHECK_UNAVAILABLE when it cannot be
- * checked, unless ACCOUNT_REAUTH_MODE is exactly "off".
+ * for "delete_account" made by this request's sign-in session
+ * (requireRecentReauth, accountReauth.ts): 403 REAUTH_REQUIRED without one,
+ * 403 REAUTH_SESSION_UNAVAILABLE when the token names no session, 503
+ * REAUTH_CHECK_UNAVAILABLE when it cannot be checked, unless
+ * ACCOUNT_REAUTH_MODE is exactly "off".
  *
  * WHAT REPLACED THE "BEST-EFFORT REVOCATION" RULE, AND WHY
  * This route used to revoke each Plaid Item best-effort and then delete every
@@ -94,7 +100,11 @@ export async function POST(request: NextRequest) {
   // A recent email-code verification for this purpose, read from the
   // database, before anything is revoked or deleted. Closed when it cannot be
   // checked. Not used up: a deletion that stops part-way is retried.
-  const reauth = await requireRecentReauth(liveReauthGateDeps(), authUserId, "delete_account");
+  const reauth = await requireRecentReauth(
+    liveReauthGateDeps(),
+    { userId: authUserId, sessionId: verifiedRequestSessionId(request) },
+    "delete_account"
+  );
   if (!reauth.ok) {
     return reauthResponse(reauth);
   }

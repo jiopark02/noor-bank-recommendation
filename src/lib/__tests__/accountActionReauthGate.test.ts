@@ -16,9 +16,21 @@ import type { NextRequest } from "next/server";
  *   a mode other than exactly "off" skipping the gate           -> G3
  *   the gate given another purpose, or the export not used up   -> G4
  *   the gate given an id from anywhere but the token            -> G4
+ *   the gate given no session, or a session not from the token  -> G4
+ *   a token without a session passing the gate                  -> G5
  */
 
-const BEARER = "sentinel-bearer-token-c3d0";
+const SESSION = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+function jwtWith(payload: Record<string, unknown>): string {
+  const encode = (value: string) =>
+    Buffer.from(value, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${encode('{"alg":"HS256","typ":"JWT"}')}.${encode(JSON.stringify(payload))}.sentinel-signature-c3d0`;
+}
+
+/** The auth server is faked and accepts any token; its payload carries the session. */
+const BEARER = jwtWith({ sub: "sentinel-sub", session_id: SESSION });
+const BEARER_NO_SESSION = jwtWith({ sub: "sentinel-sub" });
 const USER_ID = "sentinel-user-id-2b8e";
 
 type CheckAnswer = { data: unknown; error: unknown } | "throw";
@@ -66,24 +78,24 @@ vi.mock("@/lib/accountExport", () => ({
   makeSupabasePageReader: () => async () => ({ data: [], error: null }),
 }));
 
-async function callDelete(): Promise<{ status: number; json: Record<string, unknown> }> {
+async function callDelete(bearer: string = BEARER): Promise<{ status: number; json: Record<string, unknown> }> {
   const { POST } = await import("../../app/api/account/delete/route");
   const res = await POST(
     new Request("https://noor.test/api/account/delete", {
       method: "POST",
-      headers: { authorization: `Bearer ${BEARER}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
       body: JSON.stringify({ userId: "sentinel-body-user" }),
     }) as unknown as NextRequest
   );
   return { status: res.status, json: await res.json() };
 }
 
-async function callExport(): Promise<{ status: number; json: Record<string, unknown> }> {
+async function callExport(bearer: string = BEARER): Promise<{ status: number; json: Record<string, unknown> }> {
   const { GET } = await import("../../app/api/account/export/route");
   const res = await GET(
     new Request("https://noor.test/api/account/export", {
       method: "GET",
-      headers: { authorization: `Bearer ${BEARER}` },
+      headers: { authorization: `Bearer ${bearer}` },
     }) as unknown as NextRequest
   );
   return { status: res.status, json: await res.json() };
@@ -182,8 +194,25 @@ describe("account action reauthentication gate", () => {
     await callDelete();
     await callExport();
     expect(state.checkCalls).toEqual([
-      { p_user_id: USER_ID, p_purpose: "delete_account", p_window_seconds: 600, p_consume: false },
-      { p_user_id: USER_ID, p_purpose: "export_data", p_window_seconds: 600, p_consume: true },
+      { p_user_id: USER_ID, p_purpose: "delete_account", p_session_id: SESSION, p_window_seconds: 600, p_consume: false },
+      { p_user_id: USER_ID, p_purpose: "export_data", p_session_id: SESSION, p_window_seconds: 600, p_consume: true },
     ]);
+  });
+
+  it("G5 a token without a session id: 403 REAUTH_SESSION_UNAVAILABLE, no check, no action, unless the mode is off", async () => {
+    state.checkAnswer = { data: true, error: null };
+    const deleted = await callDelete(BEARER_NO_SESSION);
+    const exported = await callExport(BEARER_NO_SESSION);
+    for (const res of [deleted, exported]) {
+      expect(res.status).toBe(403);
+      expect(res.json.code).toBe("REAUTH_SESSION_UNAVAILABLE");
+    }
+    expect(state.checkCalls).toEqual([]);
+    expect(state.deletions).toEqual([]);
+    expect(state.exports).toEqual([]);
+
+    process.env.ACCOUNT_REAUTH_MODE = "off";
+    expect((await callDelete(BEARER_NO_SESSION)).status).toBe(200);
+    expect(state.deletions).toEqual([USER_ID]);
   });
 });

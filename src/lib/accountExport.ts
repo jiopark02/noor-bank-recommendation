@@ -188,7 +188,8 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
   },
   // One row per user, keyed by user_id, which the output leaves out.
   // code_hash is not exported: it is the keyed hash of a one-time code,
-  // nothing the user entered or can use.
+  // nothing the user entered or can use. verified_session_id is not exported
+  // either: an internal session identifier, nothing the user can use.
   {
     key: "account_reauth_codes",
     table: "account_reauth_codes",

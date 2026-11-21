@@ -3,7 +3,11 @@ import { createAdminClient } from "@/lib/supabase";
 import { getAuthenticatedUserFromRequest } from "@/lib/apiAuth";
 import { buildAccountExport, makeSupabasePageReader } from "@/lib/accountExport";
 import { requireRecentReauth } from "@/lib/accountReauth";
-import { liveReauthGateDeps, reauthResponse } from "@/lib/accountReauthRoute";
+import {
+  liveReauthGateDeps,
+  reauthResponse,
+  verifiedRequestSessionId,
+} from "@/lib/accountReauthRoute";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +21,12 @@ export const dynamic = "force-dynamic";
  * and how each is paged, lives in src/lib/accountExport.ts.
  *
  * Before any section is read the route requires a recent email-code
- * verification for "export_data" (requireRecentReauth, accountReauth.ts),
- * and the check uses it up, so one verification answers one export: 403
- * REAUTH_REQUIRED without one, 503 REAUTH_CHECK_UNAVAILABLE when it cannot be
- * checked, unless ACCOUNT_REAUTH_MODE is exactly "off".
+ * verification for "export_data" made by this request's sign-in session
+ * (requireRecentReauth, accountReauth.ts), and the check uses it up, so one
+ * verification answers one export: 403 REAUTH_REQUIRED without one, 403
+ * REAUTH_SESSION_UNAVAILABLE when the token names no session, 503
+ * REAUTH_CHECK_UNAVAILABLE when it cannot be checked, unless
+ * ACCOUNT_REAUTH_MODE is exactly "off".
  *
  * Deliberately excluded:
  *   - plaid_connections.access_token — a live bank credential; only
@@ -33,6 +39,8 @@ export const dynamic = "force-dynamic";
  *     member's identifier is their personal data.
  *   - account_reauth_codes.code_hash — the keyed hash of a one-time code,
  *     nothing the user entered or can use.
+ *   - account_reauth_codes.verified_session_id — an internal session
+ *     identifier, nothing the user can use.
  *
  * If any page of any section fails, the whole export returns 500 rather than
  * silently handing back an incomplete file the user believes is complete.
@@ -45,7 +53,11 @@ export async function GET(request: NextRequest) {
 
   // A recent email-code verification for this purpose, read from the
   // database and used up by the same check, before any section is read.
-  const reauth = await requireRecentReauth(liveReauthGateDeps(), user.id, "export_data");
+  const reauth = await requireRecentReauth(
+    liveReauthGateDeps(),
+    { userId: user.id, sessionId: verifiedRequestSessionId(request) },
+    "export_data"
+  );
   if (!reauth.ok) {
     return reauthResponse(reauth);
   }
