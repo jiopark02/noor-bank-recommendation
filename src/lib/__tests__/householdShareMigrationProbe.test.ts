@@ -40,6 +40,9 @@ import path from "path";
  *   a trigger added                                                 -> S7
  *   a DO block check or its raise removed                           -> S8
  *   the precondition that share_grants is empty removed             -> S9
+ *   a cleanup delete removed, moved after the DO block, or without its
+ *     owner or grantee condition                                    -> S10
+ *   the DO block's no-stale-row check removed                       -> S10
  */
 
 const MIGRATIONS = path.resolve(__dirname, "../../../supabase/migrations");
@@ -342,6 +345,32 @@ describe("household share grants migration", () => {
     expect(block).toMatch(/is distinct from 'uuid' then\n\s+raise exception/);
     expect(block).toMatch(
       /and a\.attname = 'grantee_user_id'[\s\S]*?\) and exists \(select 1 from public\.share_grants\) then\n\s+raise exception/
+    );
+  });
+
+  it("S10 before the closing DO block, both tables lose every row whose owner or grantee is not an active member of its household, and the block requires none left", () => {
+    const closing = sql.lastIndexOf("\ndo $$");
+    const grants = sql.indexOf(
+      "grant execute on function public.household_leave(uuid) to service_role;"
+    );
+    for (const [table, alias] of [
+      ["share_grants", "g"],
+      ["share_prompt_answers", "a"],
+    ]) {
+      const head = `\ndelete from public.${table} ${alias}\n where not exists (`;
+      const start = sql.indexOf(head);
+      expect(start, table).toBeGreaterThan(grants);
+      expect(start, table).toBeLessThan(closing);
+      const statement = sql.slice(start, sql.indexOf(";", start) + 1);
+      for (const person of ["owner_user_id", "grantee_user_id"]) {
+        expect(statement, `${table} ${person}`).toContain(
+          `from public.household_members m\n          where m.household_id = ${alias}.household_id\n            and m.user_id = ${alias}.${person}\n            and m.status = 'active'`
+        );
+      }
+      expect(statement, table).toMatch(/\)\n {4}or not exists \(/);
+    }
+    expect(closingDoBlock()).toMatch(
+      /m\.user_id = r\.owner_user_id[\s\S]*?m\.user_id = r\.grantee_user_id[\s\S]*?if v_count <> 0 then\n\s+raise exception 'public\.%: % rows name someone who is not an active member/
     );
   });
 });

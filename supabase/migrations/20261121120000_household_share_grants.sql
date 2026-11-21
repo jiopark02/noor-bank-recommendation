@@ -31,7 +31,7 @@
 --     plaid_connections (user_id, id), all on delete cascade. A new partner
 --     is a new question: a row for one person does not answer for another.
 --   - Creates public.household_share_set(p_user_id, p_item_id, p_shared),
---     the only writer of both tables. It answers one of:
+--     the only function that inserts into either table. It answers one of:
 --       none           the caller has no active household
 --       solo           the caller's household has no other active member
 --       no_connection  the caller has no connection with that item id
@@ -50,6 +50,9 @@
 --     grantee is the person leaving. Rows between members who stay are kept,
 --     should a household ever hold more than two. The signature, the
 --     answers, the locks and the owner succession are unchanged.
+--   - Deletes every grant and answer whose owner or grantee is not an
+--     active member of the row's household, and checks that none is left
+--     (see "Rows left by a household_leave without the deletes" below).
 --
 -- How grants end:
 --   - Leaving a household: household_leave, above, for the rows the person
@@ -109,6 +112,20 @@
 --     household_leave with the body that deletes no grant.
 -- After running either again, run this file again; its DO block is the one
 -- that detects both.
+--
+-- Rows left by a household_leave without the deletes. While the second file
+-- above is the last to have run, a person who leaves keeps every
+-- share_grants and share_prompt_answers row they gave or received. Just
+-- before the closing DO block, this file deletes every row of either table
+-- whose owner or grantee is not an active member of the row's household,
+-- and the DO block then requires that no such row is left. On a first
+-- application both tables are empty and the deletes remove nothing; in
+-- normal operation no such row exists, because household_share_set writes a
+-- row only while both people are active members there and household_leave
+-- deletes it in the same transaction that ends the membership. What the
+-- deletes cannot tell apart: a person who left during that window and has
+-- since joined the same household again is an active member there again, so
+-- the rows from before they left are kept and count as shared.
 --
 -- 20261107130000_add_integrity_constraints_users_plaid_connections.sql
 -- cannot be reversed while this file is applied: the composite foreign keys
@@ -447,6 +464,41 @@ revoke all on function public.household_leave(uuid)
   from public, anon, authenticated;
 grant execute on function public.household_leave(uuid) to service_role;
 
+-- Delete every grant and answer whose owner or grantee is not an active
+-- member of the row's household (see "Rows left by a household_leave
+-- without the deletes" above). Nothing matches on a first application.
+delete from public.share_grants g
+ where not exists (
+         select 1
+           from public.household_members m
+          where m.household_id = g.household_id
+            and m.user_id = g.owner_user_id
+            and m.status = 'active'
+       )
+    or not exists (
+         select 1
+           from public.household_members m
+          where m.household_id = g.household_id
+            and m.user_id = g.grantee_user_id
+            and m.status = 'active'
+       );
+
+delete from public.share_prompt_answers a
+ where not exists (
+         select 1
+           from public.household_members m
+          where m.household_id = a.household_id
+            and m.user_id = a.owner_user_id
+            and m.status = 'active'
+       )
+    or not exists (
+         select 1
+           from public.household_members m
+          where m.household_id = a.household_id
+            and m.user_id = a.grantee_user_id
+            and m.status = 'active'
+       );
+
 do $$
 declare
   v_tables text[] := array['share_grants', 'share_prompt_answers'];
@@ -741,6 +793,28 @@ begin
   if not v_ok then
     raise exception 'public.share_prompt_answers: no unique constraint on (resource_id, grantee_user_id)';
   end if;
+
+  -- 16. No grant or answer names an owner or grantee who is not an active
+  --     member of the row's household.
+  foreach v_name in array v_tables loop
+    execute format(
+      'select count(*) from public.%I r
+        where not exists (
+                select 1 from public.household_members m
+                 where m.household_id = r.household_id
+                   and m.user_id = r.owner_user_id
+                   and m.status = ''active'')
+           or not exists (
+                select 1 from public.household_members m
+                 where m.household_id = r.household_id
+                   and m.user_id = r.grantee_user_id
+                   and m.status = ''active'')',
+      v_name
+    ) into v_count;
+    if v_count <> 0 then
+      raise exception 'public.%: % rows name someone who is not an active member of the row''s household', v_name, v_count;
+    end if;
+  end loop;
 end
 $$;
 
