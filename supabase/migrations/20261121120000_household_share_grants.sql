@@ -109,8 +109,12 @@
 -- own checks pass:
 --   - 20261108120000_create_households_and_goals.sql takes back service_role
 --     INSERT and DELETE on share_grants. Until this file is applied again,
---     household_leave and household_share_set, which both delete from
---     share_grants as service_role, fail with 42501.
+--     every call that reaches a delete from share_grants as service_role
+--     fails with 42501: household_leave for a person leaving a household
+--     that has another active member, and household_share_set for a
+--     caller with exactly one other active member and a connection with
+--     that item id. Answers given before that delete (none, solo,
+--     no_connection) are not affected.
 --   - 20261120120000_household_invites_and_membership_changes.sql replaces
 --     household_leave with the body that deletes no grant.
 -- After running either again, run this file again; its DO block is the one
