@@ -29,7 +29,7 @@ import { HOUSEHOLD_MESSAGES, HOUSEHOLD_UI } from "../householdCopy";
  *   a mount removed, doubled, or the money page changed beyond the mount
  *     and the key bump after a new bank                                    -> SP-W2
  *   the household screen's back button no longer replacing to /dashboard  -> SP-W2
- *   a settled refusal (no connection, no partner, household changed,
+ *   a refusal to reload on (no connection, no partner, household changed,
  *     invalid request) answered "Try again" without a reload              -> SP-R1
  *   a network failure, 5xx, gate 503 or session problem reloaded or
  *     given a refusal's sentence                                         -> SP-R1
@@ -151,16 +151,16 @@ describe("after an answer", () => {
   const answer = (status: number, body: Record<string, unknown> = {}) =>
     ({ kind: "answer", status, body }) as const;
 
-  it("SP-R1 settled refusals reload and show their own sentence; everything else keeps the view and says Try again", () => {
+  it("SP-R1 refusals to reload on read the view again and show their own sentence; everything else keeps the view and says Try again", () => {
     expect(afterShareAnswer(answer(200, { shared: true }))).toEqual({ reload: true, message: null });
 
-    const settled: Array<[number, string]> = [
+    const toReload: Array<[number, string]> = [
       [404, "SHARE_NO_CONNECTION"],
       [409, "SHARE_NO_PARTNER"],
       [409, "HOUSEHOLD_CHANGED"],
       [400, "SHARE_INVALID_REQUEST"],
     ];
-    for (const [status, code] of settled) {
+    for (const [status, code] of toReload) {
       expect(afterShareAnswer(answer(status, { code })), code).toEqual({
         reload: true,
         message: HOUSEHOLD_MESSAGES[code as keyof typeof HOUSEHOLD_MESSAGES],

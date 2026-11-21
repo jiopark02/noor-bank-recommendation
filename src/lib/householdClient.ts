@@ -582,12 +582,14 @@ export function sharePromptView(data: SharingData | null): SharePromptView {
 }
 
 /**
- * Answers to a share request that another press cannot change: the
- * connection is gone, there is no one to share with, the household changed
- * under the request, or the request itself was refused. The screen reads the
- * view again and shows that answer's own sentence instead of "Try again".
+ * Refusals after which the screen reads the view again: the connection is
+ * gone, there is no one to share with, or the request itself was refused,
+ * none of which another press changes; or the household changed under the
+ * request, which can be tried again, but only after reading what changed.
+ * The screen reads the view again and shows that answer's own sentence
+ * instead of "Try again".
  */
-const SHARE_SETTLED_REFUSALS: HouseholdCode[] = [
+const SHARE_REFUSALS_TO_RELOAD: HouseholdCode[] = [
   HOUSEHOLD_CODES.SHARE_NO_CONNECTION,
   HOUSEHOLD_CODES.SHARE_NO_PARTNER,
   HOUSEHOLD_CODES.HOUSEHOLD_CHANGED,
@@ -598,7 +600,7 @@ export type ShareAnswerStep = { reload: boolean; message: string | null };
 
 /**
  * What a share screen does after an answer: a 2xx reads the view again with
- * no message; a settled refusal (decided by the answer's code, not its
+ * no message; a refusal to reload on (decided by the answer's code, not its
  * status) reads it again and shows the code's sentence; anything else (no
  * network, a 5xx, a gate answer, a session problem) keeps the view and says
  * "Try again".
@@ -606,7 +608,7 @@ export type ShareAnswerStep = { reload: boolean; message: string | null };
 export function afterShareAnswer(outcome: HouseholdOutcome): ShareAnswerStep {
   if (isOk(outcome)) return { reload: true, message: null };
   const code = outcomeCode(outcome);
-  if (code !== null && SHARE_SETTLED_REFUSALS.indexOf(code) !== -1) {
+  if (code !== null && SHARE_REFUSALS_TO_RELOAD.indexOf(code) !== -1) {
     return { reload: true, message: HOUSEHOLD_MESSAGES[code] };
   }
   return { reload: false, message: HOUSEHOLD_UI.shareFailed };

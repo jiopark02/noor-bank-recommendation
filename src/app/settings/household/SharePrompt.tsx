@@ -21,9 +21,9 @@ import {
  * again (after a new bank is connected, say).
  *
  * It never holds up the screen it is on: while loading, when the load fails,
- * and when there is nothing to ask, it renders nothing. An answer another
- * press cannot change (the bank or the other member is gone, the household
- * changed) reads the view again and shows that answer's sentence; any other
+ * and when there is nothing to ask, it renders nothing. A refusal to reload
+ * on (the bank or the other member is gone, the household changed) reads the
+ * view again and shows that answer's sentence; any other
  * failure shows "Try again" and keeps the question (afterShareAnswer).
  * Only the latest load is applied (createLatestOnly), so a load started
  * before refreshKey changed cannot overwrite the newer one. It shows no
