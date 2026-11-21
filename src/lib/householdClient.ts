@@ -631,3 +631,71 @@ export function createLatestOnly(): { begin(): () => boolean } {
     },
   };
 }
+
+/** A share answer's sentence, held with the bank it was about. */
+export type ShareNotice = { itemId: string; institutionName: string; text: string };
+
+/** The notice to hold after an answer about this bank, or null when it says nothing. */
+export function shareNoticeFor(
+  step: ShareAnswerStep,
+  itemId: string,
+  institutionName: string
+): ShareNotice | null {
+  return step.message === null ? null : { itemId, institutionName, text: step.message };
+}
+
+export type SharePromptLines = {
+  view: SharePromptView;
+  /** The notice under the question, when the question is still about its bank. */
+  underQuestion: string | null;
+  /** The notice on a line of its own, naming its bank, in every other case. */
+  alone: string | null;
+};
+
+/**
+ * What the share question draws. A notice stays with the bank it was about:
+ * under the question while the question is about that bank; otherwise (the
+ * question moved to another bank, nothing is left to ask, or the read failed)
+ * on a line of its own that names the bank, so it is never read as being
+ * about another one.
+ */
+export function sharePromptLines(
+  data: SharingData | null,
+  notice: ShareNotice | null
+): SharePromptLines {
+  const view = sharePromptView(data);
+  if (notice === null) return { view, underQuestion: null, alone: null };
+  if (view.kind === "ask" && view.itemId === notice.itemId) {
+    return { view, underQuestion: notice.text, alone: null };
+  }
+  return {
+    view,
+    underQuestion: null,
+    alone: HOUSEHOLD_UI.shareNoticeAbout(notice.institutionName, notice.text),
+  };
+}
+
+export type SharingSettingsLines = {
+  body: "nothing" | "unavailable" | "list";
+  /** The notice, always naming its bank; drawn whatever the body is. */
+  notice: string | null;
+};
+
+/**
+ * What the household screen's sharing list draws: nothing before the first
+ * answer and when there is no other member, one line when the read failed,
+ * the list otherwise. A notice is drawn in every case, under the list or on
+ * its own, and names its bank because the list holds several.
+ */
+export function sharingSettingsLines(
+  loaded: boolean,
+  data: SharingData | null,
+  notice: ShareNotice | null
+): SharingSettingsLines {
+  const line =
+    notice === null ? null : HOUSEHOLD_UI.shareNoticeAbout(notice.institutionName, notice.text);
+  if (!loaded) return { body: "nothing", notice: line };
+  if (data === null) return { body: "unavailable", notice: line };
+  if (!data.eligible) return { body: "nothing", notice: line };
+  return { body: "list", notice: line };
+}

@@ -9,7 +9,10 @@ import {
   browserHouseholdHttp,
   createLatestOnly,
   loadSharing,
-  sharePromptView,
+  shareNoticeFor,
+  sharePromptLines,
+  sharingSettingsLines,
+  type ShareNotice,
   type SharingData,
 } from "@/lib/householdClient";
 
@@ -21,18 +24,22 @@ import {
  * again (after a new bank is connected, say).
  *
  * It never holds up the screen it is on: while loading, when the load fails,
- * and when there is nothing to ask, it renders nothing. A refusal to reload
- * on (the bank or the other member is gone, the household changed) reads the
- * view again and shows that answer's sentence; any other
- * failure shows "Try again" and keeps the question (afterShareAnswer).
- * Only the latest load is applied (createLatestOnly), so a load started
- * before refreshKey changed cannot overwrite the newer one. It shows no
- * amounts, writes nothing to browser storage and never signs anyone out.
+ * and when there is nothing to ask, it renders nothing but a notice. A refusal
+ * to reload on (the bank or the other member is gone, the household changed)
+ * reads the view again and keeps that answer's sentence as a notice about the
+ * bank it was about; any other failure keeps the question and says "Try
+ * again" (afterShareAnswer). sharePromptLines decides where the notice goes:
+ * under the question while it is about that bank, otherwise on a line of its
+ * own naming the bank. A refreshKey change clears the notice; the read after
+ * an answer does not. Only the latest load is applied (createLatestOnly), so a
+ * load started before refreshKey changed cannot overwrite the newer one. It
+ * shows no amounts, writes nothing to browser storage and never signs anyone
+ * out.
  */
 export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<SharingData | null>(null);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ShareNotice | null>(null);
   const mountedRef = useRef(true);
   const latestRef = useRef(createLatestOnly());
 
@@ -48,63 +55,74 @@ export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
 
   useEffect(() => {
     mountedRef.current = true;
+    setNotice(null);
     void load();
     return () => {
       mountedRef.current = false;
     };
   }, [load, refreshKey]);
 
-  const view = sharePromptView(data);
-  if (view.kind === "none") return null;
+  const lines = sharePromptLines(data, notice);
+  const view = lines.view;
+  if (view.kind === "none" && lines.alone === null) return null;
 
-  const answer = async (shared: boolean) => {
+  const answer = async (itemId: string, institutionName: string, shared: boolean) => {
     setSaving(true);
-    setMessage(null);
+    setNotice(null);
     const outcome = await answerShare(
       () => readSession(undefined, "household-mount"),
       browserHouseholdHttp,
-      view.itemId,
+      itemId,
       shared
     );
     if (!mountedRef.current) return;
     setSaving(false);
     const step = afterShareAnswer(outcome);
-    setMessage(step.message);
+    setNotice(shareNoticeFor(step, itemId, institutionName));
     if (step.reload) await load();
   };
 
   return (
     <div className="noor-card p-5 w-full mb-4">
-      <p className="text-[15px] font-semibold text-black">
-        {HOUSEHOLD_UI.shareQuestion(view.institutionName, view.partnerFirstName)}
-      </p>
-      <p className="text-[13px] mt-2" style={{ color: "rgba(0,0,0,0.55)" }}>
-        {HOUSEHOLD_UI.shareExplainer(view.partnerFirstName)}
-      </p>
-      {message && (
-        <p className="text-[13px] mt-2" style={{ color: "#B91C1C" }}>
-          {message}
+      {lines.alone && (
+        <p className={`text-[13px] ${view.kind === "ask" ? "mb-3" : ""}`} style={{ color: "#B91C1C" }}>
+          {lines.alone}
         </p>
       )}
-      <div className="flex gap-3 mt-4">
-        <button
-          type="button"
-          onClick={() => answer(false)}
-          disabled={saving}
-          className="flex-1 py-2.5 rounded-xl text-[14px] font-medium disabled:opacity-40"
-          style={{ background: "rgba(0,0,0,0.06)", color: "#000" }}
-        >
-          {HOUSEHOLD_UI.notNow}
-        </button>
-        <button
-          type="button"
-          onClick={() => answer(true)}
-          disabled={saving}
-          className="flex-1 py-2.5 rounded-xl text-[14px] font-medium text-white bg-black disabled:opacity-40"
-        >
-          {saving ? HOUSEHOLD_UI.shareSaving : HOUSEHOLD_UI.shareButton}
-        </button>
-      </div>
+      {view.kind === "ask" && (
+        <>
+          <p className="text-[15px] font-semibold text-black">
+            {HOUSEHOLD_UI.shareQuestion(view.institutionName, view.partnerFirstName)}
+          </p>
+          <p className="text-[13px] mt-2" style={{ color: "rgba(0,0,0,0.55)" }}>
+            {HOUSEHOLD_UI.shareExplainer(view.partnerFirstName)}
+          </p>
+          {lines.underQuestion && (
+            <p className="text-[13px] mt-2" style={{ color: "#B91C1C" }}>
+              {lines.underQuestion}
+            </p>
+          )}
+          <div className="flex gap-3 mt-4">
+            <button
+              type="button"
+              onClick={() => answer(view.itemId, view.institutionName, false)}
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-xl text-[14px] font-medium disabled:opacity-40"
+              style={{ background: "rgba(0,0,0,0.06)", color: "#000" }}
+            >
+              {HOUSEHOLD_UI.notNow}
+            </button>
+            <button
+              type="button"
+              onClick={() => answer(view.itemId, view.institutionName, true)}
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-xl text-[14px] font-medium text-white bg-black disabled:opacity-40"
+            >
+              {saving ? HOUSEHOLD_UI.shareSaving : HOUSEHOLD_UI.shareButton}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -114,13 +132,14 @@ export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
  * shared with the other member and a button to change it. Same reads and
  * writes as SharePrompt; takes only refreshKey. It renders nothing while
  * loading and when there is no other member, and one line when the load
- * failed.
+ * failed. A notice from an answer names its bank and is drawn in every one of
+ * those cases (sharingSettingsLines); a refreshKey change clears it.
  */
 export function SharingSettings({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<SharingData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [savingItem, setSavingItem] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ShareNotice | null>(null);
   const mountedRef = useRef(true);
   const latestRef = useRef(createLatestOnly());
 
@@ -137,25 +156,38 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
 
   useEffect(() => {
     mountedRef.current = true;
+    setNotice(null);
     void load();
     return () => {
       mountedRef.current = false;
     };
   }, [load, refreshKey]);
 
-  if (!loaded) return null;
-  if (data === null) {
+  const lines = sharingSettingsLines(loaded, data, notice);
+  if (lines.body === "nothing" && lines.notice === null) return null;
+
+  const noticeLine = lines.notice && (
+    <p className="text-[13px] mt-3" style={{ color: "#B91C1C" }}>
+      {lines.notice}
+    </p>
+  );
+
+  if (lines.body !== "list" || data === null) {
     return (
-      <p className="mx-5 mt-4 text-[13px]" style={{ color: "rgba(0,0,0,0.45)" }}>
-        {HOUSEHOLD_UI.sharingUnavailable}
-      </p>
+      <div className="mx-5 mt-4">
+        {lines.body === "unavailable" && (
+          <p className="text-[13px]" style={{ color: "rgba(0,0,0,0.45)" }}>
+            {HOUSEHOLD_UI.sharingUnavailable}
+          </p>
+        )}
+        {noticeLine}
+      </div>
     );
   }
-  if (!data.eligible) return null;
 
-  const toggle = async (itemId: string, shared: boolean) => {
+  const toggle = async (itemId: string, institutionName: string, shared: boolean) => {
     setSavingItem(itemId);
-    setMessage(null);
+    setNotice(null);
     const outcome = await answerShare(
       () => readSession(undefined, "household-mount"),
       browserHouseholdHttp,
@@ -165,7 +197,7 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
     if (!mountedRef.current) return;
     setSavingItem(null);
     const step = afterShareAnswer(outcome);
-    setMessage(step.message);
+    setNotice(shareNoticeFor(step, itemId, institutionName));
     if (step.reload) await load();
   };
 
@@ -190,7 +222,7 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
           </div>
           <button
             type="button"
-            onClick={() => toggle(connection.itemId, !connection.shared)}
+            onClick={() => toggle(connection.itemId, connection.institutionName, !connection.shared)}
             disabled={savingItem !== null}
             className="px-4 py-2 rounded-xl text-[13px] font-medium disabled:opacity-40"
             style={{ background: "rgba(0,0,0,0.06)", color: "#000" }}
@@ -203,11 +235,7 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
           </button>
         </div>
       ))}
-      {message && (
-        <p className="text-[13px] mt-3" style={{ color: "#B91C1C" }}>
-          {message}
-        </p>
-      )}
+      {noticeLine}
     </div>
   );
 }

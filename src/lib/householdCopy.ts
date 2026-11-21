@@ -128,6 +128,8 @@ export const HOUSEHOLD_UI = {
   shareButton: "Share",
   shareSaving: "Saving…",
   shareFailed: "We couldn't save that. Try again.",
+  /** A share answer's sentence on a line of its own, naming the bank it was about. */
+  shareNoticeAbout: (bank: string, text: string) => `${bank || "One of your banks"}: ${text}`,
   sharingSection: "Bank sharing",
   sharingNote: (name: string | null) =>
     `Choose which of your banks ${name ?? "the other person in your household"} can see.`,
