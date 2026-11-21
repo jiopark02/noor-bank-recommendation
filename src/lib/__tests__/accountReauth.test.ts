@@ -37,6 +37,7 @@ import type { BuiltEmail } from "../emailConfirmation";
  *   the export check not used up, or the delete check used up    -> A10
  *   the code, key, hash or address in a log line or a body       -> A11
  *   a session id read loosely (case, spaces, any string)          -> A13
+ *   a code sent to an address that is not confirmed               -> A15
  *   verify or the gate going on without a session, or the mode off
  *   asking for one                                                -> A14
  *   the session left out of the verify or check arguments          -> A8, A10
@@ -86,7 +87,7 @@ function harness(options: {
 }
 
 const SESSION = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
-const IDENTITY = { id: USER, email: ADDRESS, sessionId: SESSION };
+const IDENTITY = { id: USER, email: ADDRESS, sessionId: SESSION, emailConfirmed: true };
 const CALLER = { userId: USER, sessionId: SESSION };
 
 describe("ACCOUNT_REAUTH_MODE", () => {
@@ -240,10 +241,21 @@ describe("startReauth", () => {
     }
     for (const email of [null, "", "  "]) {
       const h = harness({ answers: { account_reauth_issue: { data: "issued", error: null } } });
-      expect((await startReauth(h.deps, { id: USER, email, sessionId: SESSION }, "delete_account")).status).toBe(409);
+      expect((await startReauth(h.deps, { ...IDENTITY, email }, "delete_account")).status).toBe(409);
       expect(h.rpcCalls).toEqual([]);
       expect(h.sent).toEqual([]);
     }
+  });
+
+  it("A15 an address the auth server does not report confirmed gets no code: 409, no rpc, no email", async () => {
+    const h = harness({ answers: { account_reauth_issue: { data: "issued", error: null } } });
+    for (const purpose of ["delete_account", "export_data"] as const) {
+      const result = await startReauth(h.deps, { ...IDENTITY, emailConfirmed: false }, purpose);
+      expect(result.status).toBe(409);
+      expect(result.body.code).toBe("REAUTH_EMAIL_UNAVAILABLE");
+    }
+    expect(h.rpcCalls).toEqual([]);
+    expect(h.sent).toEqual([]);
   });
 
   it("with the mode off answers not_required and neither issues nor sends", async () => {

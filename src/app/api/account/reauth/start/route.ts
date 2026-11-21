@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/account/reauth/start — body {purpose}. Issues a one-time code for
  * deleting the account or exporting its data and emails it to the address on
- * the verified token. The decision is startReauth (accountReauth.ts).
+ * the verified token, only when the auth server reports it confirmed (409
+ * REAUTH_EMAIL_UNAVAILABLE otherwise). The decision is startReauth (accountReauth.ts).
  */
 export async function POST(request: NextRequest) {
   const gate = await reauthRouteGate(request, "start");

@@ -15,6 +15,7 @@ import type { NextRequest } from "next/server";
  *   a code that verifies with another purpose or another user     -> T3
  *   the code, key, hash, address or bearer token in a log or body -> T4
  *   the session taken from the body, or verify going on without one -> T5
+ *   confirmation read from the body, or not read at all            -> T6
  */
 
 const SESSION = "5e1d0c9b-8a7f-4e6d-9c5b-4a3f2e1d0c9b";
@@ -39,6 +40,7 @@ type Row = { purpose: string; hash: string; attempts: number; verified: boolean 
 
 const state = {
   adminConfigured: true,
+  emailConfirmedAt: "2026-01-01T00:00:00Z" as string | null,
   getUserCalls: 0,
   rpcCalls: [] as Array<{ fn: string; args: Record<string, unknown> }>,
   rows: new Map<string, Row>(),
@@ -78,7 +80,7 @@ vi.mock("@/lib/supabase", () => ({
       getUser: async () => {
         state.getUserCalls++;
         return {
-          data: { user: { id: USER_ID, email: USER_EMAIL, email_confirmed_at: "2026-01-01T00:00:00Z" } },
+          data: { user: { id: USER_ID, email: USER_EMAIL, email_confirmed_at: state.emailConfirmedAt } },
           error: null,
         };
       },
@@ -131,6 +133,7 @@ const savedEnv = { mode: process.env.ACCOUNT_REAUTH_MODE, key: process.env.SUPAB
 
 beforeEach(() => {
   state.adminConfigured = true;
+  state.emailConfirmedAt = "2026-01-01T00:00:00Z";
   state.getUserCalls = 0;
   state.rpcCalls = [];
   state.rows = new Map();
@@ -239,6 +242,15 @@ describe("reauth routes", () => {
     expect(res.status).toBe(403);
     expect(res.json.code).toBe("REAUTH_SESSION_UNAVAILABLE");
     expect(state.rpcCalls).toEqual([]);
+  });
+
+  it("T6 a user whose address is not confirmed gets 409 REAUTH_EMAIL_UNAVAILABLE, no rpc and no email", async () => {
+    state.emailConfirmedAt = null;
+    const res = await post("start", { purpose: "delete_account", emailConfirmed: true, email_confirmed_at: "2026-01-01T00:00:00Z" });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("REAUTH_EMAIL_UNAVAILABLE");
+    expect(state.rpcCalls).toEqual([]);
+    expect(state.emails).toEqual([]);
   });
 
   it("T4 no log line or answer carries the code, the key, the hash, the address or the bearer token", async () => {

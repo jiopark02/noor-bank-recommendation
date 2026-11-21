@@ -6,8 +6,8 @@ import type { BuiltEmail } from "@/lib/emailConfirmation";
  * accountReauth — a one-time email code that confirms a recent sign-in before
  * the account is deleted or its data exported.
  *
- * The application makes the code, emails it to the address on the verified
- * token, and stores only a keyed hash of it through the functions of migration
+ * The application makes the code, emails it to the confirmed address on the
+ * verified token, and stores only a keyed hash of it through the functions of migration
  * 20261121130000_account_reauth_codes.sql (whether it is applied is live
  * state). The database decides: the issue limit, the attempt count, the
  * lifetime and whether a verification is recent are all answered by those
@@ -160,7 +160,7 @@ export const REAUTH_MESSAGES: Record<ReauthCode, string> = {
   REAUTH_CHECK_UNAVAILABLE: "We couldn't confirm it's you right now. Please try again in a moment.",
   REAUTH_UNAVAILABLE: "We couldn't send or check a code right now. Please try again in a moment.",
   REAUTH_BAD_REQUEST: "Something went wrong. Please try again.",
-  REAUTH_EMAIL_UNAVAILABLE: "Your account has no email address we can send a code to.",
+  REAUTH_EMAIL_UNAVAILABLE: "Your account has no confirmed email address we can send a code to.",
   REAUTH_RATE_LIMITED: "Too many codes requested. Please wait a while and try again.",
   REAUTH_SEND_FAILED: "We couldn't send the email. Please try again.",
   REAUTH_CODE_INVALID: "Enter the 6-digit code from the email.",
@@ -213,6 +213,8 @@ export type ReauthIdentity = {
   email: string | null;
   /** The token's session_id claim, or null when it has none in the expected form. */
   sessionId: string | null;
+  /** Whether the auth server reports the address as confirmed. */
+  emailConfirmed: boolean;
 };
 
 export type ReauthDeps = {
@@ -301,8 +303,9 @@ export async function startReauth(
   if (deps.mode === "off") {
     return { status: 200, body: { status: "not_required" } };
   }
+  // A code goes only to an address the auth server reports as confirmed.
   const to = typeof identity.email === "string" ? identity.email.trim() : "";
-  if (to.length === 0) {
+  if (to.length === 0 || identity.emailConfirmed !== true) {
     deps.log("[account-reauth] route=start outcome=no_email");
     return refusal(409, REAUTH_CODES.REAUTH_EMAIL_UNAVAILABLE);
   }

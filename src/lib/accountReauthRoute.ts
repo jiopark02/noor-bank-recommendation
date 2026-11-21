@@ -80,8 +80,9 @@ export function liveReauthGateDeps(): Pick<ReauthDeps, "mode" | "rpc" | "log"> {
  *   2. the bearer token verified (resolveRequestAuth). An auth server that
  *      gave no usable answer is 503; every other cause is 401;
  *   3. the body read under REAUTH_BODY_MAX_BYTES.
- * The identity is the verified user's id and address and the token's session
- * id; nothing from the body names a user, an address or a session.
+ * The identity is the verified user's id, address and whether that address is
+ * confirmed, and the token's session id; nothing from the body names a user,
+ * an address or a session.
  */
 export async function reauthRouteGate(
   request: NextRequest,
@@ -143,6 +144,7 @@ export async function reauthRouteGate(
       id: auth.user.id,
       email: typeof auth.user.email === "string" ? auth.user.email : null,
       sessionId: verifiedRequestSessionId(request),
+      emailConfirmed: Boolean(auth.user.email_confirmed_at),
     },
     body,
   };
