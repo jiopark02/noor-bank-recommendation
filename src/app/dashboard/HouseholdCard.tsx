@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import SharePrompt from "@/app/settings/household/SharePrompt";
 import { readSession } from "@/lib/supabase-browser";
 import { HOUSEHOLD_UI } from "@/lib/householdCopy";
 import {
@@ -20,7 +21,9 @@ import {
  * takes no props, so its load, failure or delay reaches no other card. It
  * shows no amounts, never signs anyone out, and writes nothing to browser
  * storage: a session that has ended shows the card as unavailable, and the
- * page decides about the session.
+ * page decides about the session. Inside it, SharePrompt makes its own
+ * request to GET /api/household/sharing and asks whether to share a bank
+ * with the other member; it renders nothing until there is a question.
  */
 export default function HouseholdCard() {
   const [view, setView] = useState<HouseholdCardView>({ kind: "loading" });
@@ -79,6 +82,12 @@ export default function HouseholdCard() {
             >
               {HOUSEHOLD_UI.cardInvite}
             </Link>
+          )}
+
+          {!view.showInviteLink && (
+            <div className="mt-4">
+              <SharePrompt refreshKey={0} />
+            </div>
           )}
         </div>
       )}

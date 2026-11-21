@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageLayout } from "@/components/layout";
+import SharePrompt from "@/app/settings/household/SharePrompt";
 import {
   AddBankButton,
   BankMonogram,
@@ -168,6 +169,7 @@ export default function MoneyPage() {
   // which this page reads only as a boolean, so the bank silently stayed in the
   // list with no explanation.
   const [removeNotice, setRemoveNotice] = useState<string | null>(null);
+  const [sharePromptKey, setSharePromptKey] = useState(0);
 
   // Use the Plaid connections hook
   const plaidConnections = usePlaidConnections(userId);
@@ -421,6 +423,7 @@ export default function MoneyPage() {
   const handleExchangeConnected = useCallback(() => {
     handleBankConnected();
     void fetchData();
+    setSharePromptKey((k) => k + 1);
   }, [handleBankConnected, fetchData]);
 
   const bankExchange = usePlaidExchange({
@@ -535,6 +538,8 @@ export default function MoneyPage() {
           </div>
         </div>
       </header>
+
+      <SharePrompt refreshKey={sharePromptKey} />
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">

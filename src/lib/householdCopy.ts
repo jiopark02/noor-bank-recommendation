@@ -121,6 +121,22 @@ export const HOUSEHOLD_UI = {
   openLinkAgain: "Open the invite link again to continue.",
   tryAgain: "Try again",
 
+  shareQuestion: (bank: string, name: string | null) =>
+    `Share ${bank || "this bank"} with ${name ?? "the other person in your household"}?`,
+  shareExplainer: (name: string | null) =>
+    `If you share, ${name ?? "they"} can see this bank's accounts and balances on their screens and in their Noor AI chat. You can change this anytime in Settings → Household.`,
+  shareButton: "Share",
+  shareSaving: "Saving…",
+  shareFailed: "We couldn't save that. Try again.",
+  sharingSection: "Bank sharing",
+  sharingNote: (name: string | null) =>
+    `Choose which of your banks ${name ?? "the other person in your household"} can see.`,
+  sharingNoBanks: "You haven't connected a bank yet.",
+  sharingUnavailable: "We couldn't load your bank sharing right now.",
+  sharedLabel: "Shared",
+  notSharedLabel: "Not shared",
+  stopSharing: "Stop sharing",
+
   sessionEnded: "Your session has ended. Please sign in again.",
   sessionUnconfirmed: "We couldn't confirm you're signed in. Try again.",
   reload: "Reload",

@@ -71,7 +71,7 @@ export function householdRequestSession(
 export type HouseholdHttp = (
   path: string,
   init: {
-    method: "GET" | "POST" | "DELETE";
+    method: "GET" | "POST" | "PUT" | "DELETE";
     accessToken: string;
     body?: unknown;
     /** Aborts the request and its body read. */
@@ -92,7 +92,7 @@ export async function householdCall(
   read: SessionReadResult,
   http: HouseholdHttp,
   path: string,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   body?: unknown,
   signal?: AbortSignal
 ): Promise<HouseholdOutcome> {
@@ -456,4 +456,127 @@ export function cancelButtonLabel(busy: HouseholdBusyAction): string {
 
 export function leaveConfirmLabel(busy: HouseholdBusyAction): string {
   return busy === "leave" ? HOUSEHOLD_UI.leavingCurrent : HOUSEHOLD_UI.leaveConfirm;
+}
+
+// ---------------------------------------------------------------------------
+// Sharing a bank connection with the other member
+// ---------------------------------------------------------------------------
+
+export type SharingConnection = {
+  itemId: string;
+  institutionName: string;
+  shared: boolean;
+  answered: boolean;
+};
+
+export type SharingData = {
+  eligible: boolean;
+  partnerFirstName: string | null;
+  connections: SharingConnection[];
+};
+
+/** The view from GET /api/household/sharing, or null when it is not in that shape. */
+export function readSharingData(body: Record<string, unknown>): SharingData | null {
+  const s = body.sharing as Record<string, unknown> | undefined;
+  if (!s || typeof s.eligible !== "boolean" || !Array.isArray(s.connections)) return null;
+  const connections: SharingConnection[] = [];
+  for (const raw of s.connections as Array<Record<string, unknown>>) {
+    if (!raw || typeof raw.itemId !== "string" || raw.itemId === "") continue;
+    connections.push({
+      itemId: raw.itemId,
+      institutionName: typeof raw.institutionName === "string" ? raw.institutionName : "",
+      shared: raw.shared === true,
+      answered: raw.answered === true,
+    });
+  }
+  const name = s.partnerFirstName;
+  return {
+    eligible: s.eligible,
+    partnerFirstName: typeof name === "string" && name.trim() !== "" ? name : null,
+    connections,
+  };
+}
+
+/**
+ * Reads the session and GET /api/household/sharing under one time limit, the
+ * household card's. Null for anything but a 2xx answer in the view's shape,
+ * for a passed limit (the request is aborted) and for a throw. Never rejects:
+ * a caller that gets null shows nothing, and nothing else on its screen waits.
+ */
+export function loadSharing(
+  read: () => Promise<SessionReadResult>,
+  http: HouseholdHttp,
+  timeoutMs: number = HOUSEHOLD_CARD_FETCH_TIMEOUT_MS
+): Promise<SharingData | null> {
+  const controller = new AbortController();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (data: SharingData | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(data);
+    };
+    const timer = setTimeout(() => {
+      controller.abort();
+      finish(null);
+    }, timeoutMs);
+    (async () => {
+      try {
+        const session = await read();
+        if (controller.signal.aborted) return;
+        const outcome = await householdCall(
+          session,
+          http,
+          "/api/household/sharing",
+          "GET",
+          undefined,
+          controller.signal
+        );
+        finish(isOk(outcome) ? readSharingData(outcome.body) : null);
+      } catch {
+        finish(null);
+      }
+    })();
+  });
+}
+
+/**
+ * Turns sharing of one of the caller's connections on or off, which also
+ * records that the caller answered. Never rejects: a throw is a network
+ * outcome.
+ */
+export async function answerShare(
+  read: () => Promise<SessionReadResult>,
+  http: HouseholdHttp,
+  itemId: string,
+  shared: boolean
+): Promise<HouseholdOutcome> {
+  try {
+    const session = await read();
+    return await householdCall(session, http, "/api/household/sharing", "PUT", { itemId, shared });
+  } catch {
+    return { kind: "network" };
+  }
+}
+
+export type SharePromptView =
+  | { kind: "none" }
+  | { kind: "ask"; itemId: string; institutionName: string; partnerFirstName: string | null };
+
+/**
+ * The one question to show: the first connection not yet answered for the
+ * current other member. Nothing when the load failed, when there is no other
+ * member, or when every connection is answered.
+ */
+export function sharePromptView(data: SharingData | null): SharePromptView {
+  if (!data || !data.eligible) return { kind: "none" };
+  const next = data.connections.find((c) => !c.answered && !c.shared);
+  if (!next) return { kind: "none" };
+  return {
+    kind: "ask",
+    itemId: next.itemId,
+    institutionName: next.institutionName,
+    partnerFirstName: data.partnerFirstName,
+  };
 }

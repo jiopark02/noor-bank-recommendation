@@ -13,6 +13,7 @@ import {
 } from '@/lib/sessionFlow';
 import { clearLocalAuthState } from '@/lib/validation';
 import { HOUSEHOLD_UI } from '@/lib/householdCopy';
+import { SharingSettings } from './SharePrompt';
 import {
   browserHouseholdHttp,
   buildInviteLink,
@@ -368,6 +369,8 @@ export default function HouseholdPage() {
               )}
             </div>
           )}
+
+          {others.length > 0 && <SharingSettings refreshKey={others.length} />}
 
           {others.length > 0 && (
             <div className="mx-4 mt-6">
