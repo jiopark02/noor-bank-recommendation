@@ -21,6 +21,8 @@ import path from "path";
  *   an enable row level security line removed, or a policy added    -> S1
  *   on delete cascade removed from any foreign key                  -> S2
  *   the composite key's columns changed or reordered                -> S2
+ *   the answers' id primary key or its unique constraint removed    -> S2
+ *   the DO block's unique-constraint check removed                  -> S8
  *   the household lock taken before the user lock in either function -> S3
  *   a write in the share function moved before the household lock   -> S3
  *   the re-read under the household lock removed                    -> S3
@@ -160,8 +162,20 @@ describe("household share grants migration", () => {
     );
     expect(sql).toContain("add column if not exists grantee_user_id uuid not null;");
     expect(occurrences(sql, "check (grantee_user_id <> owner_user_id)")).toBe(2);
-    expect(sql).toContain(
-      "constraint share_prompt_answers_pkey primary key (resource_id, grantee_user_id)"
+    // A single-column primary key, which the account export pages on, and
+    // one row per connection and person, which the share function's
+    // conflict target names.
+    const answers = sql.slice(
+      sql.indexOf("create table if not exists public.share_prompt_answers ("),
+      sql.indexOf("\n);", sql.indexOf("create table if not exists public.share_prompt_answers ("))
+    );
+    expect(answers).toContain("\n  id               uuid primary key default gen_random_uuid(),\n");
+    expect(answers.match(/primary key/gi)?.length).toBe(1);
+    expect(answers).toContain(
+      "constraint share_prompt_answers_resource_grantee_key unique (resource_id, grantee_user_id),"
+    );
+    expect(functionBody("household_share_set")).toContain(
+      "on conflict (resource_id, grantee_user_id) do nothing;"
     );
   });
 
@@ -297,7 +311,8 @@ describe("household share grants migration", () => {
       ["function service_role EXECUTE", /raise exception '%: service_role lacks EXECUTE'/],
       ["only the cleanup trigger", /t\.tgname = 'trg_household_members_cleanup'[\s\S]*?raise exception 'public\.household_members: expected only the cleanup trigger/],
       ["user_id uuid", /raise exception 'public\.plaid_connections\.user_id is not a uuid';/],
-      ["MAINTAIN guard", /server_version_num'\)::integer >= 170000 then\n\s+v_privileges := v_privileges \|\| 'MAINTAIN'::text;/],
+      ["answers unique key", /k\.contype = 'u'[\s\S]*?= array\['resource_id', 'grantee_user_id'\][\s\S]*?raise exception 'public\.share_prompt_answers: no unique constraint on \(resource_id, grantee_user_id\)'/],
+      ["MAINTAIN guard",/server_version_num'\)::integer >= 170000 then\n\s+v_privileges := v_privileges \|\| 'MAINTAIN'::text;/],
     ];
     for (const [label, pattern] of checks) {
       expect(block, label).toMatch(pattern);

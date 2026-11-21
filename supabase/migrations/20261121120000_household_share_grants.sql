@@ -21,7 +21,11 @@
 --   - Creates share_prompt_answers: one row per connection and person, meaning
 --     "the owner was asked whether to share this connection with this
 --     person". It records that the question was answered, not the answer.
---     The primary key is (resource_id, grantee_user_id); owner_user_id and
+--     The primary key is a uuid id, the single column the account export
+--     pages on. A unique constraint, share_prompt_answers_resource_grantee_key
+--     on (resource_id, grantee_user_id), allows one row per connection and
+--     person; household_share_set's insert names it as its conflict
+--     target. owner_user_id and
 --     grantee_user_id reference public.users, household_id references
 --     households, and (owner_user_id, resource_id) references
 --     plaid_connections (user_id, id), all on delete cascade. A new partner
@@ -192,12 +196,13 @@ create index if not exists share_grants_household_id_idx
   on public.share_grants (household_id);
 
 create table if not exists public.share_prompt_answers (
+  id               uuid primary key default gen_random_uuid(),
   owner_user_id    uuid not null references public.users(id) on delete cascade,
   grantee_user_id  uuid not null references public.users(id) on delete cascade,
   household_id     uuid not null references public.households(id) on delete cascade,
   resource_id      bigint not null,
   answered_at      timestamptz not null default now(),
-  constraint share_prompt_answers_pkey primary key (resource_id, grantee_user_id),
+  constraint share_prompt_answers_resource_grantee_key unique (resource_id, grantee_user_id),
   constraint share_prompt_answers_grantee_not_owner check (grantee_user_id <> owner_user_id),
   constraint share_prompt_answers_connection_fkey
     foreign key (owner_user_id, resource_id)
@@ -713,6 +718,28 @@ begin
        and not a.attisdropped
   ) is distinct from 'uuid' then
     raise exception 'public.plaid_connections.user_id is not a uuid';
+  end if;
+
+  -- 15. share_prompt_answers has a unique constraint on exactly
+  --     (resource_id, grantee_user_id), in that order. household_share_set's
+  --     insert names those columns as its conflict target, which needs a
+  --     unique constraint or index on exactly them.
+  select exists (
+    select 1
+      from pg_constraint k
+     where k.conrelid = 'public.share_prompt_answers'::regclass
+       and k.contype = 'u'
+       and array(
+             select a.attname::text
+               from unnest(k.conkey) with ordinality as u(attnum, n)
+               join pg_attribute a
+                 on a.attrelid = k.conrelid
+                and a.attnum = u.attnum
+              order by u.n
+           ) = array['resource_id', 'grantee_user_id']
+  ) into v_ok;
+  if not v_ok then
+    raise exception 'public.share_prompt_answers: no unique constraint on (resource_id, grantee_user_id)';
   end if;
 end
 $$;
