@@ -98,6 +98,8 @@ function sites(): Site[] {
 
 const EXPECTED: Site[] = [
   { file: "app/api/plaid/connections/route.ts", fn: "readConnections", op: "select", filters: ["user_id=authUserId"] },
+  // The caller's own connections for the household sharing settings.
+  { file: "lib/householdShareStore.ts", fn: "makeHouseholdShareStore", op: "select", filters: ["user_id=userId"] },
   { file: "lib/plaidApiUtils.ts", fn: "countPlaidConnections", op: "select", filters: ["user_id=userId"] },
   { file: "lib/plaidApiUtils.ts", fn: "deletePlaidConnection", op: "delete", filters: ["user_id=userId", "item_id=itemId"] },
   { file: "lib/plaidApiUtils.ts", fn: "getActivePlaidConnectionByInstitution", op: "select", filters: ["user_id=userId", "institution_id=institutionId", 'status="active"'] },

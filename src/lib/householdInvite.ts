@@ -127,7 +127,15 @@ export type HouseholdStore = {
 
 export type HouseholdLog = (line: string) => void;
 
-export type RouteName = "view" | "invite-create" | "invite-cancel" | "invite-preview" | "invite-accept" | "leave";
+export type RouteName =
+  | "view"
+  | "invite-create"
+  | "invite-cancel"
+  | "invite-preview"
+  | "invite-accept"
+  | "leave"
+  | "sharing-view"
+  | "sharing-set";
 
 function fail(status: number, code: HouseholdCode): HouseholdResult {
   return { status, body: { error: HOUSEHOLD_MESSAGES[code], code } };

@@ -23,6 +23,9 @@ export const HOUSEHOLD_CODES = {
   SERVER_ERROR: "SERVER_ERROR",
   REQUEST_TOO_LARGE: "REQUEST_TOO_LARGE",
   AUTH_UNAVAILABLE: "AUTH_UNAVAILABLE",
+  SHARE_INVALID_REQUEST: "SHARE_INVALID_REQUEST",
+  SHARE_NO_PARTNER: "SHARE_NO_PARTNER",
+  SHARE_NO_CONNECTION: "SHARE_NO_CONNECTION",
 } as const;
 
 export type HouseholdCode = (typeof HOUSEHOLD_CODES)[keyof typeof HOUSEHOLD_CODES];
@@ -50,6 +53,9 @@ export const HOUSEHOLD_MESSAGES: Record<HouseholdCode, string> = {
   SERVER_ERROR: SERVER_FAULT_MESSAGE,
   REQUEST_TOO_LARGE: "Request is too large.",
   AUTH_UNAVAILABLE: "We couldn't confirm your sign-in right now. Please try again in a moment.",
+  SHARE_INVALID_REQUEST: "That request isn't valid.",
+  SHARE_NO_PARTNER: "There's no one else in your household to share with.",
+  SHARE_NO_CONNECTION: "We couldn't find that bank connection on your account.",
 };
 
 /** The role as shown on screen. */
