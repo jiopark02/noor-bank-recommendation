@@ -295,6 +295,7 @@ describe("account export: what each section reads", () => {
     plaid_link_token_issues: "user_id",
     household_members: "user_id",
     share_grants: "owner_user_id",
+    share_prompt_answers: "owner_user_id",
     goals: "owner_user_id",
     household_invites: "invited_by",
     household_invite_issues: "user_id",
@@ -320,6 +321,7 @@ describe("account export: what each section reads", () => {
     plaid_link_token_issues: "user_id",
     household_members: "id",
     share_grants: "id",
+    share_prompt_answers: "id",
     goals: "id",
     household_invites: "id",
     household_invite_issues: "user_id",
@@ -345,6 +347,7 @@ describe("account export: what each section reads", () => {
         "plaid_link_token_issues",
         "household_members",
         "share_grants",
+        "share_prompt_answers",
         "goals",
         "household_invites",
         "household_invite_issues",
@@ -443,8 +446,10 @@ describe("account export: what each section reads", () => {
     expect(callsFor(calls, "plaid_connections")[0].select).toBe(
       "institution_name, status, item_id, id"
     );
+    // id is an exported column of plaid_connections, so it stays; the key
+    // removed after paging is checked on email_confirmation_sends below.
     for (const row of result.body.plaid_connections as ExportRow[]) {
-      expect(Object.keys(row)).toEqual(["institution_name", "status", "item_id"]);
+      expect(Object.keys(row)).toEqual(["institution_name", "status", "item_id", "id"]);
     }
     for (const row of result.body.chat_messages as ExportRow[]) {
       expect(row).toHaveProperty("id");
@@ -593,23 +598,127 @@ describe("account export: explicit column lists match the schema", () => {
     "plaid_link_token_issues",
     "household_members",
     "share_grants",
+    "share_prompt_answers",
     "goals",
     "household_invite_issues",
   ];
 
+  /**
+   * Columns a section leaves out on purpose, beyond its filter column.
+   * share_grants.grantee_user_id and share_prompt_answers.grantee_user_id:
+   * the other member's identifier is their personal data, so it is not
+   * exported to the person who shared or was asked.
+   */
+  const NOT_EXPORTED: Readonly<Record<string, readonly string[]>> = {
+    share_grants: ["grantee_user_id"],
+    share_prompt_answers: ["grantee_user_id"],
+  };
+
   for (const table of EXPLICIT) {
-    it(`E10 ${table}: the export's columns are the table's columns minus its filter column`, () => {
+    it(`E10 ${table}: the export's columns are the table's columns minus its filter column and the columns it leaves out on purpose`, () => {
       const section = sectionFor(table);
       expect(section.columns).not.toBe("*");
       const exported = section.columns.split(", ");
       const schema = migrationColumns(table);
+      const left = NOT_EXPORTED[table] ?? [];
       expect(schema).toContain(section.filterColumn);
+      // A left-out column must exist, so this list cannot outlive the schema.
+      for (const column of left) {
+        expect(schema, `${table}.${column}`).toContain(column);
+        expect(exported, `${table}.${column}`).not.toContain(column);
+      }
       expect(new Set(exported).size).toBe(exported.length);
       expect([...exported].sort()).toEqual(
-        schema.filter((c) => c !== section.filterColumn).sort()
+        schema.filter((c) => c !== section.filterColumn && !left.includes(c)).sort()
       );
     });
   }
+
+  it("E10 every table with a left-out column is checked by E10", () => {
+    for (const table of Object.keys(NOT_EXPORTED)) {
+      expect(EXPLICIT).toContain(table);
+    }
+  });
+
+  it("E19 neither share section's rows carry grantee_user_id, executed", async () => {
+    // The other member's identifier is their personal data: it is not
+    // exported to the person who shared, or was asked whether to share.
+    const GRANTEE = "33333333-3333-4333-8333-333333333333";
+    const { result } = await exportOf(
+      {
+        share_grants: [
+          {
+            id: uuidFor(1),
+            owner_user_id: USER,
+            grantee_user_id: GRANTEE,
+            household_id: uuidFor(9),
+            resource_type: "plaid_connection",
+            resource_id: 7,
+            scope: "view",
+            granted_at: "2026-11-21T00:00:00Z",
+            revoked_at: null,
+          },
+        ],
+        share_prompt_answers: [
+          {
+            id: uuidFor(2),
+            owner_user_id: USER,
+            grantee_user_id: GRANTEE,
+            household_id: uuidFor(9),
+            resource_id: 7,
+            answered_at: "2026-11-21T00:00:00Z",
+          },
+        ],
+      },
+      EXPORT_SECTIONS
+    );
+    expect(result.status).toBe(200);
+    for (const key of ["share_grants", "share_prompt_answers"]) {
+      const rows = result.body[key] as ExportRow[];
+      expect(rows.length, key).toBe(1);
+      expect(Object.keys(rows[0]), key).not.toContain("grantee_user_id");
+      expect(Object.keys(rows[0]), key).not.toContain("owner_user_id");
+    }
+    expect(JSON.stringify(result.body)).not.toContain(GRANTEE);
+  });
+
+  it("E20 a share row's resource_id names a bank connection in the same file, executed", async () => {
+    const { result } = await exportOf(
+      {
+        plaid_connections: plaidRows([7, 8]),
+        share_grants: [
+          {
+            id: uuidFor(1),
+            owner_user_id: USER,
+            grantee_user_id: OTHER,
+            household_id: uuidFor(9),
+            resource_type: "plaid_connection",
+            resource_id: 8,
+            scope: "view",
+            granted_at: "2026-11-21T00:00:00Z",
+            revoked_at: null,
+          },
+        ],
+        share_prompt_answers: [
+          {
+            id: uuidFor(2),
+            owner_user_id: USER,
+            grantee_user_id: OTHER,
+            household_id: uuidFor(9),
+            resource_id: 7,
+            answered_at: "2026-11-21T00:00:00Z",
+          },
+        ],
+      },
+      EXPORT_SECTIONS
+    );
+    expect(result.status).toBe(200);
+    const banks = result.body.plaid_connections as ExportRow[];
+    for (const row of banks) expect(row).not.toHaveProperty("access_token");
+    const bankFor = (resourceId: unknown) => banks.find((b) => b.id === resourceId)?.item_id;
+    expect(bankFor((result.body.share_grants as ExportRow[])[0].resource_id)).toBe("item8");
+    expect(bankFor((result.body.share_prompt_answers as ExportRow[])[0].resource_id)).toBe("item7");
+  });
 
   it("E14 users: the export's columns are the table's columns, id included", () => {
     // users has no user_id; its id is the user's own id. A column added to

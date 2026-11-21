@@ -23,6 +23,9 @@ export const HOUSEHOLD_CODES = {
   SERVER_ERROR: "SERVER_ERROR",
   REQUEST_TOO_LARGE: "REQUEST_TOO_LARGE",
   AUTH_UNAVAILABLE: "AUTH_UNAVAILABLE",
+  SHARE_INVALID_REQUEST: "SHARE_INVALID_REQUEST",
+  SHARE_NO_PARTNER: "SHARE_NO_PARTNER",
+  SHARE_NO_CONNECTION: "SHARE_NO_CONNECTION",
 } as const;
 
 export type HouseholdCode = (typeof HOUSEHOLD_CODES)[keyof typeof HOUSEHOLD_CODES];
@@ -50,6 +53,9 @@ export const HOUSEHOLD_MESSAGES: Record<HouseholdCode, string> = {
   SERVER_ERROR: SERVER_FAULT_MESSAGE,
   REQUEST_TOO_LARGE: "Request is too large.",
   AUTH_UNAVAILABLE: "We couldn't confirm your sign-in right now. Please try again in a moment.",
+  SHARE_INVALID_REQUEST: "That request isn't valid.",
+  SHARE_NO_PARTNER: "There's no one else in your household to share with.",
+  SHARE_NO_CONNECTION: "We couldn't find that bank connection on your account.",
 };
 
 /** The role as shown on screen. */
@@ -114,6 +120,24 @@ export const HOUSEHOLD_UI = {
   leftPrevious: "You left your previous household.",
   openLinkAgain: "Open the invite link again to continue.",
   tryAgain: "Try again",
+
+  shareQuestion: (bank: string, name: string | null) =>
+    `Share ${bank || "this bank"} with ${name ?? "the other person in your household"}?`,
+  shareExplainer: (name: string | null) =>
+    `If you share, ${name ?? "they"} can see this bank's accounts and balances on their screens and in their Noor AI chat. You can change this anytime in Settings → Household.`,
+  shareButton: "Share",
+  shareSaving: "Saving…",
+  shareFailed: "We couldn't save that. Try again.",
+  /** A share answer's sentence on a line of its own, naming the bank it was about. */
+  shareNoticeAbout: (bank: string, text: string) => `${bank || "One of your banks"}: ${text}`,
+  sharingSection: "Bank sharing",
+  sharingNote: (name: string | null) =>
+    `Choose which of your banks ${name ?? "the other person in your household"} can see.`,
+  sharingNoBanks: "You haven't connected a bank yet.",
+  sharingUnavailable: "We couldn't load your bank sharing right now.",
+  sharedLabel: "Shared",
+  notSharedLabel: "Not shared",
+  stopSharing: "Stop sharing",
 
   sessionEnded: "Your session has ended. Please sign in again.",
   sessionUnconfirmed: "We couldn't confirm you're signed in. Try again.",

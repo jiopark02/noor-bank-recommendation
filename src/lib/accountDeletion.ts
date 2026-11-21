@@ -346,6 +346,13 @@ export async function deleteAccountForUser(
   // household_invite_issues row, by user_id. When the deleted user was the
   // owner of a household that keeps a member, nothing promotes that member
   // here; household_repair_owner does on the household's next read.
+  // Migration 20261121120000_household_share_grants.sql (whether it is
+  // applied is live state) adds share grants and share_prompt_answers rows
+  // that name a bank connection and the person it is shared with. They
+  // cascade from the plaid_connections row, so step 2's row deletes remove
+  // the user's own, and from public.users on both the owner and the grantee
+  // key, so this delete also removes the rows that name this user as the
+  // person a connection is shared with.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to

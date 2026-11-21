@@ -14,7 +14,7 @@ import { makeFakeClient, type FakeOptions } from "./householdFakeClient";
  * Mutations and the test each one turns red:
  *   a route's gate call removed, or a route reading the body first  -> T-A1
  *   every refusal answered 503                                       -> T-A1
- *   a seventh route, or a method added or removed under household    -> T-A2
+ *   another route, or a method added or removed under household      -> T-A2
  *   the service-role gate removed or moved below authentication      -> T-A3
  *   an unreachable auth server answered 401                          -> T-A4
  *   the 503 given another code or message, or reaching the store     -> T-A4
@@ -66,7 +66,7 @@ vi.mock("@/lib/supabase", () => ({
   isSupabaseAdminConfigured: () => state.adminConfigured,
 }));
 
-type Call = { method: "GET" | "POST" | "DELETE"; path: string };
+type Call = { method: "GET" | "POST" | "PUT" | "DELETE"; path: string };
 
 const CALLS: Call[] = [
   { method: "GET", path: "" },
@@ -75,6 +75,8 @@ const CALLS: Call[] = [
   { method: "POST", path: "invite/preview" },
   { method: "POST", path: "invite/accept" },
   { method: "POST", path: "leave" },
+  { method: "GET", path: "sharing" },
+  { method: "PUT", path: "sharing" },
 ];
 
 async function handler(call: Call) {
@@ -87,7 +89,9 @@ async function handler(call: Call) {
           ? await import("../../app/api/household/invite/preview/route")
           : call.path === "invite/accept"
             ? await import("../../app/api/household/invite/accept/route")
-            : await import("../../app/api/household/leave/route");
+            : call.path === "sharing"
+              ? await import("../../app/api/household/sharing/route")
+              : await import("../../app/api/household/leave/route");
   return (mod as Record<string, (req: NextRequest) => Promise<Response>>)[call.method];
 }
 

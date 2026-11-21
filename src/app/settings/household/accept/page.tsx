@@ -26,6 +26,7 @@ import {
   type AcceptStep,
   type AcceptView,
 } from "@/lib/householdClient";
+import SharePrompt from "../SharePrompt";
 
 /**
  * /settings/household/accept#household_invite=<token> — joins the household
@@ -254,6 +255,7 @@ export default function HouseholdAcceptPage() {
         {view.kind === "joined" && (
           <div>
             <p className="text-gray-800 mb-6">{HOUSEHOLD_UI.joined}</p>
+            <SharePrompt refreshKey={0} />
             <button
               type="button"
               onClick={() => router.push("/settings/household")}

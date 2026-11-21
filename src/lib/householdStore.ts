@@ -38,7 +38,8 @@ function isRole(value: unknown): value is HouseholdRole {
   return value === "owner" || value === "member";
 }
 
-async function rpcText(
+/** One rpc whose answer is a non-empty text token; the share store uses it too. */
+export async function rpcText(
   client: Pick<SupabaseClient, "rpc">,
   fn: string,
   args: Record<string, unknown>
