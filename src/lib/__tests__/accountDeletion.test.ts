@@ -27,8 +27,9 @@ import type {
  * WHAT IT DOES NOT PROVE
  * Nothing about the route above it. Whether POST /api/account/delete verifies
  * the token, builds these dependencies correctly, or serializes this result is
- * not visible from here. Nothing in this suite executes a route handler, and
- * this file does not change that.
+ * not visible from here, and this file executes no route handler.
+ * accountActionReauthGate.test.ts executes that route for its
+ * reauthentication gate only.
  */
 
 /** A sentinel that must never reach a response body. */
