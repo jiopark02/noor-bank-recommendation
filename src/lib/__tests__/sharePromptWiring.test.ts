@@ -47,6 +47,8 @@ import { HOUSEHOLD_MESSAGES, HOUSEHOLD_UI } from "../householdCopy";
  *   a component drawing its own notice text, or not drawing the lines    -> SP-N2
  *   the notice kept across a refreshKey change, or cleared by the read
  *     after an answer                                                    -> SP-N2
+ *   a handler clearing the notice after its read (or any other added
+ *     setNotice call)                                                    -> SP-N3
  */
 
 function read(relativePath: string): string {
@@ -428,5 +430,22 @@ describe("the screens", () => {
     for (const rest of PROMPT.split("const load = useCallback(async () => {").slice(1)) {
       expect(rest.slice(0, rest.indexOf("}, []);"))).not.toContain("setNotice");
     }
+  });
+
+  it("SP-N3 each component sets the notice in three places only: the refreshKey clear, the clear before a request, and the answer's notice as the handler's last write", () => {
+    const flat = PROMPT.replace(/\s+/g, " ");
+    const places = [
+      // The refreshKey effect.
+      "setNotice(null); void load();",
+      // Before the request goes out.
+      "setNotice(null); const outcome = await answerShare(",
+      // The answer's notice, then the read, then the handler ends.
+      "setNotice(shareNoticeFor(step, itemId, institutionName)); if (step.reload) await load(); };",
+    ];
+    for (const place of places) {
+      expect(flat.split(place).length - 1, place).toBe(2);
+    }
+    // Nothing else calls setNotice, in either component.
+    expect(PROMPT.split("setNotice(").length - 1).toBe(places.length * 2);
   });
 });
