@@ -27,8 +27,8 @@ import type { BuiltEmail } from "@/lib/emailConfirmation";
  * session is the session_id claim of the bearer token the route has just had
  * the auth server accept (sessionIdFromVerifiedToken); the claim is read from
  * that same string, never from the body. A token without a well-formed
- * session id gets 403 REAUTH_SESSION_UNAVAILABLE from verify and from the
- * gate, and no rpc is made.
+ * session id gets 403 REAUTH_SESSION_UNAVAILABLE from start, from verify and
+ * from the gate (one decision, requireSession), and no rpc or email is made.
  *
  * THE HASH KEY
  * The stored hash is an HMAC keyed by a key derived (HKDF-SHA256) from the
@@ -286,6 +286,21 @@ export function buildReauthCodeEmail(code: string, purpose: ReauthPurpose): Buil
 }
 
 /**
+ * The one session decision start, verify and the gate all make: a request
+ * whose verified token carries no well-formed session id is refused 403
+ * REAUTH_SESSION_UNAVAILABLE before any rpc or email.
+ */
+function requireSession(
+  sessionId: string | null,
+  where: string,
+  log: ReauthLog
+): { ok: true; sessionId: string } | { ok: false; result: ReauthResult } {
+  if (sessionId !== null) return { ok: true, sessionId };
+  log(`[account-reauth] route=${where} outcome=no_session`);
+  return { ok: false, result: refusal(403, REAUTH_CODES.REAUTH_SESSION_UNAVAILABLE) };
+}
+
+/**
  * Issue a code for the purpose and email it. The stored row is written
  * before the email is sent, so a code that reaches the inbox is always one
  * the database knows.
@@ -303,6 +318,9 @@ export async function startReauth(
   if (deps.mode === "off") {
     return { status: 200, body: { status: "not_required" } };
   }
+  // A code is issued only to a session that could then verify it.
+  const session = requireSession(identity.sessionId, "start", deps.log);
+  if (!session.ok) return session.result;
   // A code goes only to an address the auth server reports as confirmed.
   const to = typeof identity.email === "string" ? identity.email.trim() : "";
   if (to.length === 0 || identity.emailConfirmed !== true) {
@@ -369,10 +387,8 @@ export async function verifyReauth(
   if (code === null) {
     return refusal(400, REAUTH_CODES.REAUTH_CODE_INVALID);
   }
-  if (identity.sessionId === null) {
-    deps.log("[account-reauth] route=verify outcome=no_session");
-    return refusal(403, REAUTH_CODES.REAUTH_SESSION_UNAVAILABLE);
-  }
+  const session = requireSession(identity.sessionId, "verify", deps.log);
+  if (!session.ok) return session.result;
   if (deps.key === null) {
     deps.log("[account-reauth] route=verify outcome=unavailable cause=no_key");
     return refusal(503, REAUTH_CODES.REAUTH_UNAVAILABLE);
@@ -382,7 +398,7 @@ export async function verifyReauth(
     p_user_id: identity.id,
     p_purpose: purpose,
     p_code_hash: hashReauthCode(deps.key, purpose, identity.id, code),
-    p_session_id: identity.sessionId,
+    p_session_id: session.sessionId,
     p_max_attempts: REAUTH_MAX_ATTEMPTS,
   });
   if (!answer.ok) {
@@ -420,14 +436,12 @@ export async function requireRecentReauth(
   purpose: ReauthPurpose
 ): Promise<ReauthGateResult> {
   if (deps.mode === "off") return { ok: true };
-  if (caller.sessionId === null) {
-    deps.log(`[account-reauth] route=gate purpose=${purpose} outcome=no_session`);
-    return { ok: false, ...refusal(403, REAUTH_CODES.REAUTH_SESSION_UNAVAILABLE) };
-  }
+  const session = requireSession(caller.sessionId, `gate purpose=${purpose}`, deps.log);
+  if (!session.ok) return { ok: false, ...session.result };
   const answer = await callRpc(deps.rpc, "account_reauth_check", {
     p_user_id: caller.userId,
     p_purpose: purpose,
-    p_session_id: caller.sessionId,
+    p_session_id: session.sessionId,
     p_window_seconds: REAUTH_VERIFIED_WINDOW_SECONDS,
     p_consume: purpose === "export_data",
   });

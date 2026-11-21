@@ -17,6 +17,10 @@
  *             The stage survives a failed action (a deletion that stopped
  *             part-way, say), so the retry goes straight to the action, and
  *             ends when the server answers that it needs a new verification.
+ *
+ * Closing the modal returns to idle from any stage (afterClose), and an
+ * answer to a request sent before the close changes nothing
+ * (answerStillCurrent).
  */
 
 export type ReauthStep =
@@ -168,6 +172,25 @@ export function stageAfterFailedAction(
   body: unknown
 ): ReauthStage {
   return isReauthRequiredAnswer(status, body) ? "idle" : stage;
+}
+
+/**
+ * Closing the delete or export modal, by Cancel, the backdrop or the export
+ * starting, while a request is in flight or not: the step starts over, with
+ * no code, error or notice kept.
+ */
+export function afterClose(): ReauthOutcome {
+  return outcome("idle", false, null, null, true);
+}
+
+/**
+ * Whether an answer may still change the screen. Every close advances the
+ * screen's counter; an answer to a request sent before the latest close is
+ * dropped, so a request still in flight when the modal closed cannot put its
+ * stage, code, error or notice back afterwards.
+ */
+export function answerStillCurrent(sentAtClose: number, closesNow: number): boolean {
+  return sentAtClose === closesNow;
 }
 
 /** The delete button's words for the stage and the request in flight, if any. */

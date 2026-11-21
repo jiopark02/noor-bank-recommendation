@@ -2,8 +2,10 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
 import {
+  afterClose,
   afterStart,
   afterVerify,
+  answerStillCurrent,
   deleteButtonLabel,
   exportButtonLabel,
   isReauthRequiredAnswer,
@@ -30,6 +32,9 @@ import {
  *   or hides a refusal                                            -> C5
  *   "Deleting…" shown while a code is being checked               -> C6
  *   the page setting a stage itself instead of from an outcome     -> C7
+ *   a close that keeps any stage, or a late answer accepted        -> C8
+ *   a modal exit that skips closeModal, or a late answer applied
+ *   without the close check                                        -> C9
  */
 
 /** Runs one press the way the page does and returns the stage it leaves. */
@@ -134,6 +139,29 @@ describe("stage transitions", () => {
     }
   });
 
+  it("C8 closing starts over from every stage, and an answer sent before the close changes nothing", () => {
+    expect(afterClose()).toEqual({ stage: "idle", proceed: false, error: null, notice: null, clearCode: true });
+    expect(answerStillCurrent(0, 0)).toBe(true);
+    expect(answerStillCurrent(0, 1)).toBe(false);
+    expect(answerStillCurrent(3, 2)).toBe(false);
+
+    // The page's sequence: a verify is sent in the code stage, the modal is
+    // closed while it is out, then the answer "verified" arrives.
+    for (const from of ["idle", "code", "verified"] as const) {
+      let closes = 0;
+      let stage: ReauthStage = from;
+      const sentAt = closes;
+      closes += 1;
+      stage = afterClose().stage;
+      const late = afterVerify(readReauthAnswer(200, { status: "verified" }));
+      const acted = answerStillCurrent(sentAt, closes) ? late.proceed : false;
+      if (answerStillCurrent(sentAt, closes)) stage = late.stage;
+      expect(stage, from).toBe("idle");
+      expect(acted, from).toBe(false);
+      expect(pressAction(stage), from).toBe("start");
+    }
+  });
+
   it("C6 the delete button says Deleting only while the delete request itself is out", () => {
     expect(deleteButtonLabel("idle", "start")).toBe(REAUTH_UI.working);
     expect(deleteButtonLabel("code", "verify")).toBe(REAUTH_UI.working);
@@ -202,13 +230,37 @@ describe("settings page wiring", () => {
     expect(PAGE).not.toMatch(/Email me a code|Sending…|Deleting…|REAUTH_UI\.send/);
   });
 
+  it("C9 every way out of a modal starts over, and every late answer is checked against the closes", () => {
+    const close = between("const closeModal = () => {", "const postReauth = async");
+    expect(close).toContain("modalCloses.current += 1;");
+    expect(close).toContain("applyReauthOutcome(afterClose());");
+    expect(close).toContain("setReauthBusy(null);");
+    // Every modal, by backdrop and by Cancel, closes through closeModal.
+    expect(PAGE.split("<Modal onClose={closeModal}>").length - 1).toBe(PAGE.split("<Modal ").length - 1);
+    // closeModal is the only place a modal is closed.
+    expect(PAGE.split("setActiveModal(null)").length - 1).toBe(1);
+    expect(close).toContain("setActiveModal(null)");
+    const cancels = PAGE.split("Cancel </button>").length - 1;
+    expect(cancels).toBeGreaterThan(0);
+    expect(PAGE.split("<button onClick={closeModal}").length - 1).toBe(cancels);
+    // The answers that can arrive after a close are each checked.
+    const helpers = between("const advanceReauth = async", "const handleDeleteAccount = async");
+    expect(helpers.split("answerStillCurrent(sentAt, modalCloses.current)").length - 1).toBe(2);
+    expect(helpers.indexOf("answerStillCurrent(sentAt, modalCloses.current)")).toBeLessThan(
+      helpers.indexOf("applyReauthOutcome(next);")
+    );
+    const deletion = between("const handleDeleteAccount = async", "const handleExportData");
+    expect(deletion.split("answerStillCurrent(sentAt, modalCloses.current)").length - 1).toBe(2);
+  });
+
   it("C7 the page takes every stage change from the transition functions", () => {
     const helpers = between("const resetReauth = () =>", "const handleDeleteAccount = async");
     expect(helpers).toContain("const press = pressAction(reauthStage);");
     expect(helpers).toContain("if (press === 'act') return { proceed: true, stage: reauthStage };");
     expect(helpers).toContain("afterStart('idle', await postReauth('start', { purpose }))");
     expect(helpers).toContain("afterVerify(await postReauth('verify', { purpose, code: reauthCode }))");
-    expect(helpers).toContain("applyReauthOutcome(afterStart('code', await postReauth('start', { purpose })));");
+    expect(helpers).toContain("const next = afterStart('code', await postReauth('start', { purpose }));");
+    expect(helpers).toContain("if (answerStillCurrent(sentAt, modalCloses.current)) applyReauthOutcome(next);");
     const deletion = between("const handleDeleteAccount = async", "const handleExportData");
     expect(deletion).toContain("stageAfterFailedAction(ready.stage, res.status, errBody)");
     expect(deletion).toContain("setReauthBusy('act');");

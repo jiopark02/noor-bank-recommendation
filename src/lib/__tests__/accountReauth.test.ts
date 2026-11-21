@@ -38,6 +38,8 @@ import type { BuiltEmail } from "../emailConfirmation";
  *   the code, key, hash or address in a log line or a body       -> A11
  *   a session id read loosely (case, spaces, any string)          -> A13
  *   a code sent to an address that is not confirmed               -> A15
+ *   start issuing or emailing without a session, or deciding the
+ *   session after the address, or the mode off asking for one     -> A16
  *   verify or the gate going on without a session, or the mode off
  *   asking for one                                                -> A14
  *   the session left out of the verify or check arguments          -> A8, A10
@@ -380,6 +382,42 @@ describe("the session", () => {
     for (const value of refused) {
       expect(sessionIdFromVerifiedToken(value), value).toBeNull();
     }
+  });
+
+  it("A16 without a session, start refuses 403 before any rpc or email; with the mode off it answers not_required first", async () => {
+    const h = harness({ answers: { account_reauth_issue: { data: "issued", error: null } } });
+    for (const purpose of ["delete_account", "export_data"] as const) {
+      const result = await startReauth(h.deps, { ...IDENTITY, sessionId: null }, purpose);
+      expect(result.status).toBe(403);
+      expect(result.body.code).toBe("REAUTH_SESSION_UNAVAILABLE");
+    }
+    // The session is decided before the address: an unconfirmed address
+    // without a session is still the session refusal.
+    const both = await startReauth(h.deps, { ...IDENTITY, sessionId: null, emailConfirmed: false }, "delete_account");
+    expect(both.body.code).toBe("REAUTH_SESSION_UNAVAILABLE");
+    expect(h.rpcCalls).toEqual([]);
+    expect(h.sent).toEqual([]);
+    expect(h.logs).toContain("[account-reauth] route=start outcome=no_session");
+
+    const off = harness({ mode: "off" });
+    expect(await startReauth(off.deps, { ...IDENTITY, sessionId: null }, "delete_account")).toEqual({
+      status: 200,
+      body: { status: "not_required" },
+    });
+    expect(off.rpcCalls).toEqual([]);
+    expect(off.sent).toEqual([]);
+  });
+
+  it("A16 start, verify and the gate log the one no-session line, each under its own name", async () => {
+    const h = harness({});
+    await startReauth(h.deps, { ...IDENTITY, sessionId: null }, "export_data");
+    await verifyReauth(h.deps, { ...IDENTITY, sessionId: null }, "export_data", CODE);
+    await requireRecentReauth(h.deps, { userId: USER, sessionId: null }, "export_data");
+    expect(h.logs).toEqual([
+      "[account-reauth] route=start outcome=no_session",
+      "[account-reauth] route=verify outcome=no_session",
+      "[account-reauth] route=gate purpose=export_data outcome=no_session",
+    ]);
   });
 
   it("A14 without a session, verify and the gate refuse 403 with no rpc; the mode off still passes the gate", async () => {

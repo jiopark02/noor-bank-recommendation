@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
@@ -18,8 +18,10 @@ import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supaba
 import { HOUSEHOLD_UI } from '@/lib/householdCopy';
 import {
   REAUTH_UI,
+  afterClose,
   afterStart,
   afterVerify,
+  answerStillCurrent,
   deleteButtonLabel,
   exportButtonLabel,
   pressAction,
@@ -302,6 +304,11 @@ export default function SettingsPage() {
   const [reauthBusy, setReauthBusy] = useState<ReauthPress | null>(null);
   const [reauthCode, setReauthCode] = useState('');
   const [reauthNotice, setReauthNotice] = useState<string | null>(null);
+  // How many times a modal has been closed. A request remembers the count it
+  // was sent at; its answer changes the screen only while the count is the
+  // same (answerStillCurrent). isLoading is not cleared on close, so a new
+  // press waits for the earlier request to finish.
+  const modalCloses = useRef(0);
 
   useEffect(() => {
     const profile = localStorage.getItem('noor_user_profile');
@@ -342,10 +349,14 @@ export default function SettingsPage() {
     if (next.clearCode) setReauthCode('');
   };
 
+  // Every way out of a modal comes here: Cancel, the backdrop, and the export
+  // once it starts. The reauthentication step starts over even while a
+  // request is in flight; that request's answer is then dropped.
   const closeModal = () => {
+    modalCloses.current += 1;
     setActiveModal(null);
-    setError(null);
-    resetReauth();
+    applyReauthOutcome(afterClose());
+    setReauthBusy(null);
   };
 
   const postReauth = async (
@@ -374,22 +385,27 @@ export default function SettingsPage() {
   ): Promise<{ proceed: boolean; stage: ReauthStage }> => {
     const press = pressAction(reauthStage);
     if (press === 'act') return { proceed: true, stage: reauthStage };
+    const sentAt = modalCloses.current;
     setReauthBusy(press);
     const next =
       press === 'start'
         ? afterStart('idle', await postReauth('start', { purpose }))
         : afterVerify(await postReauth('verify', { purpose, code: reauthCode }));
+    // Closed meanwhile: the answer changes nothing and the action does not run.
+    if (!answerStillCurrent(sentAt, modalCloses.current)) return { proceed: false, stage: 'idle' };
     applyReauthOutcome(next);
     return { proceed: next.proceed, stage: next.stage };
   };
 
   // "Get a new code", offered in the code stage only. Never runs the action.
   const handleNewReauthCode = async (purpose: ReauthPurpose) => {
+    const sentAt = modalCloses.current;
     setIsLoading(true);
     setError(null);
     setReauthBusy('start');
     try {
-      applyReauthOutcome(afterStart('code', await postReauth('start', { purpose })));
+      const next = afterStart('code', await postReauth('start', { purpose }));
+      if (answerStillCurrent(sentAt, modalCloses.current)) applyReauthOutcome(next);
     } catch {
       setError(REAUTH_UI.fallback);
     } finally {
@@ -403,6 +419,7 @@ export default function SettingsPage() {
       setError('Please type DELETE to confirm');
       return;
     }
+    const sentAt = modalCloses.current;
     setIsLoading(true);
     setError(null);
     try {
@@ -434,11 +451,14 @@ export default function SettingsPage() {
         // account was deleted when it was not (or was only half-deleted).
         // The stage is kept unless the server asks for a new verification, so
         // retrying a deletion that stopped part-way goes straight to it.
+        // A modal closed while the request was out has already started over.
         const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        const nextStage = stageAfterFailedAction(ready.stage, res.status, errBody);
-        if (nextStage === 'idle') resetReauth();
-        else setReauthStage(nextStage);
-        setError(errBody.error || 'Failed to delete account. Please try again.');
+        if (answerStillCurrent(sentAt, modalCloses.current)) {
+          const nextStage = stageAfterFailedAction(ready.stage, res.status, errBody);
+          if (nextStage === 'idle') resetReauth();
+          else setReauthStage(nextStage);
+          setError(errBody.error || 'Failed to delete account. Please try again.');
+        }
         setReauthBusy(null);
         setIsLoading(false);
         return;
@@ -459,7 +479,9 @@ export default function SettingsPage() {
         navigate: () => router.push('/welcome'),
       });
     } catch {
-      setError('Failed to delete account. Please try again.');
+      if (answerStillCurrent(sentAt, modalCloses.current)) {
+        setError('Failed to delete account. Please try again.');
+      }
       setReauthBusy(null);
       setIsLoading(false);
     }

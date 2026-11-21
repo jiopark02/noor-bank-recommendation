@@ -16,6 +16,7 @@ import type { NextRequest } from "next/server";
  *   the code, key, hash, address or bearer token in a log or body -> T4
  *   the session taken from the body, or verify going on without one -> T5
  *   confirmation read from the body, or not read at all            -> T6
+ *   start going on without a session                               -> T7
  */
 
 const SESSION = "5e1d0c9b-8a7f-4e6d-9c5b-4a3f2e1d0c9b";
@@ -232,6 +233,14 @@ describe("reauth routes", () => {
     expect(verified.status).toBe(200);
     const verifyCalls = state.rpcCalls.filter((c) => c.fn === "account_reauth_verify");
     expect(verifyCalls.map((c) => c.args.p_session_id)).toEqual([SESSION]);
+  });
+
+  it("T7 a token without a session id cannot ask for a code: 403, no rpc, no email", async () => {
+    const res = await post("start", { purpose: "delete_account", sessionId: BODY_SESSION }, BEARER_NO_SESSION);
+    expect(res.status).toBe(403);
+    expect(res.json.code).toBe("REAUTH_SESSION_UNAVAILABLE");
+    expect(state.rpcCalls).toEqual([]);
+    expect(state.emails).toEqual([]);
   });
 
   it("T5 a token without a session id cannot verify, and no rpc is made", async () => {
