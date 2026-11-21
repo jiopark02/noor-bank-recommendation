@@ -6,6 +6,7 @@ import type { SessionReadResult } from "../supabase-browser";
 import {
   afterShareAnswer,
   answerShare,
+  createLatestOnly,
   loadSharing,
   readSharingData,
   sharePromptView,
@@ -34,6 +35,8 @@ import { HOUSEHOLD_MESSAGES, HOUSEHOLD_UI } from "../householdCopy";
  *     given a refusal's sentence                                         -> SP-R1
  *   the refusal decided by status instead of code                         -> SP-R1
  *   a component ignoring afterShareAnswer's reload or message             -> SP-R2
+ *   createLatestOnly letting an earlier request's late answer through     -> SP-S1
+ *   a component applying a load without its latest-only check            -> SP-S2
  */
 
 function read(relativePath: string): string {
@@ -183,6 +186,72 @@ describe("after an answer", () => {
   });
 });
 
+describe("only the latest load is applied", () => {
+  function deferred() {
+    let resolve: (value: string) => void = () => {};
+    const promise = new Promise<string>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  /** The components' load, with the read replaced by a deferred answer. */
+  function makeScreen() {
+    const latest = createLatestOnly();
+    const applied: string[] = [];
+    const load = async (answer: Promise<string>) => {
+      const isLatest = latest.begin();
+      const next = await answer;
+      if (!isLatest()) return;
+      applied.push(next);
+    };
+    return { load, applied };
+  }
+
+  it("SP-S1 an earlier load that answers after a later one is dropped; the later one is applied", async () => {
+    const screen = makeScreen();
+    const first = deferred();
+    const second = deferred();
+    const a = screen.load(first.promise);
+    const b = screen.load(second.promise);
+    second.resolve("after refreshKey changed");
+    await b;
+    first.resolve("before refreshKey changed");
+    await a;
+    expect(screen.applied).toEqual(["after refreshKey changed"]);
+  });
+
+  it("SP-S1 answers in order: only the last one is applied; a lone load is applied", async () => {
+    const screen = makeScreen();
+    const first = deferred();
+    const second = deferred();
+    const a = screen.load(first.promise);
+    const b = screen.load(second.promise);
+    first.resolve("first");
+    await a;
+    second.resolve("second");
+    await b;
+    expect(screen.applied).toEqual(["second"]);
+
+    const lone = makeScreen();
+    const only = deferred();
+    const c = lone.load(only.promise);
+    only.resolve("only");
+    await c;
+    expect(lone.applied).toEqual(["only"]);
+  });
+
+  it("SP-S1 each screen keeps its own count", () => {
+    const one = createLatestOnly();
+    const two = createLatestOnly();
+    const check = one.begin();
+    two.begin();
+    expect(check()).toBe(true);
+    one.begin();
+    expect(check()).toBe(false);
+  });
+});
+
 describe("which question", () => {
   it("SP-V1 the first bank not yet answered for this person; none without another member or a load", () => {
     const data = readSharingData(SHARING_BODY);
@@ -259,5 +328,24 @@ describe("the screens", () => {
     expect(PROMPT.split("{message && (").length - 1).toBe(2);
     expect(PROMPT).not.toMatch(/\bisOk\(/);
     expect(PROMPT).not.toContain("HOUSEHOLD_UI.shareFailed");
+  });
+
+  it("SP-S2 both components apply a load only after its latest-only check", () => {
+    expect(PROMPT.split("const latestRef = useRef(createLatestOnly());").length - 1).toBe(2);
+    const loads = PROMPT.split("const load = useCallback(async () => {").slice(1);
+    expect(loads.length).toBe(2);
+    for (const rest of loads) {
+      const body = rest.slice(0, rest.indexOf("}, []);"));
+      const begin = body.indexOf("const isLatest = latestRef.current.begin();");
+      const read = body.indexOf("await loadSharing(");
+      const guard = body.indexOf("if (!mountedRef.current || !isLatest()) return;");
+      const apply = body.indexOf("setData(");
+      expect(begin).toBeGreaterThan(-1);
+      expect(read).toBeGreaterThan(begin);
+      expect(guard).toBeGreaterThan(read);
+      expect(apply).toBeGreaterThan(guard);
+    }
+    // setData is called only inside the two loads.
+    expect(PROMPT.split("setData(").length - 1).toBe(2);
   });
 });

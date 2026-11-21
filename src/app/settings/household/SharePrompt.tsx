@@ -7,6 +7,7 @@ import {
   afterShareAnswer,
   answerShare,
   browserHouseholdHttp,
+  createLatestOnly,
   loadSharing,
   sharePromptView,
   type SharingData,
@@ -23,21 +24,26 @@ import {
  * and when there is nothing to ask, it renders nothing. An answer another
  * press cannot change (the bank or the other member is gone, the household
  * changed) reads the view again and shows that answer's sentence; any other
- * failure shows "Try again" and keeps the question (afterShareAnswer). It shows no amounts, writes nothing to
- * browser storage and never signs anyone out.
+ * failure shows "Try again" and keeps the question (afterShareAnswer).
+ * Only the latest load is applied (createLatestOnly), so a load started
+ * before refreshKey changed cannot overwrite the newer one. It shows no
+ * amounts, writes nothing to browser storage and never signs anyone out.
  */
 export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<SharingData | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const latestRef = useRef(createLatestOnly());
 
   const load = useCallback(async () => {
+    const isLatest = latestRef.current.begin();
     const next = await loadSharing(
       () => readSession(undefined, "household-mount"),
       browserHouseholdHttp
     );
-    if (mountedRef.current) setData(next);
+    if (!mountedRef.current || !isLatest()) return;
+    setData(next);
   }, []);
 
   useEffect(() => {
@@ -116,13 +122,15 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
   const [savingItem, setSavingItem] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const latestRef = useRef(createLatestOnly());
 
   const load = useCallback(async () => {
+    const isLatest = latestRef.current.begin();
     const next = await loadSharing(
       () => readSession(undefined, "household-mount"),
       browserHouseholdHttp
     );
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || !isLatest()) return;
     setData(next);
     setLoaded(true);
   }, []);

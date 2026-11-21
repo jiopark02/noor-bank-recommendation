@@ -611,3 +611,21 @@ export function afterShareAnswer(outcome: HouseholdOutcome): ShareAnswerStep {
   }
   return { reload: false, message: HOUSEHOLD_UI.shareFailed };
 }
+
+/**
+ * Keeps only the answer of the latest request a screen started. begin()
+ * marks a new request and returns a check that stays true only while no later
+ * request has begun. A screen that reloads when a prop changes applies an
+ * answer only while its check is true, so an earlier request that answers
+ * late cannot overwrite a later one's result.
+ */
+export function createLatestOnly(): { begin(): () => boolean } {
+  let latest = 0;
+  return {
+    begin() {
+      latest += 1;
+      const mine = latest;
+      return () => mine === latest;
+    },
+  };
+}
