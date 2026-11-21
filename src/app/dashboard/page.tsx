@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { PageLayout } from "@/components/layout";
+import HouseholdCard from "./HouseholdCard";
 import { buildJsonAuthorizedHeaders } from "@/lib/supabaseAuthHeaders";
 import { getSupabaseBearerHeaders, readSession } from "@/lib/supabase-browser";
 import {
@@ -828,6 +829,8 @@ export default function HomePage() {
             </Link>
           </div>
         </motion.div>
+
+        <HouseholdCard />
       </section>
     </PageLayout>
   );

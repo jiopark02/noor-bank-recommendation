@@ -19,9 +19,11 @@ import {
   cancelButtonLabel,
   createButtonLabel,
   householdCall,
+  householdLoadView,
   leaveConfirmLabel,
   householdMessage,
   isOk,
+  memberKey,
   memberLineText,
   readHouseholdData,
   type HouseholdBusyAction,
@@ -234,6 +236,12 @@ export default function HouseholdPage() {
         </div>
       )}
 
+      {householdLoadView(data, loadError) === 'loading' && (
+        <p role="status" className="mx-5 mt-5 text-[14px]" style={{ color: 'rgba(0,0,0,0.45)' }}>
+          {HOUSEHOLD_UI.loading}
+        </p>
+      )}
+
       {loadError && !data && (
         <div className="mx-4 mt-5 rounded-2xl p-5 bg-white" style={{ border: '1px solid rgba(0,0,0,0.07)' }}>
           <p className="text-[14px] text-black mb-4">{loadError}</p>
@@ -251,7 +259,7 @@ export default function HouseholdPage() {
         <>
           <div className="mx-4 mt-5 rounded-2xl p-5 bg-white" style={{ border: '1px solid rgba(0,0,0,0.07)' }}>
             {data.members.map((member, i) => (
-              <div key={i} className="text-[14px] text-black py-1">
+              <div key={memberKey(data.members, i)} className="text-[14px] text-black py-1">
                 {memberLineText(member)}
               </div>
             ))}

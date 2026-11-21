@@ -52,8 +52,10 @@ import { makeFakeClient } from "./householdFakeClient";
  *   the limit or window changed                                    -> T-L3
  *   a message, address, token or id added to a log line            -> T-G1
  *   an error object or its message logged instead of its code      -> T-G2
- *   repair or prune dropped from the view, or reordered            -> T-R1
+ *   repair dropped from the view, reordered, or a prune call added -> T-R1
  *   email (or any other users column) read                         -> T-R2
+ *   the view's expires_at filter removed (with no prune before the
+ *     read, it alone keeps an expired invite off the screen)       -> T-R2
  *   the application's household size out of step with the SQL     -> M11
  */
 
@@ -521,28 +523,31 @@ describe("logs", () => {
 });
 
 describe("the view", () => {
-  it("T-R1 the view ensures, repairs the owner, prunes, then reads, in that order", async () => {
+  it("T-R1 the view ensures, repairs the owner, then reads, in that order, and deletes no invite", async () => {
     const store = fakeStore();
     const r = await viewHousehold(confirmed, store, vi.fn());
     expect(r.status).toBe(200);
-    const order = [store.ensure, store.repairOwner, store.pruneExpired, store.readView].map(
+    const order = [store.ensure, store.repairOwner, store.readView].map(
       (fn) => fn.mock.invocationCallOrder[0]
     );
+    expect(order.every((n) => typeof n === "number")).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(store.ensure).toHaveBeenCalledWith(ID);
     expect(store.repairOwner).toHaveBeenCalledWith(ID);
     expect(store.readView).toHaveBeenCalledWith(ID);
+    // Expired invites are deleted by the cron route, not by a read.
+    expect(store.pruneExpired).not.toHaveBeenCalled();
 
     const failed = fakeStore({ ensure: vi.fn(async () => false) });
     expect((await viewHousehold(confirmed, failed, vi.fn())).status).toBe(500);
     expect(failed.readView).not.toHaveBeenCalled();
 
-    // A failed repair or prune is logged and the view is still read.
+    // A failed repair is logged and the view is still read.
     const degraded = fakeStore({
       repairOwner: vi.fn(async () => ({ ok: false as const, code: "P0001" })),
-      pruneExpired: vi.fn(async () => ({ ok: false as const, code: "P0001" })),
     });
     expect((await viewHousehold(confirmed, degraded, vi.fn())).status).toBe(200);
+    expect(degraded.pruneExpired).not.toHaveBeenCalled();
   });
 
   it("T-R2 the store reads first_name only from users, filters on the caller's id, and the invite for the owner only", async () => {

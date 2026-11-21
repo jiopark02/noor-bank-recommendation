@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
-import { EXPORT_SECTIONS } from "../accountExport";
+import { buildAccountExport, EXPORT_SECTIONS, type ReadPage } from "../accountExport";
 
 /**
  * The household_invites export section. It is not in accountExport.test.ts's
@@ -13,6 +13,8 @@ import { EXPORT_SECTIONS } from "../accountExport";
  *   token_hash added to the section's columns                     -> T-E2
  *   a column added to the table and not to the export, or removed  -> T-E2
  *   the section read by household_id instead of invited_by        -> T-E2
+ *   token_hash, invited_by or household_id exported from the
+ *     invites made for the user                                   -> T-E3
  */
 
 const MIGRATION = path.resolve(
@@ -52,5 +54,50 @@ describe("household invites export", () => {
     expect([...exported].sort()).toEqual(
       schema.filter((c) => c !== "invited_by" && c !== "token_hash").sort()
     );
+  });
+
+  it("T-E3 the invites made for the user carry no token hash, no sender and no sender's household", async () => {
+    const section = EXPORT_SECTIONS.find((s) => s.key === "household_invites_received");
+    expect(section?.table).toBe("household_invites");
+    expect(section?.filterColumn).toBe("invitee_email");
+    expect(section?.filterBy).toBe("confirmed_email");
+    const exported = String(section?.columns).split(", ");
+    const schema = tableColumns("household_invites");
+    expect([...exported].sort()).toEqual(
+      schema
+        .filter((c) => c !== "invited_by" && c !== "token_hash" && c !== "household_id")
+        .sort()
+    );
+
+    const HASH = "d".repeat(64);
+    const SENDER = "sentinel-sender-id-61";
+    const SENDER_HOUSEHOLD = "sentinel-sender-household-62";
+    const readPage: ReadPage = async (request) => {
+      if (request.table !== "household_invites" || request.filterColumn !== "invitee_email") {
+        return { data: [], error: null };
+      }
+      const row: Record<string, unknown> = {
+        id: "00000000-0000-4000-8000-000000000001",
+        household_id: SENDER_HOUSEHOLD,
+        invited_by: SENDER,
+        invitee_email: request.filterValue,
+        token_hash: HASH,
+        created_at: "t",
+        expires_at: "t",
+      };
+      const out: Record<string, unknown> = {};
+      for (const c of request.select.split(",").map((s) => s.trim())) out[c] = row[c];
+      return { data: [out], error: null };
+    };
+    const result = await buildAccountExport(
+      { id: "sentinel-user-63", email: "person@example.test", emailConfirmed: true },
+      readPage
+    );
+    expect(result.status).toBe(200);
+    expect((result.body.household_invites_received as unknown[]).length).toBe(1);
+    const text = JSON.stringify(result.body);
+    expect(text).not.toContain(HASH);
+    expect(text).not.toContain(SENDER);
+    expect(text).not.toContain(SENDER_HOUSEHOLD);
   });
 });

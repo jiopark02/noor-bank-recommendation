@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizeInviteEmail } from "./householdInvite";
 
 /**
  * The decision half of GET /api/account/export — which tables are read, how
@@ -6,6 +7,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * builds the page reader, calls buildAccountExport and serializes the result,
  * so everything that decides anything here is reached by
  * accountExport.test.ts with an injected reader and no vi.mock.
+ *
+ * FILTERS
+ * Every section is read by one column compared with a value taken from the
+ * verified token only: the caller's id, or, for a section marked
+ * filterBy "confirmed_email", the caller's address trimmed and lowercased the
+ * way an invite's address is stored and accepted (normalizeInviteEmail). An
+ * address that is not confirmed, or not an address, is not used: that
+ * section is not read and comes out empty. Nothing from the request is used.
  *
  * PAGING
  * Every section is read in pages with a keyset: rows ordered by the section's
@@ -36,19 +45,27 @@ export type ExportSection = {
   table: string;
   /** "*" or a comma-separated column list: exactly what the file carries. */
   columns: string;
-  /** Compared with the verified caller's id. */
+  /**
+   * Compared with the verified caller's id, or with their confirmed address
+   * when filterBy is "confirmed_email".
+   */
   filterColumn: string;
+  filterBy?: "confirmed_email";
+  /** One more fixed equality every page of the section asks for. */
+  extraEq?: { column: string; value: string };
   /** A unique key of the table; the keyset pages on it. */
   orderColumn: string;
   orderKeyType: ExportKeyType;
 };
 
 /**
- * Sections whose column list is explicit leave their filter column out (user_id,
- * or owner_user_id): it always equals the file's top-level user_id, and a
- * column added to the table later is not exported until someone decides it
- * should be. The users table has no user_id; its id is the user's own id, and
- * its list carries it.
+ * Sections whose column list is explicit leave a filter column holding the
+ * caller's id out (user_id, owner_user_id, invited_by, created_by): it always
+ * equals the file's top-level user_id, and a column added to the table later
+ * is not exported until someone decides it should be. The users table has no
+ * user_id; its id is the user's own id, and its list carries it. A section
+ * read by the caller's address keeps that column: it is the address the
+ * invite was made for.
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
   {
@@ -130,7 +147,8 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     orderKeyType: "uuid",
   },
   // Personal goals only, read by owner_user_id. A joint goal belongs to a
-  // household and has no owner_user_id, so it is not read here.
+  // household and has no owner_user_id, so it is not read here; the joint
+  // goals the user created are read by joint_goals_created below.
   {
     key: "goals",
     table: "goals",
@@ -143,7 +161,7 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
   // Invites the user created, read by invited_by: the address they entered,
   // the household and the two times. token_hash is not exported; it names the
   // invite to the database and is nothing the user entered. Invites made to
-  // the user by someone else are not read here.
+  // the user by someone else are read by household_invites_received below.
   {
     key: "household_invites",
     table: "household_invites",
@@ -161,7 +179,47 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     orderColumn: "user_id",
     orderKeyType: "uuid",
   },
+  // Joint goals the user created, read by created_by and kind 'joint'.
+  // created_by is the filter; owner_user_id is always null on a joint goal.
+  {
+    key: "joint_goals_created",
+    table: "goals",
+    columns:
+      "id, kind, household_id, target_amount_cents, target_date, monthly_amount_cents, status, created_at, updated_at",
+    filterColumn: "created_by",
+    extraEq: { column: "kind", value: "joint" },
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // Invites made for the user's confirmed address, by anyone. Neither
+  // token_hash nor who sent it (invited_by) nor their household
+  // (household_id) is exported: none of them is the user's.
+  {
+    key: "household_invites_received",
+    table: "household_invites",
+    columns: "id, invitee_email, created_at, expires_at",
+    filterColumn: "invitee_email",
+    filterBy: "confirmed_email",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
 ];
+
+/** The verified caller, from the token only. */
+export type ExportIdentity = {
+  id: string;
+  /** The address as the auth server returned it. */
+  email: string | null;
+  emailConfirmed: boolean;
+};
+
+/**
+ * The address a "confirmed_email" section is read by: the confirmed address
+ * trimmed and lowercased, or null when it is not confirmed or not an address.
+ */
+export function exportConfirmedEmail(identity: ExportIdentity): string | null {
+  return identity.emailConfirmed ? normalizeInviteEmail(identity.email) : null;
+}
 
 export type ExportRow = Record<string, unknown>;
 
@@ -169,7 +227,12 @@ export type PageRequest = {
   table: string;
   select: string;
   filterColumn: string;
+  /** The caller the export is for, from the verified token. */
   userId: string;
+  /** The value filterColumn must equal: the caller's id or confirmed address. */
+  filterValue: string;
+  /** Present when the section asks for one more fixed equality. */
+  extraEq?: { column: string; value: string };
   orderColumn: string;
   /** Absent on a section's first page. */
   afterKey?: unknown;
@@ -210,10 +273,15 @@ export function selectForSection(section: ExportSection): {
 
 async function readSection(
   section: ExportSection,
-  userId: string,
+  identity: ExportIdentity,
   readPage: ReadPage,
   pageSize: number
 ): Promise<ExportRow[] | null> {
+  const filterValue =
+    section.filterBy === "confirmed_email" ? exportConfirmedEmail(identity) : identity.id;
+  // No confirmed address: nothing can be read by it, and nothing is.
+  if (filterValue === null) return [];
+
   const { select, keyAdded } = selectForSection(section);
   const rows: ExportRow[] = [];
   let afterKey: unknown = undefined;
@@ -223,10 +291,12 @@ async function readSection(
       table: section.table,
       select,
       filterColumn: section.filterColumn,
-      userId,
+      userId: identity.id,
+      filterValue,
       orderColumn: section.orderColumn,
       limit: pageSize,
     };
+    if (section.extraEq) request.extraEq = { ...section.extraEq };
     if (afterKey !== undefined) request.afterKey = afterKey;
 
     const result = await readPage(request);
@@ -254,10 +324,11 @@ async function readSection(
 }
 
 /**
- * @param userId The authenticated user id, from the verified Bearer token only.
+ * @param identity The authenticated user's id, address and whether the address
+ *                 is confirmed, from the verified Bearer token only.
  */
 export async function buildAccountExport(
-  userId: string,
+  identity: ExportIdentity,
   readPage: ReadPage,
   options: {
     sections?: readonly ExportSection[];
@@ -270,7 +341,7 @@ export async function buildAccountExport(
   const now = options.now ?? (() => new Date());
 
   const results = await Promise.all(
-    sections.map((section) => readSection(section, userId, readPage, pageSize))
+    sections.map((section) => readSection(section, identity, readPage, pageSize))
   );
 
   const failedSections = sections
@@ -282,7 +353,7 @@ export async function buildAccountExport(
 
   const body: Record<string, unknown> = {
     exported_at: now().toISOString(),
-    user_id: userId,
+    user_id: identity.id,
   };
   sections.forEach((section, i) => {
     body[section.key] = results[i];
@@ -298,7 +369,10 @@ export function makeSupabasePageReader(
     let query = client
       .from(request.table)
       .select(request.select)
-      .eq(request.filterColumn, request.userId);
+      .eq(request.filterColumn, request.filterValue);
+    if (request.extraEq !== undefined) {
+      query = query.eq(request.extraEq.column, request.extraEq.value);
+    }
     if (request.afterKey !== undefined) {
       query = query.gt(request.orderColumn, request.afterKey);
     }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase";
-import { getAuthenticatedUserIdFromRequest } from "@/lib/apiAuth";
+import { getAuthenticatedUserFromRequest } from "@/lib/apiAuth";
 import { buildAccountExport, makeSupabasePageReader } from "@/lib/accountExport";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +9,10 @@ export const dynamic = "force-dynamic";
  * GET /api/account/export — GDPR data export.
  *
  * Returns the caller's own data as a downloadable JSON file. Identity comes
- * ONLY from the verified Bearer JWT; every query is filtered by that id.
- * Which tables are read, and how each is paged, lives in
- * src/lib/accountExport.ts.
+ * ONLY from the verified Bearer JWT: the user's id, their address and whether
+ * that address is confirmed. Every query is filtered by that id, or, for the
+ * invites made to the user, by the confirmed address. Which tables are read,
+ * and how each is paged, lives in src/lib/accountExport.ts.
  *
  * Deliberately excluded:
  *   - plaid_connections.access_token — a live bank credential; only
@@ -25,14 +26,18 @@ export const dynamic = "force-dynamic";
  * silently handing back an incomplete file the user believes is complete.
  */
 export async function GET(request: NextRequest) {
-  const authUserId = await getAuthenticatedUserIdFromRequest(request);
-  if (!authUserId) {
+  const user = await getAuthenticatedUserFromRequest(request);
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const admin = createAdminClient();
   const result = await buildAccountExport(
-    authUserId,
+    {
+      id: user.id,
+      email: typeof user.email === "string" ? user.email : null,
+      emailConfirmed: Boolean(user.email_confirmed_at),
+    },
     makeSupabasePageReader(admin)
   );
 

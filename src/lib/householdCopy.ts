@@ -64,6 +64,9 @@ export const HOUSEHOLD_UI = {
   settingsRowDescription: "Share Noor with one other person",
 
   title: "Household",
+  loading: "Loading your household…",
+  cardUnavailable: "We couldn't load your household right now.",
+  cardInvite: "Invite someone",
   alone: "You're the only person in your household.",
   explainer: "A household is two people at most. The Manager can invite one other person.",
   you: "You",

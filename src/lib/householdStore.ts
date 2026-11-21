@@ -74,8 +74,10 @@ export function makeHouseholdStore(
           {}
         )) as QueryAnswer;
         if (error) return { ok: false, code: errorCode(error) };
-        if (typeof data !== "number") return { ok: false, code: "bad_answer" };
-        return { ok: true };
+        if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
+          return { ok: false, code: "bad_answer" };
+        }
+        return { ok: true, deleted: data };
       } catch {
         return { ok: false, code: "throw" };
       }
