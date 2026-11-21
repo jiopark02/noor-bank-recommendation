@@ -295,6 +295,7 @@ describe("account export: what each section reads", () => {
     plaid_link_token_issues: "user_id",
     household_members: "user_id",
     share_grants: "owner_user_id",
+    share_prompt_answers: "owner_user_id",
     goals: "owner_user_id",
     household_invites: "invited_by",
     household_invite_issues: "user_id",
@@ -320,6 +321,7 @@ describe("account export: what each section reads", () => {
     plaid_link_token_issues: "user_id",
     household_members: "id",
     share_grants: "id",
+    share_prompt_answers: "id",
     goals: "id",
     household_invites: "id",
     household_invite_issues: "user_id",
@@ -345,6 +347,7 @@ describe("account export: what each section reads", () => {
         "plaid_link_token_issues",
         "household_members",
         "share_grants",
+        "share_prompt_answers",
         "goals",
         "household_invites",
         "household_invite_issues",
@@ -593,17 +596,20 @@ describe("account export: explicit column lists match the schema", () => {
     "plaid_link_token_issues",
     "household_members",
     "share_grants",
+    "share_prompt_answers",
     "goals",
     "household_invite_issues",
   ];
 
   /**
    * Columns a section leaves out on purpose, beyond its filter column.
-   * share_grants.grantee_user_id: the other member's identifier is their
-   * personal data, so it is not exported to the person who shared.
+   * share_grants.grantee_user_id and share_prompt_answers.grantee_user_id:
+   * the other member's identifier is their personal data, so it is not
+   * exported to the person who shared or was asked.
    */
   const NOT_EXPORTED: Readonly<Record<string, readonly string[]>> = {
     share_grants: ["grantee_user_id"],
+    share_prompt_answers: ["grantee_user_id"],
   };
 
   for (const table of EXPLICIT) {
@@ -630,6 +636,48 @@ describe("account export: explicit column lists match the schema", () => {
     for (const table of Object.keys(NOT_EXPORTED)) {
       expect(EXPLICIT).toContain(table);
     }
+  });
+
+  it("E19 neither share section's rows carry grantee_user_id, executed", async () => {
+    // The other member's identifier is their personal data: it is not
+    // exported to the person who shared, or was asked whether to share.
+    const GRANTEE = "33333333-3333-4333-8333-333333333333";
+    const { result } = await exportOf(
+      {
+        share_grants: [
+          {
+            id: uuidFor(1),
+            owner_user_id: USER,
+            grantee_user_id: GRANTEE,
+            household_id: uuidFor(9),
+            resource_type: "plaid_connection",
+            resource_id: 7,
+            scope: "view",
+            granted_at: "2026-11-21T00:00:00Z",
+            revoked_at: null,
+          },
+        ],
+        share_prompt_answers: [
+          {
+            id: uuidFor(2),
+            owner_user_id: USER,
+            grantee_user_id: GRANTEE,
+            household_id: uuidFor(9),
+            resource_id: 7,
+            answered_at: "2026-11-21T00:00:00Z",
+          },
+        ],
+      },
+      EXPORT_SECTIONS
+    );
+    expect(result.status).toBe(200);
+    for (const key of ["share_grants", "share_prompt_answers"]) {
+      const rows = result.body[key] as ExportRow[];
+      expect(rows.length, key).toBe(1);
+      expect(Object.keys(rows[0]), key).not.toContain("grantee_user_id");
+      expect(Object.keys(rows[0]), key).not.toContain("owner_user_id");
+    }
+    expect(JSON.stringify(result.body)).not.toContain(GRANTEE);
   });
 
   it("E14 users: the export's columns are the table's columns, id included", () => {

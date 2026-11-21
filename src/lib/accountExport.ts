@@ -65,7 +65,8 @@ export type ExportSection = {
  * is not exported until someone decides it should be. The users table has no
  * user_id; its id is the user's own id, and its list carries it. A section
  * read by the caller's address keeps that column: it is the address the
- * invite was made for.
+ * invite was made for. A column that names another person by id is left out
+ * as well (grantee_user_id on the share sections).
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
   {
@@ -137,11 +138,23 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     orderColumn: "id",
     orderKeyType: "uuid",
   },
-  // Grants the user made, read by owner_user_id.
+  // Grants the user made, read by owner_user_id. grantee_user_id, the
+  // person the connection is shared with, is not exported: the other
+  // member's identifier is their personal data.
   {
     key: "share_grants",
     table: "share_grants",
     columns: "id, household_id, resource_type, resource_id, scope, granted_at, revoked_at",
+    filterColumn: "owner_user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // The record that the user was asked whether to share a connection, read
+  // by owner_user_id. grantee_user_id is not exported, for the same reason.
+  {
+    key: "share_prompt_answers",
+    table: "share_prompt_answers",
+    columns: "id, household_id, resource_id, answered_at",
     filterColumn: "owner_user_id",
     orderColumn: "id",
     orderKeyType: "uuid",
