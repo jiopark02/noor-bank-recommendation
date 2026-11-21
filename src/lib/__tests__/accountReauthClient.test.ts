@@ -1,18 +1,151 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
-import { isReauthRequiredAnswer, readReauthAnswer, REAUTH_UI } from "../accountReauthClient";
+import {
+  afterStart,
+  afterVerify,
+  deleteButtonLabel,
+  exportButtonLabel,
+  isReauthRequiredAnswer,
+  pressAction,
+  readReauthAnswer,
+  REAUTH_UI,
+  stageAfterFailedAction,
+  type ReauthStage,
+} from "../accountReauthClient";
 
 /**
- * The settings screen's email-code step: the answer reader, executed, and the
- * page's wiring, by source.
+ * The settings screen's email-code step: the answer reader and the stage
+ * transitions, executed, and the page's wiring, by source.
  *
  * Mutations and the test each one turns red:
  *   a non-200 answer read as a pass                                -> C1
  *   a locked code or a required verification not restarting       -> C1
  *   the delete or export request sent before the code step         -> C2
  *   the code or its step written to browser storage                -> C2
+ *   a verified stage that verifies again, or is lost on a failure
+ *   that does not ask for a new verification                      -> C4
+ *   a 403 asking for a new verification not starting over          -> C4
+ *   a new code that runs the action, leaves the old code typed,
+ *   or hides a refusal                                            -> C5
+ *   "Deleting…" shown while a code is being checked               -> C6
+ *   the page setting a stage itself instead of from an outcome     -> C7
  */
+
+/** Runs one press the way the page does and returns the stage it leaves. */
+function press(
+  stage: ReauthStage,
+  answer: Parameters<typeof readReauthAnswer>,
+  action?: { status: number; body: unknown }
+): { request: string; stage: ReauthStage; acted: boolean } {
+  const kind = pressAction(stage);
+  if (kind === "act") {
+    const after = action ? stageAfterFailedAction(stage, action.status, action.body) : stage;
+    return { request: "act", stage: after, acted: true };
+  }
+  const step = readReauthAnswer(...answer);
+  const next = kind === "start" ? afterStart("idle", step) : afterVerify(step);
+  if (next.proceed) {
+    const after = action ? stageAfterFailedAction(next.stage, action.status, action.body) : next.stage;
+    return { request: `${kind}+act`, stage: after, acted: true };
+  }
+  return { request: kind, stage: next.stage, acted: false };
+}
+
+describe("stage transitions", () => {
+  it("C4 a verified code sends the next press straight to the action until the server asks for a new one", () => {
+    // idle -> start -> code
+    let r = press("idle", [200, { status: "sent" }]);
+    expect(r).toEqual({ request: "start", stage: "code", acted: false });
+    // code -> verify succeeds -> the action runs in the same press; it stops
+    // part-way, and the stage stays verified
+    r = press(r.stage, [200, { status: "verified" }], { status: 409, body: { code: "REVOKE_INCOMPLETE" } });
+    expect(r).toEqual({ request: "verify+act", stage: "verified", acted: true });
+    // verified -> the retry goes to the action with no verify, and survives
+    // an unavailable check and any other failure
+    for (const failure of [
+      { status: 409, body: { code: "REVOKE_INCOMPLETE" } },
+      { status: 503, body: { code: "REAUTH_CHECK_UNAVAILABLE" } },
+      { status: 500, body: {} },
+    ]) {
+      r = press(r.stage, [200, {}], failure);
+      expect(r, JSON.stringify(failure)).toEqual({ request: "act", stage: "verified", acted: true });
+    }
+    // the server asks for a new verification -> idle, and the next press starts
+    for (const code of ["REAUTH_REQUIRED", "REAUTH_SESSION_UNAVAILABLE"]) {
+      r = press("verified", [200, {}], { status: 403, body: { code } });
+      expect(r, code).toEqual({ request: "act", stage: "idle", acted: true });
+      expect(pressAction(r.stage)).toBe("start");
+    }
+    // a 403 with another code keeps the stage
+    expect(stageAfterFailedAction("verified", 403, { code: "SOMETHING_ELSE" })).toBe("verified");
+  });
+
+  it("C4 a wrong code stays in code, a locked one starts over, and no code required acts at once", () => {
+    expect(press("code", [403, { code: "REAUTH_CODE_REJECTED", error: "No." }])).toEqual({
+      request: "verify",
+      stage: "code",
+      acted: false,
+    });
+    expect(press("code", [429, { code: "REAUTH_LOCKED", error: "Locked." }])).toEqual({
+      request: "verify",
+      stage: "idle",
+      acted: false,
+    });
+    expect(press("idle", [200, { status: "not_required" }])).toEqual({
+      request: "start+act",
+      stage: "idle",
+      acted: true,
+    });
+    expect(afterVerify(readReauthAnswer(403, { code: "REAUTH_CODE_REJECTED", error: "No." })).error).toBe("No.");
+    expect(afterVerify(readReauthAnswer(200, { status: "verified" }))).toEqual({
+      stage: "verified",
+      proceed: true,
+      error: null,
+      notice: REAUTH_UI.verified,
+      clearCode: true,
+    });
+  });
+
+  it("C5 a new code stays in code, clears the typed code, and shows the issue-limit and email-failure answers as they are", () => {
+    expect(afterStart("code", readReauthAnswer(200, { status: "sent" }))).toEqual({
+      stage: "code",
+      proceed: false,
+      error: null,
+      notice: REAUTH_UI.newCodeSent,
+      clearCode: true,
+    });
+    const limit = "Too many codes requested. Please wait a while and try again.";
+    const mail = "We couldn't send the email. Please try again.";
+    for (const [status, code, message] of [
+      [429, "REAUTH_RATE_LIMITED", limit],
+      [502, "REAUTH_SEND_FAILED", mail],
+    ] as const) {
+      const next = afterStart("code", readReauthAnswer(status, { code, error: message }));
+      expect(next, code).toEqual({ stage: "code", proceed: false, error: message, notice: null, clearCode: false });
+    }
+    // A new code never runs the action, whatever the answer.
+    for (const answer of [
+      [200, { status: "not_required" }],
+      [200, { status: "verified" }],
+      [503, {}],
+    ] as const) {
+      expect(afterStart("code", readReauthAnswer(answer[0], answer[1])).proceed).toBe(false);
+    }
+  });
+
+  it("C6 the delete button says Deleting only while the delete request itself is out", () => {
+    expect(deleteButtonLabel("idle", "start")).toBe(REAUTH_UI.working);
+    expect(deleteButtonLabel("code", "verify")).toBe(REAUTH_UI.working);
+    expect(deleteButtonLabel("verified", "act")).toBe(REAUTH_UI.deleting);
+    expect(deleteButtonLabel("code", "act")).toBe(REAUTH_UI.deleting);
+    expect(deleteButtonLabel("idle", null)).toBe(REAUTH_UI.start);
+    expect(deleteButtonLabel("code", null)).toBe(REAUTH_UI.deleteConfirm);
+    expect(deleteButtonLabel("verified", null)).toBe(REAUTH_UI.deleteConfirm);
+    expect(exportButtonLabel("code", "verify")).toBe(REAUTH_UI.working);
+    expect(exportButtonLabel("verified", null)).toBe(REAUTH_UI.exportConfirm);
+  });
+});
 
 describe("readReauthAnswer", () => {
   it("C1 only a 200 with a known status passes, and a used-up code restarts", () => {
@@ -51,15 +184,38 @@ describe("settings page wiring", () => {
   }
 
   it("C3 the first-step words promise no email, since the first press may run the action at once", () => {
-    const firstStep = [REAUTH_UI.start, REAUTH_UI.working, REAUTH_UI.exportTitle, REAUTH_UI.exportBody];
+    const firstStep = [
+      deleteButtonLabel("idle", null),
+      deleteButtonLabel("idle", "start"),
+      exportButtonLabel("idle", null),
+      exportButtonLabel("idle", "start"),
+      REAUTH_UI.exportTitle,
+      REAUTH_UI.exportBody,
+    ];
     for (const words of firstStep) {
       expect(words).not.toMatch(/email me|sending|we'll email|we will email|send (you )?a code/i);
     }
     expect(REAUTH_UI.exportBody).toContain("we may email you a code");
-    // Both modals label their idle step with these words and nothing else.
-    expect(PAGE.split("reauthStage === 'idle' ? REAUTH_UI.start :").length - 1).toBe(2);
-    expect(PAGE.split("reauthStage === 'idle' ? REAUTH_UI.working :").length - 1).toBe(2);
-    expect(PAGE).not.toMatch(/Email me a code|Sending…|REAUTH_UI\.send/);
+    // Both modals take their button's words from the label functions only.
+    expect(PAGE).toContain("{deleteButtonLabel(reauthStage, reauthBusy)}");
+    expect(PAGE).toContain("{exportButtonLabel(reauthStage, reauthBusy)}");
+    expect(PAGE).not.toMatch(/Email me a code|Sending…|Deleting…|REAUTH_UI\.send/);
+  });
+
+  it("C7 the page takes every stage change from the transition functions", () => {
+    const helpers = between("const resetReauth = () =>", "const handleDeleteAccount = async");
+    expect(helpers).toContain("const press = pressAction(reauthStage);");
+    expect(helpers).toContain("if (press === 'act') return { proceed: true, stage: reauthStage };");
+    expect(helpers).toContain("afterStart('idle', await postReauth('start', { purpose }))");
+    expect(helpers).toContain("afterVerify(await postReauth('verify', { purpose, code: reauthCode }))");
+    expect(helpers).toContain("applyReauthOutcome(afterStart('code', await postReauth('start', { purpose })));");
+    const deletion = between("const handleDeleteAccount = async", "const handleExportData");
+    expect(deletion).toContain("stageAfterFailedAction(ready.stage, res.status, errBody)");
+    expect(deletion).toContain("setReauthBusy('act');");
+    // No stage is set by hand anywhere but from an outcome or the reset.
+    expect(PAGE.split("setReauthStage(").length - 1).toBe(3);
+    expect(PAGE).toContain("onClick={() => handleNewReauthCode('delete_account')}");
+    expect(PAGE).toContain("onClick={() => handleNewReauthCode('export_data')}");
   });
 
   it("C2 each action runs the code step for its own purpose before its request, and stores nothing", () => {
