@@ -4,13 +4,14 @@ import { describe, expect, it } from "vitest";
 import type { Session } from "@supabase/supabase-js";
 import type { SessionReadResult } from "../supabase-browser";
 import {
+  afterShareAnswer,
   answerShare,
   loadSharing,
   readSharingData,
   sharePromptView,
   type HouseholdHttp,
 } from "../householdClient";
-import { HOUSEHOLD_UI } from "../householdCopy";
+import { HOUSEHOLD_MESSAGES, HOUSEHOLD_UI } from "../householdCopy";
 
 /**
  * The share question and the household screen's sharing list: the client
@@ -27,6 +28,12 @@ import { HOUSEHOLD_UI } from "../householdCopy";
  *   a mount removed, doubled, or the money page changed beyond the mount
  *     and the key bump after a new bank                                    -> SP-W2
  *   the household screen's back button no longer replacing to /dashboard  -> SP-W2
+ *   a settled refusal (no connection, no partner, household changed,
+ *     invalid request) answered "Try again" without a reload              -> SP-R1
+ *   a network failure, 5xx, gate 503 or session problem reloaded or
+ *     given a refusal's sentence                                         -> SP-R1
+ *   the refusal decided by status instead of code                         -> SP-R1
+ *   a component ignoring afterShareAnswer's reload or message             -> SP-R2
  */
 
 function read(relativePath: string): string {
@@ -137,6 +144,45 @@ describe("answering", () => {
   });
 });
 
+describe("after an answer", () => {
+  const answer = (status: number, body: Record<string, unknown> = {}) =>
+    ({ kind: "answer", status, body }) as const;
+
+  it("SP-R1 settled refusals reload and show their own sentence; everything else keeps the view and says Try again", () => {
+    expect(afterShareAnswer(answer(200, { shared: true }))).toEqual({ reload: true, message: null });
+
+    const settled: Array<[number, string]> = [
+      [404, "SHARE_NO_CONNECTION"],
+      [409, "SHARE_NO_PARTNER"],
+      [409, "HOUSEHOLD_CHANGED"],
+      [400, "SHARE_INVALID_REQUEST"],
+    ];
+    for (const [status, code] of settled) {
+      expect(afterShareAnswer(answer(status, { code })), code).toEqual({
+        reload: true,
+        message: HOUSEHOLD_MESSAGES[code as keyof typeof HOUSEHOLD_MESSAGES],
+      });
+    }
+
+    const TRY_AGAIN = { reload: false, message: HOUSEHOLD_UI.shareFailed };
+    const others: Array<[string, Parameters<typeof afterShareAnswer>[0]]> = [
+      ["network", { kind: "network" }],
+      ["session ended", { kind: "session", reason: "ended" }],
+      ["session unconfirmed", { kind: "session", reason: "unconfirmed" }],
+      ["401", answer(401, { error: "Unauthorized" })],
+      ["500", answer(500, { code: "SERVER_ERROR" })],
+      ["503 admin", answer(503, { code: "ADMIN_UNCONFIGURED" })],
+      ["503 auth", answer(503, { code: "AUTH_UNAVAILABLE" })],
+      ["409 without a code", answer(409, {})],
+      ["404 without a code", answer(404, {})],
+      ["409 with an unknown code", answer(409, { code: "SOMETHING_ELSE" })],
+    ];
+    for (const [label, outcome] of others) {
+      expect(afterShareAnswer(outcome), label).toEqual(TRY_AGAIN);
+    }
+  });
+});
+
 describe("which question", () => {
   it("SP-V1 the first bank not yet answered for this person; none without another member or a load", () => {
     const data = readSharingData(SHARING_BODY);
@@ -205,5 +251,13 @@ describe("the screens", () => {
 
     // The household screen's back button stays a replace to the dashboard.
     expect(HOUSEHOLD).toContain("onClick={() => router.replace('/dashboard')}");
+  });
+
+  it("SP-R2 both components decide after an answer through afterShareAnswer only, and show its message", () => {
+    const flat = PROMPT.replace(/\s+/g, " ");
+    expect(flat.split("const step = afterShareAnswer(outcome); setMessage(step.message); if (step.reload) await load();").length - 1).toBe(2);
+    expect(PROMPT.split("{message && (").length - 1).toBe(2);
+    expect(PROMPT).not.toMatch(/\bisOk\(/);
+    expect(PROMPT).not.toContain("HOUSEHOLD_UI.shareFailed");
   });
 });

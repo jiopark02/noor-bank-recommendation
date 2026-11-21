@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readSession } from "@/lib/supabase-browser";
 import { HOUSEHOLD_UI } from "@/lib/householdCopy";
 import {
+  afterShareAnswer,
   answerShare,
   browserHouseholdHttp,
-  isOk,
   loadSharing,
   sharePromptView,
   type SharingData,
@@ -20,14 +20,16 @@ import {
  * again (after a new bank is connected, say).
  *
  * It never holds up the screen it is on: while loading, when the load fails,
- * and when there is nothing to ask, it renders nothing. A failed answer shows
- * one line and keeps the question. It shows no amounts, writes nothing to
+ * and when there is nothing to ask, it renders nothing. An answer another
+ * press cannot change (the bank or the other member is gone, the household
+ * changed) reads the view again and shows that answer's sentence; any other
+ * failure shows "Try again" and keeps the question (afterShareAnswer). It shows no amounts, writes nothing to
  * browser storage and never signs anyone out.
  */
 export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<SharingData | null>(null);
   const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -51,7 +53,7 @@ export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
 
   const answer = async (shared: boolean) => {
     setSaving(true);
-    setFailed(false);
+    setMessage(null);
     const outcome = await answerShare(
       () => readSession(undefined, "household-mount"),
       browserHouseholdHttp,
@@ -60,11 +62,9 @@ export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
     );
     if (!mountedRef.current) return;
     setSaving(false);
-    if (isOk(outcome)) {
-      await load();
-    } else {
-      setFailed(true);
-    }
+    const step = afterShareAnswer(outcome);
+    setMessage(step.message);
+    if (step.reload) await load();
   };
 
   return (
@@ -75,9 +75,9 @@ export default function SharePrompt({ refreshKey }: { refreshKey: number }) {
       <p className="text-[13px] mt-2" style={{ color: "rgba(0,0,0,0.55)" }}>
         {HOUSEHOLD_UI.shareExplainer(view.partnerFirstName)}
       </p>
-      {failed && (
+      {message && (
         <p className="text-[13px] mt-2" style={{ color: "#B91C1C" }}>
-          {HOUSEHOLD_UI.shareFailed}
+          {message}
         </p>
       )}
       <div className="flex gap-3 mt-4">
@@ -114,7 +114,7 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<SharingData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [savingItem, setSavingItem] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -147,7 +147,7 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
 
   const toggle = async (itemId: string, shared: boolean) => {
     setSavingItem(itemId);
-    setFailed(false);
+    setMessage(null);
     const outcome = await answerShare(
       () => readSession(undefined, "household-mount"),
       browserHouseholdHttp,
@@ -156,11 +156,9 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
     );
     if (!mountedRef.current) return;
     setSavingItem(null);
-    if (isOk(outcome)) {
-      await load();
-    } else {
-      setFailed(true);
-    }
+    const step = afterShareAnswer(outcome);
+    setMessage(step.message);
+    if (step.reload) await load();
   };
 
   return (
@@ -197,9 +195,9 @@ export function SharingSettings({ refreshKey }: { refreshKey: number }) {
           </button>
         </div>
       ))}
-      {failed && (
+      {message && (
         <p className="text-[13px] mt-3" style={{ color: "#B91C1C" }}>
-          {HOUSEHOLD_UI.shareFailed}
+          {message}
         </p>
       )}
     </div>
