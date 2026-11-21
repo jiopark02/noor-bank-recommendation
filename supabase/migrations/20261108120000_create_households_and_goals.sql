@@ -53,9 +53,12 @@
 -- What this file does not do:
 --   - It writes no row. There is no backfill: a user gets a household the
 --     next time household_ensure_for_user runs for them.
---   - share_grants.resource_id has no foreign key, because resource_type and
---     resource_id name a resource generically. Disconnecting a bank connection
---     does not remove grants that name it.
+--   - share_grants.resource_id has no foreign key in this file, because
+--     resource_type and resource_id name a resource generically.
+--     20261121120000_household_share_grants.sql adds a grantee and a foreign
+--     key from (owner_user_id, resource_id) to plaid_connections, so a grant
+--     is removed with the connection it names; whether that file is applied
+--     is live state.
 --   - goals carry no progress or accumulated amount, and no suggested value.
 --
 -- Access: service role only. RLS is on with no policies, and every privilege

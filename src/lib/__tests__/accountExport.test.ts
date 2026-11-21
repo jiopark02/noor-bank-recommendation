@@ -597,19 +597,40 @@ describe("account export: explicit column lists match the schema", () => {
     "household_invite_issues",
   ];
 
+  /**
+   * Columns a section leaves out on purpose, beyond its filter column.
+   * share_grants.grantee_user_id: the other member's identifier is their
+   * personal data, so it is not exported to the person who shared.
+   */
+  const NOT_EXPORTED: Readonly<Record<string, readonly string[]>> = {
+    share_grants: ["grantee_user_id"],
+  };
+
   for (const table of EXPLICIT) {
-    it(`E10 ${table}: the export's columns are the table's columns minus its filter column`, () => {
+    it(`E10 ${table}: the export's columns are the table's columns minus its filter column and the columns it leaves out on purpose`, () => {
       const section = sectionFor(table);
       expect(section.columns).not.toBe("*");
       const exported = section.columns.split(", ");
       const schema = migrationColumns(table);
+      const left = NOT_EXPORTED[table] ?? [];
       expect(schema).toContain(section.filterColumn);
+      // A left-out column must exist, so this list cannot outlive the schema.
+      for (const column of left) {
+        expect(schema, `${table}.${column}`).toContain(column);
+        expect(exported, `${table}.${column}`).not.toContain(column);
+      }
       expect(new Set(exported).size).toBe(exported.length);
       expect([...exported].sort()).toEqual(
-        schema.filter((c) => c !== section.filterColumn).sort()
+        schema.filter((c) => c !== section.filterColumn && !left.includes(c)).sort()
       );
     });
   }
+
+  it("E10 every table with a left-out column is checked by E10", () => {
+    for (const table of Object.keys(NOT_EXPORTED)) {
+      expect(EXPLICIT).toContain(table);
+    }
+  });
 
   it("E14 users: the export's columns are the table's columns, id included", () => {
     // users has no user_id; its id is the user's own id. A column added to
