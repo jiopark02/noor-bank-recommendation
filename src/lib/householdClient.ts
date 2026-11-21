@@ -682,8 +682,9 @@ export type SharingSettingsLines = {
 };
 
 /**
- * What the household screen's sharing list draws: nothing before the first
- * answer and when there is no other member, one line when the read failed,
+ * What the household screen's sharing list draws: nothing until the first
+ * read of the sharing view has answered and when there is no other member,
+ * one line when the read failed,
  * the list otherwise. A notice is drawn in every case, under the list or on
  * its own, and names its bank because the list holds several.
  */
