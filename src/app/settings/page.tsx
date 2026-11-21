@@ -22,6 +22,7 @@ import {
   readReauthAnswer,
   type ReauthStep,
 } from '@/lib/accountReauthClient';
+import { SESSIONS_UI } from '@/lib/accountSessions';
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
 const ACCENT = '#5B4EE8';
@@ -33,7 +34,7 @@ interface UserProfile {
   email?: string;
 }
 
-type ModalType = 'delete' | 'export' | null;
+type ModalType = 'delete' | 'export' | 'signOutOthers' | null;
 
 type ReauthPurpose = 'delete_account' | 'export_data';
 
@@ -492,6 +493,36 @@ export default function SettingsPage() {
     });
   };
 
+  // Signs out this user's other devices through the server; this device
+  // stays signed in and nothing local is cleared. Another device is signed
+  // out when its session next refreshes, which the copy says.
+  const handleSignOutOthers = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) {
+        setError(SESSIONS_UI.sessionExpired);
+        return;
+      }
+      const res = await fetch('/api/account/sessions/sign-out-others', {
+        method: 'POST',
+        headers: buildBearerOnlyHeaders(rawAuth),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(errBody.error || SESSIONS_UI.fallback);
+        return;
+      }
+      closeModal();
+      showSuccess(SESSIONS_UI.done);
+    } catch {
+      setError(SESSIONS_UI.fallback);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const initials = getInitials(userProfile?.firstName, userProfile?.lastName);
   const fullName = [userProfile?.firstName, userProfile?.lastName].filter(Boolean).join(' ');
 
@@ -626,8 +657,15 @@ export default function SettingsPage() {
           label="Change Password"
           description="We'll email you a reset link"
           chevron
-          last
           onClick={() => router.push('/forgot-password')}
+        />
+        <SettingsRow
+          icon={Ico.lock}
+          label={SESSIONS_UI.rowLabel}
+          description={SESSIONS_UI.rowDescription}
+          chevron
+          last
+          onClick={() => setActiveModal('signOutOthers')}
         />
       </SettingsCard>
 
@@ -749,6 +787,37 @@ export default function SettingsPage() {
                 {isLoading
                   ? (reauthStage === 'idle' ? REAUTH_UI.working : 'Deleting…')
                   : (reauthStage === 'idle' ? REAUTH_UI.start : 'Delete Account')}
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {/* Sign out other devices */}
+        {activeModal === 'signOutOthers' && (
+          <Modal onClose={closeModal}>
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(0,0,0,0.05)' }}>
+                <div style={{ color: 'rgba(0,0,0,0.55)' }}>{Ico.lock}</div>
+              </div>
+              <h3 className="text-[16px] font-semibold text-black mb-2" style={{ fontFamily: FONT }}>{SESSIONS_UI.title}</h3>
+              <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}>
+                {SESSIONS_UI.body}
+              </p>
+            </div>
+
+            {error && <p className="text-[13px] text-red-500 mb-2" style={{ fontFamily: FONT }}>{error}</p>}
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={closeModal} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+                Cancel
+              </button>
+              <button
+                onClick={handleSignOutOthers}
+                disabled={isLoading}
+                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
+                style={{ background: ACCENT, fontFamily: FONT }}
+              >
+                {isLoading ? SESSIONS_UI.working : SESSIONS_UI.confirm}
               </button>
             </div>
           </Modal>
