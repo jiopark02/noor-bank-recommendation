@@ -65,7 +65,8 @@ export type ExportSection = {
  * is not exported until someone decides it should be. The users table has no
  * user_id; its id is the user's own id, and its list carries it. A section
  * read by the caller's address keeps that column: it is the address the
- * invite was made for.
+ * invite was made for. A column that names another person by id is left out
+ * as well (grantee_user_id on the share sections).
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
   {
@@ -89,8 +90,10 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
   { key: "chat_messages", table: "chat_messages", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   { key: "chat_summaries", table: "chat_summaries", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   { key: "user_facts", table: "user_facts", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
-  // The stored bank credential is never selected; only these three columns.
-  { key: "plaid_connections", table: "plaid_connections", columns: "institution_name, status, item_id", filterColumn: "user_id", orderColumn: "id", orderKeyType: "int8" },
+  // The stored bank credential is never selected; only these four columns.
+  // id is the connection's own row id, the value the share sections'
+  // resource_id names, so the file can tell which bank a share row is about.
+  { key: "plaid_connections", table: "plaid_connections", columns: "institution_name, status, item_id, id", filterColumn: "user_id", orderColumn: "id", orderKeyType: "int8" },
   {
     key: "llm_calls",
     table: "llm_calls",
@@ -137,11 +140,23 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     orderColumn: "id",
     orderKeyType: "uuid",
   },
-  // Grants the user made, read by owner_user_id.
+  // Grants the user made, read by owner_user_id. grantee_user_id, the
+  // person the connection is shared with, is not exported: the other
+  // member's identifier is their personal data.
   {
     key: "share_grants",
     table: "share_grants",
     columns: "id, household_id, resource_type, resource_id, scope, granted_at, revoked_at",
+    filterColumn: "owner_user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // The record that the user was asked whether to share a connection, read
+  // by owner_user_id. grantee_user_id is not exported, for the same reason.
+  {
+    key: "share_prompt_answers",
+    table: "share_prompt_answers",
+    columns: "id, household_id, resource_id, answered_at",
     filterColumn: "owner_user_id",
     orderColumn: "id",
     orderKeyType: "uuid",
