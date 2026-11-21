@@ -33,7 +33,8 @@
 --   - Creates public.household_share_set(p_user_id, p_item_id, p_shared),
 --     the only function that inserts into either table. It answers one of:
 --       none           the caller has no active household
---       solo           the caller's household has no other active member
+--       solo           the caller's household does not have exactly one other
+--                      active member
 --       no_connection  the caller has no connection with that item id
 --       shared         a grant to the other member exists
 --       unshared       no grant for that connection exists
@@ -107,7 +108,9 @@
 -- again. Two earlier files undo part of it when they run again, and their
 -- own checks pass:
 --   - 20261108120000_create_households_and_goals.sql takes back service_role
---     INSERT and DELETE on share_grants.
+--     INSERT and DELETE on share_grants. Until this file is applied again,
+--     household_leave and household_share_set, which both delete from
+--     share_grants as service_role, fail with 42501.
 --   - 20261120120000_household_invites_and_membership_changes.sql replaces
 --     household_leave with the body that deletes no grant.
 -- After running either again, run this file again; its DO block is the one
