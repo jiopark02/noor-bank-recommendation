@@ -191,6 +191,9 @@ describe("after an answer", () => {
       ["409 without a code", answer(409, {})],
       ["404 without a code", answer(404, {})],
       ["409 with an unknown code", answer(409, { code: "SOMETHING_ELSE" })],
+      // A 4xx with a known code outside the reload list: the sharing route
+      // answers it for a body over the byte limit.
+      ["413 REQUEST_TOO_LARGE", answer(413, { code: "REQUEST_TOO_LARGE" })],
     ];
     for (const [label, outcome] of others) {
       expect(afterShareAnswer(outcome), label).toEqual(TRY_AGAIN);
