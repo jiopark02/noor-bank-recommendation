@@ -90,8 +90,10 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
   { key: "chat_messages", table: "chat_messages", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   { key: "chat_summaries", table: "chat_summaries", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
   { key: "user_facts", table: "user_facts", columns: "*", filterColumn: "user_id", orderColumn: "id", orderKeyType: "uuid" },
-  // The stored bank credential is never selected; only these three columns.
-  { key: "plaid_connections", table: "plaid_connections", columns: "institution_name, status, item_id", filterColumn: "user_id", orderColumn: "id", orderKeyType: "int8" },
+  // The stored bank credential is never selected; only these four columns.
+  // id is the connection's own row id, the value the share sections'
+  // resource_id names, so the file can tell which bank a share row is about.
+  { key: "plaid_connections", table: "plaid_connections", columns: "institution_name, status, item_id, id", filterColumn: "user_id", orderColumn: "id", orderKeyType: "int8" },
   {
     key: "llm_calls",
     table: "llm_calls",

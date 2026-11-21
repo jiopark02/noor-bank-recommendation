@@ -16,11 +16,13 @@ export const dynamic = "force-dynamic";
  *
  * Deliberately excluded:
  *   - plaid_connections.access_token — a live bank credential; only
- *     institution_name / status / item_id are exported.
+ *     institution_name / status / item_id / id are exported.
  *   - admin_users — internal access-control data, not user-owned content.
  *   - waitlist_signups — pre-signup data with no user_id link.
  *   - user_id in sections with an explicit column list — the payload's
  *     top-level user_id already carries it.
+ *   - grantee_user_id in share_grants and share_prompt_answers — the other
+ *     member's identifier is their personal data.
  *
  * If any page of any section fails, the whole export returns 500 rather than
  * silently handing back an incomplete file the user believes is complete.

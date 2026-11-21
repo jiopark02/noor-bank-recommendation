@@ -446,8 +446,10 @@ describe("account export: what each section reads", () => {
     expect(callsFor(calls, "plaid_connections")[0].select).toBe(
       "institution_name, status, item_id, id"
     );
+    // id is an exported column of plaid_connections, so it stays; the key
+    // removed after paging is checked on email_confirmation_sends below.
     for (const row of result.body.plaid_connections as ExportRow[]) {
-      expect(Object.keys(row)).toEqual(["institution_name", "status", "item_id"]);
+      expect(Object.keys(row)).toEqual(["institution_name", "status", "item_id", "id"]);
     }
     for (const row of result.body.chat_messages as ExportRow[]) {
       expect(row).toHaveProperty("id");
@@ -678,6 +680,44 @@ describe("account export: explicit column lists match the schema", () => {
       expect(Object.keys(rows[0]), key).not.toContain("owner_user_id");
     }
     expect(JSON.stringify(result.body)).not.toContain(GRANTEE);
+  });
+
+  it("E20 a share row's resource_id names a bank connection in the same file, executed", async () => {
+    const { result } = await exportOf(
+      {
+        plaid_connections: plaidRows([7, 8]),
+        share_grants: [
+          {
+            id: uuidFor(1),
+            owner_user_id: USER,
+            grantee_user_id: OTHER,
+            household_id: uuidFor(9),
+            resource_type: "plaid_connection",
+            resource_id: 8,
+            scope: "view",
+            granted_at: "2026-11-21T00:00:00Z",
+            revoked_at: null,
+          },
+        ],
+        share_prompt_answers: [
+          {
+            id: uuidFor(2),
+            owner_user_id: USER,
+            grantee_user_id: OTHER,
+            household_id: uuidFor(9),
+            resource_id: 7,
+            answered_at: "2026-11-21T00:00:00Z",
+          },
+        ],
+      },
+      EXPORT_SECTIONS
+    );
+    expect(result.status).toBe(200);
+    const banks = result.body.plaid_connections as ExportRow[];
+    for (const row of banks) expect(row).not.toHaveProperty("access_token");
+    const bankFor = (resourceId: unknown) => banks.find((b) => b.id === resourceId)?.item_id;
+    expect(bankFor((result.body.share_grants as ExportRow[])[0].resource_id)).toBe("item8");
+    expect(bankFor((result.body.share_prompt_answers as ExportRow[])[0].resource_id)).toBe("item7");
   });
 
   it("E14 users: the export's columns are the table's columns, id included", () => {
