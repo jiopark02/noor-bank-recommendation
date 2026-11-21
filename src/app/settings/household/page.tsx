@@ -212,7 +212,7 @@ export default function HouseholdPage() {
       >
         <div className="flex items-center gap-3 px-4 py-3.5">
           <button
-            onClick={() => router.push('/settings')}
+            onClick={() => router.replace('/dashboard')}
             className="w-8 h-8 flex items-center justify-center rounded-full"
             style={{ background: 'rgba(0,0,0,0.06)' }}
             aria-label="Back"

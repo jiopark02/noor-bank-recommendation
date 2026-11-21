@@ -244,9 +244,10 @@ export default function ChatPage() {
       >
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.back()}
+            onClick={() => router.replace("/dashboard")}
             className="w-8 h-8 flex items-center justify-center rounded-full transition-colors"
             style={{ background: "rgba(0,0,0,0.05)" }}
+            aria-label="Back"
           >
             <svg className="w-4 h-4 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />

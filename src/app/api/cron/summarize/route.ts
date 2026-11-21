@@ -11,7 +11,7 @@ import {
   writeCronBackoff,
   writeCronCountedFailure,
   writeCronGiveUp,
-  recordCronRun,        // ← 추가
+  recordCronRun,
   type ChatSession,
   type DbChatMessage,
 } from "@/lib/aiMemory";
@@ -64,14 +64,14 @@ const CLOSE_BATCH_LIMIT = 50;
 const SUMMARIZE_BATCH_LIMIT = 8;
 
 /**
- * OpenRouter chat completions를 호출해 요약 텍스트를 반환한다.
+ * Calls OpenRouter chat completions and returns the summary text.
  *
- * 이 cron의 기존 에러 처리(summarizeOneSession이 throw하고 바깥 for 루프
- * try/catch가 받음)와 일관되게, result 객체 대신 throw 기반으로 동작한다.
- * 실패 시 throw → 해당 세션만 건너뛰고 다음 run에서 재시도된다.
+ * It throws rather than returning a result object, consistent with this
+ * cron's error handling (summarizeOneSession throws and the caller's
+ * per-session handling catches it). On failure only that session is skipped,
+ * and it is retried on a later run.
  *
- * route.ts의 callOpenRouter를 공용화하지 않고 자체 버전을 둠
- * (route.ts를 건드리지 않는 게 안전).
+ * This cron keeps its own model call rather than sharing the chat route's.
  *
  * Every exit records one llm_calls row first. recordLlmCall never rejects
  * (llmCallLog.ts), so the `finally` cannot replace the error this throws or the
@@ -164,8 +164,9 @@ async function requestSummary(
     );
   }
 
-  // HTTP 200이어도 본문이 JSON이 아닐 수 있음 (게이트웨이 오류 페이지 등).
-  // 파싱 실패를 별도로 구분해 "응답 누락"과 다른 에러 메시지를 남긴다.
+  // A 200 response can still carry a body that is not JSON (a gateway error
+  // page, for example). A parse failure gets its own error message, distinct
+  // from a missing-content one.
   let data: unknown;
   try {
     data = await response.json();
@@ -434,7 +435,8 @@ export async function GET(request: NextRequest) {
 
   console.info("Summarize cron complete:", stats);
 
-  // cron_runs에 실행 기록 (격리 — 기록 실패가 본업/응답을 망치지 않게).
+  // Record the run in cron_runs (isolated, so a failed record cannot break the
+  // run's work or its response).
   // A session given up this run failed this run, so it is among the failed
   // items and the run's status reflects it.
   try {

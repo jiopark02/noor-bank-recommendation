@@ -13,8 +13,8 @@ import {
   expireUserFact,
   isUniqueViolation,
   isSensitiveFactRejected,
-  recordCronRun,        // ← 추가
-  deleteOldCronRuns,    // ← 추가
+  recordCronRun,
+  deleteOldCronRuns,
   type ChatSession,
   type DbChatMessage,
   type NewUserFact,
@@ -68,23 +68,23 @@ export const dynamic = "force-dynamic";
 const EXTRACTION_MODEL =
   process.env.EXTRACTION_MODEL?.trim() || "~anthropic/claude-sonnet-latest";
 
-// 한 세션에서 LLM에 넘기는 최대 메시지 수 (PR4와 동일).
+// Most recent messages of one session passed to the model.
 const MAX_MESSAGES_PER_EXTRACTION = 200;
-// fact 추출 출력은 JSON(new_facts/supersede/expire 배열)이라 요약(1024)보다
-// 큰 토큰이 필요할 수 있음. 넉넉하게 3072.
+// The extraction output is JSON (new_facts / supersede / expire arrays), so it
+// can need a larger token budget than a summary does.
 const EXTRACTION_MAX_TOKENS = 3072;
-// LLM 호출이라 배치는 작게 (PR4 SUMMARIZE_BATCH_LIMIT와 동일).
+// Sessions per run; kept small because each one is a model call.
 const EXTRACT_BATCH_LIMIT = 8;
-// LLM에 참고로 넘기는 기존 active facts 최대 개수.
+// Most existing active facts read and passed to the model for reference.
 const EXISTING_FACTS_LIMIT = 200;
-// cron_runs 보존 기간(일). 이 cron 끝에서 best-effort 정리.
+// cron_runs retention in days; best-effort cleanup at the end of this cron.
 const CRON_RUNS_RETENTION_DAYS = 180;
 
 /**
- * OpenRouter chat completions를 호출해 raw 문자열 응답을 반환한다.
+ * Calls OpenRouter chat completions and returns the raw string response.
  *
- * PR4 callOpenRouterForSummary와 동일한 throw 기반 동작.
- * 실패 시 throw → 바깥 세션 try/catch가 받아 processFailed 처리.
+ * Throws on failure, like the summarize cron's model call; the caller's
+ * per-session handling records the session as failed.
  *
  * Every exit records one llm_calls row first. recordLlmCall never rejects
  * (llmCallLog.ts), so the `finally` cannot replace the error this throws or the
@@ -173,7 +173,8 @@ async function requestExtraction(
     );
   }
 
-  // HTTP 200이어도 본문이 JSON이 아닐 수 있음 (게이트웨이 오류 페이지 등).
+  // A 200 response can still carry a body that is not JSON (a gateway error
+  // page, for example).
   let data: unknown;
   try {
     data = await response.json();
@@ -269,19 +270,20 @@ function buildConversationText(messages: DbChatMessage[]): CronConversation {
 }
 
 /**
- * LLM raw 문자열에서 markdown fence를 제거하고 JSON.parse.
- * 파싱 실패 시 throw (바깥 세션 try/catch가 받음).
+ * Strips a markdown code fence from the model's raw string and parses it as
+ * JSON. Throws when it does not parse (the caller's per-session handling
+ * catches it).
  */
 function parseExtractionJson(raw: string): RawExtractionOutput {
   let text = raw.trim();
-  // ```json ... ``` 또는 ``` ... ``` fence 제거.
+  // Strip a ```json ... ``` or ``` ... ``` fence.
   if (text.startsWith("```")) {
-    // 첫 줄(``` 또는 ```json)을 제거.
+    // Drop the opening fence line (``` or ```json).
     const firstNewline = text.indexOf("\n");
     if (firstNewline !== -1) {
       text = text.slice(firstNewline + 1);
     }
-    // 끝의 ``` 제거.
+    // Drop the closing ```.
     if (text.endsWith("```")) {
       text = text.slice(0, text.length - 3);
     }
@@ -300,7 +302,7 @@ function parseExtractionJson(raw: string): RawExtractionOutput {
   return parsed as RawExtractionOutput;
 }
 
-// 세션 1개 처리 결과 카운트.
+// Fact outcome counts for one session.
 interface SessionFactStats {
   saved: number;
   skipped: number;
@@ -313,15 +315,16 @@ interface SessionFactStats {
 }
 
 /**
- * 세션 1개의 facts를 추출·반영한다.
+ * Extracts one session's facts and applies them.
  *
  * Flow: empty session → read messages → read existing facts and number the
  *       leading ones that fit the facts budget (existing.facts) → LLM call →
  *       parse and validate → supersede → expire → new_facts →
  *       markFactsExtracted.
  *
- * LLM/파싱 실패는 throw → 바깥 세션 try/catch가 받음 (세션 미완료, 재시도).
- * 개별 fact DB 실패는 stats.failed에 집계하고 계속 진행.
+ * A model or parse failure throws to the caller's per-session handling (the
+ * session stays unfinished and is retried). A failed write of one fact is
+ * counted in stats.failed and the rest continue.
  *
  * Records on `tracker` each stage it reaches (see memoryCronBatch.ts). If any
  * fact write failed, the session is not marked done: it throws in the store
@@ -333,20 +336,21 @@ async function extractOneSession(
   stats: SessionFactStats,
   tracker: StageTracker
 ): Promise<void> {
-  // 1. 빈 세션 → LLM 없이 완료 표시.
+  // 1. Empty session: mark it done without a model call.
   if (session.message_count === 0) {
     await markFactsExtracted(session.id, session.user_id);
     return;
   }
 
-  // 2. 세션 메시지 조회 (최근 200개, 시간순).
+  // 2. Read the session's most recent messages, then put them in time order.
   const recent = await getSessionMessages(session.id, session.user_id, {
     limit: MAX_MESSAGES_PER_EXTRACTION,
     order: "desc",
   });
   const messages = recent.reverse();
 
-  // 3. message_count > 0 인데 메시지 0개 → 완료 표시 후 종료.
+  // 3. message_count is positive but no message was found: mark it done and
+  //    stop.
   if (messages.length === 0) {
     console.warn(
       `Extract cron: session ${session.id} has message_count=` +
@@ -364,7 +368,7 @@ async function extractOneSession(
     limit: EXISTING_FACTS_LIMIT,
   });
 
-  // 5. LLM 호출.
+  // 5. Model call.
   const conversation = buildConversationText(messages);
   // Only the leading facts that fit the facts budget are numbered for the
   // model. old_number is checked and resolved against existing.facts, the
@@ -391,7 +395,7 @@ async function extractOneSession(
     );
   }
 
-  // 6. 파싱 + 검증. (파싱 실패 시 throw)
+  // 6. Parse and validate (throws when it does not parse).
   const parsed = parseExtractionJson(rawOutput);
   const validated = validateExtraction(
     parsed,
@@ -402,8 +406,9 @@ async function extractOneSession(
 
   tracker.stage = "store";
 
-  // 7. 분기 실행 — 순서 고정: supersede → expire → new_facts.
-  //    fact 작업 단위 try/catch. 하나 실패해도 나머지 계속.
+  // 7. Apply in a fixed order: supersede, then expire, then new_facts.
+  //    Each fact write has its own try/catch; one failure does not stop the
+  //    rest.
 
   // 7-1) supersede
   for (const item of validated.supersede) {
@@ -426,8 +431,8 @@ async function extractOneSession(
         stats.filtered++;
         continue;
       }
-      // supersedeUserFact 내부 부분 실패 가능 (old superseded됐는데
-      // new insert 실패). 동일 내용으로 saveUserFact 1회 복구 시도.
+      // supersedeUserFact can fail partway (the old fact superseded, the new
+      // insert failed). Try once to recover by saving the same payload.
       try {
         await saveUserFact(session.user_id, payload);
         stats.superseded++;
@@ -466,7 +471,8 @@ async function extractOneSession(
     }
   }
 
-  // 7-3) new_facts — saveUserFact + 23505 분기 (factsSaved/Skipped 정확 카운트)
+  // 7-3) new_facts: saveUserFact, with a unique violation (23505) counted as
+  //      skipped rather than saved
   for (const item of validated.newFacts) {
     const payload: NewUserFact = {
       category: item.category,
@@ -484,7 +490,8 @@ async function extractOneSession(
         // string or crisis content).
         stats.filtered++;
       } else if (isUniqueViolation(saveError)) {
-        // 동일 텍스트 active fact 이미 존재 — upsert와 동일하게 흡수.
+        // An active fact with the same text already exists; absorb it as an
+        // upsert would.
         stats.skipped++;
       } else {
         stats.failed++;
@@ -544,8 +551,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // processFailed 세션도 부분 성공 fact가 factsSaved 등에 합산될 수 있음
-  //  — 세션은 실패해도 일부 fact가 DB에 반영됐을 수 있기 때문.
+  // A failed session's partly applied facts still count toward factsSaved and
+  // the other fact counts, since some of its facts may already be stored.
   const startedAt = new Date();
   let infraError: string | null = null;
   const stats = {
@@ -594,7 +601,8 @@ export async function GET(request: NextRequest) {
         try {
           await extractOneSession(apiKey, s, sessionStats, tracker);
         } finally {
-          // 세션 처리 도중 일부라도 반영된 fact 카운트는 합산.
+          // Add whatever facts were applied, even if the session failed
+          // partway.
           stats.factsSaved += sessionStats.saved;
           stats.factsSkipped += sessionStats.skipped;
           stats.factsSuperseded += sessionStats.superseded;
@@ -641,7 +649,8 @@ export async function GET(request: NextRequest) {
 
   console.info("Extract cron complete:", stats);
 
-  // cron_runs에 실행 기록 (격리). items_*는 세션 단위 (factsFailed는 stats에만).
+  // Record the run in cron_runs (isolated). items_* count sessions; factsFailed
+  // appears only in stats.
   // A session given up this run failed this run, so it is among the failed
   // items and the run's status reflects it.
   try {
@@ -658,7 +667,8 @@ export async function GET(request: NextRequest) {
     console.error("Extract cron: failed to record cron_runs row:", recordError);
   }
 
-  // cron_runs 보존 정리 (격리 — 느슨한 작업, 실패해도 다음 run에서 정리됨).
+  // cron_runs retention cleanup (isolated and best-effort; a failure is cleaned
+  // up on a later run).
   try {
     const deleted = await deleteOldCronRuns(CRON_RUNS_RETENTION_DAYS);
     if (deleted > 0) {
