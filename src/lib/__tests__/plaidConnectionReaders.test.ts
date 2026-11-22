@@ -150,4 +150,39 @@ describe("plaid_connections queries", () => {
       dynamic.map((f) => path.relative(SRC, f).split(path.sep).join("/")).sort()
     ).toEqual(["lib/accountExport.ts"]);
   });
+
+  it("connection rows reached through a database function: each call site, with the id it passes", () => {
+    // The literal search above sees only .from(); a function that returns
+    // connection rows is called through .rpc() instead. Each such call is
+    // pinned here with its file and the argument naming whose rows are read.
+    const RPC = /\.rpc\(\s*"(household_shared_connections)"\s*,\s*\{([^}]*)\}/g;
+    const found: Array<{ file: string; fn: string; args: string }> = [];
+    for (const file of walk(SRC)) {
+      const source = readFileSync(file, "utf8")
+        .replace(/\r\n/g, "\n")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      let m: RegExpExecArray | null;
+      while ((m = RPC.exec(source)) !== null) {
+        found.push({
+          file: path.relative(SRC, file).split(path.sep).join("/"),
+          fn: m[1],
+          args: m[2].replace(/\s+/g, " ").trim(),
+        });
+      }
+      // The function name anywhere else (a variable, a string built at run
+      // time) would escape the pattern above.
+      const named = source.split("household_shared_connections").length - 1;
+      const called = source.split('.rpc("household_shared_connections"').length - 1;
+      expect(named, path.relative(SRC, file)).toBe(called);
+    }
+    expect(found).toEqual([
+      // The rows another member shares with the caller; the caller's verified id only.
+      {
+        file: "lib/householdSharedAccountsStore.ts",
+        fn: "household_shared_connections",
+        args: "p_user_id: userId,",
+      },
+    ]);
+  });
 });

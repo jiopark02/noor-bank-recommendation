@@ -6,8 +6,10 @@ import { codeBySourceFile, expectAllowlistHolds, word, type ProbeTarget } from "
  * that creates grants, in code.
  *
  * These names reach another person's data: a grant, the record that the owner
- * was asked, the mark that shared bank data entered a chat session, and
- * household_share_set, the only function that inserts grants. household_leave
+ * was asked, the mark that shared bank data entered a chat session,
+ * household_share_set, the only function that inserts grants, and
+ * household_shared_connections, the function that returns the connections
+ * another member shares with a person, stored tokens included. household_leave
  * also deletes grants but is not listed: this probe guards the names that can
  * widen exposure, and deleting a grant narrows it. Each name has its own
  * allowlist of files, so a new file naming one of them fails here and has to
@@ -61,6 +63,16 @@ const TARGETS: ProbeTarget[] = [
     allowed: {
       // setShare calls the function that inserts or deletes a grant.
       "lib/householdShareStore.ts": "the sharing route's only write of a grant",
+    },
+  },
+  {
+    name: "household_shared_connections",
+    pattern: word("household_shared_connections"),
+    allowed: {
+      // readSharedConnections: the rows another member shares with the caller,
+      // called with the verified caller's id only.
+      "lib/householdSharedAccountsStore.ts":
+        "the only read of connections another member shares with the caller",
     },
   },
 ];

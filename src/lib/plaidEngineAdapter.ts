@@ -5,7 +5,9 @@
 // responses are read and turned into the engine's input. The summary route,
 // which serves the dashboard and the money screen, calls this for every read.
 // The chat's bank-state read (plaidChatState.ts) calls it for accounts only,
-// with no Item read and its own log origin (BankReadOptions).
+// with no Item read and its own log origin (BankReadOptions). The household
+// shared-accounts route calls it the same way, once per owner, with that
+// owner's id and only that owner's rows.
 //
 // Server only: it decrypts stored access tokens and calls Plaid. Client code may
 // import its TYPES (`import type`), never its values; a source probe in the test
@@ -260,7 +262,7 @@ export interface BankReadRequest {
 export interface BankReadOptions {
   itemStatus?: boolean;
   signal?: AbortSignal;
-  logOrigin?: "chat";
+  logOrigin?: "chat" | "household-shared";
 }
 
 function originSuffix(opts: BankReadOptions): string {
@@ -1276,9 +1278,12 @@ export interface BankRead {
 /**
  * Reads every given connection and merges the results.
  *
- * `rows` are the caller's own active connections, read with the verified
- * token's user id; `userId` is that same id, used unmodified as the decrypt
- * AAD. All tokens are decrypted before the first Plaid call.
+ * `rows` are active connections of one person, every one of them a row
+ * stored under `userId`; `userId` is that person's id exactly as stored on
+ * the rows, used unmodified as the decrypt AAD. A caller reading its own
+ * connections passes the verified token's user id. Rows of two people are
+ * never passed in one call. All tokens are decrypted before the first Plaid
+ * call.
  *
  * When every row fails to decrypt, this throws the first row's error with
  * nothing sent: a fault shared by every row is the key's, and must not be
