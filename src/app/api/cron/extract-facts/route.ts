@@ -6,6 +6,7 @@ import {
   writeCronBackoff,
   writeCronCountedFailure,
   writeCronGiveUp,
+  getEarliestSharedSourceTime,
   getSessionMessages,
   getUserFacts,
   saveUserFact,
@@ -317,7 +318,9 @@ interface SessionFactStats {
 /**
  * Extracts one session's facts and applies them.
  *
- * Flow: empty session → read messages → read existing facts and number the
+ * Flow: empty session → read where another member's shared bank data entered
+ *       the session → read the messages from before it → read existing facts
+ *       and number the
  *       leading ones that fit the facts budget (existing.facts) → LLM call →
  *       parse and validate → supersede → expire → new_facts →
  *       markFactsExtracted.
@@ -342,20 +345,36 @@ async function extractOneSession(
     return;
   }
 
-  // 2. Read the session's most recent messages, then put them in time order.
+  // 2. Where another household member's shared bank data entered the
+  //    session, if it did. Facts are extracted only from what was said
+  //    before that moment. It is read before the messages, never after (see
+  //    getEarliestSharedSourceTime), and a failed read throws here, before
+  //    the model is called. Then read the session's most recent messages
+  //    from before it, and put them in time order.
+  const sharedFrom = await getEarliestSharedSourceTime(session.id, session.user_id);
+
   const recent = await getSessionMessages(session.id, session.user_id, {
     limit: MAX_MESSAGES_PER_EXTRACTION,
     order: "desc",
+    before: sharedFrom ?? undefined,
   });
   const messages = recent.reverse();
 
-  // 3. message_count is positive but no message was found: mark it done and
-  //    stop.
+  // 3. No message to read: mark it done and stop. Either nothing was said
+  //    before the shared data entered, or message_count is positive but no
+  //    message was found.
   if (messages.length === 0) {
-    console.warn(
-      `Extract cron: session ${session.id} has message_count=` +
-        `${session.message_count} but 0 messages found — marking extracted.`
-    );
+    if (sharedFrom !== null) {
+      console.log(
+        `Extract cron: session ${session.id} has no message from before ` +
+          "shared bank data entered it — marking extracted."
+      );
+    } else {
+      console.warn(
+        `Extract cron: session ${session.id} has message_count=` +
+          `${session.message_count} but 0 messages found — marking extracted.`
+      );
+    }
     await markFactsExtracted(session.id, session.user_id);
     return;
   }
