@@ -3,7 +3,10 @@
 //
 // This module provides server-side helpers to interact with the four AI memory
 // tables (chat_sessions, chat_messages, user_facts, chat_summaries) created in
-// the 20260518120000_create_ai_memory_tables migration.
+// the 20260518120000_create_ai_memory_tables migration. It also reads
+// chat_shared_sources (20261122120000_chat_shared_sources migration), which
+// marks where another household member's shared bank data entered a session;
+// it never writes that table.
 //
 // SECURITY NOTE: All functions use the admin client (createAdminClient), which
 // BYPASSES Row Level Security. Every query MUST filter by user_id explicitly.
@@ -524,6 +527,13 @@ export interface GetSessionMessagesOptions {
    * just the most-recent N messages for context-window trimming.
    */
   order?: "asc" | "desc";
+  /**
+   * When given, only messages created strictly before this moment are
+   * returned. Pass the timestamp string exactly as the database returned it
+   * (see getEarliestSharedSourceTime): converting it through a Date drops
+   * its microseconds and could move the boundary past a message.
+   */
+  before?: string;
 }
 
 const DEFAULT_MESSAGES_LIMIT = 50;
@@ -724,7 +734,8 @@ export async function findSavedTurn(
  *
  * @param sessionId  Session to read messages from.
  * @param userId     Authenticated user id (used as an authorization filter).
- * @param options    Optional limit and sort order. See GetSessionMessagesOptions.
+ * @param options    Optional limit, sort order and upper bound on created_at.
+ *                   See GetSessionMessagesOptions.
  * @returns          Array of messages. Empty when the session does not exist,
  *                   does not belong to userId, or has no messages.
  *
@@ -739,11 +750,15 @@ export async function getSessionMessages(
   const order = options.order ?? "asc";
 
   const supabase = getAdmin();
-  const { data, error } = await supabase
+  let query = supabase
     .from("chat_messages")
     .select("*")
     .eq("session_id", sessionId)
-    .eq("user_id", userId)
+    .eq("user_id", userId);
+  if (options.before !== undefined) {
+    query = query.lt("created_at", options.before);
+  }
+  const { data, error } = await query
     .order("created_at", { ascending: order === "asc" })
     // Same created_at: user before assistant when asc; assistant before user when
     // desc so reverse() (getRecentMessages / GET history) still ends user-first.
@@ -758,6 +773,54 @@ export async function getSessionMessages(
     );
   }
   return (data ?? []) as DbChatMessage[];
+}
+
+/**
+ * The earliest moment another household member's shared bank data entered a
+ * session, or null when none did.
+ *
+ * Every message of the session created at or after that moment counts as
+ * carrying the shared figures, since the session's history returns to the
+ * model on each later turn. A reader that must not take those figures along
+ * (the summary and fact jobs) reads this first and then passes it to
+ * getSessionMessages as `before`. Read it before the messages, never after:
+ * when sharing ends the rows this reads are deleted together with the
+ * messages they mark, so the other order could read the messages and then
+ * find nothing marking them.
+ *
+ * The value is returned as the database wrote it, to be passed on unchanged.
+ *
+ * SECURITY: Filters by both session_id AND user_id, like getSessionMessages.
+ *
+ * @throws Error when the query fails or a row carries no usable moment. A
+ *   caller must treat that as "unknown" and read no messages, not as "none".
+ */
+export async function getEarliestSharedSourceTime(
+  sessionId: string,
+  userId: string
+): Promise<string | null> {
+  const supabase = getAdmin();
+  const { data, error } = await supabase
+    .from("chat_shared_sources")
+    .select("first_shared_at")
+    .eq("session_id", sessionId)
+    .eq("user_id", userId)
+    .order("first_shared_at", { ascending: true })
+    .limit(1);
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to fetch shared sources of a session: ${error.message}`,
+      error
+    );
+  }
+  const rows = (data ?? []) as Array<{ first_shared_at?: unknown }>;
+  if (rows.length === 0) return null;
+  const moment = rows[0].first_shared_at;
+  if (typeof moment !== "string" || moment === "") {
+    throw new Error("Failed to fetch shared sources of a session: no moment in the row");
+  }
+  return moment;
 }
 
 // -----------------------------------------------------------------------------
