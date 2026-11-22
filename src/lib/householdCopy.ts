@@ -139,6 +139,14 @@ export const HOUSEHOLD_UI = {
   notSharedLabel: "Not shared",
   stopSharing: "Stop sharing",
 
+  sharedAccountsTitle: "Shared with you",
+  sharedAccountsFrom: (name: string | null) =>
+    `From ${name ?? "the other person in your household"}`,
+  sharedAccountsUnnamedBank: "Bank",
+  sharedAccountsUnreadable: "We can't read this bank right now.",
+  sharedAccountsUnavailable: "We couldn't load shared accounts right now.",
+  sharedAccountsAvailable: "Available",
+
   sessionEnded: "Your session has ended. Please sign in again.",
   sessionUnconfirmed: "We couldn't confirm you're signed in. Try again.",
   reload: "Reload",

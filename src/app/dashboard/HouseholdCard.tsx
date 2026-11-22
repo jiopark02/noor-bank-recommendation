@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SharePrompt from "@/app/settings/household/SharePrompt";
+import SharedAccounts from "./SharedAccounts";
 import { readSession } from "@/lib/supabase-browser";
 import { HOUSEHOLD_UI } from "@/lib/householdCopy";
 import {
@@ -18,12 +19,16 @@ import {
  * Manager's open invite, and a way to the household screen when the caller
  * is on their own. It reads GET /api/household through loadHouseholdCard
  * (src/lib/householdClient.ts) and nothing else, holds its own state, and
- * takes no props, so its load, failure or delay reaches no other card. It
- * shows no amounts, never signs anyone out, and writes nothing to browser
- * storage: a session that has ended shows the card as unavailable, and the
- * page decides about the session. Inside it, SharePrompt makes its own
- * request to GET /api/household/sharing and asks whether to share a bank
- * with the other member; it renders nothing until there is a question.
+ * takes no props, so its load, failure or delay reaches no other card. This
+ * file shows no amounts itself, never signs anyone out, and writes nothing
+ * to browser storage: a session that has ended shows the card as
+ * unavailable, and the page decides about the session. Inside it, when the
+ * household has two people, SharePrompt makes its own request to GET
+ * /api/household/sharing and asks whether to share a bank with the other
+ * member; it renders nothing until there is a question. SharedAccounts makes
+ * its own request to GET /api/household/shared-accounts and lists the
+ * accounts and balances the other member shares with the caller; it renders
+ * nothing when nothing is shared.
  */
 export default function HouseholdCard() {
   const [view, setView] = useState<HouseholdCardView>({ kind: "loading" });
@@ -87,6 +92,12 @@ export default function HouseholdCard() {
           {!view.showInviteLink && (
             <div className="mt-4">
               <SharePrompt refreshKey={0} />
+            </div>
+          )}
+
+          {!view.showInviteLink && (
+            <div className="mt-4">
+              <SharedAccounts />
             </div>
           )}
         </div>
