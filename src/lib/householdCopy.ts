@@ -146,6 +146,9 @@ export const HOUSEHOLD_UI = {
   sharedAccountsUnreadable: "We can't read this bank right now.",
   sharedAccountsUnavailable: "We couldn't load shared accounts right now.",
   sharedAccountsAvailable: "Available",
+  sharedAccountsNoAccounts: "No accounts to show for this bank.",
+  sharedAccountsUnnamedAccount: "Unnamed account",
+  sharedAccountsUnknownCurrency: "currency unknown",
 
   sessionEnded: "Your session has ended. Please sign in again.",
   sessionUnconfirmed: "We couldn't confirm you're signed in. Try again.",

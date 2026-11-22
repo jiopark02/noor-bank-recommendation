@@ -79,6 +79,12 @@ const state = {
   accountsGetCalls: 0,
   /** Items whose accounts read fails with ITEM_LOGIN_REQUIRED. */
   loginRequired: new Set<string>(),
+  /** Per item, the currency code the accounts read gives; USD when not set. */
+  currencyByItem: new Map<string, string | null>(),
+  /** Per item, the account name the accounts read gives; ACCOUNT_NAME when not set. */
+  nameByItem: new Map<string, unknown>(),
+  /** When true, a failed decrypt throws the crypto module's own error. */
+  cryptoErrors: false,
 };
 
 function fakeClient() {
@@ -120,18 +126,24 @@ vi.mock("@/lib/supabase", () => ({
   isSupabaseAdminConfigured: () => true,
 }));
 
-vi.mock("@/lib/plaidTokenCrypto", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../plaidTokenCrypto")>()),
-  isPlaidTokenCryptoConfigured: () => true,
-  decryptPlaidAccessToken: (storedToken: string, userId: string) => {
-    state.decryptCalls.push({ stored: storedToken, userId });
-    const [prefix, owner, item] = storedToken.split("|");
-    if (prefix !== "sentinel-cipher" || owner !== userId) {
-      throw new Error("sentinel-decrypt-failure-text");
-    }
-    return plaintext(item);
-  },
-}));
+vi.mock("@/lib/plaidTokenCrypto", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../plaidTokenCrypto")>();
+  return {
+    ...real,
+    isPlaidTokenCryptoConfigured: () => true,
+    decryptPlaidAccessToken: (storedToken: string, userId: string) => {
+      state.decryptCalls.push({ stored: storedToken, userId });
+      const [prefix, owner, item] = storedToken.split("|");
+      if (prefix !== "sentinel-cipher" || owner !== userId) {
+        if (state.cryptoErrors) {
+          throw new real.PlaidTokenCryptoError("auth_failed", "sentinel-decrypt-failure-text");
+        }
+        throw new Error("sentinel-decrypt-failure-text");
+      }
+      return plaintext(item);
+    },
+  };
+});
 
 vi.mock("@/lib/plaid", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../plaid")>()),
@@ -150,7 +162,7 @@ vi.mock("@/lib/plaid", async (importOriginal) => ({
           accounts: [
             {
               account_id: accountId(item),
-              name: ACCOUNT_NAME,
+              name: state.nameByItem.has(item) ? state.nameByItem.get(item) : ACCOUNT_NAME,
               official_name: null,
               mask: MASK,
               type: "depository",
@@ -159,7 +171,9 @@ vi.mock("@/lib/plaid", async (importOriginal) => ({
                 current: CURRENT_DOLLARS,
                 available: AVAILABLE_DOLLARS,
                 limit: null,
-                iso_currency_code: "USD",
+                iso_currency_code: state.currencyByItem.has(item)
+                  ? state.currencyByItem.get(item)
+                  : "USD",
               },
             },
           ],
@@ -218,6 +232,7 @@ function account() {
     subtype: "checking",
     currentCents: Math.round(CURRENT_DOLLARS * 100),
     availableCents: Math.round(AVAILABLE_DOLLARS * 100),
+    currency: "USD",
   };
 }
 
@@ -241,6 +256,9 @@ beforeEach(() => {
   state.readCalls = [];
   state.accountsGetCalls = 0;
   state.loginRequired = new Set();
+  state.currencyByItem = new Map();
+  state.nameByItem = new Map();
+  state.cryptoErrors = false;
   delete process.env.HOUSEHOLD_SHARED_ACCOUNTS_MODE;
   spies.length = 0;
   for (const method of ["error", "warn", "info", "log", "debug"] as const) {
@@ -411,7 +429,7 @@ describe("GET /api/household/shared-accounts", () => {
         expect(Object.keys(c).sort()).toEqual(["accounts", "institutionName", "readable"]);
         for (const a of c.accounts) {
           expect(Object.keys(a).sort()).toEqual(
-            ["availableCents", "currentCents", "mask", "name", "subtype", "type"]
+            ["availableCents", "currency", "currentCents", "mask", "name", "subtype", "type"]
           );
         }
       }
@@ -461,5 +479,91 @@ describe("GET /api/household/shared-accounts", () => {
     expect(r.status).toBe(200);
     expect((r.json.sharedAccounts.owners as any[]).map((o) => o.firstName)).toEqual([null, null]);
     expect(consoleText()).toContain("[household] route=shared-accounts outcome=names_failed code=57014");
+  });
+
+  it("F1 each account carries the currency code the bank read gave, or null", async () => {
+    state.currencyByItem = new Map<string, string | null>([
+      [A2.item, "EUR"],
+      [B1.item, null],
+    ]);
+    const r = await send();
+    expect(r.status).toBe(200);
+    const currencies = (r.json.sharedAccounts.owners as any[]).flatMap((o) =>
+      (o.connections as any[]).flatMap((c) => (c.accounts as any[]).map((a) => a.currency))
+    );
+    expect(currencies).toEqual(["USD", "EUR", null]);
+  });
+
+  it("F2 an owner's read that throws logs the crypto module's reason, never the message", async () => {
+    state.cryptoErrors = true;
+    state.rpcAnswers = [
+      { data: [fnRow(A1), fnRow(B1, "sentinel-cipher|someone-else|" + B1.item)], error: null },
+    ];
+    const r = await send();
+    expect(r.status).toBe(200);
+    const text = consoleText();
+    expect(text).toContain("[household] route=shared-accounts outcome=owner_read_failed reason=auth_failed");
+    expect(text).not.toContain("sentinel-decrypt-failure-text");
+    expect(text).not.toContain(OWNER_B);
+  });
+
+  it("F2 an owner's read that throws anything else logs reason=unknown", async () => {
+    state.rpcAnswers = [
+      { data: [fnRow(A1), fnRow(B1, "sentinel-cipher|someone-else|" + B1.item)], error: null },
+    ];
+    await send();
+    const text = consoleText();
+    expect(text).toContain("[household] route=shared-accounts outcome=owner_read_failed reason=unknown");
+    expect(text).not.toContain("sentinel-decrypt-failure-text");
+  });
+
+  it("F6 an account name that is not a string is answered as an empty string, and the list is still answered", async () => {
+    state.nameByItem = new Map<string, unknown>([[A2.item, null]]);
+    const r = await send();
+    expect(r.status).toBe(200);
+    const names = (r.json.sharedAccounts.owners as any[]).flatMap((o) =>
+      (o.connections as any[]).flatMap((c) => (c.accounts as any[]).map((a) => a.name))
+    );
+    expect(names).toEqual([ACCOUNT_NAME, "", ACCOUNT_NAME]);
+  });
+});
+
+describe("viewSharedAccounts read time limit", () => {
+  it("F3 an owner's read not finished at the limit answers that owner unreadable and logs owner_read_cancelled", async () => {
+    const { viewSharedAccounts } = await import("../householdSharedAccounts");
+    const rows = [
+      { ownerUserId: OWNER_A, connectionId: A1.id, row: { access_token: stored(A1), item_id: A1.item, institution_name: BANK_A } },
+      { ownerUserId: OWNER_B, connectionId: B1.id, row: { access_token: stored(B1), item_id: B1.item, institution_name: BANK_B } },
+    ];
+    const lines: string[] = [];
+    const result = await viewSharedAccounts(USER_ID, {
+      mode: "on",
+      timeoutMs: 20,
+      log: (line) => lines.push(line),
+      store: {
+        readSharedConnections: async () => ({ ok: true, value: rows }),
+        readFirstNames: async () => ({ ok: true, value: { [OWNER_A]: NAME_A, [OWNER_B]: NAME_B } }),
+      },
+      readOwner: (ownerUserId, ownerRows, signal) => {
+        const answer = {
+          connections: ownerRows.map((r) => ({
+            itemId: r.item_id,
+            institutionName: r.institution_name,
+            status: "ok" as const,
+          })),
+          accounts: [],
+        };
+        if (ownerUserId === OWNER_A) return Promise.resolve(answer);
+        // Owner B's read answers only after it has been cancelled.
+        return new Promise((resolve) => {
+          signal.addEventListener("abort", () => resolve(answer));
+        });
+      },
+    });
+    expect(result.status).toBe(200);
+    const owners = (result.body.sharedAccounts as { owners: any[] }).owners;
+    expect(owners.map((o) => o.connections.map((c: any) => c.readable))).toEqual([[true], [false]]);
+    expect(lines).toContain("[household] route=shared-accounts outcome=owner_read_cancelled");
+    expect(lines.filter((l) => l.includes("owner_read_cancelled")).length).toBe(1);
   });
 });

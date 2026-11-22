@@ -228,11 +228,15 @@ export function householdLoadView(
 
 /**
  * How long the dashboard's household card waits for its answer, session read
- * included, before it shows that the household could not be loaded.
- * GET /api/household calls the auth server and the database and no other
- * provider, so this is not tied to BANK_SCREEN_FETCH_TIMEOUT_MS, which is
- * sized for Plaid's calls. The card blocks nothing else on the screen; this
- * only bounds how long its placeholder stays.
+ * included, before it shows that the household could not be loaded; the
+ * sharing prompt and settings use it too. GET /api/household and
+ * GET /api/household/sharing call the auth server and the database and no
+ * other provider, so this is not tied to BANK_SCREEN_FETCH_TIMEOUT_MS, which
+ * is sized for Plaid's calls. The shared-accounts list on the same card
+ * calls a route that reads banks through Plaid, so it does not use this; it
+ * has SHARED_ACCOUNTS_FETCH_TIMEOUT_MS (sharedAccountsClient.ts). The card
+ * blocks nothing else on the screen; this only bounds how long its
+ * placeholder stays.
  */
 export const HOUSEHOLD_CARD_FETCH_TIMEOUT_MS = 15_000;
 

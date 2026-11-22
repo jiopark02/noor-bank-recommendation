@@ -1,4 +1,5 @@
 import type { BankRead, StoredConnectionRow } from "@/lib/plaidEngineAdapter";
+import { isPlaidTokenCryptoError } from "@/lib/plaidTokenCrypto";
 import { HOUSEHOLD_CODES, HOUSEHOLD_MESSAGES } from "./householdCopy";
 import { logSafeCode, type HouseholdLog, type HouseholdResult } from "./householdInvite";
 
@@ -19,10 +20,12 @@ import { logSafeCode, type HouseholdLog, type HouseholdResult } from "./househol
  * read is not shown.
  *
  * Nothing is written: no database row, no cache. The answer carries no
- * owner id, no connection id, no item id and no Plaid account id. A
+ * owner id, no connection id, no item id and no Plaid account id. Each
+ * account carries the currency code the bank read gave, or null. A
  * connection that could not be read answers `readable: false` with no
- * accounts, never an amount of zero. Log lines carry route, outcome, an
- * error code and counts only.
+ * accounts, never an amount of zero. An account name that is not a string
+ * is answered as an empty string. Log lines carry route, outcome, an error
+ * code or the crypto module's reason, and counts only.
  */
 
 export type SharedAccountsMode = "off" | "on";
@@ -79,6 +82,8 @@ export type SharedAccountView = {
   subtype: string | null;
   currentCents: number | null;
   availableCents: number | null;
+  /** The currency code the bank read gave with the balances, or null. */
+  currency: string | null;
 };
 
 export type SharedConnectionView = {
@@ -138,14 +143,28 @@ function unreadable(connections: SharedConnection[]): SharedConnectionView[] {
 }
 
 function accountView(account: BankRead["accounts"][number]): SharedAccountView {
+  // The read passes Plaid's name through unchecked; the screen trusts an
+  // answer only when every name is a string, so one that is not is sent
+  // empty rather than dropping the whole list.
+  const name: unknown = account.name;
   return {
-    name: account.name,
+    name: typeof name === "string" ? name : "",
     mask: account.mask,
     type: account.type,
     subtype: account.subtype,
     currentCents: account.currentCents,
     availableCents: account.availableCents,
+    currency: typeof account.currency === "string" ? account.currency : null,
   };
+}
+
+/**
+ * Why an owner's read threw, from the crypto module's reason when the error
+ * is its own: the same source the read's per-connection log line uses.
+ * Never the error's message.
+ */
+function readFailureReason(error: unknown): string {
+  return isPlaidTokenCryptoError(error) ? error.reason : "unknown";
 }
 
 /**
@@ -167,8 +186,8 @@ async function readGroup(
       group.connections.map((c) => c.row),
       signal
     );
-  } catch {
-    logLine(log, "owner_read_failed");
+  } catch (error: unknown) {
+    logLine(log, "owner_read_failed", ` reason=${logSafeCode(readFailureReason(error))}`);
     return unreadable(group.connections);
   }
   if (signal.aborted) {

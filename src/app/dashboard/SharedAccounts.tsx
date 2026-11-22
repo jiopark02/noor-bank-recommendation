@@ -17,8 +17,10 @@ import {
  * decided in src/lib/sharedAccountsClient.ts.
  *
  * While loading, and when nothing is shared with the caller, it renders
- * nothing. A failed load shows one sentence. It shows no total, writes
- * nothing to browser storage and never signs anyone out.
+ * nothing. A failed load shows one sentence. A bank that could not be read,
+ * or that was read and has no account, shows a sentence under its name. It
+ * shows no total, writes nothing to browser storage and never signs anyone
+ * out.
  */
 export default function SharedAccounts() {
   const [view, setView] = useState<SharedAccountsView>({ kind: "loading" });
@@ -53,6 +55,9 @@ export default function SharedAccounts() {
               <p className="text-sm font-medium text-black">{bank.bank}</p>
               {bank.unreadable !== null && (
                 <p className="text-sm text-gray-500">{bank.unreadable}</p>
+              )}
+              {bank.empty !== null && (
+                <p className="text-sm text-gray-500">{bank.empty}</p>
               )}
               {bank.accounts.map((account) => (
                 <div key={account.key} className="flex items-start justify-between py-1">

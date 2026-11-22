@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  SHARED_ACCOUNTS_FETCH_TIMEOUT_MS,
   loadSharedAccounts,
   readSharedAccounts,
   sharedAccountsView,
+  type SharedAccount,
   type SharedOwner,
 } from "../sharedAccountsClient";
+import { SHARED_ACCOUNTS_READ_TIMEOUT_MS } from "../householdSharedAccounts";
 import { HOUSEHOLD_UI } from "../householdCopy";
 import type { HouseholdHttp } from "../householdClient";
 import type { SessionReadResult } from "../supabase-browser";
@@ -34,6 +37,7 @@ const READABLE: SharedOwner = {
           subtype: "checking",
           currentCents: 152_340,
           availableCents: 150_000,
+          currency: "USD",
         },
       ],
     },
@@ -113,8 +117,8 @@ describe("shared accounts list", () => {
             institutionName: null,
             readable: true,
             accounts: [
-              { name: "Card", mask: null, type: "credit", subtype: null, currentCents: null, availableCents: null },
-              { name: "Savings", mask: "9", type: "depository", subtype: "savings", currentCents: 0, availableCents: 0 },
+              { name: "Card", mask: null, type: "credit", subtype: null, currentCents: null, availableCents: null, currency: "USD" },
+              { name: "Savings", mask: "9", type: "depository", subtype: "savings", currentCents: 0, availableCents: 0, currency: "USD" },
             ],
           },
         ],
@@ -151,6 +155,88 @@ describe("shared accounts list", () => {
     expect(owners).toEqual([]);
     expect(sharedAccountsView(owners)).toEqual({ kind: "nothing" });
   });
+
+  function oneAccount(account: Partial<SharedAccount>) {
+    const view = sharedAccountsView([
+      {
+        firstName: "Alex",
+        connections: [
+          {
+            institutionName: "First Bank",
+            readable: true,
+            accounts: [{ ...READABLE.connections[0].accounts[0], ...account }],
+          },
+        ],
+      },
+    ]);
+    if (view.kind !== "list") throw new Error(view.kind);
+    return view.owners[0].banks[0].accounts[0];
+  }
+
+  it("F1 an amount in another currency, or in none given, shows a dash and the code, never a dollar sign", () => {
+    const eur = oneAccount({ currency: "EUR" });
+    expect(eur.current).toBe("— EUR");
+    expect(eur.available).toBe(`${HOUSEHOLD_UI.sharedAccountsAvailable} — EUR`);
+    const unknown = oneAccount({ currency: null });
+    expect(unknown.current).toBe(`— ${HOUSEHOLD_UI.sharedAccountsUnknownCurrency}`);
+    expect(unknown.available).toBe(
+      `${HOUSEHOLD_UI.sharedAccountsAvailable} — ${HOUSEHOLD_UI.sharedAccountsUnknownCurrency}`
+    );
+    for (const line of [eur, unknown]) {
+      expect(JSON.stringify(line)).not.toContain("$");
+      expect(JSON.stringify(line)).not.toMatch(/1,523|1523|1,500|1500/);
+    }
+    expect(oneAccount({ currency: "USD" }).current).toBe("$1,523.40");
+  });
+
+  it("F1 an answer whose currency is missing or not a string or null is not trusted", () => {
+    const account = READABLE.connections[0].accounts[0];
+    for (const currency of [undefined, 840, true, {}]) {
+      const owners = readSharedAccounts(
+        body([
+          {
+            firstName: "A",
+            connections: [{ institutionName: "B", readable: true, accounts: [{ ...account, currency }] }],
+          },
+        ])
+      );
+      expect(owners, String(currency)).toBeNull();
+    }
+  });
+
+  it("F5 a bank that was read and has no account shows the sentence and no amount line", () => {
+    const view = sharedAccountsView([
+      {
+        firstName: "Alex",
+        connections: [
+          { institutionName: "Empty Bank", readable: true, accounts: [] },
+          { institutionName: "Down Bank", readable: false, accounts: [] },
+          READABLE.connections[0],
+        ],
+      },
+    ]);
+    if (view.kind !== "list") throw new Error(view.kind);
+    const [empty, down, read] = view.owners[0].banks;
+    expect(empty.empty).toBe(HOUSEHOLD_UI.sharedAccountsNoAccounts);
+    expect(empty.unreadable).toBeNull();
+    expect(empty.accounts).toEqual([]);
+    expect(JSON.stringify(empty)).not.toMatch(/\$|0\.00/);
+    expect(down.empty).toBeNull();
+    expect(down.unreadable).toBe(HOUSEHOLD_UI.sharedAccountsUnreadable);
+    expect(read.empty).toBeNull();
+  });
+
+  it("F6 an empty or blank account name shows the stand-in name; a missing one is still not trusted", () => {
+    expect(oneAccount({ name: "" }).name).toBe(HOUSEHOLD_UI.sharedAccountsUnnamedAccount);
+    expect(oneAccount({ name: "   " }).name).toBe(HOUSEHOLD_UI.sharedAccountsUnnamedAccount);
+    expect(oneAccount({ name: "Joint Savings" }).name).toBe("Joint Savings");
+    const account = READABLE.connections[0].accounts[0];
+    expect(
+      readSharedAccounts(
+        body([{ firstName: "A", connections: [{ institutionName: "B", readable: true, accounts: [{ ...account, name: null }] }] }])
+      )
+    ).toBeNull();
+  });
 });
 
 describe("loading the shared accounts", () => {
@@ -175,6 +261,19 @@ describe("loading the shared accounts", () => {
         throw new Error("x");
       }, ok)
     ).toBeNull();
+  });
+
+  it("F3 the list waits at least five seconds longer than the route's bank reads, and stops at its limit", async () => {
+    expect(SHARED_ACCOUNTS_FETCH_TIMEOUT_MS - SHARED_ACCOUNTS_READ_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
+    vi.useFakeTimers();
+    let result: unknown = "pending";
+    void loadSharedAccounts(async () => SESSION, () => new Promise(() => {})).then((v) => {
+      result = v;
+    });
+    await vi.advanceTimersByTimeAsync(SHARED_ACCOUNTS_FETCH_TIMEOUT_MS - 1);
+    expect(result).toBe("pending");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(result).toBeNull();
   });
 
   it("a request past the limit is aborted and answers null", async () => {

@@ -51,4 +51,10 @@ describe("shared accounts wiring", () => {
     // Amounts are formatted in the decisions, not in the component.
     expect(LIST).not.toMatch(/formatCents/);
   });
+
+  it("F5 the list renders the sentence for a bank that was read and has no account", () => {
+    expect(LIST).toContain(
+      "{bank.empty !== null && (\n                <p className=\"text-sm text-gray-500\">{bank.empty}</p>\n              )}"
+    );
+  });
 });
