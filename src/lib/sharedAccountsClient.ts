@@ -12,9 +12,10 @@ import { householdCall, isOk, type HouseholdHttp } from "./householdClient";
  * anything else shows the list as unavailable, never as empty. A connection
  * that could not be read shows a sentence where its amounts would be; one
  * that was read and has no account says so. An amount is shown in dollars
- * only when its currency is USD; otherwise a dash and the currency code (or
- * that the currency is unknown) stand in its place, so no figure is shown
- * in a unit it is not in. An amount the answer does not give shows as a
+ * only when its currency is USD; otherwise a dash and the currency code (or,
+ * when the code is not given or blank, that the currency is unknown) stand
+ * in its place, so no figure is shown in a unit it is not in. A blank
+ * subtype, type or mask counts as not given. An amount the answer does not give shows as a
  * dash, never as zero. An account with an empty name shows a stand-in name.
  * No total is computed. Nothing is written to browser storage.
  */
@@ -202,20 +203,32 @@ export type SharedAccountsView =
   | { kind: "unavailable"; text: string }
   | { kind: "list"; title: string; owners: SharedOwnerLine[] };
 
+function nonBlank(value: string | null): string | null {
+  return value !== null && value.trim() !== "" ? value.trim() : null;
+}
+
+/** The subtype when given, else the type, else "Account"; blanks count as not given. */
 function kindLabel(account: SharedAccount): string {
-  const raw = (account.subtype ?? account.type).trim();
-  if (raw === "") return "Account";
+  const raw = nonBlank(account.subtype) ?? nonBlank(account.type);
+  if (raw === null) return "Account";
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
+/** The kind, and the last four digits when a non-blank mask is given. */
+function detailText(account: SharedAccount): string {
+  const mask = nonBlank(account.mask);
+  return mask === null ? kindLabel(account) : `${kindLabel(account)} · ****${mask}`;
+}
+
 /**
- * An amount in dollars only when its currency is USD. In any other currency,
- * or one not given, a dash and the code stand in for it: no dollar sign is
- * put on a figure in another unit.
+ * An amount in dollars only when its currency is USD. In any other currency
+ * a dash and the code stand in for it; when the code is not given or is
+ * blank, a dash and that the currency is unknown. No dollar sign is put on a
+ * figure in another unit, and a dash never stands alone for the unit.
  */
 function amountText(cents: number | null, currency: string | null): string {
   if (currency === "USD") return formatCentsOrDash(cents);
-  return `— ${currency ?? HOUSEHOLD_UI.sharedAccountsUnknownCurrency}`;
+  return `— ${nonBlank(currency) ?? HOUSEHOLD_UI.sharedAccountsUnknownCurrency}`;
 }
 
 function accountName(name: string): string {
@@ -249,7 +262,7 @@ export function sharedAccountsView(owners: SharedOwner[] | null): SharedAccounts
           ? connection.accounts.map((account, a) => ({
               key: `o${o}-b${b}-a${a}`,
               name: accountName(account.name),
-              detail: account.mask ? `${kindLabel(account)} · ****${account.mask}` : kindLabel(account),
+              detail: detailText(account),
               current: amountText(account.currentCents, account.currency),
               available: `${HOUSEHOLD_UI.sharedAccountsAvailable} ${amountText(account.availableCents, account.currency)}`,
             }))

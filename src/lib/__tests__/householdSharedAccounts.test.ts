@@ -528,6 +528,79 @@ describe("GET /api/household/shared-accounts", () => {
   });
 });
 
+describe("viewSharedAccounts account fields", () => {
+  /** One owner, one connection, read as ok with the given accounts. */
+  async function answerFor(accounts: Array<Record<string, unknown>>) {
+    const { viewSharedAccounts } = await import("../householdSharedAccounts");
+    const rows = [
+      { ownerUserId: OWNER_A, connectionId: A1.id, row: { access_token: stored(A1), item_id: A1.item, institution_name: BANK_A } },
+    ];
+    const result = await viewSharedAccounts(USER_ID, {
+      mode: "on",
+      log: () => {},
+      store: {
+        readSharedConnections: async () => ({ ok: true, value: rows }),
+        readFirstNames: async () => ({ ok: true, value: { [OWNER_A]: NAME_A } }),
+      },
+      readOwner: async (_owner, ownerRows) => ({
+        connections: ownerRows.map((r) => ({ itemId: r.item_id, institutionName: r.institution_name, status: "ok" as const })),
+        accounts: accounts.map((a) => ({ itemId: A1.item, ...a })) as never,
+      }),
+    });
+    expect(result.status).toBe(200);
+    return result.body;
+  }
+
+  const BASE = {
+    name: "Everyday",
+    mask: "1234",
+    type: "depository",
+    subtype: "checking",
+    currentCents: 100,
+    availableCents: 90,
+    currency: "USD",
+  };
+
+  it("G1 a currency code that is not a string, or is blank, is answered as null", async () => {
+    const body = await answerFor([
+      { ...BASE, currency: "" },
+      { ...BASE, currency: "   " },
+      { ...BASE, currency: 840 },
+      { ...BASE, currency: "EUR" },
+    ]);
+    const accounts = (body.sharedAccounts as any).owners[0].connections[0].accounts as any[];
+    expect(accounts.map((a) => a.currency)).toEqual([null, null, null, "EUR"]);
+  });
+
+  it("G2 descriptive fields not in the screen's shape are normalized, the amounts are not, and the screen trusts the result", async () => {
+    const { readSharedAccounts, sharedAccountsView } = await import("../sharedAccountsClient");
+    const body = await answerFor([
+      { ...BASE, name: 7, mask: 1234, type: 9, subtype: {}, currency: null },
+    ]);
+    const account = (body.sharedAccounts as any).owners[0].connections[0].accounts[0];
+    expect(account).toEqual({
+      name: "",
+      mask: null,
+      type: "",
+      subtype: null,
+      currentCents: 100,
+      availableCents: 90,
+      currency: null,
+    });
+    const owners = readSharedAccounts(body);
+    expect(owners).not.toBeNull();
+    const view = sharedAccountsView(owners);
+    if (view.kind !== "list") throw new Error(view.kind);
+    expect(view.owners[0].banks[0].accounts[0].detail).toBe("Account");
+
+    // An amount that is not a whole number of cents is passed as read, and
+    // the screen distrusts the answer rather than showing it altered.
+    const odd = await answerFor([{ ...BASE, currentCents: 1.5 }]);
+    expect((odd.sharedAccounts as any).owners[0].connections[0].accounts[0].currentCents).toBe(1.5);
+    expect(readSharedAccounts(odd)).toBeNull();
+  });
+});
+
 describe("viewSharedAccounts read time limit", () => {
   it("F3 an owner's read not finished at the limit answers that owner unreadable and logs owner_read_cancelled", async () => {
     const { viewSharedAccounts } = await import("../householdSharedAccounts");

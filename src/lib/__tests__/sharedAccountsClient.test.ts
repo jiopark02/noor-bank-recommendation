@@ -189,6 +189,24 @@ describe("shared accounts list", () => {
     expect(oneAccount({ currency: "USD" }).current).toBe("$1,523.40");
   });
 
+  it("G1 a blank currency code shows that the currency is unknown, never a dash alone", () => {
+    for (const currency of ["", "   "]) {
+      const line = oneAccount({ currency });
+      expect(line.current, JSON.stringify(currency)).toBe(`— ${HOUSEHOLD_UI.sharedAccountsUnknownCurrency}`);
+      expect(line.available, JSON.stringify(currency)).toBe(
+        `${HOUSEHOLD_UI.sharedAccountsAvailable} — ${HOUSEHOLD_UI.sharedAccountsUnknownCurrency}`
+      );
+    }
+  });
+
+  it("G2 a blank subtype falls back to the type, an empty type to Account, and a blank mask is not shown", () => {
+    expect(oneAccount({ subtype: "", type: "credit" }).detail).toBe("Credit · ****1234");
+    expect(oneAccount({ subtype: "  ", type: "credit", mask: null }).detail).toBe("Credit");
+    expect(oneAccount({ subtype: null, type: "", mask: null }).detail).toBe("Account");
+    expect(oneAccount({ subtype: null, type: "", mask: "  " }).detail).toBe("Account");
+    expect(oneAccount({ mask: "" }).detail).toBe("Checking");
+  });
+
   it("F1 an answer whose currency is missing or not a string or null is not trusted", () => {
     const account = READABLE.connections[0].accounts[0];
     for (const currency of [undefined, 840, true, {}]) {

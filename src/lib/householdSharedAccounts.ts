@@ -21,10 +21,11 @@ import { logSafeCode, type HouseholdLog, type HouseholdResult } from "./househol
  *
  * Nothing is written: no database row, no cache. The answer carries no
  * owner id, no connection id, no item id and no Plaid account id. Each
- * account carries the currency code the bank read gave, or null. A
- * connection that could not be read answers `readable: false` with no
- * accounts, never an amount of zero. An account name that is not a string
- * is answered as an empty string. Log lines carry route, outcome, an error
+ * account carries the currency code the bank read gave, or null when it
+ * gave none or a blank one. A connection that could not be read answers
+ * `readable: false` with no accounts, never an amount of zero. An account's
+ * descriptive fields are put in the shape the screen expects (accountView);
+ * its amounts are not. Log lines carry route, outcome, an error
  * code or the crypto module's reason, and counts only.
  */
 
@@ -142,19 +143,32 @@ function unreadable(connections: SharedConnection[]): SharedConnectionView[] {
   }));
 }
 
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * One account as answered. The screen trusts an answer only when every
+ * descriptive field has its expected shape, and the read passes some of
+ * Plaid's fields through unchecked, so each is put in that shape here
+ * rather than letting one odd value drop the whole list: name and type
+ * become an empty string when not a string, mask and subtype null, and a
+ * currency code that is not a string or is blank becomes null. The amounts
+ * are passed as read: one that is not a whole number of cents makes the
+ * screen distrust the answer, rather than being shown altered.
+ */
 function accountView(account: BankRead["accounts"][number]): SharedAccountView {
-  // The read passes Plaid's name through unchecked; the screen trusts an
-  // answer only when every name is a string, so one that is not is sent
-  // empty rather than dropping the whole list.
   const name: unknown = account.name;
+  const type: unknown = account.type;
+  const currency = textOrNull(account.currency);
   return {
     name: typeof name === "string" ? name : "",
-    mask: account.mask,
-    type: account.type,
-    subtype: account.subtype,
+    mask: textOrNull(account.mask),
+    type: typeof type === "string" ? type : "",
+    subtype: textOrNull(account.subtype),
     currentCents: account.currentCents,
     availableCents: account.availableCents,
-    currency: typeof account.currency === "string" ? account.currency : null,
+    currency: currency !== null && currency.trim() !== "" ? currency : null,
   };
 }
 
