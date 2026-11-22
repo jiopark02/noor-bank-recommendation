@@ -77,6 +77,7 @@ const CALLS: Call[] = [
   { method: "POST", path: "leave" },
   { method: "GET", path: "sharing" },
   { method: "PUT", path: "sharing" },
+  { method: "GET", path: "shared-accounts" },
 ];
 
 async function handler(call: Call) {
@@ -91,7 +92,9 @@ async function handler(call: Call) {
             ? await import("../../app/api/household/invite/accept/route")
             : call.path === "sharing"
               ? await import("../../app/api/household/sharing/route")
-              : await import("../../app/api/household/leave/route");
+              : call.path === "shared-accounts"
+                ? await import("../../app/api/household/shared-accounts/route")
+                : await import("../../app/api/household/leave/route");
   return (mod as Record<string, (req: NextRequest) => Promise<Response>>)[call.method];
 }
 

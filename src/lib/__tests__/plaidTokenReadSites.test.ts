@@ -92,6 +92,11 @@ const NON_CONSUMING_SITES: Record<string, string> = {
   // decrypts each one through liveAdapterDeps before any Plaid call.
   "lib/plaidChatState.ts":
     "selects the column; readBankData decrypts it through liveAdapterDeps",
+  // Takes the column off the shared-connections function's rows and passes it
+  // on unchanged; the route's readBankData decrypts it through liveAdapterDeps,
+  // with the row owner's id.
+  "lib/householdSharedAccountsStore.ts":
+    "reads the column off the shared-connections function's rows; readBankData decrypts it through liveAdapterDeps in the route",
   // Holds a Plaid response field, never a stored value.
   "app/api/plaid/exchange-token/route.ts":
     "reads the token off the Plaid exchange response, before storage",
