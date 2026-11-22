@@ -2,8 +2,8 @@ import type { PlaidStateMode } from "@/lib/plaidChatContext";
 
 // Shared decision surface for every place in the chat route that decides
 // whether Plaid-derived data reaches the LLM prompt:
-//   capability_scaffold  whether the bank-state block, and the one bank read
-//                        behind it, happen at all.
+//   capability_scaffold  whether the bank-state block, and the read of the
+//                        user's own banks behind it, happen at all.
 //   balance_keyword      whether a balance question raises that read to
 //                        depth "balances" (live account balances) under
 //                        "connection". It reads nothing itself. Under

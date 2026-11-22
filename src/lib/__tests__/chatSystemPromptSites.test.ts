@@ -74,6 +74,7 @@ const TARGETS: ProbeTarget[] = [
     pattern: word("buildSharedBankBlock"),
     allowed: {
       "lib/plaidChatContext.ts": "definition: the block of what another household member shares",
+      "app/api/chat/route.ts": "appends another member's shared bank state on a household turn",
     },
   },
   {
@@ -81,6 +82,7 @@ const TARGETS: ProbeTarget[] = [
     pattern: word("SHARED_NOT_IN_TURN_BLOCK"),
     allowed: {
       "lib/plaidChatContext.ts": "definition: the one line saying shared data is not in this turn",
+      "app/api/chat/route.ts": "appends that line when something is shared and this turn carries none of it",
     },
   },
 ];

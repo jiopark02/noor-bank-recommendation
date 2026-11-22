@@ -54,7 +54,7 @@ const TARGETS: ProbeTarget[] = [
       // Exports the session and moment shared data entered the user's chats.
       "lib/accountExport.ts": "export section of the user's own shared-source marks",
       // getEarliestSharedSourceTime: the memory crons read only before this moment.
-      "lib/aiMemory.ts": "the memory crons' read of the earliest shared moment",
+      "lib/aiMemory.ts": "the earliest shared moment, read by the memory crons and by the chat route to see whether the session is marked",
     },
   },
   {
