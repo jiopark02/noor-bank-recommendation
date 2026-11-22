@@ -37,8 +37,10 @@ import path from "path";
  *     successor order, invite delete, a lock, an answer)            -> S6
  *   a function changed to security definer                          -> S7
  *   a set search_path line removed, or an EXECUTE revoke or grant   -> S7
- *   a trigger added                                                 -> S7
+ *   a trigger created by this file                                  -> S7
  *   a DO block check or its raise removed                           -> S8
+ *   the DO block accepting any single trigger on share_grants, a
+ *     second one, a disabled one, or one on share_prompt_answers    -> S8
  *   the precondition that share_grants is empty removed             -> S9
  *   a cleanup delete removed, moved after the DO block, or without its
  *     owner or grantee condition                                    -> S10
@@ -269,7 +271,9 @@ describe("household share grants migration", () => {
 
   it("S7 both functions are SECURITY INVOKER with an empty search_path, only service_role executes them, and no trigger is added", () => {
     expect(sql).not.toMatch(/security definer/i);
-    expect(sql).not.toMatch(/\bcreate\s+(or\s+replace\s+)?trigger\b/i);
+    // A statement, at the start of a line. The closing DO block quotes a
+    // trigger definition inside a string literal, which S8 holds.
+    expect(sql).not.toMatch(/^\s*create\s+(or\s+replace\s+)?trigger\b/im);
     expect(sql).not.toMatch(/\bdrop\s+(table|function|trigger|index|type)\b/i);
     expect(sql.match(/create or replace function/gi)?.length).toBe(
       Object.keys(FUNCTIONS).length
@@ -300,7 +304,10 @@ describe("household share grants migration", () => {
       ["service_role exact", /array\['SELECT', 'INSERT', 'DELETE'\]\)\)\n\s+<> has_table_privilege\('service_role', v_table, p\.privilege\);[\s\S]*?raise exception '%: service_role privileges differ/],
       ["service_role column UPDATE", /has_any_column_privilege\('service_role', v_table, 'UPDATE,REFERENCES'\) then\n\s+raise exception/],
       ["owner DELETE", /has_table_privilege\(c\.relowner, v_table, 'DELETE'\)[\s\S]*?raise exception '%: the table owner lacks DELETE'/],
-      ["no trigger on the tables", /raise exception '%: carries a trigger'/],
+      ["user triggers counted", /select count\(\*\)\n\s+into v_count\n\s+from pg_trigger t\n\s+where t\.tgrelid = v_table\n\s+and not t\.tgisinternal;\n\s+if v_count <> 0 then\n/],
+      ["a trigger only on share_grants, and only one", /if v_count <> 0 then\n\s+if v_name <> 'share_grants' or v_count <> 1 then\n\s+raise exception '%: carries a trigger', v_table;\n\s+end if;/],
+      ["the definition read under an empty search_path", /perform set_config\('search_path', '', true\);\n\s+select pg_get_triggerdef\(t\.oid\), t\.tgtype, t\.tgenabled\n\s+into v_triggerdef, v_tgtype, v_tgenabled\n\s+from pg_trigger t\n\s+where t\.tgrelid = v_table\n\s+and not t\.tgisinternal;\n\s+perform set_config\('search_path', v_search_path, true\);/],
+      ["the one trigger as defined, after delete, per row, enabled", /if v_triggerdef is distinct from\n\s+'CREATE TRIGGER trg_share_grants_purge_chat AFTER DELETE ON public\.share_grants FOR EACH ROW EXECUTE FUNCTION public\.chat_shared_sources_purge_on_grant_delete\(\)'\n\s+or v_tgtype <> 9\n\s+or v_tgenabled <> 'O' then\n\s+raise exception '%: its trigger is not the enabled chat purge trigger as defined: %',\n\s+v_table, v_triggerdef;\n\s+end if;\n\s+end if;\n\s+end loop;/],
       ["foreign keys", /k\.confdeltype = 'c'[\s\S]*?\) into v_ok;\n\s+if not v_ok then\n\s+raise exception 'public\.%: % does not reference/],
       ["grantee not null", /a\.attnotnull[\s\S]*?raise exception '%: grantee_user_id is missing or nullable'/],
       ["grantee check", /'CHECK \(\(grantee_user_id <> owner_user_id\)\)'[\s\S]*?raise exception/],

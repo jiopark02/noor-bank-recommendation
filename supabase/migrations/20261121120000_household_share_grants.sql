@@ -529,6 +529,10 @@ declare
   v_proconfig text[];
   v_prosrc text;
   v_count integer;
+  v_search_path text;
+  v_triggerdef text;
+  v_tgtype smallint;
+  v_tgenabled "char";
 begin
   -- MAINTAIN exists from PostgreSQL 17; has_table_privilege rejects it before.
   if current_setting('server_version_num')::integer >= 170000 then
@@ -594,14 +598,37 @@ begin
       raise exception '%: the table owner lacks DELETE', v_table;
     end if;
 
-    -- 6. No user trigger.
-    if exists (
-      select 1
+    -- 6. No user trigger, with one exception: share_grants may carry, alone,
+    --    the delete trigger that 20261122120000_chat_shared_sources.sql
+    --    defines, enabled and exactly as defined there. So this file passes
+    --    both before that file is applied and after. The definition is read
+    --    under an empty search_path, which makes pg_get_triggerdef write the
+    --    function with its schema whatever the caller's search_path is.
+    select count(*)
+      into v_count
+      from pg_trigger t
+     where t.tgrelid = v_table
+       and not t.tgisinternal;
+    if v_count <> 0 then
+      if v_name <> 'share_grants' or v_count <> 1 then
+        raise exception '%: carries a trigger', v_table;
+      end if;
+      v_search_path := current_setting('search_path');
+      perform set_config('search_path', '', true);
+      select pg_get_triggerdef(t.oid), t.tgtype, t.tgenabled
+        into v_triggerdef, v_tgtype, v_tgenabled
         from pg_trigger t
        where t.tgrelid = v_table
-         and not t.tgisinternal
-    ) then
-      raise exception '%: carries a trigger', v_table;
+         and not t.tgisinternal;
+      perform set_config('search_path', v_search_path, true);
+      -- tgtype 9 is row (1) + delete (8): AFTER, no other event.
+      if v_triggerdef is distinct from
+           'CREATE TRIGGER trg_share_grants_purge_chat AFTER DELETE ON public.share_grants FOR EACH ROW EXECUTE FUNCTION public.chat_shared_sources_purge_on_grant_delete()'
+         or v_tgtype <> 9
+         or v_tgenabled <> 'O' then
+        raise exception '%: its trigger is not the enabled chat purge trigger as defined: %',
+          v_table, v_triggerdef;
+      end if;
     end if;
   end loop;
 

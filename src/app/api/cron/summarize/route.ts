@@ -4,6 +4,7 @@ import {
   getSessionsToClose,
   getSessionsNeedingSummary,
   endSession,
+  getEarliestSharedSourceTime,
   getSessionMessages,
   getSummaryBySessionId,
   createSummary,
@@ -266,17 +267,33 @@ async function summarizeOneSession(
     return;
   }
 
+  // Where another household member's shared bank data entered the session,
+  // if it did. Only what was said before that moment is summarized. It is
+  // read before the messages, never after (see getEarliestSharedSourceTime),
+  // and a failed read throws here, before the model is called.
+  const sharedFrom = await getEarliestSharedSourceTime(session.id, session.user_id);
+
   const recent = await getSessionMessages(session.id, session.user_id, {
     limit: MAX_MESSAGES_PER_SUMMARY,
     order: "desc",
+    before: sharedFrom ?? undefined,
   });
   const messages = recent.reverse();
 
   if (messages.length === 0) {
-    console.warn(
-      `Summarize cron: session ${session.id} has message_count=` +
-        `${session.message_count} but 0 messages found — marking summarized.`
-    );
+    if (sharedFrom !== null) {
+      // Nothing was said before the shared data entered: the session ends
+      // without a summary.
+      console.log(
+        `Summarize cron: session ${session.id} has no message from before ` +
+          "shared bank data entered it — marking summarized."
+      );
+    } else {
+      console.warn(
+        `Summarize cron: session ${session.id} has message_count=` +
+          `${session.message_count} but 0 messages found — marking summarized.`
+      );
+    }
     await markSessionSummarized(session.id, session.user_id);
     return;
   }

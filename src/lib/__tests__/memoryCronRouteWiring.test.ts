@@ -110,6 +110,73 @@ describe.each([
   }
 );
 
+/**
+ * Where another household member's shared bank data entered a session, only
+ * what was said before that moment may reach the model. Each route reads the
+ * moment first and hands it to the message read as its upper bound. The
+ * order matters: when sharing ends, the rows marking the moment are deleted
+ * together with the messages they mark, so reading the messages first could
+ * be followed by finding no moment.
+ */
+describe.each([
+  [
+    "summarize",
+    functionBody(SUMMARIZE, "summarizeOneSession"),
+    "MAX_MESSAGES_PER_SUMMARY",
+    "markSessionSummarized",
+    "summarized",
+  ],
+  [
+    "extract-facts",
+    functionBody(EXTRACT, "extractOneSession"),
+    "MAX_MESSAGES_PER_EXTRACTION",
+    "markFactsExtracted",
+    "extracted",
+  ],
+])("%s route: messages from before shared bank data entered", (_label, body, limit, mark, word) => {
+  const SHARED_READ =
+    "const sharedFrom = await getEarliestSharedSourceTime(session.id, session.user_id);";
+  const MESSAGE_READ = `const recent = await getSessionMessages(session.id, session.user_id, {\n    limit: ${limit},\n    order: "desc",\n    before: sharedFrom ?? undefined,\n  });\n  const messages = recent.reverse();`;
+
+  it("reads the moment once, with the session's own user id, before the messages and before the model call", () => {
+    expect(occurrences(body, "getEarliestSharedSourceTime(")).toBe(1);
+    expect(occurrences(body, "await getSessionMessages(")).toBe(1);
+    const sharedAt = body.indexOf(SHARED_READ);
+    const messagesAt = body.indexOf(MESSAGE_READ);
+    const callAt = body.indexOf('tracker.stage = "call";');
+    expect(sharedAt).toBeGreaterThan(-1);
+    expect(messagesAt).toBeGreaterThan(sharedAt);
+    expect(callAt).toBeGreaterThan(messagesAt);
+  });
+
+  it("hands the moment to the message read unchanged, as its upper bound", () => {
+    expect(body).toContain(MESSAGE_READ);
+    expect(occurrences(body, "sharedFrom")).toBe(3);
+    expect(body).not.toMatch(/new Date\(\s*sharedFrom/);
+  });
+
+  it("builds the model's input from those messages only", () => {
+    expect(occurrences(body, "buildConversationText(messages)")).toBe(1);
+    expect(occurrences(body, "buildConversationText(")).toBe(1);
+    expect(body).not.toContain("buildConversationText(recent");
+  });
+
+  it("ends a session with nothing from before the moment without calling the model", () => {
+    const emptyAt = body.indexOf("if (messages.length === 0) {\n    if (sharedFrom !== null) {");
+    const markAt = body.indexOf(
+      `    await ${mark}(session.id, session.user_id);\n    return;\n  }`,
+      emptyAt
+    );
+    const callAt = body.indexOf('tracker.stage = "call";');
+    expect(emptyAt).toBeGreaterThan(body.indexOf(MESSAGE_READ));
+    expect(markAt).toBeGreaterThan(emptyAt);
+    expect(callAt).toBeGreaterThan(markAt);
+    expect(body).toContain(
+      `has no message from before \` +\n          "shared bank data entered it — marking ${word}."`
+    );
+  });
+});
+
 describe("summarizeOneSession stages", () => {
   const body = functionBody(SUMMARIZE, "summarizeOneSession");
 
