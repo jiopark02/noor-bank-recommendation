@@ -66,7 +66,8 @@ export type ExportSection = {
  * user_id; its id is the user's own id, and its list carries it. A section
  * read by the caller's address keeps that column: it is the address the
  * invite was made for. A column that names another person by id is left out
- * as well (grantee_user_id on the share sections).
+ * as well (grantee_user_id on the share sections), and so is a stored hash
+ * (code_hash on account_reauth_codes).
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
   {
@@ -183,6 +184,18 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     columns: "id, household_id, invitee_email, created_at, expires_at",
     filterColumn: "invited_by",
     orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // One row per user, keyed by user_id, which the output leaves out.
+  // code_hash is not exported: it is the keyed hash of a one-time code,
+  // nothing the user entered or can use. verified_session_id is not exported
+  // either: an internal session identifier, nothing the user can use.
+  {
+    key: "account_reauth_codes",
+    table: "account_reauth_codes",
+    columns: "purpose, expires_at, attempts, verified_at, window_start, window_count",
+    filterColumn: "user_id",
+    orderColumn: "user_id",
     orderKeyType: "uuid",
   },
   // One row per user, keyed by user_id, which the output leaves out.

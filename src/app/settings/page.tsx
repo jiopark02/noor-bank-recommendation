@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomNav } from '@/components/layout';
@@ -16,6 +16,23 @@ import {
 import { runSignOut } from '@/lib/sessionFlow';
 import { buildJsonAuthorizedHeaders, buildBearerOnlyHeaders } from '@/lib/supabaseAuthHeaders';
 import { HOUSEHOLD_UI } from '@/lib/householdCopy';
+import {
+  REAUTH_UI,
+  afterClose,
+  afterStart,
+  afterVerify,
+  answerStillCurrent,
+  deleteButtonLabel,
+  exportButtonLabel,
+  pressAction,
+  readReauthAnswer,
+  stageAfterFailedAction,
+  type ReauthOutcome,
+  type ReauthPress,
+  type ReauthStage,
+  type ReauthStep,
+} from '@/lib/accountReauthClient';
+import { SESSIONS_UI } from '@/lib/accountSessions';
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
 const ACCENT = '#5B4EE8';
@@ -27,7 +44,9 @@ interface UserProfile {
   email?: string;
 }
 
-type ModalType = 'delete' | null;
+type ModalType = 'delete' | 'export' | 'signOutOthers' | null;
+
+type ReauthPurpose = 'delete_account' | 'export_data';
 
 function getInitials(firstName?: string, lastName?: string): string {
   const f = firstName?.trim()?.[0]?.toUpperCase() ?? '';
@@ -277,6 +296,20 @@ export default function SettingsPage() {
 
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
+  // The email-code step before deleting or exporting. The stages and what a
+  // press does in each are decided in accountReauthClient.ts; this page only
+  // applies them. Held in memory only. reauthBusy is the request in flight,
+  // for the button's words.
+  const [reauthStage, setReauthStage] = useState<ReauthStage>('idle');
+  const [reauthBusy, setReauthBusy] = useState<ReauthPress | null>(null);
+  const [reauthCode, setReauthCode] = useState('');
+  const [reauthNotice, setReauthNotice] = useState<string | null>(null);
+  // How many times a modal has been closed. A request remembers the count it
+  // was sent at; its answer changes the screen only while the count is the
+  // same (answerStillCurrent). isLoading is not cleared on close, so a new
+  // press waits for the earlier request to finish.
+  const modalCloses = useRef(0);
+
   useEffect(() => {
     const profile = localStorage.getItem('noor_user_profile');
     if (profile) {
@@ -302,20 +335,108 @@ export default function SettingsPage() {
     router.push('/survey');
   };
 
+  const resetReauth = () => {
+    setReauthStage('idle');
+    setReauthBusy(null);
+    setReauthCode('');
+    setReauthNotice(null);
+  };
+
+  const applyReauthOutcome = (next: ReauthOutcome) => {
+    setReauthStage(next.stage);
+    setError(next.error);
+    setReauthNotice(next.notice);
+    if (next.clearCode) setReauthCode('');
+  };
+
+  // Every way out of a modal comes here: Cancel, the backdrop, and the export
+  // once it starts. The reauthentication step starts over even while a
+  // request is in flight; that request's answer is then dropped.
+  const closeModal = () => {
+    modalCloses.current += 1;
+    setActiveModal(null);
+    applyReauthOutcome(afterClose());
+    setReauthBusy(null);
+  };
+
+  const postReauth = async (
+    path: 'start' | 'verify',
+    body: Record<string, string>
+  ): Promise<ReauthStep> => {
+    const rawAuth = await getSupabaseBearerHeaders();
+    if (!rawAuth.Authorization) {
+      return { kind: 'error', message: REAUTH_UI.sessionExpired };
+    }
+    const res = await fetch(`/api/account/reauth/${path}`, {
+      method: 'POST',
+      headers: buildJsonAuthorizedHeaders(rawAuth),
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    return readReauthAnswer(res.status, json);
+  };
+
+  // One press of the email-code step, as pressAction decides for the current
+  // stage. Returns whether the action runs now and the stage it runs in. In
+  // 'verified' no request is made. The delete and export routes check the
+  // verification again on the server.
+  const advanceReauth = async (
+    purpose: ReauthPurpose
+  ): Promise<{ proceed: boolean; stage: ReauthStage }> => {
+    const press = pressAction(reauthStage);
+    if (press === 'act') return { proceed: true, stage: reauthStage };
+    const sentAt = modalCloses.current;
+    setReauthBusy(press);
+    const next =
+      press === 'start'
+        ? afterStart('idle', await postReauth('start', { purpose }))
+        : afterVerify(await postReauth('verify', { purpose, code: reauthCode }));
+    // Closed meanwhile: the answer changes nothing and the action does not run.
+    if (!answerStillCurrent(sentAt, modalCloses.current)) return { proceed: false, stage: 'idle' };
+    applyReauthOutcome(next);
+    return { proceed: next.proceed, stage: next.stage };
+  };
+
+  // "Get a new code", offered in the code stage only. Never runs the action.
+  const handleNewReauthCode = async (purpose: ReauthPurpose) => {
+    const sentAt = modalCloses.current;
+    setIsLoading(true);
+    setError(null);
+    setReauthBusy('start');
+    try {
+      const next = afterStart('code', await postReauth('start', { purpose }));
+      if (answerStillCurrent(sentAt, modalCloses.current)) applyReauthOutcome(next);
+    } catch {
+      setError(REAUTH_UI.fallback);
+    } finally {
+      setReauthBusy(null);
+      setIsLoading(false);
+    }
+  };
+
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== 'DELETE') {
       setError('Please type DELETE to confirm');
       return;
     }
+    const sentAt = modalCloses.current;
     setIsLoading(true);
     setError(null);
     try {
-      // Deletion authenticates via the Bearer token only — no password gate.
-      // A password check breaks OAuth users (who have no password), and the
-      // token already proves identity account-type-neutrally.
+      // No password gate: OAuth users have no password. Instead the server
+      // requires a recent email-code verification, which advanceReauth asks
+      // for; the route checks it again in the database.
+      const ready = await advanceReauth('delete_account');
+      if (!ready.proceed) {
+        setReauthBusy(null);
+        setIsLoading(false);
+        return;
+      }
+      setReauthBusy('act');
       const rawAuth = await getSupabaseBearerHeaders();
       if (!rawAuth.Authorization) {
         setError('Your session has expired. Please sign in again to delete your account.');
+        setReauthBusy(null);
         setIsLoading(false);
         return;
       }
@@ -328,8 +449,17 @@ export default function SettingsPage() {
       if (!res.ok) {
         // Surface the server's explicit error — never let the user believe the
         // account was deleted when it was not (or was only half-deleted).
+        // The stage is kept unless the server asks for a new verification, so
+        // retrying a deletion that stopped part-way goes straight to it.
+        // A modal closed while the request was out has already started over.
         const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(errBody.error || 'Failed to delete account. Please try again.');
+        if (answerStillCurrent(sentAt, modalCloses.current)) {
+          const nextStage = stageAfterFailedAction(ready.stage, res.status, errBody);
+          if (nextStage === 'idle') resetReauth();
+          else setReauthStage(nextStage);
+          setError(errBody.error || 'Failed to delete account. Please try again.');
+        }
+        setReauthBusy(null);
         setIsLoading(false);
         return;
       }
@@ -349,7 +479,10 @@ export default function SettingsPage() {
         navigate: () => router.push('/welcome'),
       });
     } catch {
-      setError('Failed to delete account. Please try again.');
+      if (answerStillCurrent(sentAt, modalCloses.current)) {
+        setError('Failed to delete account. Please try again.');
+      }
+      setReauthBusy(null);
       setIsLoading(false);
     }
   };
@@ -359,10 +492,18 @@ export default function SettingsPage() {
     // survey responses, etc.) — NOT the legacy localStorage dump. Identity is
     // proven by the Bearer token; the server filters everything by that id.
     setIsLoading(true);
-    // Export is triggered from a page row, not a modal, so failures must use
-    // the page-level toast (showError) — the modal-only `error` state would be
-    // invisible here.
+    setError(null);
+    // The email-code step runs inside the export modal, so its failures use
+    // the modal's `error`. Once it passes the modal closes, and failures of
+    // the download itself use the page-level toast (showError).
     try {
+      const ready = await advanceReauth('export_data');
+      if (!ready.proceed) {
+        return;
+      }
+      // The export check uses the verification up, so the modal closes and the
+      // stage starts over whatever the download's answer.
+      closeModal();
       const rawAuth = await getSupabaseBearerHeaders();
       if (!rawAuth.Authorization) {
         showError('Your session has expired. Please sign in again to export your data.');
@@ -397,6 +538,7 @@ export default function SettingsPage() {
     } catch {
       showError('Failed to export your data. Please try again.');
     } finally {
+      setReauthBusy(null);
       setIsLoading(false);
     }
   };
@@ -413,6 +555,36 @@ export default function SettingsPage() {
       clearLocal: clearLocalAuthState,
       navigate: () => router.push('/welcome'),
     });
+  };
+
+  // Signs out this user's other devices through the server; this device
+  // stays signed in and nothing local is cleared. Another device is signed
+  // out when its session next refreshes, which the copy says.
+  const handleSignOutOthers = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const rawAuth = await getSupabaseBearerHeaders();
+      if (!rawAuth.Authorization) {
+        setError(SESSIONS_UI.sessionExpired);
+        return;
+      }
+      const res = await fetch('/api/account/sessions/sign-out-others', {
+        method: 'POST',
+        headers: buildBearerOnlyHeaders(rawAuth),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(errBody.error || SESSIONS_UI.fallback);
+        return;
+      }
+      closeModal();
+      showSuccess(SESSIONS_UI.done);
+    } catch {
+      setError(SESSIONS_UI.fallback);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const initials = getInitials(userProfile?.firstName, userProfile?.lastName);
@@ -549,8 +721,15 @@ export default function SettingsPage() {
           label="Change Password"
           description="We'll email you a reset link"
           chevron
-          last
           onClick={() => router.push('/forgot-password')}
+        />
+        <SettingsRow
+          icon={Ico.lock}
+          label={SESSIONS_UI.rowLabel}
+          description={SESSIONS_UI.rowDescription}
+          chevron
+          last
+          onClick={() => setActiveModal('signOutOthers')}
         />
       </SettingsCard>
 
@@ -562,7 +741,7 @@ export default function SettingsPage() {
           label="Export My Data"
           description="Download everything (GDPR)"
           chevron
-          onClick={handleExportData}
+          onClick={() => setActiveModal('export')}
         />
         <SettingsRow
           icon={Ico.document}
@@ -636,7 +815,7 @@ export default function SettingsPage() {
 
         {/* Delete Account */}
         {activeModal === 'delete' && (
-          <Modal onClose={() => { setActiveModal(null); setError(null); }}>
+          <Modal onClose={closeModal}>
             <div className="text-center mb-5">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(239,68,68,0.1)' }}>
                 <div style={{ color: '#EF4444' }}>{Ico.warning}</div>
@@ -650,11 +829,28 @@ export default function SettingsPage() {
 
             <div className="space-y-4">
               <ModalInput label='Type "DELETE" to confirm' value={deleteConfirmText} onChange={setDeleteConfirmText} placeholder="DELETE" autoFocus />
+              {reauthStage === 'verified' && reauthNotice && (
+                <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}>{reauthNotice}</p>
+              )}
+              {reauthStage === 'code' && (
+                <>
+                  {reauthNotice && <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}>{reauthNotice}</p>}
+                  <ModalInput label={REAUTH_UI.codeLabel} value={reauthCode} onChange={setReauthCode} placeholder="123456" />
+                  <button
+                    onClick={() => handleNewReauthCode('delete_account')}
+                    disabled={isLoading}
+                    className="text-[13px] font-medium underline disabled:opacity-40"
+                    style={{ color: ACCENT, fontFamily: FONT }}
+                  >
+                    {REAUTH_UI.newCode}
+                  </button>
+                </>
+              )}
               {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => { setActiveModal(null); setError(null); }} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+              <button onClick={closeModal} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
                 Cancel
               </button>
               <button
@@ -663,7 +859,85 @@ export default function SettingsPage() {
                 className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
                 style={{ background: '#EF4444', fontFamily: FONT }}
               >
-                {isLoading ? 'Deleting…' : 'Delete Account'}
+                {deleteButtonLabel(reauthStage, reauthBusy)}
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {/* Sign out other devices */}
+        {activeModal === 'signOutOthers' && (
+          <Modal onClose={closeModal}>
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(0,0,0,0.05)' }}>
+                <div style={{ color: 'rgba(0,0,0,0.55)' }}>{Ico.lock}</div>
+              </div>
+              <h3 className="text-[16px] font-semibold text-black mb-2" style={{ fontFamily: FONT }}>{SESSIONS_UI.title}</h3>
+              <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}>
+                {SESSIONS_UI.body}
+              </p>
+            </div>
+
+            {error && <p className="text-[13px] text-red-500 mb-2" style={{ fontFamily: FONT }}>{error}</p>}
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={closeModal} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+                Cancel
+              </button>
+              <button
+                onClick={handleSignOutOthers}
+                disabled={isLoading}
+                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
+                style={{ background: ACCENT, fontFamily: FONT }}
+              >
+                {isLoading ? SESSIONS_UI.working : SESSIONS_UI.confirm}
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {/* Export My Data */}
+        {activeModal === 'export' && (
+          <Modal onClose={closeModal}>
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(0,0,0,0.05)' }}>
+                <div style={{ color: 'rgba(0,0,0,0.55)' }}>{Ico.download}</div>
+              </div>
+              <h3 className="text-[16px] font-semibold text-black mb-2" style={{ fontFamily: FONT }}>{REAUTH_UI.exportTitle}</h3>
+              <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.45)', fontFamily: FONT }}>
+                {REAUTH_UI.exportBody}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {reauthStage === 'code' && (
+                <>
+                  {reauthNotice && <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}>{reauthNotice}</p>}
+                  <ModalInput label={REAUTH_UI.codeLabel} value={reauthCode} onChange={setReauthCode} placeholder="123456" autoFocus />
+                  <button
+                    onClick={() => handleNewReauthCode('export_data')}
+                    disabled={isLoading}
+                    className="text-[13px] font-medium underline disabled:opacity-40"
+                    style={{ color: ACCENT, fontFamily: FONT }}
+                  >
+                    {REAUTH_UI.newCode}
+                  </button>
+                </>
+              )}
+              {error && <p className="text-[13px] text-red-500" style={{ fontFamily: FONT }}>{error}</p>}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={closeModal} className="flex-1 py-3 rounded-xl text-[14px] font-medium" style={{ background: 'rgba(0,0,0,0.06)', color: '#000', fontFamily: FONT }}>
+                Cancel
+              </button>
+              <button
+                onClick={handleExportData}
+                disabled={isLoading}
+                className="flex-1 py-3 rounded-xl text-[14px] font-medium text-white disabled:opacity-40"
+                style={{ background: ACCENT, fontFamily: FONT }}
+              >
+                {exportButtonLabel(reauthStage, reauthBusy)}
               </button>
             </div>
           </Modal>

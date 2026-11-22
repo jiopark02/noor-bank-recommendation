@@ -13,6 +13,12 @@ import {
   revokeAndDeleteConnections,
 } from "@/lib/plaidRevocation";
 import { deleteAccountForUser } from "@/lib/accountDeletion";
+import { requireRecentReauth } from "@/lib/accountReauth";
+import {
+  liveReauthGateDeps,
+  reauthResponse,
+  verifiedRequestSessionId,
+} from "@/lib/accountReauthRoute";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +31,13 @@ export const maxDuration = 300;
  *
  * Identity comes ONLY from the verified Bearer JWT. No id is read from the
  * request body — it is neither accepted nor trusted.
+ *
+ * Before anything else the route requires a recent email-code verification
+ * for "delete_account" made by this request's sign-in session
+ * (requireRecentReauth, accountReauth.ts): 403 REAUTH_REQUIRED without one,
+ * 403 REAUTH_SESSION_UNAVAILABLE when the token names no session, 503
+ * REAUTH_CHECK_UNAVAILABLE when it cannot be checked, unless
+ * ACCOUNT_REAUTH_MODE is exactly "off".
  *
  * WHAT REPLACED THE "BEST-EFFORT REVOCATION" RULE, AND WHY
  * This route used to revoke each Plaid Item best-effort and then delete every
@@ -65,10 +78,11 @@ export const maxDuration = 300;
  * src/lib/accountDeletion.ts, and the ordering rationale is documented there.
  * The split exists because the guarantee that matters is a negative one — when
  * a bank connection could not be revoked, the user's rows are NOT deleted — and
- * a negative guarantee has to be observed as a call that did not happen. This
- * route cannot be executed offline (it authenticates first, and nothing in the
- * suite fakes that boundary), so the decision moved to where it can be:
+ * a negative guarantee has to be observed as a call that did not happen. The
+ * decision moved to where it can be observed without faking authentication:
  * accountDeletion.test.ts runs every branch with injected fakes.
+ * accountActionReauthGate.test.ts executes this route with authentication faked,
+ * for the reauthentication gate only.
  *
  * Keep it that way. A branch added here instead of there is a branch nothing
  * tests.
@@ -81,6 +95,18 @@ export async function POST(request: NextRequest) {
   const authUserId = await getAuthenticatedUserIdFromRequest(request);
   if (!authUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // A recent email-code verification for this purpose, read from the
+  // database, before anything is revoked or deleted. Closed when it cannot be
+  // checked. Not used up: a deletion that stops part-way is retried.
+  const reauth = await requireRecentReauth(
+    liveReauthGateDeps(),
+    { userId: authUserId, sessionId: verifiedRequestSessionId(request) },
+    "delete_account"
+  );
+  if (!reauth.ok) {
+    return reauthResponse(reauth);
   }
 
   // Constructed lazily and at most once. createAdminClient() THROWS when

@@ -299,6 +299,7 @@ describe("account export: what each section reads", () => {
     goals: "owner_user_id",
     household_invites: "invited_by",
     household_invite_issues: "user_id",
+    account_reauth_codes: "user_id",
     joint_goals_created: "created_by",
     household_invites_received: "invitee_email",
   };
@@ -325,6 +326,7 @@ describe("account export: what each section reads", () => {
     goals: "id",
     household_invites: "id",
     household_invite_issues: "user_id",
+    account_reauth_codes: "user_id",
   };
 
   it("E5 the file carries exactly these top-level keys", async () => {
@@ -351,6 +353,7 @@ describe("account export: what each section reads", () => {
         "goals",
         "household_invites",
         "household_invite_issues",
+        "account_reauth_codes",
         "joint_goals_created",
         "household_invites_received",
       ].sort()
@@ -601,6 +604,7 @@ describe("account export: explicit column lists match the schema", () => {
     "share_prompt_answers",
     "goals",
     "household_invite_issues",
+    "account_reauth_codes",
   ];
 
   /**
@@ -608,10 +612,15 @@ describe("account export: explicit column lists match the schema", () => {
    * share_grants.grantee_user_id and share_prompt_answers.grantee_user_id:
    * the other member's identifier is their personal data, so it is not
    * exported to the person who shared or was asked.
+   * account_reauth_codes.code_hash: the keyed hash of a one-time code,
+   * nothing the user entered or can use.
+   * account_reauth_codes.verified_session_id: an internal session
+   * identifier, nothing the user can use.
    */
   const NOT_EXPORTED: Readonly<Record<string, readonly string[]>> = {
     share_grants: ["grantee_user_id"],
     share_prompt_answers: ["grantee_user_id"],
+    account_reauth_codes: ["code_hash", "verified_session_id"],
   };
 
   for (const table of EXPLICIT) {
@@ -680,6 +689,58 @@ describe("account export: explicit column lists match the schema", () => {
       expect(Object.keys(rows[0]), key).not.toContain("owner_user_id");
     }
     expect(JSON.stringify(result.body)).not.toContain(GRANTEE);
+  });
+
+  it("E21 the account_reauth_codes row carries no code_hash, no verified_session_id and only the caller's row, executed", async () => {
+    const HASH = "sentinel-code-hash-5e0b";
+    const OTHER_HASH = "sentinel-other-hash-91c2";
+    const SESSION_ID = "44444444-4444-4444-8444-444444444444";
+    const { result } = await exportOf(
+      {
+        account_reauth_codes: [
+          {
+            user_id: USER,
+            purpose: "export_data",
+            code_hash: HASH,
+            expires_at: "2026-11-21T00:10:00Z",
+            attempts: 1,
+            verified_at: "2026-11-21T00:02:00Z",
+            verified_session_id: SESSION_ID,
+            window_start: "2026-11-21T00:00:00Z",
+            window_count: 1,
+          },
+          {
+            user_id: OTHER,
+            purpose: "delete_account",
+            code_hash: OTHER_HASH,
+            expires_at: "2026-11-21T00:10:00Z",
+            attempts: 0,
+            verified_at: null,
+            verified_session_id: null,
+            window_start: "2026-11-21T00:00:00Z",
+            window_count: 1,
+          },
+        ],
+      },
+      EXPORT_SECTIONS
+    );
+    expect(result.status).toBe(200);
+    const rows = result.body.account_reauth_codes as ExportRow[];
+    expect(Object.keys(rows[0])).not.toContain("verified_session_id");
+    expect(JSON.stringify(result.body)).not.toContain(SESSION_ID);
+    expect(rows).toEqual([
+      {
+        purpose: "export_data",
+        expires_at: "2026-11-21T00:10:00Z",
+        attempts: 1,
+        verified_at: "2026-11-21T00:02:00Z",
+        window_start: "2026-11-21T00:00:00Z",
+        window_count: 1,
+      },
+    ]);
+    expect(Object.keys(rows[0])).not.toContain("code_hash");
+    expect(JSON.stringify(result.body)).not.toContain(HASH);
+    expect(JSON.stringify(result.body)).not.toContain(OTHER_HASH);
   });
 
   it("E20 a share row's resource_id names a bank connection in the same file, executed", async () => {
