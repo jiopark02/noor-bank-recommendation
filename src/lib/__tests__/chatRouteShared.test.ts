@@ -358,6 +358,10 @@ describe("nothing shared (T15)", () => {
       const unset = await bodyWithSwitch(undefined, text);
       const on = await bodyWithSwitch("on", text);
       expect(on).toBe(unset);
+      // Not only equal to the unset request: neither shared-data section is
+      // in it, whatever the unset request carries.
+      expect(on).not.toContain(NOTICE_HEADING);
+      expect(on).not.toContain("## What a household member shares");
       expect(seen.lists).toEqual([USER_ID]);
       expect(seen.reads).toEqual([]);
       expect(seen.marks).toEqual([]);
