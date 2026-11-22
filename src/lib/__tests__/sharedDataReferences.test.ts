@@ -66,6 +66,14 @@ const TARGETS: ProbeTarget[] = [
     },
   },
   {
+    name: "chat_shared_turn_save",
+    pattern: word("chat_shared_turn_save"),
+    allowed: {
+      // saveSharedTurn: the only save of a turn whose prompt carried another member's bank data.
+      "lib/aiMemory.ts": "the only call of the function that records the shared sources and stores the turn together",
+    },
+  },
+  {
     name: "household_shared_connections",
     pattern: word("household_shared_connections"),
     allowed: {

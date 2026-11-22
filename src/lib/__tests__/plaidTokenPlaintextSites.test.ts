@@ -50,7 +50,7 @@ const TARGETS: ProbeTarget[] = [
       // Passes it to readBankData for the money summary.
       "app/api/finance/summary/route.ts": "reads accounts, transactions and recurring for the summary",
       // Passes it to readBankData for the chat's bank state.
-      "lib/plaidChatState.ts": "reads accounts for the chat's bank state",
+      "lib/plaidChatState.ts": "reads accounts for the chat's bank state: the user's own, and those another household member shares, one owner per call",
       // Passes it to readBankData once per owner, with that owner's id.
       "app/api/household/shared-accounts/route.ts":
         "reads accounts of connections another household member shares with the caller, one owner per call",

@@ -5,8 +5,11 @@
 // tables (chat_sessions, chat_messages, user_facts, chat_summaries) created in
 // the 20260518120000_create_ai_memory_tables migration. It also reads
 // chat_shared_sources (20261122120000_chat_shared_sources migration), which
-// marks where another household member's shared bank data entered a session;
-// it never writes that table.
+// marks where another household member's shared bank data entered a session.
+// It writes that table only through saveSharedTurn, which calls the database
+// function chat_shared_turn_save (20261124120000_chat_shared_turn_save
+// migration; whether it is applied is live state) to record the mark and store
+// the turn together.
 //
 // SECURITY NOTE: All functions use the admin client (createAdminClient), which
 // BYPASSES Row Level Security. Every query MUST filter by user_id explicitly.
@@ -721,6 +724,136 @@ export async function findSavedTurn(
   if (!userRow || !assistantRow) return null;
   if (userRow.session_id !== assistantRow.session_id) return null;
   return userRow.session_id;
+}
+
+/**
+ * Thrown by saveSharedTurn when a connection whose data entered the turn is no
+ * longer shared with the user: nothing was stored.
+ */
+export class SharedSourceEndedError extends Error {
+  readonly code = "SHARED_SOURCE_ENDED";
+
+  constructor() {
+    super("Shared bank data is no longer shared: the messages were not stored");
+    this.name = "SharedSourceEndedError";
+    Object.setPrototypeOf(this, SharedSourceEndedError.prototype);
+  }
+}
+
+/**
+ * Thrown by saveSharedTurn when a lock the save needs was held elsewhere on
+ * both tries: nothing was stored.
+ */
+export class SharedTurnBusyError extends Error {
+  readonly code = "SHARED_TURN_BUSY";
+
+  constructor() {
+    super("The shared turn could not be stored now: the messages were not stored");
+    this.name = "SharedTurnBusyError";
+    Object.setPrototypeOf(this, SharedTurnBusyError.prototype);
+  }
+}
+
+/** How long saveSharedTurn waits before its one second try after 'busy'. */
+export const SHARED_TURN_BUSY_RETRY_MS = 150;
+
+/** A shared connection whose data entered the turn being saved. */
+export interface SharedTurnSource {
+  ownerUserId: string;
+  connectionId: number;
+}
+
+export interface SaveSharedTurnOptions {
+  ids: SavedTurnIds;
+  signal?: AbortSignal;
+  /** Replaces the wait before the second try; for tests. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Stores a turn whose prompt carried bank data another household member shares
+ * with the user, and records each connection it came from, in one call of
+ * chat_shared_turn_save. The function decides under the purge's locks; the
+ * moment it records and the user message's created_at are one database time.
+ *
+ * Answers, and what this does with them (every one but 'saved' stored
+ * nothing):
+ *   saved           returns
+ *   session_closed  throws SessionClosedError, as saveMessages does, so the
+ *                   caller may store the same pair, with the same ids, in the
+ *                   user's open session (another call of this function)
+ *   not_shared      throws SharedSourceEndedError
+ *   busy            waits SHARED_TURN_BUSY_RETRY_MS and calls once more; busy
+ *                   again, or a signal already aborted before that call,
+ *                   throws SharedTurnBusyError
+ * An error from the call itself is NR001 (SessionClosedError, the whole call
+ * rolled back) or anything else, wrapped; then, as with saveMessages, the
+ * caller does not know whether the call was stored and asks by id.
+ *
+ * SECURITY: userId is the authenticated id; the function stores it on both
+ * rows and decides the sharing for it, never for an id from the request.
+ */
+export async function saveSharedTurn(
+  sessionId: string,
+  userId: string,
+  pair: MessagePairToSave,
+  sources: SharedTurnSource[],
+  options: SaveSharedTurnOptions
+): Promise<void> {
+  if (!pair.userContent || pair.userContent.trim() === "") {
+    throw new Error("saveSharedTurn: userContent must be a non-empty string");
+  }
+  if (!pair.assistantContent || pair.assistantContent.trim() === "") {
+    throw new Error("saveSharedTurn: assistantContent must be a non-empty string");
+  }
+  if (sources.length === 0) {
+    throw new Error("saveSharedTurn: at least one source is required");
+  }
+
+  const call = async (): Promise<unknown> => {
+    const supabase = getAdmin();
+    const request = supabase.rpc("chat_shared_turn_save", {
+      p_session_id: sessionId,
+      p_user_id: userId,
+      p_owner_user_ids: sources.map((s) => s.ownerUserId),
+      p_resource_ids: sources.map((s) => s.connectionId),
+      p_user_message_id: options.ids.user,
+      p_assistant_message_id: options.ids.assistant,
+      p_user_content: pair.userContent,
+      p_assistant_content: pair.assistantContent,
+      p_model: pair.assistantModel ?? null,
+      p_input_tokens: pair.inputTokens ?? null,
+      p_output_tokens: pair.outputTokens ?? null,
+    });
+    const { data, error } = await (options.signal
+      ? request.abortSignal(options.signal)
+      : request);
+    if (error) {
+      if ((error as { code?: unknown }).code === PG_CHAT_SESSION_CLOSED) {
+        throw new SessionClosedError();
+      }
+      throw wrapDbError(`Failed to save the shared turn: ${error.message}`, error);
+    }
+    return data;
+  };
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const answer = await call();
+    if (answer === "saved") return;
+    if (answer === "session_closed") throw new SessionClosedError();
+    if (answer === "not_shared") throw new SharedSourceEndedError();
+    if (answer !== "busy") {
+      throw new Error("saveSharedTurn: unexpected answer from the database function");
+    }
+    if (attempt === 2) break;
+    await (options.sleep ?? defaultSleep)(SHARED_TURN_BUSY_RETRY_MS);
+    if (options.signal?.aborted) break;
+  }
+  throw new SharedTurnBusyError();
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
