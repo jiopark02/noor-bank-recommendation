@@ -296,6 +296,7 @@ describe("account export: what each section reads", () => {
     household_members: "user_id",
     share_grants: "owner_user_id",
     share_prompt_answers: "owner_user_id",
+    chat_shared_sources: "user_id",
     goals: "owner_user_id",
     household_invites: "invited_by",
     household_invite_issues: "user_id",
@@ -323,6 +324,7 @@ describe("account export: what each section reads", () => {
     household_members: "id",
     share_grants: "id",
     share_prompt_answers: "id",
+    chat_shared_sources: "id",
     goals: "id",
     household_invites: "id",
     household_invite_issues: "user_id",
@@ -350,6 +352,7 @@ describe("account export: what each section reads", () => {
         "household_members",
         "share_grants",
         "share_prompt_answers",
+        "chat_shared_sources",
         "goals",
         "household_invites",
         "household_invite_issues",
@@ -602,6 +605,7 @@ describe("account export: explicit column lists match the schema", () => {
     "household_members",
     "share_grants",
     "share_prompt_answers",
+    "chat_shared_sources",
     "goals",
     "household_invite_issues",
     "account_reauth_codes",
@@ -612,6 +616,10 @@ describe("account export: explicit column lists match the schema", () => {
    * share_grants.grantee_user_id and share_prompt_answers.grantee_user_id:
    * the other member's identifier is their personal data, so it is not
    * exported to the person who shared or was asked.
+   * chat_shared_sources.owner_user_id and chat_shared_sources.resource_id:
+   * the person who shared a bank connection, and the row id of that
+   * person's connection. Both identify another person's data, so neither is
+   * exported to the person it was shared with.
    * account_reauth_codes.code_hash: the keyed hash of a one-time code,
    * nothing the user entered or can use.
    * account_reauth_codes.verified_session_id: an internal session
@@ -620,6 +628,7 @@ describe("account export: explicit column lists match the schema", () => {
   const NOT_EXPORTED: Readonly<Record<string, readonly string[]>> = {
     share_grants: ["grantee_user_id"],
     share_prompt_answers: ["grantee_user_id"],
+    chat_shared_sources: ["owner_user_id", "resource_id"],
     account_reauth_codes: ["code_hash", "verified_session_id"],
   };
 
@@ -689,6 +698,62 @@ describe("account export: explicit column lists match the schema", () => {
       expect(Object.keys(rows[0]), key).not.toContain("owner_user_id");
     }
     expect(JSON.stringify(result.body)).not.toContain(GRANTEE);
+  });
+
+  it("E22 a chat_shared_sources row carries neither the owner's id nor their connection's row id, and only the caller's rows are exported, executed", async () => {
+    // The person who shared and their bank connection's row id identify
+    // another person's data: neither is exported to the person the
+    // connection was shared with. Sentinel values, so their absence from
+    // the whole file is checked too.
+    const SHARER = "55555555-5555-4555-8555-555555555555";
+    const CONNECTION_ROW_ID = 918273645;
+    const { result } = await exportOf(
+      {
+        chat_shared_sources: [
+          {
+            id: uuidFor(1),
+            session_id: uuidFor(21),
+            user_id: USER,
+            owner_user_id: SHARER,
+            resource_type: "plaid_connection",
+            resource_id: CONNECTION_ROW_ID,
+            first_shared_at: "2026-11-22T09:15:30.123456+00:00",
+            created_at: "2026-11-22T09:15:31Z",
+          },
+          {
+            id: uuidFor(2),
+            session_id: uuidFor(22),
+            user_id: OTHER,
+            owner_user_id: USER,
+            resource_type: "plaid_connection",
+            resource_id: 7,
+            first_shared_at: "2026-11-22T10:00:00Z",
+            created_at: "2026-11-22T10:00:01Z",
+          },
+        ],
+      },
+      EXPORT_SECTIONS
+    );
+    expect(result.status).toBe(200);
+    const rows = result.body.chat_shared_sources as ExportRow[];
+    // The second row is another person's session that the caller shared
+    // into: it is that person's, read by user_id, and not exported here.
+    expect(rows).toEqual([
+      {
+        id: uuidFor(1),
+        session_id: uuidFor(21),
+        resource_type: "plaid_connection",
+        first_shared_at: "2026-11-22T09:15:30.123456+00:00",
+        created_at: "2026-11-22T09:15:31Z",
+      },
+    ]);
+    expect(Object.keys(rows[0])).not.toContain("owner_user_id");
+    expect(Object.keys(rows[0])).not.toContain("resource_id");
+    expect(Object.keys(rows[0])).not.toContain("user_id");
+    const file = JSON.stringify(result.body);
+    expect(file).not.toContain(SHARER);
+    expect(file).not.toContain(String(CONNECTION_ROW_ID));
+    expect(file).not.toContain(uuidFor(22));
   });
 
   it("E21 the account_reauth_codes row carries no code_hash, no verified_session_id and only the caller's row, executed", async () => {

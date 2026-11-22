@@ -66,7 +66,9 @@ export type ExportSection = {
  * user_id; its id is the user's own id, and its list carries it. A section
  * read by the caller's address keeps that column: it is the address the
  * invite was made for. A column that names another person by id is left out
- * as well (grantee_user_id on the share sections), and so is a stored hash
+ * as well (grantee_user_id on the share sections, owner_user_id on
+ * chat_shared_sources), together with the id of a row that belongs to that
+ * person (resource_id on chat_shared_sources), and so is a stored hash
  * (code_hash on account_reauth_codes).
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
@@ -159,6 +161,19 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     table: "share_prompt_answers",
     columns: "id, household_id, resource_id, answered_at",
     filterColumn: "owner_user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // Where another household member's shared bank data entered one of the
+  // user's chat sessions, read by user_id: the session and the moment.
+  // owner_user_id, the person who shared, and resource_id, the row id of
+  // that person's bank connection, are not exported: both identify another
+  // person's data, not the user's.
+  {
+    key: "chat_shared_sources",
+    table: "chat_shared_sources",
+    columns: "id, session_id, resource_type, first_shared_at, created_at",
+    filterColumn: "user_id",
     orderColumn: "id",
     orderKeyType: "uuid",
   },
