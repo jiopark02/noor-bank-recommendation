@@ -2,11 +2,13 @@ import { describe, it } from "vitest";
 import { codeBySourceFile, expectAllowlistHolds, word, type ProbeTarget } from "./sourceProbe";
 
 /**
- * Which application files can obtain a Plaid access token in plaintext.
+ * Which application files can reach the decryption of a stored Plaid access
+ * token.
  *
- * Plaintext comes from decryptPlaidAccessToken, called directly or through the
- * two factories that hand it on as a dependency together with the Plaid
- * client: liveAdapterDeps (bank reads) and liveRevocationDeps (revocation).
+ * A stored token is decrypted by decryptPlaidAccessToken, called directly or
+ * through the two factories that hand it on as a dependency together with the
+ * Plaid client: liveAdapterDeps (bank reads) and liveRevocationDeps
+ * (revocation).
  * Each name has its own allowlist of files, so a new file reaching one of
  * them fails here and has to be added with a reason, which makes the addition
  * visible in review. An allowlisted file that stops naming its target fails
@@ -19,7 +21,9 @@ import { codeBySourceFile, expectAllowlistHolds, word, type ProbeTarget } from "
  *
  * Code is read with comments removed and matched as whole words. It executes
  * nothing. Limit: a factory's result or the decrypt function passed on
- * through a variable or another helper is not followed.
+ * through a variable or another helper is not followed. Limit: the plaintext
+ * token Plaid returns at exchange, before it is encrypted (the exchange-token
+ * route and the modules it hands that token to), is not tracked here.
  */
 
 const TARGETS: ProbeTarget[] = [

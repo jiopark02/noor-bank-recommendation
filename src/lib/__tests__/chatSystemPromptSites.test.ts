@@ -22,6 +22,8 @@ import { codeBySourceFile, expectAllowlistHolds, word, type ProbeTarget } from "
  * whose role key is the string "system"; a type naming "system" in a union
  * does not count. It executes nothing. Limit: a role or a builder passed
  * through a variable, or a prompt sent without a role key, is not seen.
+ * Limit: a "system" after the role key followed by | is taken for a type
+ * union and excluded, so an expression continuing with || is excluded too.
  */
 
 const TARGETS: ProbeTarget[] = [

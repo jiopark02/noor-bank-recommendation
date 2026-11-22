@@ -2,15 +2,18 @@ import { describe, it } from "vitest";
 import { codeBySourceFile, expectAllowlistHolds, word, type ProbeTarget } from "./sourceProbe";
 
 /**
- * Which application files name the household sharing tables and functions in
- * code.
+ * Which application files name the household sharing tables, and the function
+ * that creates grants, in code.
  *
  * These names reach another person's data: a grant, the record that the owner
- * was asked, the mark that shared bank data entered a chat session, and the
- * only function that writes grants. Each name has its own allowlist of files,
- * so a new file naming one of them fails here and has to be added with a
- * reason, which makes the addition visible in review. An allowlisted file
- * that stops naming its target fails too, so the list cannot go stale.
+ * was asked, the mark that shared bank data entered a chat session, and
+ * household_share_set, the only function that inserts grants. household_leave
+ * also deletes grants but is not listed: this probe guards the names that can
+ * widen exposure, and deleting a grant narrows it. Each name has its own
+ * allowlist of files, so a new file naming one of them fails here and has to
+ * be added with a reason, which makes the addition visible in review. An
+ * allowlisted file that stops naming its target fails too, so the list cannot
+ * go stale.
  *
  * shareGrantReferences.test.ts keeps its own narrower guarantee (the grantee
  * column, and the bank-reading modules with their comments); this file does

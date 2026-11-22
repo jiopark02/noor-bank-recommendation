@@ -7,11 +7,11 @@ import { expect } from "vitest";
  * Shared pieces of the file-level boundary probes (sharedDataReferences,
  * plaidTokenPlaintextSites, chatSystemPromptSites).
  *
- * The walk and the comment stripper are the ones shareGrantReferences.test.ts
- * and chatSharedSourceRecordCallers.test.ts already use: every source file
- * under src/ outside __tests__ and node_modules, and block comments then line
- * comments not preceded by ':' (so URLs survive). The stripper is regex-based:
- * a string literal containing comment markers can hide code from it.
+ * The walk reads every .ts, .tsx, .js, .jsx, .mjs and .cjs file under src/,
+ * skipping any directory named __tests__ or node_modules. The stripper removes
+ * block comments, then line comments not preceded by ':' (so URLs survive).
+ * The stripper is regex-based: a string literal containing comment markers
+ * can hide code from it.
  *
  * Not a test file itself; it executes nothing in src/.
  */
