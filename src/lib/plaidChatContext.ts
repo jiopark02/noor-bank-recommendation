@@ -21,8 +21,15 @@
 //                 also reads balances (depth "balances", resolvePlaidChatDepth).
 // - balances   -> connection scaffold + sealed shallow balances on substantive turns.
 //
+// A second switch, AI_HOUSEHOLD_SHARED_STATE (exactly "on", else off), lets a
+// household turn also carry the connections and balances another household
+// member shares with the user (buildSharedBankBlock), and puts one line on a
+// turn that does not (SHARED_NOT_IN_TURN_BLOCK). "off" above closes that too.
+//
 // Design: docs/design/B-1-plaid-chat-capability-scaffold.md
 // =============================================================================
+
+import { sanitizeNameField } from "@/lib/validation";
 
 export type PlaidStateMode = "off" | "connection" | "balances";
 
@@ -112,19 +119,134 @@ export function resolvePlaidStateMode(): PlaidStateMode {
  * The depth of this turn's bank-state read, for a mode other than "off" (the
  * caller reads nothing under "off").
  *
- * "balances" when the mode is "balances" and the turn is not a greeting, or
- * when the balance-keyword channel allowed this turn (mode "connection" and a
- * balance question: plaidEgressPolicy.ts). Anything else reads connections
- * only, so a greeting never triggers a live balance read.
+ * "balances" when the mode is "balances" and the turn is not a greeting, when
+ * the balance-keyword channel allowed this turn (mode "connection" and a
+ * balance question), or when the household-shared channel allowed it (a
+ * household turn reads the user's balances beside the other member's):
+ * plaidEgressPolicy.ts. Anything else reads connections only, so a greeting
+ * never triggers a live balance read.
  */
 export function resolvePlaidChatDepth(input: {
   mode: PlaidStateMode;
   isGreeting: boolean;
   balanceKeywordAllowed: boolean;
+  householdSharedAllowed?: boolean;
 }): PlaidChatDepth {
   if (input.mode === "balances" && !input.isGreeting) return "balances";
   if (input.balanceKeywordAllowed) return "balances";
+  if (input.householdSharedAllowed === true) return "balances";
   return "connection";
+}
+
+/**
+ * The chat's shared-data switch, AI_HOUSEHOLD_SHARED_STATE. On only when the
+ * value is exactly "on" (no trimming, no case folding); unset and every other
+ * value are off. While it is off the chat reads nothing another household
+ * member shares, adds no line about it, and saves every turn as before.
+ */
+export function resolveSharedStateEnabled(): boolean {
+  return process.env.AI_HOUSEHOLD_SHARED_STATE === "on";
+}
+
+// -----------------------------------------------------------------------------
+// Household turn
+// -----------------------------------------------------------------------------
+
+/**
+ * Words that make a message about the household, matched as whole words in
+ * any case. "we" and "us" are left out: they are too common in questions
+ * about the user's own money to stand for another person.
+ */
+const HOUSEHOLD_WORDS = [
+  "partner",
+  "spouse",
+  "husband",
+  "wife",
+  "household",
+  "joint",
+  "our",
+  "ours",
+  "fiance",
+  "fiancee",
+  "boyfriend",
+  "girlfriend",
+  "roommate",
+  "housemate",
+  // Common terms of endearment.
+  "babe",
+  "honey",
+  "hubby",
+  "wifey",
+  "bae",
+  "my love",
+];
+
+const HOUSEHOLD_WORDS_RE = new RegExp(`\\b(?:${HOUSEHOLD_WORDS.join("|")})\\b`);
+
+/**
+ * First names that are also everyday or money words. One of these counts as
+ * the other member's name only where the message writes it with a capital
+ * first letter.
+ */
+const NAMES_THAT_ARE_WORDS = [
+  "bill",
+  "will",
+  "may",
+  "mark",
+  "grant",
+  "chase",
+  "penny",
+  "rich",
+  "max",
+  "cash",
+];
+
+/** A letter of any script, or an ASCII digit. */
+function isWordCharacter(c: string | undefined): boolean {
+  if (c === undefined || c === "") return false;
+  return c.toLowerCase() !== c.toUpperCase() || (c >= "0" && c <= "9");
+}
+
+/**
+ * Whether the message names this person: the name, cleaned like every other
+ * name that reaches a prompt, as a whole word. `\b` only knows ASCII letters,
+ * so the edges are checked by hand: the characters on either side must not be
+ * a letter of any script or a digit.
+ */
+function messageNames(message: string, rawName: string | null): boolean {
+  const name = sanitizeNameField(rawName);
+  if (name.length < 2) return false;
+  const lower = name.toLowerCase();
+  const needsCapital = NAMES_THAT_ARE_WORDS.indexOf(lower) !== -1;
+  for (let i = 0; i + name.length <= message.length; i++) {
+    const segment = message.substr(i, name.length);
+    if (segment.toLowerCase() !== lower) continue;
+    if (isWordCharacter(message.charAt(i - 1))) continue;
+    if (isWordCharacter(message.charAt(i + name.length))) continue;
+    const first = segment.charAt(0);
+    if (needsCapital && first === first.toLowerCase()) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the user's latest message is about their household: it holds one of
+ * HOUSEHOLD_WORDS, or the first name of a member who shares a bank with them.
+ * The caller decides the rest: a greeting is never a household turn, and a
+ * session already marked with shared data is one whatever the message says.
+ */
+export function isHouseholdTurn(
+  message: string,
+  ownerFirstNames: Array<string | null>
+): boolean {
+  if (typeof message !== "string" || message === "") return false;
+  const folded = message.toLowerCase().replace(/\s+/g, " ");
+  if (HOUSEHOLD_WORDS_RE.test(folded)) return true;
+  for (const name of ownerFirstNames) {
+    if (messageNames(message, name)) return true;
+  }
+  return false;
 }
 
 // -----------------------------------------------------------------------------
@@ -412,6 +534,111 @@ export function buildPlaidCapabilityBlock(state: PlaidChatState): string {
 
   return block;
 }
+
+// -----------------------------------------------------------------------------
+// Bank data another household member shares
+// -----------------------------------------------------------------------------
+
+/** One member's shared banks, as read for this turn. */
+export interface SharedChatOwner {
+  /** Raw first name from the profile, or null. Sanitized at render time. */
+  firstName: string | null;
+  /** The connections this member shares, each with this turn's read. */
+  connections: PlaidChatConnection[];
+  /** The accounts read from those connections. */
+  accounts: PlaidChatAccount[];
+}
+
+export interface SharedChatState {
+  /** One entry per member, in the order the shared connections listed them. */
+  owners: SharedChatOwner[];
+}
+
+/**
+ * The name the block gives a member: the profile's first name, cleaned as
+ * every name that reaches a prompt is (sanitizeNameField) and then as a bank
+ * label is (sanitizePlaidLabel removes angle brackets, which could close the
+ * seal), or a stand-in when nothing is left.
+ */
+export function sharedOwnerLabel(firstName: string | null): string {
+  return sanitizePlaidLabel(sanitizeNameField(firstName)) || "A household member";
+}
+
+const SHARED_READ_LABELS: Record<PlaidChatConnectionRead, string> = {
+  read: "balances read",
+  needs_reconnect: "its owner needs to reconnect it in Noor",
+  not_read: "not read this turn",
+};
+
+const SHARED_STATEMENT =
+  "Another member of the user's household shares the bank data below with " +
+  "the user. It is that person's money, not the user's: never add it to the " +
+  "user's own balances or describe it as the user's. Use it only when the " +
+  "user's question is about that person or about the household's money " +
+  "together, and follow the bank data rules: cite only figures shown below, " +
+  "and for a bank marked as not read or as needing its owner to reconnect it, " +
+  "do not state or estimate its figures.";
+
+const SHARED_OWED =
+  "An amount owed below is a credit card or loan balance that person owes, " +
+  "not money they have.";
+
+function renderSharedOwner(owner: SharedChatOwner): string {
+  const lines = [`Shared by ${sharedOwnerLabel(owner.firstName)}:`];
+  const connLine = owner.connections
+    .map((c) => {
+      const read = c.read ? `, ${SHARED_READ_LABELS[c.read]}` : "";
+      return `${institutionLabel(c)} (${c.status}${read})`;
+    })
+    .join(", ");
+  if (connLine) lines.push(`Connections: ${connLine}`);
+  const shown = owner.accounts.slice(0, MAX_RENDERED_ACCOUNTS);
+  if (shown.length === 0) {
+    lines.push("Accounts: none returned this turn");
+    return lines.join("\n");
+  }
+  lines.push("Accounts:");
+  for (const a of shown) lines.push(`- ${renderAccountLine(a)}`);
+  const remainder = owner.accounts.length - shown.length;
+  if (remainder > 0) {
+    lines.push(
+      `- ...and ${remainder} more account${remainder === 1 ? "" : "s"} not shown.`
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The system-prompt block of what other household members share with the
+ * user, for a turn the household-shared channel allowed. Its own section,
+ * after the user's own bank block, which it never changes. Every name and
+ * label is cleaned and sits inside the sealed bank data. Empty when no member
+ * has a connection to show.
+ */
+export function buildSharedBankBlock(state: SharedChatState): string {
+  const owners = state.owners.filter((o) => o.connections.length > 0);
+  if (owners.length === 0) return "";
+  const parts = [SHARED_STATEMENT];
+  if (owners.some((o) => o.accounts.slice(0, MAX_RENDERED_ACCOUNTS).some((a) => a.owed === true))) {
+    parts.push(SHARED_OWED);
+  }
+  const inner = owners.map(renderSharedOwner).join("\n\n");
+  return (
+    "\n\n## What a household member shares with this user\n" +
+    `${parts.join(" ")}\n\n${sealBankData(inner)}`
+  );
+}
+
+/**
+ * The one line for a turn where something is shared with the user but none of
+ * it is in the prompt. It names no person, bank, account or amount.
+ */
+export const SHARED_NOT_IN_TURN_BLOCK =
+  "\n\n## Household sharing\n" +
+  "A member of the user's household shares bank accounts with the user, but " +
+  "none of their data is in this turn. Do not guess anything about it. If the " +
+  "user asks about that person's money or the household's, ask them to mention " +
+  "their partner, or their partner's name, in their message.";
 
 // -----------------------------------------------------------------------------
 // Masked logging (§7)

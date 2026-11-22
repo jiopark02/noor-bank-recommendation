@@ -69,6 +69,20 @@ const TARGETS: ProbeTarget[] = [
       "app/api/chat/route.ts": "appends bank state to the chat system prompt",
     },
   },
+  {
+    name: "buildSharedBankBlock",
+    pattern: word("buildSharedBankBlock"),
+    allowed: {
+      "lib/plaidChatContext.ts": "definition: the block of what another household member shares",
+    },
+  },
+  {
+    name: "SHARED_NOT_IN_TURN_BLOCK",
+    pattern: word("SHARED_NOT_IN_TURN_BLOCK"),
+    allowed: {
+      "lib/plaidChatContext.ts": "definition: the one line saying shared data is not in this turn",
+    },
+  },
 ];
 
 describe("chat system prompt sites", () => {

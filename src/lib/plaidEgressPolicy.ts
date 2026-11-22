@@ -1,6 +1,6 @@
 import type { PlaidStateMode } from "@/lib/plaidChatContext";
 
-// Shared decision surface for the three places in the chat route that decide
+// Shared decision surface for every place in the chat route that decides
 // whether Plaid-derived data reaches the LLM prompt:
 //   capability_scaffold  whether the bank-state block, and the one bank read
 //                        behind it, happen at all.
@@ -11,6 +11,12 @@ import type { PlaidStateMode } from "@/lib/plaidChatContext";
 //                        turn but a greeting, so this channel denies there.
 //   financial_analysis_keyword
 //                        switched off outright — see its case for why.
+//   household_shared     whether bank data another household member shares
+//                        with the user (connections and balances) is read
+//                        into this turn's prompt. Only on a household turn,
+//                        only when something is shared, and only while the
+//                        chat's shared-data switch is on; when it allows, the
+//                        user's own read also goes to depth "balances".
 // Every channel also denies under "off": before that held, "off" stopped the
 // scaffold but still let a balance question pull a live balance into the
 // prompt.
@@ -23,6 +29,7 @@ export const PLAID_EGRESS_CHANNELS = [
   "capability_scaffold",
   "balance_keyword",
   "financial_analysis_keyword",
+  "household_shared",
 ] as const;
 
 export type PlaidEgressChannel = (typeof PLAID_EGRESS_CHANNELS)[number];
@@ -32,6 +39,12 @@ export interface PlaidEgressPolicyInput {
   plaidStateMode: PlaidStateMode;
   wantsBalance?: boolean;
   wantsFinancialAnalysis?: boolean;
+  /** household_shared: the chat's shared-data switch is on. */
+  sharedStateEnabled?: boolean;
+  /** household_shared: at least one connection is shared with the user. */
+  hasSharedConnections?: boolean;
+  /** household_shared: this turn is about the household. */
+  householdTurn?: boolean;
 }
 
 export interface PlaidEgressDecision {
@@ -97,6 +110,32 @@ export function evaluatePlaidEgressDecision(
         channel: input.channel,
         allowed: false,
         reason: "channel_disabled_transaction_policy_pending",
+      };
+    }
+    case "household_shared": {
+      // Every condition is checked in this order, so the reason names the
+      // first one that failed. "off" comes first: it closes this channel as
+      // it closes every other.
+      if (input.plaidStateMode === "off") {
+        return { channel: input.channel, allowed: false, reason: "mode_off" };
+      }
+      if (input.sharedStateEnabled !== true) {
+        return { channel: input.channel, allowed: false, reason: "switch_off" };
+      }
+      if (input.hasSharedConnections !== true) {
+        return { channel: input.channel, allowed: false, reason: "nothing_shared" };
+      }
+      if (input.householdTurn !== true) {
+        return {
+          channel: input.channel,
+          allowed: false,
+          reason: "not_household_turn",
+        };
+      }
+      return {
+        channel: input.channel,
+        allowed: true,
+        reason: "household_turn_mode_not_off",
       };
     }
     default: {
