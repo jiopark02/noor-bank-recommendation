@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   detectCrisisSignal,
@@ -6,6 +8,14 @@ import {
   type CrisisCategory,
 } from "@/lib/crisisSignals";
 import { CRISIS_NOTICES } from "@/lib/crisisNotice";
+import { stripComments } from "./sourceProbe";
+
+/**
+ * Mutations and the test each one turns red:
+ *   a pattern built from a string again                       -> "every pattern is a literal"
+ *   a word boundary dropped from a pattern that repeats a
+ *   shared group, or the group written differently            -> "word boundaries" table and the corpora
+ */
 
 const FIRST_PERSON: Array<[string, CrisisCategory]> = [
   ["I want to kill myself", "self_harm"],
@@ -176,6 +186,46 @@ describe("detectCrisisSignal", () => {
     const started = Date.now();
     expect(detectCrisisSignal(big)).toBeNull();
     expect(Date.now() - started).toBeLessThan(2000);
+  });
+});
+
+// Each row holds a pattern's word boundary on one side: the text matches
+// only with the boundary dropped (or, for an exception phrase, keeps its
+// signal only because the exception does not apply). The words are chosen
+// for that, not for meaning.
+const WORD_BOUNDARIES: Array<[string, CrisisCategory | null]> = [
+  // "kill" + reflexive, leading boundary
+  ["I will upskill myself this year", null],
+  // "end" + possessive + "life", leading boundary
+  ["I want to spend my life savings wisely", null],
+  // "take" + possessive + "life", trailing boundary
+  ["I take my own lifestyle choices seriously", null],
+  // "hurt" / "harm" / "cut" + reflexive, leading boundary
+  ["I don't want to shortcut myself out of savings", null],
+  // intent + harm verb + person, trailing boundary
+  ["I want to hurt hermits", null],
+  // "starve" + reflexive, leading boundary
+  ["I keep outstarving myself", null],
+  // "make" + reflexive + "sick", trailing boundary
+  ["I made myself sickly sweet tea", null],
+  // "shoot <person> a text" exception, trailing boundary
+  ["I'm going to shoot him a textbook", "harm_to_others"],
+  // "<verb> <person>'s idea" exception, trailing boundary
+  ["I'm going to kill my boss's idealism", "harm_to_others"],
+];
+
+describe("word boundaries of the patterns that repeat a shared group", () => {
+  it.each(WORD_BOUNDARIES)("%s", (text, category) => {
+    expect(detectCrisisSignal(text)).toBe(category);
+  });
+});
+
+describe("crisisSignals source", () => {
+  it("every pattern is a literal: the module never calls RegExp", () => {
+    const source = stripComments(
+      readFileSync(fileURLToPath(new URL("../crisisSignals.ts", import.meta.url)), "utf8")
+    );
+    expect(source).not.toMatch(/\bRegExp\s*\(/);
   });
 });
 
