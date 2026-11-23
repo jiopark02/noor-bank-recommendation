@@ -32,6 +32,7 @@ import {
   maskSensitive,
 } from "@/lib/memoryOutputFilter";
 import { detectCrisisSignal } from "@/lib/crisisSignals";
+import { errorCodeForLog } from "@/lib/errorCodeForLog";
 import type { UserFactCategory } from "@/lib/userFactCategories";
 
 // -----------------------------------------------------------------------------
@@ -1355,9 +1356,11 @@ export async function supersedeUserFact(
   } catch (insertError) {
     // Partial state: old is superseded but no replacement exists.
     // Caller can recover by calling saveUserFact with the same content.
+    // Ids and a code only: the error's message can carry the refused row.
     console.error(
-      `supersedeUserFact: old fact ${oldFactId} marked superseded but new ` +
-        `insert failed: ${insertError instanceof Error ? insertError.message : insertError}`
+      "[memory] supersedeUserFact insert_failed old_fact=%s code=%s",
+      oldFactId,
+      errorCodeForLog(insertError)
     );
     throw insertError;
   }
@@ -1371,7 +1374,9 @@ export async function supersedeUserFact(
 
   if (linkError) {
     console.error(
-      `supersedeUserFact: failed to set superseded_by on ${oldFactId}: ${linkError.message}`
+      "[memory] supersedeUserFact link_failed old_fact=%s code=%s",
+      oldFactId,
+      errorCodeForLog(linkError)
     );
   }
 
@@ -1573,8 +1578,10 @@ export async function createSummary(
 
   if (flagError) {
     console.error(
-      `createSummary: summary ${summary.id} saved but failed to set ` +
-        `chat_sessions.summarized for ${sessionId}: ${flagError.message}`
+      "[memory] createSummary flag_failed summary=%s session=%s code=%s",
+      summary.id,
+      sessionId,
+      errorCodeForLog(flagError)
     );
   }
 
