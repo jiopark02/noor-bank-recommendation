@@ -707,10 +707,13 @@ describe("a connected bank is never also a bank to connect", () => {
 //   the shared block written outside the seal                           -> T6
 //   the user's own block changed by the shared block                    -> T6
 //   a person, bank, account or amount put in the one-line notice        -> T7
+//   the notice telling the user to mention a name, or a word that does
+//     not make a household turn in every case                           -> T7
 //   the household-shared channel no longer raising the depth            -> depth
 
 import {
   buildSharedBankBlock,
+  isHouseholdTurn,
   sharedOwnerLabel,
   SHARED_NOT_IN_TURN_BLOCK,
   type SharedChatState,
@@ -818,10 +821,26 @@ describe("SHARED_NOT_IN_TURN_BLOCK (T7)", () => {
     expect(body).not.toMatch(/\d|\$|<|>/);
     expect(body).toContain("none of that data could be included in this turn");
     expect(body).toContain(
-      "they can ask again, mentioning their partner or that person's name"
+      "they can ask again, mentioning their partner or their household."
     );
+    // A name matches only with a capital first letter, so it is not suggested.
+    expect(body).not.toMatch(/\bname\b/i);
     // It does not tell the model the user left their partner out.
     expect(body).not.toMatch(/ask them to mention|did not mention|didn't mention/);
+  });
+
+  it("every word it tells the user to mention makes a household turn, in any case, with no name known", () => {
+    const hint = /mentioning (.+)\.$/.exec(SHARED_NOT_IN_TURN_BLOCK);
+    expect(hint).not.toBeNull();
+    const words = (hint as RegExpExecArray)[1]
+      .split(/ or |, /)
+      .map((phrase) => phrase.replace(/^their /, ""));
+    expect(words).toEqual(["partner", "household"]);
+    for (const word of words) {
+      for (const written of [word, word.toUpperCase(), word.charAt(0).toUpperCase() + word.slice(1)]) {
+        expect(isHouseholdTurn(`how much does my ${written} have`, [])).toBe(true);
+      }
+    }
   });
 });
 

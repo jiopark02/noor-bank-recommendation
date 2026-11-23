@@ -630,7 +630,9 @@ export function buildSharedBankBlock(state: SharedChatState): string {
  * it is in the prompt: the turn was not about the household, or the read
  * failed or ran out of time. It names no person, bank, account or amount, and
  * does not tell the model the user left anything out, since the user may have
- * mentioned their partner already.
+ * mentioned their partner already. The words it tells the user to mention are
+ * HOUSEHOLD_WORDS, which match in any case; a name matches only when written
+ * with a capital first letter, so the line does not suggest one.
  */
 export const SHARED_NOT_IN_TURN_BLOCK =
   "\n\n## Household sharing\n" +
@@ -638,7 +640,7 @@ export const SHARED_NOT_IN_TURN_BLOCK =
   "none of that data could be included in this turn. Do not guess or state " +
   "anything about it. If the user asks about it, say that it could not be " +
   "included this time, and that they can ask again, mentioning their partner " +
-  "or that person's name.";
+  "or their household.";
 
 // -----------------------------------------------------------------------------
 // Masked logging (§7)
