@@ -142,7 +142,9 @@ export function resolvePlaidChatDepth(input: {
  * The chat's shared-data switch, AI_HOUSEHOLD_SHARED_STATE. On only when the
  * value is exactly "on" (no trimming, no case folding); unset and every other
  * value are off. While it is off the chat reads nothing another household
- * member shares, adds no line about it, and saves every turn as before.
+ * member shares and adds no line about it. It does not change how a turn is
+ * saved: a turn of a session already marked with shared data is saved
+ * through the locked save whatever this switch says.
  */
 export function resolveSharedStateEnabled(): boolean {
   return process.env.AI_HOUSEHOLD_SHARED_STATE === "on";
