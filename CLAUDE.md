@@ -24,6 +24,7 @@ This file is loaded into every session, so anything stale here becomes a wrong p
 - **Vercel env changes (deletions included) need a manual redeploy.**
 - **Single production deploy from `main`**, auto-built on push; the tech team pushes too. Run `git fetch --prune` right before creating a branch and right before a push or merge, not at session start. After pulling, re-check that earlier fixes survived.
 - **PowerShell host:** commands handed to the operator avoid `&&` and `curl -H` (use `Invoke-RestMethod`). `vercel env ls` is unavailable; env vars are read in the Vercel dashboard.
+- **Claude Code shell commands are simple, one per call.** No `{ }` groups, `$( )` substitution, backticks, expansions inside quotes (such as `echo "exit=$?"`), `2>/dev/null`, or `cd … &&` chains: these shapes open an approval prompt whatever the allow rules say. When a value is needed, split the work into separate commands and take each result into a file. To keep a command's exit code, append `; echo exit=$? >> <result file>` unquoted to the same call: the shell does not carry `$?` across calls, and the tool result does not always show a non-zero exit. A command expected to exit non-zero (such as `test -e` on a missing file, or `grep -c` with no match) is confirmed with other evidence, such as `ls` or the Grep tool.
 - **`tsconfig` targets ES5** — beware `matchAll` and iterator spread.
 
 **Change-surface report (the operator assigns risk grades, not you)**
