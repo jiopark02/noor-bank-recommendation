@@ -687,9 +687,13 @@ async function withRetry<T>(
   } catch (error) {
     if (!isRetryableError(error)) throw error;
 
+    // Name and code only, never the error or its message: a database error's
+    // message can carry the row it refused (see errorCodeForLog).
     console.warn(
-      `[retry] ${context}: transient error, retrying once:`,
-      error instanceof Error ? error.message : error
+      "[retry] %s: transient error, retrying once name=%s code=%s",
+      context,
+      errorName(error),
+      errorCodeForLog(error)
     );
     await new Promise((resolve) => setTimeout(resolve, 250));
 
@@ -699,8 +703,10 @@ async function withRetry<T>(
       return result;
     } catch (retryError) {
       console.error(
-        `[retry] ${context}: failed after retry:`,
-        retryError instanceof Error ? retryError.message : retryError
+        "[retry] %s: failed after retry name=%s code=%s",
+        context,
+        errorName(retryError),
+        errorCodeForLog(retryError)
       );
       throw retryError;
     }

@@ -43,6 +43,7 @@ import type { NextRequest } from "next/server";
  *   a failed second read taken as "not marked"                          -> N14
  *   the two reads concatenated without removing repeats                 -> N15
  *   the household turn decided by the second read's marks               -> N16
+ *   an error's message written by the retry helper's lines              -> F9
  *   a fake handing the route its fixture instead of a copy              -> F10
  *
  * WHAT THIS FILE DOES NOT PROVE
@@ -908,6 +909,37 @@ describe("the marks read before and after the history, merged (N12-N16)", () => 
     expect(systemMessage(bodies[0])).toContain(NOTICE_HEADING);
     expect(sharedLines()[0][3]).toBe(false);
     expect(seen.sharedSaves).toHaveLength(1);
+  });
+});
+
+describe("the retry helper's log lines carry the error's name and code only (F9)", () => {
+  const SENTINEL = "sentinel row content $4,321.57";
+  const transient = (): Error => Object.assign(new Error(SENTINEL), { code: "08006" });
+
+  it("a transient failure that recovers logs the retry by name and code", async () => {
+    state.markSteps = [transient(), [], []];
+    const res = await post(GENERAL);
+    expect(res.status).toBe(200);
+    expect(warnLines).toContainEqual([
+      "[retry] %s: transient error, retrying once name=%s code=%s",
+      "getSessionSharedSources",
+      "Error",
+      "08006",
+    ]);
+    expect(JSON.stringify([...infoLines, ...warnLines, ...errorLines])).not.toContain("sentinel");
+  });
+
+  it("a transient failure that fails again logs the failure by name and code, and answers 503", async () => {
+    state.markSteps = [transient(), transient()];
+    const res = await post(GENERAL);
+    expect(res.status).toBe(503);
+    expect(errorLines).toContainEqual([
+      "[retry] %s: failed after retry name=%s code=%s",
+      "getSessionSharedSources",
+      "Error",
+      "08006",
+    ]);
+    expect(JSON.stringify([...infoLines, ...warnLines, ...errorLines])).not.toContain("sentinel");
   });
 });
 
