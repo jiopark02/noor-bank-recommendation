@@ -1946,20 +1946,6 @@ export async function writeCronGiveUp(
   );
 }
 
-// ============================================================================
-// STEP A — aiMemory.ts 에 추가 (v2: Cursor 검토 반영)
-// ============================================================================
-// 위치: SECTION 5c (markFactsExtracted) 직후, SECTION 6 직전.
-// 아래 섹션 헤더 스타일로 추가.
-//
-// 변경점 (v1 → v2, Cursor 검토 반영):
-//  - throw new Error → throw wrapDbError(msg, error) (기존 패턴, cause 보존)
-//  - const admin → const supabase (기존 변수명 관례)
-//  - // SECTION 5d 헤더 추가
-//  - computeCronStatus는 export 안 함 (내부 helper)
-//  - forceFailed 옵션 추가 — 인프라 에러(배치 조회 실패 등) 시 status 강제 failed
-// ============================================================================
-
 // ---------------------------------------------------------------------------
 // SECTION 5d: Cron run monitoring (cron_runs)
 // ---------------------------------------------------------------------------
@@ -1968,29 +1954,31 @@ export type CronJobName = "summarize" | "extract-facts";
 export type CronRunStatus = "success" | "partial" | "failed";
 
 /**
- * recordCronRun 입력.
- * - status는 넘기지 않는다. itemsProcessed/itemsFailed로 헬퍼가 계산.
- * - forceFailed=true면 items가 0/0이어도 status를 'failed'로 강제한다
- *   (배치 조회 실패 등 인프라 에러로 cron이 일을 못 한 경우 — blind spot 보완).
- * - stats는 cron이 반환하는 결과 객체를 그대로 넣는다 (jsonb 저장).
+ * What recordCronRun takes.
+ * - No status is passed in: the helper computes it from itemsProcessed and
+ *   itemsFailed.
+ * - forceFailed=true makes the status "failed" even when the item counts are
+ *   0/0 (the cron could do no work because of an infrastructure failure, such
+ *   as a failed batch read, which the counts alone would not show).
+ * - stats is the result object the cron returns, stored as is (jsonb).
  */
 export interface CronRunInput {
   jobName: CronJobName;
-  startedAt: Date;          // cron 시작 시각 (라우트 맨 처음에 찍어둔 값)
-  itemsProcessed: number;   // 세션 단위 성공 수
-  itemsFailed: number;      // 세션 단위 실패 수
-  stats: Record<string, unknown>; // 전체 결과 payload (그대로 저장)
-  error?: string | null;    // 인프라/치명적 에러 메시지 (선택)
-  forceFailed?: boolean;    // true면 status를 failed로 강제 (인프라 에러용)
+  startedAt: Date;          // when the cron started (taken at the top of the route)
+  itemsProcessed: number;   // sessions that succeeded
+  itemsFailed: number;      // sessions that failed
+  stats: Record<string, unknown>; // the whole result payload, stored as is
+  error?: string | null;    // the infrastructure failure, as step and error code (optional)
+  forceFailed?: boolean;    // true makes the status "failed" (infrastructure failures)
 }
 
 /**
- * itemsProcessed/itemsFailed로 cron 실행 status를 계산.
- *  - forceFailed → failed (인프라 에러로 일을 못 함)
- *  - 실패 0      → success (0개 처리 = 할 일 없었음 포함)
- *  - 처리>0 & 실패>0 → partial
- *  - 처리=0 & 실패>0 → failed
- * (export 안 함 — 내부 helper)
+ * The cron run's status from itemsProcessed and itemsFailed.
+ *  - forceFailed            -> failed (an infrastructure failure stopped the work)
+ *  - no failures            -> success (including nothing to do)
+ *  - processed>0, failed>0  -> partial
+ *  - processed=0, failed>0  -> failed
+ * (Not exported: an internal helper.)
  */
 function computeCronStatus(
   itemsProcessed: number,
@@ -2004,11 +1992,11 @@ function computeCronStatus(
 }
 
 /**
- * cron 실행 1건을 cron_runs에 기록한다 (모델 B: 종료 시 1 row INSERT).
+ * Records one cron run in cron_runs: one row inserted when the run ends.
  *
- * finished_at / duration_ms / status는 이 함수가 계산한다.
- * 실패 시 throw — 호출하는 cron 라우트가 try/catch로 격리해야 한다
- * (기록 실패가 cron 본업을 망치면 안 됨).
+ * This function computes finished_at, duration_ms and status.
+ * Throws on failure; the calling cron route must isolate it with try/catch
+ * (a failed record must not break the cron's own work).
  */
 export async function recordCronRun(input: CronRunInput): Promise<void> {
   const supabase = getAdmin();
@@ -2042,10 +2030,11 @@ export async function recordCronRun(input: CronRunInput): Promise<void> {
 }
 
 /**
- * cron_runs 보존 정리: 지정 일수보다 오래된 row 삭제.
- * extract-facts cron 끝에서 best-effort로 호출 (실패해도 본업 무관).
- * 실패 시 throw — 호출하는 쪽에서 try/catch로 격리.
- * 삭제된 row 수 반환.
+ * cron_runs retention: deletes rows older than the given number of days.
+ * Called best-effort at the end of the extract-facts cron (a failure does not
+ * affect the cron's own work).
+ * Throws on failure; the caller isolates it with try/catch.
+ * Returns the number of rows deleted.
  */
 export async function deleteOldCronRuns(
   retentionDays: number
