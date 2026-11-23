@@ -766,7 +766,8 @@ export interface SharedTurnSource {
 /**
  * The connections whose shared data a turn being saved carries, in the two
  * kinds chat_shared_turn_save checks differently:
- *   marked  already marked on `markedSessionId` when the turn started: the
+ *   marked  found marked on `markedSessionId` by the chat route, which reads
+ *           the marks before a turn's history and again after it: the
  *           session's history carries their figures. Each must still have its
  *           mark there, which the purge deletes under the same lock when
  *           sharing ends.
@@ -984,8 +985,8 @@ export async function getEarliestSharedSourceTime(
 /**
  * The connections another household member shares whose data has entered
  * this session: one (owner, connection) pair per mark, or an empty list when
- * none has. The chat route reads this at the start of a turn, before the
- * session's history, and saves every turn of a marked session through
+ * none has. The chat route reads this before a turn's history and again
+ * after it, and saves every turn of a marked session through
  * saveSharedTurn with these pairs, since that history carries their figures
  * whatever the latest message says.
  *

@@ -635,7 +635,7 @@ describe("with the shared-data switch off and no mark on the session (N12)", () 
 
       expect(await post(c.text)).toBe(200);
       expect(digest(bodies[0])).toEqual(EXPECTED[c.name]);
-      expect(calls).toEqual({ saveMessages: 1, saveSharedTurn: 0, marks: 1 });
+      expect(calls).toEqual({ saveMessages: 1, saveSharedTurn: 0, marks: 2 });
     }
   );
 });

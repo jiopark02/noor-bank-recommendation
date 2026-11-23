@@ -56,7 +56,7 @@ const TARGETS: ProbeTarget[] = [
       // getEarliestSharedSourceTime: the memory crons read only before this moment.
       // getSessionSharedSources: the chat route saves a marked session's turns
       // through chat_shared_turn_save.
-      "lib/aiMemory.ts": "the earliest shared moment, read by the memory crons, and the session's marked sources, read by the chat route at the start of a turn",
+      "lib/aiMemory.ts": "the earliest shared moment, read by the memory crons, and the session's marked sources, read by the chat route before a turn's history and again after it",
     },
   },
   {
