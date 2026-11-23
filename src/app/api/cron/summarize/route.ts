@@ -176,12 +176,15 @@ async function requestSummary(
 
   // A 200 response can still carry a body that is not JSON (a gateway error
   // page, for example). A parse failure gets its own error message, distinct
-  // from a missing-content one.
+  // from a missing-content one. Each error thrown here carries a fixed
+  // log-safe code (errorCodeForLog), since the log line holds no message.
   let data: unknown;
   try {
     data = await response.json();
   } catch {
-    throw new Error("OpenRouter response was not valid JSON");
+    throw Object.assign(new Error("OpenRouter response was not valid JSON"), {
+      code: "provider_json_invalid",
+    });
   }
   observed.jsonParsed = true;
   observed.data = asPlainObject(data);
@@ -191,7 +194,9 @@ async function requestSummary(
       ?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string") {
-    throw new Error("OpenRouter response missing message content");
+    throw Object.assign(new Error("OpenRouter response missing message content"), {
+      code: "provider_content_missing",
+    });
   }
 
   return content;
@@ -322,8 +327,9 @@ async function summarizeOneSession(
 
   tracker.stage = "interpret";
   if (!rawOutput.trim()) {
-    throw new Error(
-      `Summarization model returned empty output for session ${session.id}`
+    throw Object.assign(
+      new Error(`Summarization model returned empty output for session ${session.id}`),
+      { code: "model_output_empty" }
     );
   }
 

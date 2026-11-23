@@ -185,12 +185,15 @@ async function requestExtraction(
   }
 
   // A 200 response can still carry a body that is not JSON (a gateway error
-  // page, for example).
+  // page, for example). Each error thrown in this route carries a fixed
+  // log-safe code (errorCodeForLog), since the log line holds no message.
   let data: unknown;
   try {
     data = await response.json();
   } catch {
-    throw new Error("OpenRouter response was not valid JSON");
+    throw Object.assign(new Error("OpenRouter response was not valid JSON"), {
+      code: "provider_json_invalid",
+    });
   }
   observed.jsonParsed = true;
   observed.data = asPlainObject(data);
@@ -200,7 +203,9 @@ async function requestExtraction(
       ?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string") {
-    throw new Error("OpenRouter response missing message content");
+    throw Object.assign(new Error("OpenRouter response missing message content"), {
+      code: "provider_content_missing",
+    });
   }
 
   return content;
@@ -305,10 +310,14 @@ function parseExtractionJson(raw: string): RawExtractionOutput {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error("Extraction output was not valid JSON");
+    throw Object.assign(new Error("Extraction output was not valid JSON"), {
+      code: "extraction_json_invalid",
+    });
   }
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("Extraction output is not a JSON object");
+    throw Object.assign(new Error("Extraction output is not a JSON object"), {
+      code: "extraction_not_object",
+    });
   }
   return parsed as RawExtractionOutput;
 }
@@ -419,8 +428,9 @@ async function extractOneSession(
   );
   tracker.stage = "interpret";
   if (!rawOutput.trim()) {
-    throw new Error(
-      `Extraction model returned empty output for session ${session.id}`
+    throw Object.assign(
+      new Error(`Extraction model returned empty output for session ${session.id}`),
+      { code: "model_output_empty" }
     );
   }
 
@@ -541,8 +551,9 @@ async function extractOneSession(
   //    repeats its text ignoring case (the unique index covers lower(fact));
   //    a fact worded differently is stored as another row.
   if (stats.failed > 0) {
-    throw new Error(
-      `Extract cron: ${stats.failed} fact write(s) failed for session ${session.id}`
+    throw Object.assign(
+      new Error(`Extract cron: ${stats.failed} fact write(s) failed for session ${session.id}`),
+      { code: "fact_writes_failed" }
     );
   }
   await markFactsExtracted(session.id, session.user_id);

@@ -21,6 +21,8 @@ import { stripComments } from "./sourceProbe";
  *   the batch failure labelled the same whether or not the
  *   candidate read returned, in either route                          -> L4
  *   a log line's level changed (error lines, the cleanup warning)    -> L1, L3
+ *   an error a route throws for an unusable answer, or for failed
+ *   fact writes, left without its fixed code or given another one     -> L6, L3
  *   an aiMemory log line given an error's message or the error        -> L5
  */
 
@@ -282,7 +284,7 @@ describe("memory cron error records", () => {
       "[memory-cron] route=cron_extract_facts step=supersede session=s-ext fact=f-1 code=23514 recovery_code=23503",
       "[memory-cron] route=cron_extract_facts step=expire session=s-ext fact=f-2 code=40001",
       "[memory-cron] route=cron_extract_facts step=save_fact session=s-ext code=23503",
-      "[memory-cron] route=cron_extract_facts step=session session=s-ext code=none",
+      "[memory-cron] route=cron_extract_facts step=session session=s-ext code=fact_writes_failed",
       "[memory-cron] route=cron_extract_facts step=record code=42P01",
     ]);
     expect(lines("warn")).toEqual(["[memory-cron] route=cron_extract_facts step=cleanup code=53300"]);
@@ -303,6 +305,32 @@ describe("memory cron error records", () => {
     expect(await run("extract-facts")).toBe(200);
     expect(lines("error")).toEqual(["[memory-cron] route=cron_extract_facts step=candidates code=57014"]);
     expect(db.recorded[0].error).toBe("candidates code=57014");
+    expectNothingLeaked();
+  });
+
+  // Every error a route throws itself for a model answer it cannot use, with
+  // the fixed code its session line carries. The answers carry SENTINEL
+  // where they carry text, so a code or line built from them shows.
+  const answerFailures = [
+    { route: "summarize" as const, body: `<html>${SENTINEL}</html>`, code: "provider_json_invalid" },
+    { route: "summarize" as const, body: JSON.stringify({ note: SENTINEL }), code: "provider_content_missing" },
+    { route: "summarize" as const, body: modelAnswer("  \n "), code: "model_output_empty" },
+    { route: "extract-facts" as const, body: `<html>${SENTINEL}</html>`, code: "provider_json_invalid" },
+    { route: "extract-facts" as const, body: JSON.stringify({ note: SENTINEL }), code: "provider_content_missing" },
+    { route: "extract-facts" as const, body: modelAnswer("  \n "), code: "model_output_empty" },
+    { route: "extract-facts" as const, body: modelAnswer(`not json ${SENTINEL}`), code: "extraction_json_invalid" },
+    { route: "extract-facts" as const, body: modelAnswer("42"), code: "extraction_not_object" },
+  ];
+
+  it.each(answerFailures)("L6 $route: an unusable answer logs the fixed code $code", async (c) => {
+    const session = { id: "s-ans", user_id: "u-1", message_count: 2, summary_failures: 0, facts_failures: 0 };
+    if (c.route === "summarize") db.summaryCandidates = [session];
+    else db.factCandidates = [session];
+    provider.answers = [{ status: 200, body: c.body }];
+
+    expect(await run(c.route)).toBe(200);
+    const logName = c.route === "summarize" ? "cron_summarize" : "cron_extract_facts";
+    expect(lines("error")).toEqual([`[memory-cron] route=${logName} step=session session=s-ans code=${c.code}`]);
     expectNothingLeaked();
   });
 
