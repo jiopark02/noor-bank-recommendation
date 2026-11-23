@@ -19,7 +19,7 @@ import { stripComments } from "./sourceProbe";
  *   the provider's error body left neither read nor cancelled        -> L1
  *   cron_runs.error written from an error's message                  -> L2
  *   the batch failure labelled the same whether or not the
- *   candidate read returned                                           -> L4
+ *   candidate read returned, in either route                          -> L4
  *   a log line's level changed (error lines, the cleanup warning)    -> L1, L3
  *   an aiMemory log line given an error's message or the error        -> L5
  */
@@ -306,25 +306,57 @@ describe("memory cron error records", () => {
     expectNothingLeaked();
   });
 
-  it("L4 a batch that rejects after its candidate read is labelled batch, not candidates", async () => {
-    // Reading the failure count throws, which the loop does outside its
-    // per-session catch, after the session failed at the provider.
-    const session = { id: "s-sum", user_id: "u-1", message_count: 2 } as Session;
-    Object.defineProperty(session, "summary_failures", {
-      get() {
-        throw failing("XX001");
+  const batchRoutes = [
+    {
+      route: "summarize" as const,
+      logName: "cron_summarize",
+      failuresKey: "summary_failures" as const,
+      setCandidates: (value: Session[] | Error) => {
+        db.summaryCandidates = value;
       },
-    });
-    db.summaryCandidates = [session];
-    provider.answers = [{ status: 500, body: SENTINEL }];
+    },
+    {
+      route: "extract-facts" as const,
+      logName: "cron_extract_facts",
+      failuresKey: "facts_failures" as const,
+      setCandidates: (value: Session[] | Error) => {
+        db.factCandidates = value;
+      },
+    },
+  ];
 
-    expect(await run("summarize")).toBe(200);
-    expect(lines("error")).toEqual([
-      "[memory-cron] route=cron_summarize step=session session=s-sum code=http_500",
-      "[memory-cron] route=cron_summarize step=batch code=XX001",
-    ]);
-    expect(db.recorded[0].error).toBe("batch code=XX001");
-    expectNothingLeaked();
+  describe.each(batchRoutes)("L4 $route: a batch rejection is labelled by whether the candidate read returned", (r) => {
+    it(`L4 ${r.route}: a candidate read that throws is labelled candidates`, async () => {
+      r.setCandidates(failing("57014"));
+
+      expect(await run(r.route)).toBe(200);
+      expect(lines("error")).toEqual([`[memory-cron] route=${r.logName} step=candidates code=57014`]);
+      expect(db.recorded[0].error).toBe("candidates code=57014");
+      expect(db.recorded[0].forceFailed).toBe(true);
+      expectNothingLeaked();
+    });
+
+    it(`L4 ${r.route}: a dependency that throws after the candidate read returned is labelled batch, not candidates`, async () => {
+      // Reading the failure count throws, which the loop does outside its
+      // per-session catch, after the session failed at the provider.
+      const session = { id: "s-batch", user_id: "u-1", message_count: 2 } as Session;
+      Object.defineProperty(session, r.failuresKey, {
+        get() {
+          throw failing("XX001");
+        },
+      });
+      r.setCandidates([session]);
+      provider.answers = [{ status: 500, body: SENTINEL }];
+
+      expect(await run(r.route)).toBe(200);
+      expect(lines("error")).toEqual([
+        `[memory-cron] route=${r.logName} step=session session=s-batch code=http_500`,
+        `[memory-cron] route=${r.logName} step=batch code=XX001`,
+      ]);
+      expect(db.recorded[0].error).toBe("batch code=XX001");
+      expect(db.recorded[0].forceFailed).toBe(true);
+      expectNothingLeaked();
+    });
   });
 });
 
