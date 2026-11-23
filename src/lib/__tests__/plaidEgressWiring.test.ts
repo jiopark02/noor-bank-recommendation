@@ -3,13 +3,16 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 
 /**
- * The chat route reads fresh bank data in one place, getPlaidChatState. That
- * read must sit inside the branch of the capability-scaffold decision, so a
- * decision that denies (every channel under AI_PLAID_STATE=off) means the
- * read never happens and nothing from it reaches the prompt. The
- * balance-keyword decision reads nothing itself: it only raises that read's
- * depth, inside the same branch. The third channel, financial analysis, is
- * evaluated and logged with no read and no branch behind it.
+ * The chat route reads the user's own fresh bank data in one place,
+ * getPlaidChatState. That read must sit inside the branch of the
+ * capability-scaffold decision, so a decision that denies (every channel
+ * under AI_PLAID_STATE=off) means the read never happens and nothing from it
+ * reaches the prompt. The balance-keyword decision reads nothing itself: it
+ * only raises that read's depth, inside the same branch. The financial
+ * analysis channel is evaluated and logged with no read and no branch behind
+ * it. The banks another household member shares are read in one place too,
+ * readSharedForChat, inside the same branch and only when the
+ * household-shared decision allows.
  *
  * ⚠️ A SOURCE PROBE, NOT AN EXECUTED TEST. The decisions themselves are
  * executed in plaidEgressPolicy.test.ts, and the depth they lead to in
@@ -63,6 +66,42 @@ describe("financialAnalysisDecision", () => {
     ).toBe(1);
     expect(occurrences(CHAT, "financialAnalysisDecision.allowed")).toBe(0);
     expect(occurrences(CHAT, "fetchFinancialSnapshotFromPlaidRoutes")).toBe(0);
+  });
+});
+
+describe("householdSharedDecision", () => {
+  it("guards the only read of another member's shared banks, inside the capability-scaffold branch", () => {
+    expect(occurrences(CHAT, 'channel: "household_shared"')).toBe(1);
+    expect(occurrences(CHAT, "readSharedForChat(")).toBe(1);
+    const branch = allowedBranch("capabilityScaffoldDecision");
+    expect(branch).toContain("readSharedForChat(");
+    expect(branch).toContain(
+      "householdSharedDecision.allowed && sharedListForRead !== null\n          ? beforeLoop(\"shared_state\""
+    );
+    expect(branch).toContain("householdSharedAllowed: householdSharedDecision.allowed");
+  });
+
+  it("puts the shared block and the one-line notice in the prompt only inside that branch", () => {
+    const branch = allowedBranch("capabilityScaffoldDecision");
+    expect(occurrences(CHAT, "systemPrompt += sharedBlock;")).toBe(1);
+    expect(occurrences(CHAT, "systemPrompt += SHARED_NOT_IN_TURN_BLOCK;")).toBe(1);
+    expect(branch).toContain("systemPrompt += sharedBlock;");
+    expect(branch).toContain("systemPrompt += SHARED_NOT_IN_TURN_BLOCK;");
+  });
+
+  it("the list of what is shared is read only while the switch is on and the mode is not off", () => {
+    expect(occurrences(CHAT, "listSharedForChat(")).toBe(1);
+    expect(CHAT).toContain(
+      "const sharedStateEnabled = resolveSharedStateEnabled() && plaidStateEnabled;"
+    );
+    const guard = CHAT.indexOf(
+      '\n    if (sharedStateEnabled) {\n      try {\n        sharedList = await beforeLoop("shared_list", () => listSharedForChat(authUserId));'
+    );
+    expect(guard).toBeGreaterThan(-1);
+    expect(CHAT.indexOf("listSharedForChat(")).toBeGreaterThan(guard);
+    expect(CHAT.indexOf("listSharedForChat(")).toBeLessThan(
+      CHAT.indexOf("const hasSharedConnections")
+    );
   });
 });
 

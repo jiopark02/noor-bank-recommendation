@@ -38,7 +38,7 @@ const BUDGET_BODY = {
 };
 const CUT_LINE = "[chat-deadline] stage cut stage=%s elapsed_ms=%d";
 const STAGES_LINE =
-  "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d save_ms=%d";
+  "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d shared_marks_ms=%d memory_ms=%d shared_marks_after_ms=%d plaid_state_ms=%d shared_list_ms=%d shared_state_ms=%d save_ms=%d";
 
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 
@@ -52,6 +52,10 @@ const state = {
     session: false,
     memory: false,
     plaidState: false,
+    /** The read of the session's marks before its history. */
+    sharedMarks: false,
+    /** The read of the session's marks after its history. */
+    sharedMarksAfter: false,
   },
   /** When set, the profile queries answer after this many milliseconds. */
   profileAnswersAfterMs: null as number | null,
@@ -65,6 +69,7 @@ const seen = {
   plaidSignal: undefined as AbortSignal | undefined,
   plaidDepth: undefined as string | undefined,
   sessionCalls: 0,
+  markCalls: 0,
   saveCalls: 0,
   modelCalls: 0,
 };
@@ -147,6 +152,12 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
       ? never()
       : Promise.resolve({ facts: [], recentSummaries: [], activeSessionId: SESSION_ID }),
   formatMemoryForPrompt: () => "",
+  // The first call is the read before the history, the second the read after.
+  getSessionSharedSources: () => {
+    seen.markCalls += 1;
+    const hang = seen.markCalls === 1 ? state.hang.sharedMarks : state.hang.sharedMarksAfter;
+    return hang ? never() : Promise.resolve([]);
+  },
   getSessionMessages: async () => [],
   saveMessages: async () => {
     seen.saveCalls += 1;
@@ -216,6 +227,8 @@ beforeEach(() => {
     session: false,
     memory: false,
     plaidState: false,
+    sharedMarks: false,
+    sharedMarksAfter: false,
   };
   state.profileAnswersAfterMs = null;
   state.sessionFailsAfterMs = null;
@@ -224,6 +237,7 @@ beforeEach(() => {
   seen.plaidSignal = undefined;
   seen.plaidDepth = undefined;
   seen.sessionCalls = 0;
+  seen.markCalls = 0;
   seen.saveCalls = 0;
   seen.modelCalls = 0;
   vi.useFakeTimers();
@@ -320,11 +334,28 @@ const STAGE_CASES: StageCase[] = [
     },
   },
   {
+    // A cut read of the marks is the time budget, not MEMORY_LOAD_FAILED.
+    stage: "shared_marks",
+    text: GENERAL,
+    setup: () => {
+      state.memoryEnabled = true;
+      state.hang.sharedMarks = true;
+    },
+  },
+  {
     stage: "memory",
     text: GENERAL,
     setup: () => {
       state.memoryEnabled = true;
       state.hang.memory = true;
+    },
+  },
+  {
+    stage: "shared_marks_after",
+    text: GENERAL,
+    setup: () => {
+      state.memoryEnabled = true;
+      state.hang.sharedMarksAfter = true;
     },
   },
   {
@@ -490,8 +521,8 @@ describe("the [chat-stages] line", () => {
   function durations(): number[] {
     const lines = stagesLines();
     expect(lines).toHaveLength(1);
-    // The format and seven values, and nothing else.
-    expect(lines[0]).toHaveLength(8);
+    // The format and eleven values, and nothing else.
+    expect(lines[0]).toHaveLength(12);
     for (const value of lines[0].slice(1)) expect(typeof value).toBe("number");
     return lines[0].slice(1) as number[];
   }
@@ -505,11 +536,25 @@ describe("the [chat-stages] line", () => {
     const res = await post("what's my balance?", 120);
     expect(res.status).toBe(200);
     expect(seen.saveCalls).toBe(1);
-    const [auth, body, profile, session, memory, plaidState, save] = durations();
+    const [
+      auth,
+      body,
+      profile,
+      session,
+      sharedMarks,
+      memory,
+      sharedMarksAfter,
+      plaidState,
+      sharedList,
+      sharedState,
+      save,
+    ] = durations();
     expect(profile).toBe(120);
-    for (const value of [auth, body, session, memory, plaidState, save]) {
+    for (const value of [auth, body, session, sharedMarks, memory, sharedMarksAfter, plaidState, save]) {
       expect(value).toBeGreaterThanOrEqual(0);
     }
+    // The shared-data switch is off: those two waits are not made.
+    expect([sharedList, sharedState]).toEqual([-1, -1]);
   });
 
   it("a wait the request did not make is -1", async () => {
@@ -518,7 +563,7 @@ describe("the [chat-stages] line", () => {
     const [auth, body, ...rest] = durations();
     expect(auth).toBeGreaterThanOrEqual(0);
     expect(body).toBeGreaterThanOrEqual(0);
-    expect(rest).toEqual([-1, -1, -1, -1, -1]);
+    expect(rest).toEqual([-1, -1, -1, -1, -1, -1, -1, -1, -1]);
   });
 
   it("is written for a request refused at authentication", async () => {
@@ -527,14 +572,14 @@ describe("the [chat-stages] line", () => {
     expect(res.status).toBe(401);
     const [auth, ...rest] = durations();
     expect(auth).toBeGreaterThanOrEqual(0);
-    expect(rest).toEqual([-1, -1, -1, -1, -1, -1]);
+    expect(rest).toEqual([-1, -1, -1, -1, -1, -1, -1, -1, -1, -1]);
   });
 
   it("reports the cut wait as having lasted until the deadline", async () => {
     vi.stubEnv("AI_PLAID_STATE", "connection");
     state.hang.plaidState = true;
     await post(GENERAL, DEADLINE_MS);
-    const [, , , , , plaidState, save] = durations();
+    const [, , , , , , , plaidState, , , save] = durations();
     expect(plaidState).toBe(DEADLINE_MS);
     expect(save).toBe(-1);
   });

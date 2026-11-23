@@ -62,7 +62,11 @@ vi.mock("@/lib/llmCallLog", () => ({
   recordLlmCall: async () => undefined,
 }));
 
-vi.mock("@/lib/aiMemory", () => ({
+vi.mock("@/lib/aiMemory", async (importOriginal) => ({
+  // The save errors the route tells apart, as the real module defines them;
+  // nothing else is taken from it.
+  SharedSourceEndedError: (await importOriginal<typeof import("../aiMemory")>()).SharedSourceEndedError,
+  SharedTurnBusyError: (await importOriginal<typeof import("../aiMemory")>()).SharedTurnBusyError,
   isAiMemoryEnabled: () => memory.enabled,
   getOrCreateActiveSession: async () => ({ id: SESSION_ID }),
   // A different id, so reading history through a second active-session lookup
@@ -70,6 +74,7 @@ vi.mock("@/lib/aiMemory", () => ({
   getActiveSession: async () => ({ id: "session-from-a-second-lookup" }),
   buildMemoryContext: async () => ({ facts: [], recentSummaries: [], activeSessionId: SESSION_ID }),
   formatMemoryForPrompt: () => "",
+  getSessionSharedSources: async () => [],
   getSessionMessages: async (...args: unknown[]) => {
     memory.historyCalls.push(args);
     memory.reserveCallsAtHistoryRead.push(usage.reserveCalls);

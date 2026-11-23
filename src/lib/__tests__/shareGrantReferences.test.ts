@@ -7,11 +7,15 @@ import { describe, it, expect } from "vitest";
  * Which application files can see a share grant.
  *
  * A share grant says one person allowed another to see one bank connection.
- * Nothing in the application reads another person's bank data yet. This
- * probe keeps the grant tables and the grantee column out of every module
- * that reads bank data or builds the chat prompt, so such a read cannot be
- * added there without this file changing: only the share store and the
- * account export may name them in code.
+ * Another member's bank data is read in two places, the shared-accounts
+ * route and the chat's shared state (listSharedForChat and readSharedForChat
+ * in plaidChatState.ts), and both get their
+ * rows from the household_shared_connections function, never from the grant
+ * tables. This probe keeps the grant tables and the grantee column out of
+ * every module that reads bank data or builds the chat prompt, so a read that
+ * decides on a grant in application code cannot be added there without this
+ * file changing: only the share store and the account export may name them in
+ * code.
  *
  * Code is read with comments removed, so a comment that explains a cascade
  * does not count as a reference. The bank-reading modules are also checked

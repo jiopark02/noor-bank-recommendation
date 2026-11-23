@@ -132,7 +132,7 @@ export const HOUSEHOLD_UI = {
   shareNoticeAbout: (bank: string, text: string) => `${bank || "One of your banks"}: ${text}`,
   sharingSection: "Bank sharing",
   sharingNote: (name: string | null) =>
-    `Choose which of your banks ${name ?? "the other person in your household"} can see.`,
+    `Choose which of your banks ${name ?? "the other person in your household"} can see. A shared bank's accounts and balances appear on their screens and in their Noor AI chat, where they can ask about them.`,
   sharingNoBanks: "You haven't connected a bank yet.",
   sharingUnavailable: "We couldn't load your bank sharing right now.",
   sharedLabel: "Shared",

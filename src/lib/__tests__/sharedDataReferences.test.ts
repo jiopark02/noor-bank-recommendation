@@ -54,7 +54,9 @@ const TARGETS: ProbeTarget[] = [
       // Exports the session and moment shared data entered the user's chats.
       "lib/accountExport.ts": "export section of the user's own shared-source marks",
       // getEarliestSharedSourceTime: the memory crons read only before this moment.
-      "lib/aiMemory.ts": "the memory crons' read of the earliest shared moment",
+      // getSessionSharedSources: the chat route saves a marked session's turns
+      // through chat_shared_turn_save.
+      "lib/aiMemory.ts": "the earliest shared moment, read by the memory crons, and the session's marked sources, read by the chat route before a turn's history and again after it",
     },
   },
   {
@@ -63,6 +65,14 @@ const TARGETS: ProbeTarget[] = [
     allowed: {
       // setShare calls the function that inserts or deletes a grant.
       "lib/householdShareStore.ts": "the sharing route's only write of a grant",
+    },
+  },
+  {
+    name: "chat_shared_turn_save",
+    pattern: word("chat_shared_turn_save"),
+    allowed: {
+      // saveSharedTurn: the only save of a turn whose prompt carried another member's bank data.
+      "lib/aiMemory.ts": "the only call of the function that records the shared sources and stores the turn together",
     },
   },
   {

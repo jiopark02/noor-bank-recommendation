@@ -20,12 +20,59 @@ describe("evaluatePlaidEgressDecision — off closes every channel", () => {
     expect(decision.allowed).toBe(false);
   });
 
-  it("covers the three known channels", () => {
+  it("covers the four known channels", () => {
     expect([...PLAID_EGRESS_CHANNELS].sort()).toEqual([
       "balance_keyword",
       "capability_scaffold",
       "financial_analysis_keyword",
+      "household_shared",
     ]);
+  });
+});
+
+// Another member's shared data reaches the prompt only when every condition
+// holds; each condition alone, taken away, closes the channel.
+describe("evaluatePlaidEgressDecision — household_shared", () => {
+  const ALL = {
+    channel: "household_shared" as const,
+    plaidStateMode: "connection" as const,
+    sharedStateEnabled: true,
+    hasSharedConnections: true,
+    householdTurn: true,
+  };
+
+  it.each(["connection", "balances"] as const)(
+    "allows a household turn with something shared and the switch on, under %s",
+    (plaidStateMode) => {
+      expect(evaluatePlaidEgressDecision({ ...ALL, plaidStateMode })).toEqual({
+        channel: "household_shared",
+        allowed: true,
+        reason: "household_turn_mode_not_off",
+      });
+    }
+  );
+
+  it("denies under off, whatever else holds", () => {
+    expect(evaluatePlaidEgressDecision({ ...ALL, plaidStateMode: "off" })).toEqual({
+      channel: "household_shared",
+      allowed: false,
+      reason: "mode_off",
+    });
+  });
+
+  it.each([
+    ["switch_off", { sharedStateEnabled: false }],
+    ["switch_off", { sharedStateEnabled: undefined }],
+    ["nothing_shared", { hasSharedConnections: false }],
+    ["nothing_shared", { hasSharedConnections: undefined }],
+    ["not_household_turn", { householdTurn: false }],
+    ["not_household_turn", { householdTurn: undefined }],
+  ] as const)("denies with %s when that condition fails", (reason, change) => {
+    expect(evaluatePlaidEgressDecision({ ...ALL, ...change })).toEqual({
+      channel: "household_shared",
+      allowed: false,
+      reason,
+    });
   });
 });
 

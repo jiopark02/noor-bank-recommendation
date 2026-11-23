@@ -262,7 +262,7 @@ export interface BankReadRequest {
 export interface BankReadOptions {
   itemStatus?: boolean;
   signal?: AbortSignal;
-  logOrigin?: "chat" | "household-shared";
+  logOrigin?: "chat" | "chat-shared" | "household-shared";
 }
 
 function originSuffix(opts: BankReadOptions): string {

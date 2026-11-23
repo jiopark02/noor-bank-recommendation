@@ -115,9 +115,24 @@ const FIXTURE_I = `        if (result.ok) {
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
               requestStartedAtMs,
+              sharedSources,
             });
           } catch (error) {
-            console.error("Failed to save messages (OpenRouter branch):", error);
+            console.error(
+              "[chat-save] failed name=%s code=%s",
+              errorName(error),
+              errorCodeForLog(error)
+            );
+            if (error instanceof SharedSourceEndedError) {
+              return respond(
+                {
+                  error:
+                    "Could not save your conversation. Please try sending your message again.",
+                  code: "SHARED_DATA_ENDED",
+                },
+                { status: 409 }
+              );
+            }
             return respond(
               {
                 error:

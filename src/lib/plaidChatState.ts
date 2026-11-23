@@ -25,25 +25,40 @@
 //    and it selects the whole row where this path reads four columns.
 //  - Null/undefined Plaid balances are preserved as "unavailable", never 0.
 //  - userId comes only from the verified token (passed in by the caller).
+//
+// The second part of this file (listSharedForChat, readSharedForChat) reads
+// the connections another household member shares with the user, one read
+// per owner with that owner's id; see its own header below.
 // =============================================================================
 
 import { isPlaidConfigured } from "@/lib/plaid";
-import { createServerClient } from "@/lib/supabase";
+import { createAdminClient, createServerClient } from "@/lib/supabase";
 import {
   bankWindow,
   liveAdapterDeps,
   readBankData,
   type BankConnectionState,
+  type BankRead,
   type ReadAccount,
   type StoredConnectionRow,
 } from "@/lib/plaidEngineAdapter";
+import { isPlaidTokenCryptoConfigured, isPlaidTokenCryptoError } from "@/lib/plaidTokenCrypto";
 import type {
   PlaidChatAccount,
   PlaidChatConnection,
   PlaidChatConnectionRead,
   PlaidChatDepth,
   PlaidChatState,
+  SharedChatOwner,
+  SharedChatState,
 } from "@/lib/plaidChatContext";
+import {
+  SHARED_ACCOUNTS_READ_TIMEOUT_MS,
+  type SharedAccountsStore,
+  type SharedConnection,
+} from "@/lib/householdSharedAccounts";
+import { makeSharedAccountsStore } from "@/lib/householdSharedAccountsStore";
+import { logSafeCode } from "@/lib/householdInvite";
 
 /**
  * The plaid_connections read failed. Thrown so the caller can tell this case
@@ -227,4 +242,285 @@ export async function getPlaidChatState(
   });
   state.accounts = read.accounts.map(toChatAccount);
   return state;
+}
+
+// =============================================================================
+// Bank data another household member shares with the user.
+//
+// Which connections those are is answered by the database's shared-connections
+// function, through the shared-accounts store (householdSharedAccountsStore.ts),
+// called with the verified user's id and nothing else; this module adds no
+// condition of its own. Reads are made per owner, with that owner's id, which
+// the stored token is bound to: rows of two owners never go to one read.
+// Accounts only: no transactions, no recurring streams, no Item read.
+//
+// Two steps, so the chat route can decide in between whether the turn needs
+// the data at all: listSharedForChat says what is shared and whose it is
+// (no bank call); readSharedForChat reads it and then asks the function
+// again, keeping only connections still shared.
+// =============================================================================
+
+/** A shared connection whose data entered a turn: what the save records. */
+export interface SharedChatSource {
+  ownerUserId: string;
+  connectionId: number;
+}
+
+/** What is shared with the user, before any bank is read. */
+export interface SharedChatList {
+  /** The function's rows, in the order it returned them. */
+  connections: SharedConnection[];
+  /** First names by owner id; null where there is none or it was unreadable. */
+  firstNames: Record<string, string | null>;
+}
+
+/** The shared data read for one turn, and the connections it came from. */
+export interface SharedChatRead {
+  state: SharedChatState;
+  /** Every connection the block names, read or not. */
+  sources: SharedChatSource[];
+}
+
+/**
+ * The shared-connections function failed, on the first call ("list") or on
+ * the call after the reads ("recheck"), or the reads and that second call did
+ * not finish inside their time limit ("timeout"), or the reads were cancelled,
+ * by that limit or by the caller, so the second call was not made
+ * ("cancelled"). `code` is the database's error code, or a fixed word; never
+ * a message.
+ */
+export type SharedChatReadStage = "list" | "recheck" | "timeout" | "cancelled";
+
+export class SharedChatReadError extends Error {
+  readonly stage: SharedChatReadStage;
+  readonly code: string;
+
+  constructor(stage: SharedChatReadStage, code: string) {
+    super(`shared connections could not be read (${stage})`);
+    this.name = "SharedChatReadError";
+    this.stage = stage;
+    this.code = code;
+    // ES5 target: keep instanceof working on the subclass.
+    Object.setPrototypeOf(this, SharedChatReadError.prototype);
+  }
+}
+
+export interface SharedChatDeps {
+  store: SharedAccountsStore;
+  log: (line: string) => void;
+}
+
+function liveSharedDeps(): SharedChatDeps {
+  return {
+    store: makeSharedAccountsStore(createAdminClient()),
+    log: (line) => console.warn(line),
+  };
+}
+
+const SHARED_ACCOUNTS_ONLY = { accounts: true, transactions: false, recurring: false };
+
+/**
+ * What other household members share with the user, and their first names.
+ * Reads no bank. A failed call of the function throws SharedChatReadError; a
+ * failed name read only leaves every name null.
+ *
+ * @param userId  The verified user's id (never a body value).
+ */
+export async function listSharedForChat(
+  userId: string,
+  deps: SharedChatDeps = liveSharedDeps()
+): Promise<SharedChatList> {
+  const rows = await deps.store.readSharedConnections(userId);
+  if (!rows.ok) throw new SharedChatReadError("list", rows.code);
+  const firstNames: Record<string, string | null> = {};
+  const owners: string[] = [];
+  for (const c of rows.value) {
+    if (owners.indexOf(c.ownerUserId) === -1) owners.push(c.ownerUserId);
+  }
+  for (const owner of owners) firstNames[owner] = null;
+  if (owners.length > 0) {
+    const names = await deps.store.readFirstNames(owners);
+    if (names.ok) {
+      for (const owner of owners) firstNames[owner] = names.value[owner] ?? null;
+    } else {
+      deps.log(`[chat-shared] outcome=names_failed code=${logSafeCode(names.code)}`);
+    }
+  }
+  return { connections: rows.value, firstNames };
+}
+
+type OwnerGroup = { ownerUserId: string; connections: SharedConnection[] };
+
+function groupSharedByOwner(rows: SharedConnection[]): OwnerGroup[] {
+  const groups: OwnerGroup[] = [];
+  const index: Record<string, number> = {};
+  for (const row of rows) {
+    if (!Object.prototype.hasOwnProperty.call(index, row.ownerUserId)) {
+      index[row.ownerUserId] = groups.length;
+      groups.push({ ownerUserId: row.ownerUserId, connections: [] });
+    }
+    groups[index[row.ownerUserId]].connections.push(row);
+  }
+  return groups;
+}
+
+/** One shared connection as this turn read it. */
+type ReadConnection = {
+  source: SharedConnection;
+  connection: PlaidChatConnection;
+  accounts: PlaidChatAccount[];
+};
+
+function notRead(rows: SharedConnection[]): ReadConnection[] {
+  return rows.map((source) => ({
+    source,
+    connection: {
+      institution: source.row.institution_name ?? "",
+      status: "active",
+      read: "not_read",
+    },
+    accounts: [],
+  }));
+}
+
+async function readOwnerForChat(
+  group: OwnerGroup,
+  canRead: boolean,
+  signal: AbortSignal | undefined,
+  log: (line: string) => void
+): Promise<ReadConnection[]> {
+  if (!canRead) return notRead(group.connections);
+  const today = new Date().toISOString().slice(0, 10);
+  let read: BankRead;
+  try {
+    read = await readBankData(
+      group.ownerUserId,
+      group.connections.map((c) => c.row),
+      SHARED_ACCOUNTS_ONLY,
+      bankWindow(today, 1),
+      liveAdapterDeps(),
+      { itemStatus: false, signal, logOrigin: "chat-shared" }
+    );
+  } catch (error) {
+    const reason = isPlaidTokenCryptoError(error) ? error.reason : "unknown";
+    log(`[chat-shared] outcome=owner_read_failed reason=${logSafeCode(reason)}`);
+    return notRead(group.connections);
+  }
+  return group.connections.map((source, k) => {
+    const status = read.connections[k];
+    const matches = status !== undefined && status.itemId === source.row.item_id;
+    const connectionRead: PlaidChatConnectionRead = matches ? readOf(status.status) : "not_read";
+    return {
+      source,
+      connection: {
+        institution: source.row.institution_name ?? "",
+        status: "active",
+        read: connectionRead,
+      },
+      accounts:
+        connectionRead === "read"
+          ? read.accounts.filter((a) => a.itemId === source.row.item_id).map(toChatAccount)
+          : [],
+    };
+  });
+}
+
+/**
+ * Reads the accounts of every connection in `list`, one read per owner with
+ * that owner's id, then calls the function again and keeps only the
+ * connections it still returns. A connection that could not be read stays,
+ * marked not read and with no account, and is still a source: its bank's name
+ * is in the block. When the second call fails, SharedChatReadError is thrown
+ * and nothing read may be used.
+ *
+ * The reads and the second call together are limited to `opts.timeoutMs`
+ * (SHARED_ACCOUNTS_READ_TIMEOUT_MS, the limit of the same read on the
+ * household card, by default). When it passes first, the bank calls are
+ * cancelled and SharedChatReadError with stage "timeout" is thrown, so the
+ * turn goes on without the other member's data instead of waiting for a slow
+ * bank until the request's own deadline.
+ *
+ * Once the reads are cancelled, by that limit or by `opts.signal`, the
+ * function is not called again: the reads end, a line says the second call
+ * was skipped, and the work ends with SharedChatReadError "cancelled", which
+ * no caller sees after the limit has already answered.
+ *
+ * @param opts.signal  Passed to every bank call; a caller that cancels must
+ *   not use the result.
+ */
+export async function readSharedForChat(
+  userId: string,
+  list: SharedChatList,
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+  deps: SharedChatDeps = liveSharedDeps()
+): Promise<SharedChatRead> {
+  const timeoutMs = opts.timeoutMs ?? SHARED_ACCOUNTS_READ_TIMEOUT_MS;
+  const controller = new AbortController();
+  const outer = opts.signal;
+  const onOuterAbort = (): void => controller.abort();
+  if (outer) {
+    if (outer.aborted) controller.abort();
+    else outer.addEventListener("abort", onOuterAbort);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const work = readAndRecheck(userId, list, controller.signal, deps);
+    work.then(undefined, () => undefined);
+    const limit = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        // Reject first, so nothing the abort triggers can settle the race.
+        reject(new SharedChatReadError("timeout", "timeout"));
+        controller.abort();
+      }, timeoutMs);
+    });
+    return await Promise.race([work, limit]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (outer) outer.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+async function readAndRecheck(
+  userId: string,
+  list: SharedChatList,
+  signal: AbortSignal,
+  deps: SharedChatDeps
+): Promise<SharedChatRead> {
+  const canRead = isPlaidConfigured() && isPlaidTokenCryptoConfigured();
+  const groups = groupSharedByOwner(list.connections);
+  // Every owner read starts here, before any wait, so no read begins after a
+  // cancellation.
+  const reads = await Promise.all(
+    groups.map((g) => readOwnerForChat(g, canRead, signal, deps.log))
+  );
+
+  // Cancelled by the time limit or by the caller: nothing read is used, so
+  // the function is not asked again.
+  if (signal.aborted) {
+    deps.log("[chat-shared] outcome=recheck_skipped reason=cancelled");
+    throw new SharedChatReadError("cancelled", "cancelled");
+  }
+
+  const again = await deps.store.readSharedConnections(userId);
+  if (!again.ok) throw new SharedChatReadError("recheck", again.code);
+  const still: Record<string, true> = {};
+  for (const c of again.value) still[`${c.ownerUserId}:${c.connectionId}`] = true;
+
+  const owners: SharedChatOwner[] = [];
+  const sources: SharedChatSource[] = [];
+  groups.forEach((group, g) => {
+    const kept = reads[g].filter(
+      (r) => still[`${r.source.ownerUserId}:${r.source.connectionId}`] === true
+    );
+    if (kept.length === 0) return;
+    owners.push({
+      firstName: list.firstNames[group.ownerUserId] ?? null,
+      connections: kept.map((r) => r.connection),
+      accounts: kept.reduce<PlaidChatAccount[]>((all, r) => all.concat(r.accounts), []),
+    });
+    for (const r of kept) {
+      sources.push({ ownerUserId: r.source.ownerUserId, connectionId: r.source.connectionId });
+    }
+  });
+  return { state: { owners }, sources };
 }

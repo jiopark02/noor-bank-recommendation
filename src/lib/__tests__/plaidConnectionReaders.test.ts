@@ -185,4 +185,32 @@ describe("plaid_connections queries", () => {
       },
     ]);
   });
+
+  it("the save of a turn that carried shared connections: one call site, deciding for the verified id", () => {
+    // chat_shared_turn_save checks, under its locks, that each connection is
+    // still shared with p_user_id, through the shared-connections function.
+    // Its one call passes the authenticated id as p_user_id.
+    const RPC = /\.rpc\(\s*"(chat_shared_turn_save)"\s*,\s*\{([^}]*)\}/g;
+    const found: Array<{ file: string; fn: string; userArg: boolean }> = [];
+    for (const file of walk(SRC)) {
+      const source = readFileSync(file, "utf8")
+        .replace(/\r\n/g, "\n")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      let m: RegExpExecArray | null;
+      while ((m = RPC.exec(source)) !== null) {
+        found.push({
+          file: path.relative(SRC, file).split(path.sep).join("/"),
+          fn: m[1],
+          userArg: m[2].replace(/\s+/g, " ").indexOf(" p_user_id: userId,") !== -1,
+        });
+      }
+      const named = source.split("chat_shared_turn_save").length - 1;
+      const called = source.split('.rpc("chat_shared_turn_save"').length - 1;
+      expect(named, path.relative(SRC, file)).toBe(called);
+    }
+    expect(found).toEqual([
+      { file: "lib/aiMemory.ts", fn: "chat_shared_turn_save", userArg: true },
+    ]);
+  });
 });

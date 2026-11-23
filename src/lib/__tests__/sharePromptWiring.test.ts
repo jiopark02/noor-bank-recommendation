@@ -342,6 +342,19 @@ describe("which question", () => {
     );
     expect(HOUSEHOLD_UI.shareExplainer("Alex")).toContain("You can change this anytime in Settings → Household.");
   });
+
+  // The settings list turns sharing on without the question above, so it says
+  // itself that the other member can ask Noor chat about a shared bank.
+  it("the settings note says a shared bank can be asked about in the other member's Noor AI chat", () => {
+    const SENTENCE =
+      "A shared bank's accounts and balances appear on their screens and in their Noor AI chat, where they can ask about them.";
+    expect(HOUSEHOLD_UI.sharingNote("Alex")).toBe(
+      `Choose which of your banks Alex can see. ${SENTENCE}`
+    );
+    expect(HOUSEHOLD_UI.sharingNote(null)).toBe(
+      `Choose which of your banks the other person in your household can see. ${SENTENCE}`
+    );
+  });
 });
 
 describe("the screens", () => {

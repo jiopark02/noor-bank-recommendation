@@ -18,21 +18,39 @@ import {
   buildMemoryContext,
   formatMemoryForPrompt,
   saveMessages,
+  saveSharedTurn,
   findSavedTurn,
   isSessionClosedError,
   getSessionMessages,
+  getSessionSharedSources,
+  SharedSourceEndedError,
+  SharedTurnBusyError,
   type DbChatMessage,
   type ChatSession,
+  type SharedTurnSource,
+  type SharedTurnSources,
 } from "@/lib/aiMemory";
 import {
   resolvePlaidStateMode,
   resolvePlaidChatDepth,
+  resolveSharedStateEnabled,
+  isHouseholdTurn,
   buildPlaidCapabilityBlock,
+  buildSharedBankBlock,
+  SHARED_NOT_IN_TURN_BLOCK,
   maskPlaidBlockForLog,
   plaidBlockCarriesBalances,
 } from "@/lib/plaidChatContext";
-import { getPlaidChatState } from "@/lib/plaidChatState";
+import {
+  getPlaidChatState,
+  listSharedForChat,
+  readSharedForChat,
+  SharedChatReadError,
+  type SharedChatList,
+  type SharedChatRead,
+} from "@/lib/plaidChatState";
 import { isPlaidTokenCryptoError } from "@/lib/plaidTokenCrypto";
+import { logSafeCode } from "@/lib/householdInvite";
 import {
   evaluatePlaidEgressDecision,
   logPlaidEgressDecision,
@@ -328,6 +346,43 @@ function plaidReadFailure(error: unknown): { cause: string; reason: string } {
     };
   }
   return { cause: "unknown", reason: "none" };
+}
+
+/**
+ * The code for a failed read of what another member shares, for its log
+ * line: the stage and the database's code when the shared-connections
+ * function failed, otherwise "unknown". Never the error's message.
+ */
+function sharedReadFailureCode(error: unknown): string {
+  if (error instanceof SharedChatReadError) {
+    return `${error.stage}:${logSafeCode(error.code)}`;
+  }
+  return "unknown";
+}
+
+/**
+ * The pairs of both reads of a session's marks: every pair of the first, then
+ * each pair of the second that the first did not hold, once.
+ */
+function mergeSharedSources(
+  first: SharedTurnSource[],
+  second: SharedTurnSource[]
+): SharedTurnSource[] {
+  const merged: SharedTurnSource[] = [];
+  const seen: Record<string, true> = {};
+  for (const s of first.concat(second)) {
+    const key = `${s.ownerUserId}:${s.connectionId}`;
+    if (seen[key] === true) continue;
+    seen[key] = true;
+    merged.push(s);
+  }
+  return merged;
+}
+
+/** The sharing members' first names, as read, for the household-turn check. */
+function ownerFirstNames(list: SharedChatList | null): Array<string | null> {
+  if (list === null) return [];
+  return Object.keys(list.firstNames).map((owner) => list.firstNames[owner]);
 }
 
 function isComplexPrompt(message: string): boolean {
@@ -632,9 +687,13 @@ async function withRetry<T>(
   } catch (error) {
     if (!isRetryableError(error)) throw error;
 
+    // Name and code only, never the error or its message: a database error's
+    // message can carry the row it refused (see errorCodeForLog).
     console.warn(
-      `[retry] ${context}: transient error, retrying once:`,
-      error instanceof Error ? error.message : error
+      "[retry] %s: transient error, retrying once name=%s code=%s",
+      context,
+      errorName(error),
+      errorCodeForLog(error)
     );
     await new Promise((resolve) => setTimeout(resolve, 250));
 
@@ -644,8 +703,10 @@ async function withRetry<T>(
       return result;
     } catch (retryError) {
       console.error(
-        `[retry] ${context}: failed after retry:`,
-        retryError instanceof Error ? retryError.message : retryError
+        "[retry] %s: failed after retry name=%s code=%s",
+        context,
+        errorName(retryError),
+        errorCodeForLog(retryError)
       );
       throw retryError;
     }
@@ -703,6 +764,22 @@ function toClientChatMessage(row: DbChatMessage): ClientChatMessage {
  * Apart from step 2, an insert is never sent twice. Callers should catch and
  * translate a throw to an HTTP error response.
  *
+ * A TURN THAT CARRIES SHARED BANK DATA
+ * When `sharedSources` names any connection, the turn carries another
+ * household member's bank data: a read of the session's marks, before or
+ * after its history, found it marked, so its history holds the figures, or
+ * this turn's prompt held it.
+ * Every insert above is then a call of saveSharedTurn instead of
+ * saveMessages, whatever the message was: it records those connections and
+ * stores the pair together, under the locks the purge takes, and only while
+ * each marked connection keeps its mark and each connection added this turn
+ * is still shared. Step 2 is the same, with the same sources for the new
+ * session; the marked ones are still checked on the session they were read
+ * from. Two of its errors say for certain that nothing was stored, so they
+ * are thrown at once, without the lookup of step 3:
+ * SharedSourceEndedError (a connection is no longer shared) and
+ * SharedTurnBusyError (a lock the save needs was held elsewhere twice).
+ *
  * @returns The id of the session the turn was stored in, or null when
  *   nothing was to be stored.
  * @throws Error when persistence is expected but content is empty, or when
@@ -717,6 +794,12 @@ async function persistTurnIfEnabled(params: {
   inputTokens?: number;
   outputTokens?: number;
   requestStartedAtMs: number;
+  /**
+   * Connections whose shared data this turn carries, found marked on the
+   * session by either read of its marks or added by its prompt; both lists
+   * may be empty.
+   */
+  sharedSources: SharedTurnSources;
 }): Promise<string | null> {
   if (!isAiMemoryEnabled()) return null;
   if (!params.activeSession) return null;
@@ -757,13 +840,20 @@ async function persistTurnIfEnabled(params: {
     );
   };
 
+  const sources = params.sharedSources;
+  const carriesShared = sources.marked.length > 0 || sources.added.length > 0;
+  const insert = (sessionId: string, signal: AbortSignal): Promise<unknown> =>
+    carriesShared
+      ? saveSharedTurn(sessionId, userId, pair, sources, { ids, signal })
+      : saveMessages(sessionId, userId, pair, { ids, signal });
+
   try {
     const savedSessionId = await runUntilDeadline(
       insertDeadlineAtMs,
       "save",
       async (signal) => {
         try {
-          await saveMessages(firstSessionId, userId, pair, { ids, signal });
+          await insert(firstSessionId, signal);
           return firstSessionId;
         } catch (error) {
           if (!isSessionClosedError(error)) throw error;
@@ -776,13 +866,22 @@ async function persistTurnIfEnabled(params: {
         const session = await getOrCreateActiveSession(userId);
         notCut(signal, "save");
         switched = true;
-        await saveMessages(session.id, userId, pair, { ids, signal });
+        await insert(session.id, signal);
         return session.id;
       }
     );
     logSave("inserted", "info");
     return savedSessionId;
   } catch (error) {
+    // Nothing was stored, for certain: no lookup by id.
+    if (error instanceof SharedSourceEndedError) {
+      logSave("shared_ended", "warn");
+      throw error;
+    }
+    if (error instanceof SharedTurnBusyError) {
+      logSave("shared_busy", "warn");
+      throw error;
+    }
     let confirmedSessionId: string | null = null;
     try {
       confirmedSessionId = await runUntilDeadline(
@@ -865,6 +964,24 @@ function errorName(error: unknown): string {
 }
 
 /**
+ * The code of a thrown error, or of the database error it wraps as its cause,
+ * for a log line: through logSafeCode, so only a short word of letters,
+ * digits and underscores, else "none" or "invalid". The error itself is never
+ * logged: a database error's message and details can carry the row it
+ * refused, and a chat row's content can carry bank figures.
+ */
+function errorCodeForLog(error: unknown): string {
+  try {
+    const own = (error as { code?: unknown } | null | undefined)?.code;
+    if (typeof own === "string" && own !== "") return logSafeCode(own);
+    const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+    return logSafeCode((cause as { code?: unknown } | null | undefined)?.code);
+  } catch {
+    return "none";
+  }
+}
+
+/**
  * One line per failed model attempt: the attempt's number, its kind (the
  * error class llm_calls records for it), the upstream HTTP status, and, for
  * an attempt that threw, the cause code (see networkCauseCode) and the
@@ -931,6 +1048,10 @@ type ChatStage =
   | "session"
   | "memory"
   | "plaid_state"
+  | "shared_marks"
+  | "shared_marks_after"
+  | "shared_list"
+  | "shared_state"
   | "save";
 
 export async function POST(request: NextRequest) {
@@ -952,6 +1073,10 @@ export async function POST(request: NextRequest) {
     session: -1,
     memory: -1,
     plaid_state: -1,
+    shared_marks: -1,
+    shared_marks_after: -1,
+    shared_list: -1,
+    shared_state: -1,
     save: -1,
   };
   const timed = async <T>(
@@ -1143,6 +1268,12 @@ export async function POST(request: NextRequest) {
     let memoryBlock = "";
     let storedHistory: DbChatMessage[] = [];
     let historySource: "server" | "none" = "none";
+    // Marks of shared data on the session: the pairs read before its history
+    // and after it, merged. What the save checks and records as marked.
+    let markedSources: SharedTurnSource[] = [];
+    // Whether the first of those reads found a mark: decides the household
+    // turn and the marked flag of the [chat-shared] line.
+    let markedAtStart = false;
 
     // With the profile read off there is nothing to wait for, so the request
     // makes no profile wait at all.
@@ -1164,6 +1295,49 @@ export async function POST(request: NextRequest) {
           }, "getOrCreateActiveSession")
         );
         activeSession = session;
+
+        // The connections another household member shares whose data has
+        // already entered this session, read whatever the shared-data switch
+        // says: the session's history goes back to the model and carries
+        // their figures, so every turn of a marked session is saved through
+        // saveSharedTurn, which refuses it once a mark is gone. They are read
+        // twice, before the history and after it, and merged. A mark the
+        // first read saw and that is deleted later (sharing ended) is checked
+        // by the save. A mark another request of this session stored with its
+        // messages after the first read is seen by the second read when the
+        // history read returned those messages. A read that fails ends the
+        // request before any model call: going on could save a turn whose
+        // history held shared figures with nothing marking it.
+        const readMarks = async (
+          stage: "shared_marks" | "shared_marks_after"
+        ): Promise<SharedTurnSource[] | null> => {
+          try {
+            return await beforeLoop(stage, (signal) =>
+              withRetry(() => {
+                notCut(signal, stage);
+                return getSessionSharedSources(session.id, authUserId);
+              }, "getSessionSharedSources")
+            );
+          } catch (error) {
+            if (error instanceof ChatDeadlineError) throw error;
+            console.error(
+              "[chat-shared] outcome=mark_read_failed name=%s code=%s",
+              errorName(error),
+              errorCodeForLog(error)
+            );
+            return null;
+          }
+        };
+        const markReadFailed = (): NextResponse =>
+          respond(
+            {
+              error: "Memory system temporarily unavailable. Please try again.",
+              code: "MEMORY_LOAD_FAILED",
+            },
+            { status: 503 }
+          );
+        const marksBefore = await readMarks("shared_marks");
+        if (marksBefore === null) return markReadFailed();
 
         // The model's history is this session's stored turns: the session
         // this turn is saved into, not a second lookup of the active session.
@@ -1188,6 +1362,11 @@ export async function POST(request: NextRequest) {
             ])
         );
 
+        const marksAfter = await readMarks("shared_marks_after");
+        if (marksAfter === null) return markReadFailed();
+        markedSources = mergeSharedSources(marksBefore, marksAfter);
+        markedAtStart = marksBefore.length > 0;
+
         memoryBlock = formatMemoryForPrompt(memoryContext);
         storedHistory = recentRows.reverse();
         historySource = "server";
@@ -1200,7 +1379,11 @@ export async function POST(request: NextRequest) {
         // A wait cut at the deadline is not a memory failure: it goes to the
         // outer catch, which answers it as the time budget.
         if (error instanceof ChatDeadlineError) throw error;
-        console.error("AI memory load failed:", error);
+        console.error(
+          "[chat-memory] load failed name=%s code=%s",
+          errorName(error),
+          errorCodeForLog(error)
+        );
         return respond(
           {
             error: "Memory system temporarily unavailable. Please try again.",
@@ -1251,8 +1434,12 @@ export async function POST(request: NextRequest) {
       !isGreeting && isFinancialPlanningQuestion(lastUserMessageText);
 
     // Bank data for the model. AI_PLAID_STATE = off | connection | balances.
-    // There is one bank read, getPlaidChatState, inside the capability
-    // scaffold's branch; "off" denies that channel, so nothing is read. The
+    // The user's own banks are read in one place, getPlaidChatState, inside
+    // the capability scaffold's branch; "off" denies that channel, so nothing
+    // is read. The banks another household member shares are read in one
+    // place too, readSharedForChat, inside the same branch and only when the
+    // household-shared channel allows the turn (which "off" also denies); that
+    // channel raises the user's own read to depth "balances". The
     // balance-keyword channel reads nothing itself: when it allows a turn
     // (mode "connection" and a balance question) that read goes to depth
     // "balances". The financial-analysis channel only has its egress decision
@@ -1268,6 +1455,55 @@ export async function POST(request: NextRequest) {
       plaidStateEnabled,
     });
     systemPrompt += memoryBlock;
+
+    // Bank data another household member shares with the user. Read at all
+    // only while AI_HOUSEHOLD_SHARED_STATE is exactly "on" and the mode is not
+    // "off"; otherwise nothing below runs and the prompt is as it was. What is
+    // shared comes from the shared-connections function, for the verified id
+    // only. It enters the prompt on a household turn (household_shared
+    // channel): a non-greeting message about the household or naming a
+    // sharing member, or any non-greeting turn of a session the first read of
+    // its marks found marked with shared data, whose history carries it. A
+    // turn where something is shared and none of it is in the prompt gets one
+    // line saying so. A failed read of what is shared adds nothing, not even
+    // that line. Whether the turn is saved through saveSharedTurn does not
+    // depend on any of this: a marked session's every turn is, by the marks of
+    // either read (see markedSources above).
+    const sharedStateEnabled = resolveSharedStateEnabled() && plaidStateEnabled;
+    let sharedList: SharedChatList | null = null;
+    const sessionMarked = markedAtStart;
+    if (sharedStateEnabled) {
+      try {
+        sharedList = await beforeLoop("shared_list", () => listSharedForChat(authUserId));
+      } catch (error) {
+        if (error instanceof ChatDeadlineError) throw error;
+        console.warn(
+          "[chat-shared] outcome=list_failed code=%s",
+          sharedReadFailureCode(error)
+        );
+      }
+    }
+    const hasSharedConnections =
+      sharedList !== null && sharedList.connections.length > 0;
+    const householdTurn =
+      hasSharedConnections &&
+      !isGreeting &&
+      (sessionMarked ||
+        isHouseholdTurn(lastUserMessageText, ownerFirstNames(sharedList)));
+    const householdSharedDecision = evaluatePlaidEgressDecision({
+      channel: "household_shared",
+      plaidStateMode,
+      sharedStateEnabled,
+      hasSharedConnections,
+      householdTurn,
+    });
+    if (sharedStateEnabled) {
+      logPlaidEgressDecision(householdSharedDecision, { mode: plaidStateMode });
+    }
+    // The connections whose data this turn's prompt carries. Empty unless the
+    // shared block below is added.
+    let promptSources: SharedTurnSource[] = [];
+    let sharedNotice = false;
 
     const capabilityScaffoldDecision = evaluatePlaidEgressDecision({
       channel: "capability_scaffold",
@@ -1291,7 +1527,26 @@ export async function POST(request: NextRequest) {
         mode: plaidStateMode,
         isGreeting,
         balanceKeywordAllowed: balanceKeywordDecision.allowed,
+        householdSharedAllowed: householdSharedDecision.allowed,
       });
+      // The shared read runs beside the user's own; its outcome is taken
+      // after the own block, and its failure never changes that block.
+      const sharedListForRead = sharedList;
+      const sharedReadOutcome =
+        householdSharedDecision.allowed && sharedListForRead !== null
+          ? beforeLoop("shared_state", (signal) =>
+              readSharedForChat(authUserId, sharedListForRead, { signal })
+            ).then(
+              (read): { read: SharedChatRead | null; error: unknown } => ({
+                read,
+                error: null,
+              }),
+              (error: unknown): { read: SharedChatRead | null; error: unknown } => ({
+                read: null,
+                error,
+              })
+            )
+          : null;
       try {
         const plaidState = await beforeLoop(
           "plaid_state",
@@ -1339,7 +1594,55 @@ export async function POST(request: NextRequest) {
           readError: true,
         });
       }
+
+      let sharedRead: SharedChatRead | null = null;
+      if (sharedReadOutcome !== null) {
+        const outcome = await sharedReadOutcome;
+        if (outcome.error instanceof ChatDeadlineError) throw outcome.error;
+        if (outcome.read !== null) {
+          sharedRead = outcome.read;
+        } else {
+          console.warn(
+            "[chat-shared] outcome=read_failed code=%s",
+            sharedReadFailureCode(outcome.error)
+          );
+        }
+      }
+      const sharedBlock = sharedRead !== null ? buildSharedBankBlock(sharedRead.state) : "";
+      if (sharedRead !== null && sharedBlock !== "") {
+        systemPrompt += sharedBlock;
+        promptSources = sharedRead.sources;
+      } else if (hasSharedConnections) {
+        systemPrompt += SHARED_NOT_IN_TURN_BLOCK;
+        sharedNotice = true;
+      }
     }
+    if (sharedStateEnabled) {
+      // Counts and flags only: no name, bank, account, amount or id.
+      console.info(
+        "[chat-shared] listed=%d household=%s marked=%s allowed=%s sources=%d notice=%d",
+        sharedList === null ? -1 : sharedList.connections.length,
+        householdTurn,
+        sessionMarked,
+        householdSharedDecision.allowed,
+        promptSources.length,
+        sharedNotice ? 1 : 0
+      );
+    }
+    // What the save checks and records: every connection either read of the
+    // session's marks found, checked by its mark on that session, and
+    // every connection this turn's prompt added that was not marked, checked
+    // against what is shared now. Either list non-empty saves the turn through
+    // saveSharedTurn, a greeting or a turn whose shared reads failed included.
+    const markedKeys: Record<string, true> = {};
+    for (const s of markedSources) markedKeys[`${s.ownerUserId}:${s.connectionId}`] = true;
+    const sharedSources: SharedTurnSources = {
+      markedSessionId: markedSources.length > 0 && activeSession ? activeSession.id : null,
+      marked: markedSources,
+      added: promptSources.filter(
+        (s) => markedKeys[`${s.ownerUserId}:${s.connectionId}`] !== true
+      ),
+    };
 
     if (isGreeting) {
       systemPrompt +=
@@ -1440,9 +1743,24 @@ export async function POST(request: NextRequest) {
               inputTokens: result.usage?.input_tokens,
               outputTokens: result.usage?.output_tokens,
               requestStartedAtMs,
+              sharedSources,
             });
           } catch (error) {
-            console.error("Failed to save messages (OpenRouter branch):", error);
+            console.error(
+              "[chat-save] failed name=%s code=%s",
+              errorName(error),
+              errorCodeForLog(error)
+            );
+            if (error instanceof SharedSourceEndedError) {
+              return respond(
+                {
+                  error:
+                    "Could not save your conversation. Please try sending your message again.",
+                  code: "SHARED_DATA_ENDED",
+                },
+                { status: 409 }
+              );
+            }
             return respond(
               {
                 error:
@@ -1506,7 +1824,11 @@ export async function POST(request: NextRequest) {
       return respond(CHAT_TIME_BUDGET_EXHAUSTED_BODY, { status: 503 });
     }
 
-    console.error("Chat API error:", error);
+    console.error(
+      "[chat-error] name=%s code=%s",
+      errorName(error),
+      errorCodeForLog(error)
+    );
 
     return respond(
       { error: "Failed to get response from AI" },
@@ -1516,13 +1838,17 @@ export async function POST(request: NextRequest) {
     // One line per request. Durations only. No user, session, or content
     // fields.
     console.info(
-      "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d save_ms=%d",
+      "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d shared_marks_ms=%d memory_ms=%d shared_marks_after_ms=%d plaid_state_ms=%d shared_list_ms=%d shared_state_ms=%d save_ms=%d",
       stageMs.auth,
       stageMs.body,
       stageMs.profile,
       stageMs.session,
+      stageMs.shared_marks,
       stageMs.memory,
+      stageMs.shared_marks_after,
       stageMs.plaid_state,
+      stageMs.shared_list,
+      stageMs.shared_state,
       stageMs.save
     );
     // Awaited: Vercel freezes the function once the response is returned.
@@ -1588,7 +1914,11 @@ export async function GET(request: NextRequest) {
         sessionId: activeSession.id,
       });
     } catch (memoryError) {
-      console.error("AI memory load failed (GET):", memoryError);
+      console.error(
+        "[chat-history-get] memory load failed name=%s code=%s",
+        errorName(memoryError),
+        errorCodeForLog(memoryError)
+      );
       return NextResponse.json(
         {
           error: "Memory system temporarily unavailable. Please try again.",
@@ -1598,7 +1928,11 @@ export async function GET(request: NextRequest) {
       );
     }
   } catch (error) {
-    console.error("Failed to fetch chat history:", error);
+    console.error(
+      "[chat-history-get] failed name=%s code=%s",
+      errorName(error),
+      errorCodeForLog(error)
+    );
     return NextResponse.json(
       { error: "Failed to fetch chat history" },
       { status: 500 }
