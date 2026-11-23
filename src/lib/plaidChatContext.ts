@@ -625,14 +625,18 @@ export function buildSharedBankBlock(state: SharedChatState): string {
 
 /**
  * The one line for a turn where something is shared with the user but none of
- * it is in the prompt. It names no person, bank, account or amount.
+ * it is in the prompt: the turn was not about the household, or the read
+ * failed or ran out of time. It names no person, bank, account or amount, and
+ * does not tell the model the user left anything out, since the user may have
+ * mentioned their partner already.
  */
 export const SHARED_NOT_IN_TURN_BLOCK =
   "\n\n## Household sharing\n" +
   "A member of the user's household shares bank accounts with the user, but " +
-  "none of their data is in this turn. Do not guess anything about it. If the " +
-  "user asks about that person's money or the household's, ask them to mention " +
-  "their partner, or their partner's name, in their message.";
+  "none of that data could be included in this turn. Do not guess or state " +
+  "anything about it. If the user asks about it, say that it could not be " +
+  "included this time, and that they can ask again, mentioning their partner " +
+  "or that person's name.";
 
 // -----------------------------------------------------------------------------
 // Masked logging (§7)

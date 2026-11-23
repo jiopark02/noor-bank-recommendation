@@ -816,8 +816,12 @@ describe("SHARED_NOT_IN_TURN_BLOCK (T7)", () => {
     const body = SHARED_NOT_IN_TURN_BLOCK.slice("\n\n## Household sharing\n".length);
     expect(body).not.toContain("\n");
     expect(body).not.toMatch(/\d|\$|<|>/);
-    expect(body).toContain("none of their data is in this turn");
-    expect(body).toContain("ask them to mention their partner, or their partner's name");
+    expect(body).toContain("none of that data could be included in this turn");
+    expect(body).toContain(
+      "they can ask again, mentioning their partner or that person's name"
+    );
+    // It does not tell the model the user left their partner out.
+    expect(body).not.toMatch(/ask them to mention|did not mention|didn't mention/);
   });
 });
 
