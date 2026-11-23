@@ -138,6 +138,16 @@
 -- cannot be reversed while this file is applied: the composite foreign keys
 -- need plaid_connections.user_id to stay a uuid. Reverse this file first.
 --
+-- This file cannot be reversed while a later file that depends on it is
+-- applied: 20261122120000_chat_shared_sources.sql (its purge trigger) and
+-- 20261123120000_household_shared_connections.sql (its function) read
+-- share_grants.grantee_user_id, which the reverse below drops, and
+-- 20261124120000_chat_shared_turn_save.sql depends on both of them. The drop
+-- itself succeeds, since a function body's references are not tracked, and
+-- every later delete from share_grants or call of those functions fails.
+-- When reversing several of these files, reverse the newest first and this
+-- file last; each file's header names what it depends on.
+--
 -- To reverse it (after the application code that calls household_share_set
 -- or exports share_prompt_answers is reverted and deployed): first apply
 -- 20261120120000_household_invites_and_membership_changes.sql again, which

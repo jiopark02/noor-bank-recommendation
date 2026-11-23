@@ -152,7 +152,9 @@
 --   drop function if exists public.chat_shared_turn_save(
 --     uuid, uuid, uuid, uuid[], bigint[], uuid[], bigint[], uuid, uuid, text, text, text, integer, integer);
 -- and apply 20261122120000_chat_shared_sources.sql again to restore the
--- recording function.
+-- recording function. When 20261122120000_chat_shared_sources.sql is to be
+-- reversed as well, reverse this file first, then that one and the other
+-- earlier files newest first, as each file's header says.
 
 begin;
 

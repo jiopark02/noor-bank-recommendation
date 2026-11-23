@@ -139,6 +139,14 @@
 -- the purge function reads, and every later delete from share_grants would
 -- fail. Reverse this file first.
 --
+-- This file cannot be reversed while
+-- 20261124120000_chat_shared_turn_save.sql is applied: that file's function
+-- writes and reads chat_shared_sources and relies on the purge trigger. The
+-- drops below succeed, since a function body's references are not tracked,
+-- and every later call of that function fails. Reverse that file first; its
+-- own reverse applies this file again to restore the recording function,
+-- which the reverse below then drops.
+--
 -- To reverse it (after the application code that reads chat_shared_sources
 -- is reverted and deployed):
 --   begin;

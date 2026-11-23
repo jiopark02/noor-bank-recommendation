@@ -59,6 +59,12 @@
 -- which this function reads, and every later call would fail. Reverse this
 -- file first.
 --
+-- This file cannot be reversed while
+-- 20261124120000_chat_shared_turn_save.sql is applied: that file's function
+-- calls this one. The drop below succeeds, since a function body's
+-- references are not tracked, and every later call of that function fails.
+-- Reverse that file first.
+--
 -- To reverse it (after the application code that calls the function is
 -- reverted and deployed):
 --   drop function if exists public.household_shared_connections(uuid);
