@@ -43,6 +43,8 @@ import type { BuiltEmail } from "../emailConfirmation";
  *   verify or the gate going on without a session, or the mode off
  *   asking for one                                                -> A14
  *   the session left out of the verify or check arguments          -> A8, A10
+ *   a missing and an unconfirmed address logged as one line, a
+ *   refused code with no line, or the address in a line           -> A17
  */
 
 const USER = "sentinel-user-id-6a1f";
@@ -260,6 +262,25 @@ describe("startReauth", () => {
     expect(h.sent).toEqual([]);
   });
 
+  it("A17 a missing address and an unconfirmed one answer alike and log different lines, with no address", async () => {
+    const cases: Array<[{ email: string | null; emailConfirmed: boolean }, string]> = [
+      [{ email: null, emailConfirmed: true }, "no_email"],
+      [{ email: "  ", emailConfirmed: true }, "no_email"],
+      // No address at all is reported as such, confirmed or not.
+      [{ email: null, emailConfirmed: false }, "no_email"],
+      [{ email: ADDRESS, emailConfirmed: false }, "email_unconfirmed"],
+    ];
+    for (const [identity, outcome] of cases) {
+      const h = harness({ answers: { account_reauth_issue: { data: "issued", error: null } } });
+      const result = await startReauth(h.deps, { ...IDENTITY, ...identity }, "delete_account");
+      const label = JSON.stringify(identity);
+      expect(result.status, label).toBe(409);
+      expect(result.body.code, label).toBe("REAUTH_EMAIL_UNAVAILABLE");
+      expect(h.logs, label).toEqual([`[account-reauth] route=start outcome=${outcome}`]);
+      expect(h.logs.join("\n"), label).not.toContain(ADDRESS);
+    }
+  });
+
   it("with the mode off answers not_required and neither issues nor sends", async () => {
     const h = harness({ mode: "off", answers: { account_reauth_issue: { data: "issued", error: null } } });
     expect(await startReauth(h.deps, IDENTITY, "delete_account")).toEqual({
@@ -295,6 +316,13 @@ describe("verifyReauth", () => {
         p_max_attempts: REAUTH_MAX_ATTEMPTS,
       });
     }
+  });
+
+  it("A17 a code that is not six digits logs one code_invalid line", async () => {
+    const h = harness({ answers: { account_reauth_verify: { data: "verified", error: null } } });
+    const result = await verifyReauth(h.deps, IDENTITY, "export_data", "12a456");
+    expect(result.status).toBe(400);
+    expect(h.logs).toEqual(["[account-reauth] route=verify outcome=code_invalid"]);
   });
 
   it("refuses a code that is not six digits without an rpc", async () => {

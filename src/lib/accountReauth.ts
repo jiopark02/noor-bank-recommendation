@@ -321,10 +321,15 @@ export async function startReauth(
   // A code is issued only to a session that could then verify it.
   const session = requireSession(identity.sessionId, "start", deps.log);
   if (!session.ok) return session.result;
-  // A code goes only to an address the auth server reports as confirmed.
+  // A code goes only to an address the auth server reports as confirmed. The
+  // two refusals answer alike and are told apart only in the log line.
   const to = typeof identity.email === "string" ? identity.email.trim() : "";
-  if (to.length === 0 || identity.emailConfirmed !== true) {
+  if (to.length === 0) {
     deps.log("[account-reauth] route=start outcome=no_email");
+    return refusal(409, REAUTH_CODES.REAUTH_EMAIL_UNAVAILABLE);
+  }
+  if (identity.emailConfirmed !== true) {
+    deps.log("[account-reauth] route=start outcome=email_unconfirmed");
     return refusal(409, REAUTH_CODES.REAUTH_EMAIL_UNAVAILABLE);
   }
   if (deps.key === null) {
@@ -385,6 +390,7 @@ export async function verifyReauth(
   }
   const code = normalizeReauthCode(codeInput);
   if (code === null) {
+    deps.log("[account-reauth] route=verify outcome=code_invalid");
     return refusal(400, REAUTH_CODES.REAUTH_CODE_INVALID);
   }
   const session = requireSession(identity.sessionId, "verify", deps.log);

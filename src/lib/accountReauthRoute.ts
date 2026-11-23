@@ -119,10 +119,14 @@ export async function reauthRouteGate(
         }),
       };
     }
+    // The cause is one of a fixed set of words (authFailureCause.ts), never
+    // anything from the request.
+    log(`[account-reauth] route=${route} outcome=unauthorized cause=${auth.cause}`);
     return { ok: false, response: reauthResponse({ status: 401, body: { error: "Unauthorized" } }) };
   }
   const read = await readRequestJsonWithByteLimit(request, REAUTH_BODY_MAX_BYTES);
   if (read.kind === "too_large") {
+    log(`[account-reauth] route=${route} outcome=too_large`);
     return {
       ok: false,
       response: reauthResponse({

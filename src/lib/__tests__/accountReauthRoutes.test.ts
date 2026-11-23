@@ -17,6 +17,8 @@ import type { NextRequest } from "next/server";
  *   the session taken from the body, or verify going on without one -> T5
  *   confirmation read from the body, or not read at all            -> T6
  *   start going on without a session                               -> T7
+ *   a refusal (401, 413, an invalid code, either 409) with no line,
+ *   a line at another level, or the address in a line             -> T8
  */
 
 const SESSION = "5e1d0c9b-8a7f-4e6d-9c5b-4a3f2e1d0c9b";
@@ -260,6 +262,54 @@ describe("reauth routes", () => {
     expect(res.json.code).toBe("REAUTH_EMAIL_UNAVAILABLE");
     expect(state.rpcCalls).toEqual([]);
     expect(state.emails).toEqual([]);
+  });
+
+  it("T8 each refusal writes one warning line naming the route and the outcome, and no address", async () => {
+    const AUTH_CAUSES = [
+      "supabase_unconfigured",
+      "no_header",
+      "not_bearer",
+      "empty_token",
+      "client_unavailable",
+      "token_rejected",
+      "auth_unreachable",
+    ];
+    const warn = spies[1];
+    const warnings = (): string[] => warn.mock.calls.map((args: unknown[]) => String(args[0]));
+    const others = (): number =>
+      spies.filter((spy) => spy !== warn).reduce((n, spy) => n + spy.mock.calls.length, 0);
+
+    for (const path of ["start", "verify"] as const) {
+      warn.mockClear();
+      const unauthorized = await post(path, { purpose: "delete_account", code: "123456" }, "");
+      expect(unauthorized.status, path).toBe(401);
+      const lines = warnings();
+      expect(lines, path).toHaveLength(1);
+      const match = new RegExp(`^\\[account-reauth\\] route=${path} outcome=unauthorized cause=([a-z_]+)$`).exec(
+        lines[0]
+      );
+      expect(match, lines[0]).not.toBeNull();
+      expect(AUTH_CAUSES).toContain(match![1]);
+
+      warn.mockClear();
+      const tooLarge = await post(path, { purpose: "delete_account", padding: "x".repeat(2000) });
+      expect(tooLarge.status, path).toBe(413);
+      expect(warnings(), path).toEqual([`[account-reauth] route=${path} outcome=too_large`]);
+    }
+
+    warn.mockClear();
+    const invalid = await post("verify", { purpose: "delete_account", code: "12a456" });
+    expect(invalid.status).toBe(400);
+    expect(warnings()).toEqual(["[account-reauth] route=verify outcome=code_invalid"]);
+
+    warn.mockClear();
+    state.emailConfirmedAt = null;
+    const unconfirmed = await post("start", { purpose: "delete_account" });
+    expect(unconfirmed.status).toBe(409);
+    expect(warnings()).toEqual(["[account-reauth] route=start outcome=email_unconfirmed"]);
+
+    expect(others()).toBe(0);
+    expect(consoleText()).not.toContain(USER_EMAIL);
   });
 
   it("T4 no log line or answer carries the code, the key, the hash, the address or the bearer token", async () => {
