@@ -409,14 +409,14 @@ export default function SettingsPage() {
     return { proceed: next.proceed, stage: next.stage };
   };
 
-  // "Get a new code", offered in the code stage only. Never runs the action.
+  // "Get a new code", offered in the code and unconfirmed stages
+  // (showsCodeEntry). Never runs the action.
   const handleNewReauthCode = async (purpose: ReauthPurpose) => {
     const sentAt = modalCloses.current;
     setIsLoading(true);
     setError(null);
     setReauthBusy('start');
     try {
-      // Offered in code and unconfirmed only (showsCodeEntry).
       const from = reauthStage === 'unconfirmed' ? 'unconfirmed' : 'code';
       const next = afterStart(from, await postReauth('start', { purpose }));
       if (answerStillCurrent(sentAt, modalCloses.current)) applyReauthOutcome(next);
@@ -523,9 +523,15 @@ export default function SettingsPage() {
     let exportRequested = false;
     // From the unconfirmed stage the modal stays open until the export's
     // answer: a check that asks for a verification returns to the code stage
-    // in the modal (afterFailedAction). Every other answer closes it.
+    // in the modal (afterFailedAction). Every other answer closes it. Set
+    // back to false once this function has closed the modal itself, since
+    // that close also advances the counter.
     let openUntilAnswer = false;
     const sentAt = modalCloses.current;
+    // While the modal stays open, the user can close it before the answer.
+    // That close cancels the export: nothing after it closes a modal, shows
+    // a message or downloads, so a modal opened since is left as it is.
+    const closedByUser = () => openUntilAnswer && !answerStillCurrent(sentAt, modalCloses.current);
     try {
       const ready = await advanceReauth('export_data');
       if (!ready.proceed) {
@@ -537,7 +543,11 @@ export default function SettingsPage() {
       if (!openUntilAnswer) closeModal();
       const rawAuth = await getSupabaseBearerHeaders();
       if (!rawAuth.Authorization) {
-        if (openUntilAnswer) closeModal();
+        if (closedByUser()) return;
+        if (openUntilAnswer) {
+          closeModal();
+          openUntilAnswer = false;
+        }
         showError('Your session has expired. Please sign in again to export your data.');
         return;
       }
@@ -548,14 +558,21 @@ export default function SettingsPage() {
         headers: buildBearerOnlyHeaders(rawAuth),
       });
 
-      if (openUntilAnswer && answerStillCurrent(sentAt, modalCloses.current)) {
+      if (openUntilAnswer) {
         const errBody = res.ok ? null : await res.json().catch(() => ({}));
+        // Checked after the body read too, which can outlast a close. A
+        // successful answer's body is then dropped unread.
+        if (closedByUser()) {
+          if (res.ok) await res.body?.cancel().catch(() => undefined);
+          return;
+        }
         const unconfirmed = errBody === null ? null : afterFailedAction(ready.stage, res.status, errBody);
         if (unconfirmed) {
           applyReauthOutcome(unconfirmed);
           return;
         }
         closeModal();
+        openUntilAnswer = false;
       }
 
       if (!res.ok) {
@@ -581,7 +598,8 @@ export default function SettingsPage() {
 
       showSuccess('Data export downloaded');
     } catch {
-      if (openUntilAnswer && answerStillCurrent(sentAt, modalCloses.current)) closeModal();
+      if (closedByUser()) return;
+      if (openUntilAnswer) closeModal();
       showError(exportRequested ? REAUTH_UI.exportFailed : REAUTH_UI.fallback);
     } finally {
       setReauthBusy(null);

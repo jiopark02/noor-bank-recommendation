@@ -42,11 +42,13 @@ import {
  *   export (the flag removed, or set after the request)           -> C10
  *   a verify with no readable answer running the action at once    -> C11
  *   a press after it sending the verify again                      -> C11
- *   a required verification after it starting over from idle, or
- *   showing the server's words                                     -> C12
+ *   a required verification after it starting over from idle,
+ *   showing the server's words, or clearing the typed code          -> C12
  *   a refused new code from it falling back to code                -> C13
  *   a throwing verify thrown on, an unreadable body read as {}, or
  *   either action not handling the unconfirmed answer              -> C14
+ *   an export kept open from unconfirmed that, after the user closed
+ *   the modal, still closes a modal, shows a message or downloads  -> C15
  */
 
 /** Runs one press the way the page does and returns the stage it leaves. */
@@ -208,19 +210,22 @@ describe("stage transitions", () => {
     }
   });
 
-  it("C12 after an unconfirmed code, a required verification returns to the code stage with its own words", () => {
+  it("C12 after an unconfirmed code, a required verification returns to the code stage with its own words and keeps the code", () => {
     expect(REAUTH_UI.codeUnconfirmed).toBe(
-      "We couldn't confirm your code. Enter it again or request a new one."
+      "We couldn't confirm your code. Check it and press again, or request a new one."
     );
     const required = { code: "REAUTH_REQUIRED", error: "Server words." };
     expect(stageAfterFailedAction("unconfirmed", 403, required)).toBe("code");
-    expect(afterFailedAction("unconfirmed", 403, required)).toEqual({
+    const back = afterFailedAction("unconfirmed", 403, required);
+    expect(back).toEqual({
       stage: "code",
       proceed: false,
       error: REAUTH_UI.codeUnconfirmed,
       notice: null,
-      clearCode: true,
+      clearCode: false,
     });
+    // The kept code is what the next press sends: the code stage verifies.
+    expect(pressAction(back!.stage)).toBe("verify");
     // A session the server cannot use starts over, as from any stage.
     expect(stageAfterFailedAction("unconfirmed", 403, { code: "REAUTH_SESSION_UNAVAILABLE" })).toBe("idle");
     expect(afterFailedAction("unconfirmed", 403, { code: "REAUTH_SESSION_UNAVAILABLE" })).toBeNull();
@@ -396,6 +401,33 @@ describe("settings page wiring", () => {
     // Both modals show the code field in code and unconfirmed alike.
     expect(PAGE.split("{showsCodeEntry(reauthStage) && (").length - 1).toBe(2);
     expect(PAGE).not.toContain("reauthStage === 'code'");
+  });
+
+  it("C15 an export kept open from unconfirmed and closed by the user before its answer is cancelled: no close, message or download", () => {
+    const exporting = between("const handleExportData = async", "const handleLogout");
+    // The user's close is told from this function's own close.
+    expect(exporting).toContain(
+      "const closedByUser = () => openUntilAnswer && !answerStillCurrent(sentAt, modalCloses.current);"
+    );
+    // Every closeModal after the modal was kept open goes through the check:
+    // the session branch, the answer, and the catch.
+    expect(exporting).toContain(
+      "if (!rawAuth.Authorization) { if (closedByUser()) return; if (openUntilAnswer) { closeModal(); openUntilAnswer = false; }"
+    );
+    expect(exporting).toContain("} catch { if (closedByUser()) return; if (openUntilAnswer) closeModal();");
+    // The answer: checked after the error body read, and a successful body is
+    // cancelled, never downloaded.
+    const CANCEL = "if (closedByUser()) { if (res.ok) await res.body?.cancel().catch(() => undefined); return; }";
+    const cancelAt = exporting.indexOf(CANCEL);
+    expect(cancelAt).toBeGreaterThan(exporting.indexOf("const errBody = res.ok ? null : await res.json()"));
+    expect(cancelAt).toBeLessThan(exporting.indexOf("const blob = await res.blob();"));
+    expect(cancelAt).toBeLessThan(exporting.indexOf("afterFailedAction(ready.stage, res.status, errBody)"));
+    expect(exporting).toContain("closeModal(); openUntilAnswer = false; } if (!res.ok) {");
+    // No closeModal in the function goes around the check: one before the
+    // session read for the other stages, and the three above.
+    expect(exporting.split("closeModal();").length - 1).toBe(4);
+    expect(exporting.split("closedByUser()").length - 1).toBe(3);
+    expect(exporting).not.toContain("answerStillCurrent(sentAt, modalCloses.current)) closeModal()");
   });
 
   it("C10 a failed export request shows the new-code sentence; a throw before the request does not", () => {

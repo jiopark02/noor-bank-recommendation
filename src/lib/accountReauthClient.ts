@@ -25,7 +25,9 @@
  *             accepted code is refused) but runs the action, and the action's
  *             own check on the server decides: it goes ahead, or it answers
  *             that a verification is required and the step returns to the
- *             code stage. Nothing is sent until the user presses.
+ *             code stage with the typed code kept, so the next press checks
+ *             it. "Get a new code" is offered here as in the code stage.
+ *             Nothing is sent until the user presses.
  *
  * Closing the modal returns to idle from any stage (afterClose), and an
  * answer to a request sent before the close changes nothing
@@ -67,7 +69,7 @@ export const REAUTH_UI = {
   // A verify request ended without a readable answer.
   verifyUnknown: "Connection lost while checking your code. Press again to continue.",
   // After that, the action's check answered that a verification is required.
-  codeUnconfirmed: "We couldn't confirm your code. Enter it again or request a new one.",
+  codeUnconfirmed: "We couldn't confirm your code. Check it and press again, or request a new one.",
 } as const;
 
 /** Answers after which the code step starts over from idle. */
@@ -231,8 +233,9 @@ export function stageAfterFailedAction(
 /**
  * The whole screen after a failed action answer, for the one case that has
  * its own words: from unconfirmed, REAUTH_REQUIRED returns to the code stage
- * with REAUTH_UI.codeUnconfirmed and clears the typed code. Null otherwise;
- * the page then handles the answer as before.
+ * with REAUTH_UI.codeUnconfirmed and keeps the typed code, which the next
+ * press sends to verify. Null otherwise; the page then handles the answer as
+ * before.
  */
 export function afterFailedAction(
   stage: ReauthStage,
@@ -240,7 +243,7 @@ export function afterFailedAction(
   body: unknown
 ): ReauthOutcome | null {
   if (stage !== "unconfirmed" || !reauthRequiredCode(status, body)) return null;
-  return outcome(stageAfterFailedAction(stage, status, body), false, REAUTH_UI.codeUnconfirmed, null, true);
+  return outcome(stageAfterFailedAction(stage, status, body), false, REAUTH_UI.codeUnconfirmed, null, false);
 }
 
 /**
