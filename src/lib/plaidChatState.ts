@@ -52,7 +52,11 @@ import type {
   SharedChatOwner,
   SharedChatState,
 } from "@/lib/plaidChatContext";
-import type { SharedAccountsStore, SharedConnection } from "@/lib/householdSharedAccounts";
+import {
+  SHARED_ACCOUNTS_READ_TIMEOUT_MS,
+  type SharedAccountsStore,
+  type SharedConnection,
+} from "@/lib/householdSharedAccounts";
 import { makeSharedAccountsStore } from "@/lib/householdSharedAccountsStore";
 import { logSafeCode } from "@/lib/householdInvite";
 
@@ -279,14 +283,15 @@ export interface SharedChatRead {
 
 /**
  * The shared-connections function failed, on the first call ("list") or on
- * the call after the reads ("recheck"). `code` is the database's error code,
- * or a fixed word from the store; never a message.
+ * the call after the reads ("recheck"), or the reads and that second call did
+ * not finish inside their time limit ("timeout"). `code` is the database's
+ * error code, or a fixed word; never a message.
  */
 export class SharedChatReadError extends Error {
-  readonly stage: "list" | "recheck";
+  readonly stage: "list" | "recheck" | "timeout";
   readonly code: string;
 
-  constructor(stage: "list" | "recheck", code: string) {
+  constructor(stage: "list" | "recheck" | "timeout", code: string) {
     super(`shared connections could not be read (${stage})`);
     this.name = "SharedChatReadError";
     this.stage = stage;
@@ -424,19 +429,58 @@ async function readOwnerForChat(
  * is in the block. When the second call fails, SharedChatReadError is thrown
  * and nothing read may be used.
  *
+ * The reads and the second call together are limited to `opts.timeoutMs`
+ * (SHARED_ACCOUNTS_READ_TIMEOUT_MS, the limit of the same read on the
+ * household card, by default). When it passes first, the bank calls are
+ * cancelled and SharedChatReadError with stage "timeout" is thrown, so the
+ * turn goes on without the other member's data instead of waiting for a slow
+ * bank until the request's own deadline.
+ *
  * @param opts.signal  Passed to every bank call; a caller that cancels must
  *   not use the result.
  */
 export async function readSharedForChat(
   userId: string,
   list: SharedChatList,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
   deps: SharedChatDeps = liveSharedDeps()
+): Promise<SharedChatRead> {
+  const timeoutMs = opts.timeoutMs ?? SHARED_ACCOUNTS_READ_TIMEOUT_MS;
+  const controller = new AbortController();
+  const outer = opts.signal;
+  const onOuterAbort = (): void => controller.abort();
+  if (outer) {
+    if (outer.aborted) controller.abort();
+    else outer.addEventListener("abort", onOuterAbort);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const work = readAndRecheck(userId, list, controller.signal, deps);
+    work.then(undefined, () => undefined);
+    const limit = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        // Reject first, so nothing the abort triggers can settle the race.
+        reject(new SharedChatReadError("timeout", "timeout"));
+        controller.abort();
+      }, timeoutMs);
+    });
+    return await Promise.race([work, limit]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (outer) outer.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+async function readAndRecheck(
+  userId: string,
+  list: SharedChatList,
+  signal: AbortSignal,
+  deps: SharedChatDeps
 ): Promise<SharedChatRead> {
   const canRead = isPlaidConfigured() && isPlaidTokenCryptoConfigured();
   const groups = groupSharedByOwner(list.connections);
   const reads = await Promise.all(
-    groups.map((g) => readOwnerForChat(g, canRead, opts.signal, deps.log))
+    groups.map((g) => readOwnerForChat(g, canRead, signal, deps.log))
   );
 
   const again = await deps.store.readSharedConnections(userId);

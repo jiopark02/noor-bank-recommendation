@@ -16,6 +16,8 @@ import type { SharedAccountsStore, SharedConnection, StoreRead } from "../househ
  *   the first call's rows used when the second call fails              -> T10
  *   transactions, recurring streams or the Item read asked for         -> T11
  *   a failed owner read not caught, or its connections dropped         -> owner
+ *   the read's own time limit removed, or its timer not aborting the
+ *     bank calls, or another limit used by default                     -> N18
  *   a name, bank, account, amount or id put in a log line              -> logs
  */
 
@@ -56,6 +58,10 @@ const state = {
   decryptCalls: [] as Array<{ userId: string }>,
   accountsGetCalls: 0,
   loginRequired: new Set<string>(),
+  /** Items whose accounts read answers only when its signal is aborted. */
+  hang: new Set<string>(),
+  /** Whether each hanging read saw its signal aborted. */
+  hangAborted: [] as boolean[],
   logs: [] as string[],
 };
 
@@ -103,9 +109,19 @@ vi.mock("@/lib/plaid", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../plaid")>()),
   isPlaidConfigured: () => state.plaidConfigured,
   plaidClient: {
-    async accountsGet(request: { access_token: string }) {
+    async accountsGet(request: { access_token: string }, options?: { signal?: AbortSignal }) {
       state.accountsGetCalls += 1;
       const item = request.access_token.split("|")[1];
+      if (state.hang.has(item)) {
+        const signal = options?.signal;
+        await new Promise<void>((resolve) => {
+          if (!signal) return;
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", () => resolve());
+        });
+        state.hangAborted.push(signal?.aborted === true);
+        throw Object.assign(new Error("sentinel-aborted"), { name: "AbortError" });
+      }
       if (state.loginRequired.has(item)) {
         throw Object.assign(new Error("sentinel-plaid-error-text"), {
           response: { status: 400, data: { error_code: "ITEM_LOGIN_REQUIRED" } },
@@ -172,6 +188,8 @@ beforeEach(() => {
   state.decryptCalls = [];
   state.accountsGetCalls = 0;
   state.loginRequired = new Set();
+  state.hang = new Set();
+  state.hangAborted = [];
   state.logs = [];
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -325,6 +343,39 @@ describe("readSharedForChat", () => {
       expect(state.readCalls).toEqual([]);
       expect(read.state.owners[0].connections[0].read).toBe("not_read");
       expect(read.sources).toEqual([{ ownerUserId: OWNER_A, connectionId: A1.id }]);
+    }
+  });
+
+  it("N18 a read that outlasts its limit is cancelled and answers a timeout, not the request's deadline", async () => {
+    state.rows = [{ ok: true, value: [shared(A1)] }];
+    state.hang.add(A1.item);
+    const list = await listSharedForChat(USER_ID, deps);
+    const error = await readSharedForChat(USER_ID, list, { timeoutMs: 20 }, deps).catch(
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(SharedChatReadError);
+    expect((error as SharedChatReadError).stage).toBe("timeout");
+    // The bank call saw its signal aborted.
+    await vi.waitFor(() => expect(state.hangAborted).toEqual([true]));
+    // The second call of the function was not reached.
+    expect(state.rowCalls).toEqual([USER_ID]);
+  });
+
+  it("N18 the default limit is the household card's limit for the same read", async () => {
+    const { SHARED_ACCOUNTS_READ_TIMEOUT_MS } = await import("../householdSharedAccounts");
+    vi.useFakeTimers();
+    try {
+      state.rows = [{ ok: true, value: [shared(A1)] }];
+      state.hang.add(A1.item);
+      const list = await listSharedForChat(USER_ID, deps);
+      const pending = readSharedForChat(USER_ID, list, {}, deps).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(SHARED_ACCOUNTS_READ_TIMEOUT_MS - 1);
+      expect(state.hangAborted).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      const error = await pending;
+      expect((error as SharedChatReadError).stage).toBe("timeout");
+    } finally {
+      vi.useRealTimers();
     }
   });
 
