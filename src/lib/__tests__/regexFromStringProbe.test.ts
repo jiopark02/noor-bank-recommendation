@@ -18,8 +18,10 @@ import { codeBySourceFile } from "./sourceProbe";
  * literal in it holds a backslash.
  *
  * What it does not see: a string held in a variable or constant and passed by
- * name, a pattern built in a function another file calls, and code the
- * comment stripper mistakes for a comment.
+ * name, a pattern built in a function another file calls, code the comment
+ * stripper mistakes for a comment, and a string passed to
+ * String.prototype.match, matchAll or search, which build a pattern from it
+ * (replace, replaceAll and split take a string as plain text).
  *
  * Mutation and the test it turns red:
  *   an application file builds a pattern from "\\b..." or `\\b${x}`   -> P1
