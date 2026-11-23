@@ -352,7 +352,21 @@ export async function deleteAccountForUser(
   // cascade from the plaid_connections row, so step 2's row deletes remove
   // the user's own, and from public.users on both the owner and the grantee
   // key, so this delete also removes the rows that name this user as the
-  // person a connection is shared with.
+  // person a connection is shared with. A household the trigger above
+  // deletes takes its share_prompt_answers and household_invites rows with
+  // it as well, by household_id.
+  //
+  // Where migration 20261122120000_chat_shared_sources.sql is applied too
+  // (live state), every share grant deleted by any of these paths fires the
+  // purge trigger on share_grants: for each chat session of the grantee
+  // marked with that owner and connection, it deletes the messages created
+  // at or after the mark's moment and the mark (chat_shared_sources) itself,
+  // and lowers the session's message_count. So step 2's row deletes also
+  // remove, from the other household member's chat, what this user's shared
+  // banks put there, while their sessions and earlier messages stay. A
+  // failure there fails that row's delete, which keeps the row and leaves
+  // the connection to the gate in step 3. In this step the user's own
+  // sessions, messages and marks go by their own cascade from public.users.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to
