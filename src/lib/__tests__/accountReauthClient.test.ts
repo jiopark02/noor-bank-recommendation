@@ -35,6 +35,9 @@ import {
  *   a close that keeps any stage, or a late answer accepted        -> C8
  *   a modal exit that skips closeModal, or a late answer applied
  *   without the close check                                        -> C9
+ *   a failed export showing the server's text or another sentence,
+ *   or a throw before the export request reported as a failed
+ *   export (the flag removed, or set after the request)           -> C10
  */
 
 /** Runs one press the way the page does and returns the stage it leaves. */
@@ -268,6 +271,37 @@ describe("settings page wiring", () => {
     expect(PAGE.split("setReauthStage(").length - 1).toBe(3);
     expect(PAGE).toContain("onClick={() => handleNewReauthCode('delete_account')}");
     expect(PAGE).toContain("onClick={() => handleNewReauthCode('export_data')}");
+  });
+
+  it("C10 a failed export request shows the new-code sentence; a throw before the request does not", () => {
+    expect(REAUTH_UI.exportFailed).toBe(
+      "Your data couldn't be exported. Request a new code and try again."
+    );
+    const exporting = between("const handleExportData = async", "const handleLogout");
+    const FLAG_SET = "exportRequested = true; const res = await fetch('/api/account/export'";
+    // The flag starts false, before the try, and is set right before the
+    // export request and nowhere else.
+    expect(exporting.indexOf("let exportRequested = false;")).toBeGreaterThan(-1);
+    expect(exporting.indexOf("let exportRequested = false;")).toBeLessThan(exporting.indexOf("try {"));
+    expect(exporting).toContain(FLAG_SET);
+    expect(exporting.split("exportRequested = true").length - 1).toBe(1);
+    // A failed answer: always the new-code sentence.
+    const afterFetch = exporting.slice(exporting.indexOf(FLAG_SET));
+    const notOk = afterFetch.indexOf("if (!res.ok) {");
+    expect(notOk).toBeGreaterThan(-1);
+    expect(afterFetch.indexOf("showError(REAUTH_UI.exportFailed);")).toBeGreaterThan(notOk);
+    expect(afterFetch.indexOf("showError(REAUTH_UI.exportFailed);")).toBeLessThan(
+      afterFetch.indexOf("} catch {")
+    );
+    // A throw: the flag decides between the two sentences.
+    const catchBody = afterFetch.slice(afterFetch.indexOf("} catch {"), afterFetch.indexOf("} finally {"));
+    expect(catchBody).toContain(
+      "showError(exportRequested ? REAUTH_UI.exportFailed : REAUTH_UI.fallback);"
+    );
+    expect(exporting.split("REAUTH_UI.exportFailed").length - 1).toBe(2);
+    // The server's own error text no longer reaches the export toast.
+    expect(exporting).not.toContain("errBody.error");
+    expect(PAGE).not.toContain("Failed to export your data");
   });
 
   it("C2 each action runs the code step for its own purpose before its request, and stores nothing", () => {

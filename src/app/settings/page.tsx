@@ -496,6 +496,10 @@ export default function SettingsPage() {
     // The email-code step runs inside the export modal, so its failures use
     // the modal's `error`. Once it passes the modal closes, and failures of
     // the download itself use the page-level toast (showError).
+    // Set right before the export request: a throw before it (the code step,
+    // the session read) did not try the export and is not reported as a
+    // failed export.
+    let exportRequested = false;
     try {
       const ready = await advanceReauth('export_data');
       if (!ready.proceed) {
@@ -510,15 +514,18 @@ export default function SettingsPage() {
         return;
       }
 
+      exportRequested = true;
       const res = await fetch('/api/account/export', {
         method: 'GET',
         headers: buildBearerOnlyHeaders(rawAuth),
       });
 
       if (!res.ok) {
-        // Surface the server's explicit error — never a silent no-op.
-        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        showError(errBody.error || 'Failed to export your data. Please try again.');
+        // Never a silent no-op. One sentence for every failed answer: the
+        // screen cannot tell whether the server's check used the
+        // verification up before the failure, so the next try asks for a
+        // new code.
+        showError(REAUTH_UI.exportFailed);
         return;
       }
 
@@ -536,7 +543,7 @@ export default function SettingsPage() {
 
       showSuccess('Data export downloaded');
     } catch {
-      showError('Failed to export your data. Please try again.');
+      showError(exportRequested ? REAUTH_UI.exportFailed : REAUTH_UI.fallback);
     } finally {
       setReauthBusy(null);
       setIsLoading(false);

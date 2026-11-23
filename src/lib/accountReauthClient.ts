@@ -49,6 +49,10 @@ export const REAUTH_UI = {
   exportTitle: "Export your data?",
   exportBody: "To protect your data, we may email you a code to confirm it's you before the download starts.",
   exportConfirm: "Download",
+  // For every failed export request, a failed answer or a network failure
+  // once the request was sent: the export check may already have used the
+  // verification up, so the next try starts with a new code.
+  exportFailed: "Your data couldn't be exported. Request a new code and try again.",
 } as const;
 
 /** Answers after which the code step starts over from idle. */
