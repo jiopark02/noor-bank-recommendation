@@ -49,7 +49,10 @@ const SAVE_LINE = "[chat-save] outcome=%s session_closed=%s switched=%s";
 
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 
-type InsertStep = "ok" | "closed" | "error" | "hang";
+type InsertStep = "ok" | "closed" | "error" | "refused" | "hang";
+
+/** Text a database refusal can carry in its message and details: the row. */
+const ROW_SENTINEL = "sentinel-row-content-balance-4321";
 type LookupStep = "both" | "missing" | "error" | "hang";
 
 interface Ids {
@@ -133,6 +136,19 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => {
       if (step === "hang") return never();
       if (step === "closed") return Promise.reject(new actual.SessionClosedError());
       if (step === "error") return Promise.reject(new Error("insert failed"));
+      if (step === "refused") {
+        // Shaped like saveMessages' wrapped database error: the message names
+        // the failure, the cause is the database's error with the row.
+        return Promise.reject(
+          new Error(`Failed to save messages: ${ROW_SENTINEL}`, {
+            cause: {
+              code: "23514",
+              message: `new row violates check constraint ${ROW_SENTINEL}`,
+              details: `Failing row contains (${ROW_SENTINEL}).`,
+            },
+          })
+        );
+      }
       return Promise.resolve({});
     },
     findSavedTurn: (
@@ -490,5 +506,26 @@ describe("the [chat-save] line", () => {
     expect(line).not.toContain(SESSION_B);
     expect(line).not.toContain(seen.inserts[0].ids!.user);
     expect(line).not.toContain(seen.inserts[0].ids!.assistant);
+  });
+});
+
+describe("the line for a failed save (N19)", () => {
+  it("names the error and the database's code, never the error's message or details", async () => {
+    script.inserts = ["refused"];
+    script.lookups = ["missing"];
+    const res = await post();
+    expect(res.status).toBe(500);
+    const errors = vi.mocked(console.error).mock.calls;
+    expect(errors).toContainEqual(["[chat-save] failed name=%s code=%s", "Error", "23514"]);
+    const everything = JSON.stringify(
+      (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+        vi.mocked(console[m]).mock.calls.map((args) =>
+          args.map((a) =>
+            a instanceof Error ? JSON.stringify({ message: a.message, cause: a.cause }) : a
+          )
+        )
+      )
+    );
+    expect(everything).not.toContain(ROW_SENTINEL);
   });
 });

@@ -928,6 +928,24 @@ function errorName(error: unknown): string {
 }
 
 /**
+ * The code of a thrown error, or of the database error it wraps as its cause,
+ * for a log line: through logSafeCode, so only a short word of letters,
+ * digits and underscores, else "none" or "invalid". The error itself is never
+ * logged: a database error's message and details can carry the row it
+ * refused, and a chat row's content can carry bank figures.
+ */
+function errorCodeForLog(error: unknown): string {
+  try {
+    const own = (error as { code?: unknown } | null | undefined)?.code;
+    if (typeof own === "string" && own !== "") return logSafeCode(own);
+    const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+    return logSafeCode((cause as { code?: unknown } | null | undefined)?.code);
+  } catch {
+    return "none";
+  }
+}
+
+/**
  * One line per failed model attempt: the attempt's number, its kind (the
  * error class llm_calls records for it), the upstream HTTP status, and, for
  * an attempt that threw, the cause code (see networkCauseCode) and the
@@ -1267,7 +1285,11 @@ export async function POST(request: NextRequest) {
         // A wait cut at the deadline is not a memory failure: it goes to the
         // outer catch, which answers it as the time budget.
         if (error instanceof ChatDeadlineError) throw error;
-        console.error("AI memory load failed:", error);
+        console.error(
+          "[chat-memory] load failed name=%s code=%s",
+          errorName(error),
+          errorCodeForLog(error)
+        );
         return respond(
           {
             error: "Memory system temporarily unavailable. Please try again.",
@@ -1633,7 +1655,11 @@ export async function POST(request: NextRequest) {
               sharedSources,
             });
           } catch (error) {
-            console.error("Failed to save messages (OpenRouter branch):", error);
+            console.error(
+              "[chat-save] failed name=%s code=%s",
+              errorName(error),
+              errorCodeForLog(error)
+            );
             if (error instanceof SharedSourceEndedError) {
               return respond(
                 {
@@ -1707,7 +1733,11 @@ export async function POST(request: NextRequest) {
       return respond(CHAT_TIME_BUDGET_EXHAUSTED_BODY, { status: 503 });
     }
 
-    console.error("Chat API error:", error);
+    console.error(
+      "[chat-error] name=%s code=%s",
+      errorName(error),
+      errorCodeForLog(error)
+    );
 
     return respond(
       { error: "Failed to get response from AI" },
@@ -1791,7 +1821,11 @@ export async function GET(request: NextRequest) {
         sessionId: activeSession.id,
       });
     } catch (memoryError) {
-      console.error("AI memory load failed (GET):", memoryError);
+      console.error(
+        "[chat-history-get] memory load failed name=%s code=%s",
+        errorName(memoryError),
+        errorCodeForLog(memoryError)
+      );
       return NextResponse.json(
         {
           error: "Memory system temporarily unavailable. Please try again.",
@@ -1801,7 +1835,11 @@ export async function GET(request: NextRequest) {
       );
     }
   } catch (error) {
-    console.error("Failed to fetch chat history:", error);
+    console.error(
+      "[chat-history-get] failed name=%s code=%s",
+      errorName(error),
+      errorCodeForLog(error)
+    );
     return NextResponse.json(
       { error: "Failed to fetch chat history" },
       { status: 500 }

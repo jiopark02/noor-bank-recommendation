@@ -118,7 +118,11 @@ const FIXTURE_I = `        if (result.ok) {
               sharedSources,
             });
           } catch (error) {
-            console.error("Failed to save messages (OpenRouter branch):", error);
+            console.error(
+              "[chat-save] failed name=%s code=%s",
+              errorName(error),
+              errorCodeForLog(error)
+            );
             if (error instanceof SharedSourceEndedError) {
               return respond(
                 {
