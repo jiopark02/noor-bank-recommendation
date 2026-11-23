@@ -230,7 +230,9 @@ function foldAccentedE(text: string): string {
  * Whether the user's latest message is about their household: it holds one of
  * HOUSEHOLD_WORDS, or the first name of a member who shares a bank with them.
  * The caller decides the rest: a greeting is never a household turn, and a
- * session already marked with shared data is one whatever the message says.
+ * turn of a session the first read of its marks, before the history, found
+ * marked with shared data is one whatever the message says; a mark only the
+ * read after the history found does not make one.
  */
 export function isHouseholdTurn(
   message: string,

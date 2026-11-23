@@ -19,9 +19,10 @@
 --   - Creates public.chat_shared_turn_save(...). It is given the person's
 --     session, the two messages with ids the caller chose, and two kinds of
 --     (owner, connection) pairs:
---       (a) pairs already marked on a session when the turn started, with the
---           id of that session (p_marked_session_id), which is the session
---           the turn is saved in unless that session was closed meanwhile;
+--       (a) pairs the caller found marked on a session, reading its marks
+--           before the turn's history and again after it, with the id of
+--           that session (p_marked_session_id), which is the session the
+--           turn is saved in unless that session was closed meanwhile;
 --       (b) pairs whose data the caller put into this turn's prompt.
 --     It:
 --       1. refuses with SQLSTATE 22023 when an argument is null, a pair array
@@ -324,7 +325,8 @@ begin
     return 'session_closed';
   end if;
 
-  -- (a) A pair marked when the turn started: its mark must still be there.
+  -- (a) A pair the caller found marked, reading the session's marks before
+  -- the turn's history and again after it: its mark must still be there.
   if exists (
     select 1
       from unnest(p_marked_owner_user_ids, p_marked_resource_ids) as k(owner_user_id, resource_id)

@@ -38,13 +38,13 @@ import type { NextRequest } from "next/server";
  *     after it                                                          -> N9
  *   the marked session's id replaced by the session the save goes to    -> N10
  *   a marked connection also sent as added, or added ones dropped       -> N11
- *   the second read's marks not used                                    -> N12
- *   the first read's marks replaced by the second's                     -> N13
- *   a failed second read taken as "not marked"                          -> N14
- *   the two reads concatenated without removing repeats                 -> N15
- *   the household turn decided by the second read's marks               -> N16
- *   an error's message written by the retry helper's lines              -> F9
- *   a fake handing the route its fixture instead of a copy              -> F10
+ *   the second read's marks not used                                    -> TR1
+ *   the first read's marks replaced by the second's                     -> TR2
+ *   a failed second read taken as "not marked"                          -> TR3
+ *   the two reads concatenated without removing repeats                 -> TR4
+ *   the household turn decided by the second read's marks               -> TR5
+ *   an error's message written by the retry helper's lines              -> retry-log
+ *   a fake handing the route its fixture instead of a copy              -> fixture-copy
  *
  * WHAT THIS FILE DOES NOT PROVE
  * What the database function decides (chatSharedTurnSaveMigrationProbe and
@@ -842,8 +842,8 @@ describe("every turn of a marked session is saved through saveSharedTurn (N1-N11
   });
 });
 
-describe("the marks read before and after the history, merged (N12-N16)", () => {
-  it("N12 a mark stored with messages after the first read is checked: saved through saveSharedTurn, not saveMessages", async () => {
+describe("the marks read before and after the history, merged (TR1-TR5)", () => {
+  it("TR1 a mark only the second read found is sent to the save as marked: saved through saveSharedTurn, not saveMessages", async () => {
     state.markSteps = [[], [Y]];
     state.history = HISTORY_WITH_FIGURES;
     const res = await post(GENERAL);
@@ -858,7 +858,7 @@ describe("the marks read before and after the history, merged (N12-N16)", () => 
     });
   });
 
-  it("N13 a mark gone by the second read is still checked, so a save after sharing ended is refused", async () => {
+  it("TR2 a mark the first read found and the second did not is still sent to the save as marked", async () => {
     state.markSteps = [[X], []];
     state.history = HISTORY_WITH_FIGURES;
     state.read = { ...READ, sources: [X] };
@@ -871,7 +871,7 @@ describe("the marks read before and after the history, merged (N12-N16)", () => 
     });
   });
 
-  it("N14 a second read that fails ends the request before the model: 503, nothing saved", async () => {
+  it("TR3 a second read that fails ends the request before the model: 503, nothing saved", async () => {
     state.markSteps = [[X], "fail"];
     state.history = HISTORY_WITH_FIGURES;
     const res = await post(GENERAL);
@@ -892,7 +892,7 @@ describe("the marks read before and after the history, merged (N12-N16)", () => 
     ]);
   });
 
-  it("N15 a pair both reads return is sent once, in the order first seen", async () => {
+  it("TR4 a pair both reads return is sent once, in the order first seen", async () => {
     state.markSteps = [[X], [Y, X]];
     await post(GENERAL);
     expect(seen.sharedSaves[0].sources).toEqual({
@@ -902,7 +902,7 @@ describe("the marks read before and after the history, merged (N12-N16)", () => 
     });
   });
 
-  it("N16 the household turn is decided by the first read: a mark only the second read found reads nothing shared", async () => {
+  it("TR5 the household turn is decided by the first read: a mark only the second read found reads nothing shared", async () => {
     state.markSteps = [[], [Y]];
     await post(GENERAL);
     expect(seen.reads).toEqual([]);
@@ -912,7 +912,7 @@ describe("the marks read before and after the history, merged (N12-N16)", () => 
   });
 });
 
-describe("the retry helper's log lines carry the error's name and code only (F9)", () => {
+describe("the retry helper's log lines carry the error's name and code only (retry-log)", () => {
   const SENTINEL = "sentinel row content $4,321.57";
   const transient = (): Error => Object.assign(new Error(SENTINEL), { code: "08006" });
 
@@ -943,7 +943,7 @@ describe("the retry helper's log lines carry the error's name and code only (F9)
   });
 });
 
-describe("the fixtures reach every request unchanged (F10)", () => {
+describe("the fixtures reach every request unchanged (fixture-copy)", () => {
   it("the stored history is still newest first after a request", async () => {
     state.history = HISTORY_WITH_FIGURES;
     expect((await post(GENERAL)).status).toBe(200);
