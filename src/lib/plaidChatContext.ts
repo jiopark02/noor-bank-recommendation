@@ -154,8 +154,10 @@ export function resolveSharedStateEnabled(): boolean {
 
 /**
  * Words that make a message about the household, matched as whole words in
- * any case. "we" and "us" are left out: they are too common in questions
- * about the user's own money to stand for another person.
+ * any case. "we", "us", "our" and "ours" are left out: they are too common in
+ * questions about the user's own money to stand for another person. The
+ * accented spellings of "fiance" and "fiancee" are folded to these before
+ * matching.
  */
 const HOUSEHOLD_WORDS = [
   "partner",
@@ -164,8 +166,6 @@ const HOUSEHOLD_WORDS = [
   "wife",
   "household",
   "joint",
-  "our",
-  "ours",
   "fiance",
   "fiancee",
   "boyfriend",
@@ -183,24 +183,6 @@ const HOUSEHOLD_WORDS = [
 
 const HOUSEHOLD_WORDS_RE = new RegExp(`\\b(?:${HOUSEHOLD_WORDS.join("|")})\\b`);
 
-/**
- * First names that are also everyday or money words. One of these counts as
- * the other member's name only where the message writes it with a capital
- * first letter.
- */
-const NAMES_THAT_ARE_WORDS = [
-  "bill",
-  "will",
-  "may",
-  "mark",
-  "grant",
-  "chase",
-  "penny",
-  "rich",
-  "max",
-  "cash",
-];
-
 /** A letter of any script, or an ASCII digit. */
 function isWordCharacter(c: string | undefined): boolean {
   if (c === undefined || c === "") return false;
@@ -209,25 +191,37 @@ function isWordCharacter(c: string | undefined): boolean {
 
 /**
  * Whether the message names this person: the name, cleaned like every other
- * name that reaches a prompt, as a whole word. `\b` only knows ASCII letters,
- * so the edges are checked by hand: the characters on either side must not be
- * a letter of any script or a digit.
+ * name that reaches a prompt, as a whole word whose first letter the message
+ * writes as a capital, so that a name that is also an everyday word (Bill,
+ * Grant, Hope) counts only where it is written as a name. A first letter of a
+ * script without case matches as written. `\b` only knows ASCII letters, so
+ * the edges are checked by hand: the characters on either side must not be a
+ * letter of any script or a digit.
  */
 function messageNames(message: string, rawName: string | null): boolean {
   const name = sanitizeNameField(rawName);
   if (name.length < 2) return false;
   const lower = name.toLowerCase();
-  const needsCapital = NAMES_THAT_ARE_WORDS.indexOf(lower) !== -1;
   for (let i = 0; i + name.length <= message.length; i++) {
     const segment = message.substr(i, name.length);
     if (segment.toLowerCase() !== lower) continue;
     if (isWordCharacter(message.charAt(i - 1))) continue;
     if (isWordCharacter(message.charAt(i + name.length))) continue;
     const first = segment.charAt(0);
-    if (needsCapital && first === first.toLowerCase()) continue;
+    const hasCase = first.toLowerCase() !== first.toUpperCase();
+    if (hasCase && first !== first.toUpperCase()) continue;
     return true;
   }
   return false;
+}
+
+/**
+ * Folds the accented spellings of "fiancé" and "fiancée" (a precomposed é, or
+ * an e followed by the combining acute accent) to plain "e". String.normalize
+ * is not used: the build targets ES5.
+ */
+function foldAccentedE(text: string): string {
+  return text.replace(/é/g, "e").replace(/é/g, "e");
 }
 
 /**
@@ -241,7 +235,7 @@ export function isHouseholdTurn(
   ownerFirstNames: Array<string | null>
 ): boolean {
   if (typeof message !== "string" || message === "") return false;
-  const folded = message.toLowerCase().replace(/\s+/g, " ");
+  const folded = foldAccentedE(message.toLowerCase()).replace(/\s+/g, " ");
   if (HOUSEHOLD_WORDS_RE.test(folded)) return true;
   for (const name of ownerFirstNames) {
     if (messageNames(message, name)) return true;
