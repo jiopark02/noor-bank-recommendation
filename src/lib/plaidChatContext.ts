@@ -156,34 +156,20 @@ export function resolveSharedStateEnabled(): boolean {
 
 /**
  * Words that make a message about the household, matched as whole words in
- * any case. "we", "us", "our" and "ours" are left out: they are too common in
- * questions about the user's own money to stand for another person. The
- * accented spellings of "fiance" and "fiancee" are folded to these before
+ * any case (the message is lowercased first): partner, spouse, husband, wife,
+ * household, joint, fiance, fiancee, boyfriend, girlfriend, roommate,
+ * housemate, and the common terms of endearment babe, honey, hubby, wifey,
+ * bae and "my love". "we", "us", "our" and "ours" are left out: they are too
+ * common in questions about the user's own money to stand for another person.
+ * The accented spellings of "fiance" and "fiancee" are folded to these before
  * matching.
+ *
+ * A regex literal, never a pattern built from a string: the production
+ * build's minifier folded the built string and wrote each "\b" back as a
+ * backspace, so the pattern matched no ordinary message.
  */
-const HOUSEHOLD_WORDS = [
-  "partner",
-  "spouse",
-  "husband",
-  "wife",
-  "household",
-  "joint",
-  "fiance",
-  "fiancee",
-  "boyfriend",
-  "girlfriend",
-  "roommate",
-  "housemate",
-  // Common terms of endearment.
-  "babe",
-  "honey",
-  "hubby",
-  "wifey",
-  "bae",
-  "my love",
-];
-
-const HOUSEHOLD_WORDS_RE = new RegExp(`\\b(?:${HOUSEHOLD_WORDS.join("|")})\\b`);
+const HOUSEHOLD_WORDS_RE =
+  /\b(?:partner|spouse|husband|wife|household|joint|fiance|fiancee|boyfriend|girlfriend|roommate|housemate|babe|honey|hubby|wifey|bae|my love)\b/;
 
 /** A letter of any script, or an ASCII digit. */
 function isWordCharacter(c: string | undefined): boolean {
@@ -228,7 +214,8 @@ function foldAccentedE(text: string): string {
 
 /**
  * Whether the user's latest message is about their household: it holds one of
- * HOUSEHOLD_WORDS, or the first name of a member who shares a bank with them.
+ * the words HOUSEHOLD_WORDS_RE matches, or the first name of a member who
+ * shares a bank with them.
  * The caller decides the rest: a greeting is never a household turn, and a
  * turn of a session the first read of its marks, before the history, found
  * marked with shared data is one whatever the message says; a mark only the
@@ -633,7 +620,7 @@ export function buildSharedBankBlock(state: SharedChatState): string {
  * failed or ran out of time. It names no person, bank, account or amount, and
  * does not tell the model the user left anything out, since the user may have
  * mentioned their partner already. The words it tells the user to mention are
- * HOUSEHOLD_WORDS, which match in any case; a name matches only when written
+ * matched by HOUSEHOLD_WORDS_RE in any case; a name matches only when written
  * with a capital first letter, so the line does not suggest one.
  */
 export const SHARED_NOT_IN_TURN_BLOCK =
