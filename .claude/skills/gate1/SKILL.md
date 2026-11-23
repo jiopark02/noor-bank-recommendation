@@ -20,48 +20,57 @@ The tests that must fail list only tests that this mutation can make fail. A tes
 
 Name each test by its file and full title, as vitest prints it, so it can be found in the failure list.
 
+`<test files>` below means every test file that holds a listed test of any mutation, separated by spaces.
+
 ## Output directory
 
 Write outputs outside the repo. If the operator names an output directory, use it; if it does not exist, stop and ask the operator where to write, and do not create it.
 
-Otherwise make a new directory for this run: `C:\Temp\gate1-<YYYYMMDD-HHMMSS>\` (`/c/Temp/gate1-<YYYYMMDD-HHMMSS>` in Git Bash), with the timestamp spelled out, e.g. `mkdir /c/Temp/gate1-20261027-193000; echo "exit=$?"`. Do not pass `-p`. If `C:\Temp` does not exist, or the new directory already exists, stop and ask the operator where to write.
+Otherwise make a new directory for this run: `C:\Temp\gate1-<YYYYMMDD-HHMMSS>\` (`/c/Temp/gate1-<YYYYMMDD-HHMMSS>` in Git Bash), with the timestamp spelled out, e.g. `mkdir /c/Temp/gate1-20261027-193000`. Do not pass `-p`. If `C:\Temp` does not exist, or the new directory already exists, stop and ask the operator where to write.
 
 `<out>` below means the directory in use.
 
 ## Result files
 
-- `<out>/green-1-vitest.txt`: the suite before any mutation.
-- `<out>/<ID>-vitest.txt`: the suite with mutation `<ID>` applied, one per mutation.
-- `<out>/green-2-vitest.txt`: the suite after every mutation is restored.
+- `<out>/green-1-vitest.txt`: the control run, before any mutation.
+- `<out>/<ID>-vitest.txt`: the run with mutation `<ID>` applied, one per mutation.
+- `<out>/green-2-vitest.txt`: the run after every mutation is restored.
 - `<out>/summary.md`: the summary in the Report section.
-- `<out>/<ID>-<repo path>.bak`: the backup of each file a mutation touches, where `<repo path>` is the file's path from the repo root with every `/` replaced by `_` (for `src/lib/plaidExchange.ts` in `M1`: `<out>/M1-src_lib_plaidExchange.ts.bak`).
 
 Before writing any of them, check that it does not exist; if it does, do not overwrite it — stop and report.
 
-## Steps
+## Shell commands
 
-Every test run below writes to a file: redirect plus `echo "exit=$?"`, never a pipe. Write each redirect target as a literal path, never through a variable: permission rules cannot check a variable in a redirect target, so it opens an approval prompt whatever the allow rules say.
+Follow CLAUDE.md's rule for Claude Code shell commands: one simple command per call, with no `{ }` group, `$( )` substitution, backtick, expansion inside quotes, `2>/dev/null` or `cd … &&` chain. To keep a command's exit code, append `; echo exit=$? >> <result file>` unquoted to the same call: the shell does not carry `$?` across calls, and the tool result does not always show a non-zero exit. A command expected to exit non-zero (such as `test -e` on a missing file, or `grep -c` with no match) is confirmed with other evidence, such as `ls` or the Grep tool; whether a result file exists is checked with `ls <out>`. Write each redirect target as a literal path, never through a variable: permission rules cannot check a variable in a redirect target, so it opens an approval prompt whatever the allow rules say. Every test run writes to a file through a redirect, never a pipe.
+
+Every test run is `node node_modules/vitest/vitest.mjs run <test files> > <out>/<result file> 2>&1; echo exit=$? >> <out>/<result file>`, with the same `<test files>` for every run, so the run's exit code is the last line of its result file.
+
+Mutations and restores are made with the Edit tool only. Do not write a helper script, do not run edits through bash, and do not use `cp`, `mv`, `sed -i`, `git checkout --` or backup files.
+
+## Summary line
+
+Each run's verdict is read from vitest's summary line in its result file (the line that starts with `Tests` and gives the failed and passed counts). Record that line verbatim for every run, with the full name of every failed test. A run whose result file has no summary line is **NOT RUN**, never RED, whatever its exit code: it says nothing about the tests.
+
+## Steps
 
 1. Precondition: `git status --porcelain` is empty, and the code under test is committed — in the commit form, the fix is in `<commit>`; in the table form, the code the table mutates is at `HEAD`. Otherwise stop and report. Record the full hash of `<commit>` (commit form) or of `HEAD` (table form).
 2. Check that none of the result files above exists.
-3. Run the full suite green: `node_modules/.bin/vitest run > <out>/green-1-vitest.txt 2>&1; echo "exit=$?"`. If it is not green, stop and report.
+3. Control run, with no mutation applied: run the tests into `<out>/green-1-vitest.txt`. If it has no summary line, or any test failed, stop and report.
 4. For each mutation, in order:
-   1. Back up each file the mutation touches to `<out>/<ID>-<repo path>.bak`.
-   2. Count CR-bearing lines in each of those files:
-      `grep -U -c "$(printf '\r')" <file>; echo "exit=$?"`.
-      Do not write `$'\r'` inside a double-quoted `"$( )"`; there it matches every line, not CRs, and always pass -U: Git Bash grep strips CR without it.
-   3. Apply the mutation with the Edit tool. Never use `sed -i`. Keep the list of edits made. Count CR-bearing lines again; the count must match step 4.2, allowing only for lines the mutation removed or added.
-   4. Run the full suite: `node_modules/.bin/vitest run > <out>/<ID>-vitest.txt 2>&1; echo "exit=$?"`.
-   5. Judge from the failure list in `<out>/<ID>-vitest.txt`:
+   1. Count CR-bearing lines in each file the mutation touches with the Grep tool (pattern `\r$`, output mode `count`). Git Bash `grep` strips CR without `-U` and has no usable `-P` here, so it is not used for this.
+   2. Apply the mutation with the Edit tool. Keep the list of edits made. Count CR-bearing lines again; the count must match step 4.1, allowing only for lines the mutation removed or added.
+   3. Run the tests into `<out>/<ID>-vitest.txt`.
+   4. Judge from the summary line and the failure list in `<out>/<ID>-vitest.txt`:
+      - **NOT RUN**: the file has no summary line. Record the file's last lines verbatim.
       - **RED**: every listed test failed.
       - **PARTIAL RED**: some listed tests failed. Record the names of those that did not.
       - **NOT RED**: no listed test failed.
       - **UNDETERMINED**: a file holding listed tests did not load at all (vitest reports the file failed with no tests run, e.g. a syntax or import error the mutation caused). This says nothing about the tests. Record the error verbatim; that mutation has to be redesigned so the file loads, and run again under a new ID.
       Record each listed test's failing assertion and message verbatim. Record any test that failed without being listed, too.
-   6. Restore by reversing each edit from step 4.3 with the Edit tool (old and new strings swapped), last edit first. Do not use `git checkout --`. If a reverse edit is ambiguous (its string is not unique in the file, or edits overlap), restore the file from its step 4.1 backup with `cp` instead, then confirm with `cmp <backup> <file>; echo "exit=$?"`, which must exit 0. The CR counts must match step 4.2 again.
-   7. Run `git status --porcelain` right away. It must be empty. If it is not, stop immediately: run no further mutations, and report its output and the backup paths.
-   8. PARTIAL RED, NOT RED and UNDETERMINED do not stop the run: go on to the next mutation. Never edit a test to make it go red.
-5. Run the suite green again: `node_modules/.bin/vitest run > <out>/green-2-vitest.txt 2>&1; echo "exit=$?"`. If it is not green, stop and report, as in step 3.
+   5. Restore by reversing each edit from step 4.2 with the Edit tool (old and new strings swapped), last edit first. If a reverse edit is ambiguous (its string is not unique in the file, or edits overlap), stop: run no further mutations, and report the file and the edits still applied. The CR counts must match step 4.1 again.
+   6. Run `git status --porcelain` right away. Its output must be empty; that is the restore check. Do not compare against a `git show` copy with `cmp`: the working tree is CRLF and that copy is not, so they never match. If the output is not empty, stop immediately: run no further mutations, and report its output.
+   7. NOT RUN, PARTIAL RED, NOT RED and UNDETERMINED do not stop the run: go on to the next mutation. Never edit a test to make it go red.
+5. Run the tests again into `<out>/green-2-vitest.txt`. If it has no summary line, or any test failed, stop and report, as in step 3.
 6. Write `<out>/summary.md` and report.
 
 ## Report
@@ -69,7 +78,7 @@ Every test run below writes to a file: redirect plus `echo "exit=$?"`, never a p
 In `<out>/summary.md` and in the reply:
 
 - The full hash recorded in step 1.
-- Every result file path, with the pass and fail counts and the exit value of each run, counted from the result files themselves.
-- The CR counts from steps 4.2, 4.3 and 4.6 for each mutation.
-- One row per mutation: ID · verdict · listed tests that did not fail · unlisted tests that failed.
-- At the end, every PARTIAL RED, NOT RED and UNDETERMINED mutation gathered in one list, with the load error for each UNDETERMINED one.
+- Every result file path, with its summary line verbatim and the `exit=` line at its end.
+- The CR counts from steps 4.1, 4.2 and 4.5 for each mutation.
+- One row per mutation: ID · verdict · summary line · listed tests that did not fail · unlisted tests that failed.
+- At the end, every NOT RUN, PARTIAL RED, NOT RED and UNDETERMINED mutation gathered in one list, with the load error for each UNDETERMINED one.
