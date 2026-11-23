@@ -52,6 +52,10 @@ const state = {
     session: false,
     memory: false,
     plaidState: false,
+    /** The read of the session's marks before its history. */
+    sharedMarks: false,
+    /** The read of the session's marks after its history. */
+    sharedMarksAfter: false,
   },
   /** When set, the profile queries answer after this many milliseconds. */
   profileAnswersAfterMs: null as number | null,
@@ -65,6 +69,7 @@ const seen = {
   plaidSignal: undefined as AbortSignal | undefined,
   plaidDepth: undefined as string | undefined,
   sessionCalls: 0,
+  markCalls: 0,
   saveCalls: 0,
   modelCalls: 0,
 };
@@ -147,7 +152,12 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
       ? never()
       : Promise.resolve({ facts: [], recentSummaries: [], activeSessionId: SESSION_ID }),
   formatMemoryForPrompt: () => "",
-  getSessionSharedSources: async () => [],
+  // The first call is the read before the history, the second the read after.
+  getSessionSharedSources: () => {
+    seen.markCalls += 1;
+    const hang = seen.markCalls === 1 ? state.hang.sharedMarks : state.hang.sharedMarksAfter;
+    return hang ? never() : Promise.resolve([]);
+  },
   getSessionMessages: async () => [],
   saveMessages: async () => {
     seen.saveCalls += 1;
@@ -217,6 +227,8 @@ beforeEach(() => {
     session: false,
     memory: false,
     plaidState: false,
+    sharedMarks: false,
+    sharedMarksAfter: false,
   };
   state.profileAnswersAfterMs = null;
   state.sessionFailsAfterMs = null;
@@ -225,6 +237,7 @@ beforeEach(() => {
   seen.plaidSignal = undefined;
   seen.plaidDepth = undefined;
   seen.sessionCalls = 0;
+  seen.markCalls = 0;
   seen.saveCalls = 0;
   seen.modelCalls = 0;
   vi.useFakeTimers();
@@ -321,11 +334,28 @@ const STAGE_CASES: StageCase[] = [
     },
   },
   {
+    // A cut read of the marks is the time budget, not MEMORY_LOAD_FAILED.
+    stage: "shared_marks",
+    text: GENERAL,
+    setup: () => {
+      state.memoryEnabled = true;
+      state.hang.sharedMarks = true;
+    },
+  },
+  {
     stage: "memory",
     text: GENERAL,
     setup: () => {
       state.memoryEnabled = true;
       state.hang.memory = true;
+    },
+  },
+  {
+    stage: "shared_marks_after",
+    text: GENERAL,
+    setup: () => {
+      state.memoryEnabled = true;
+      state.hang.sharedMarksAfter = true;
     },
   },
   {
