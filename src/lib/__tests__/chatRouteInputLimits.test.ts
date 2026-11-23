@@ -73,6 +73,7 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
     memory.saved.push({ sessionId, userId, pair });
     return {};
   },
+  getSessionSharedSources: async () => [],
   getSessionMessages: async () => [],
 }));
 

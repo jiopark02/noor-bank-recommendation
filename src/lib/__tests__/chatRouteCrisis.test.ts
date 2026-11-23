@@ -108,6 +108,7 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
     return {};
   },
   // Newest first, as the route asks for.
+  getSessionSharedSources: async () => [],
   getSessionMessages: async () =>
     memory.history
       .map((row, i) => ({

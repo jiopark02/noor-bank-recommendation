@@ -38,7 +38,7 @@ const BUDGET_BODY = {
 };
 const CUT_LINE = "[chat-deadline] stage cut stage=%s elapsed_ms=%d";
 const STAGES_LINE =
-  "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d shared_list_ms=%d shared_state_ms=%d save_ms=%d";
+  "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d shared_marks_ms=%d memory_ms=%d plaid_state_ms=%d shared_list_ms=%d shared_state_ms=%d save_ms=%d";
 
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 
@@ -147,6 +147,7 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
       ? never()
       : Promise.resolve({ facts: [], recentSummaries: [], activeSessionId: SESSION_ID }),
   formatMemoryForPrompt: () => "",
+  getSessionSharedSources: async () => [],
   getSessionMessages: async () => [],
   saveMessages: async () => {
     seen.saveCalls += 1;
@@ -490,8 +491,8 @@ describe("the [chat-stages] line", () => {
   function durations(): number[] {
     const lines = stagesLines();
     expect(lines).toHaveLength(1);
-    // The format and nine values, and nothing else.
-    expect(lines[0]).toHaveLength(10);
+    // The format and ten values, and nothing else.
+    expect(lines[0]).toHaveLength(11);
     for (const value of lines[0].slice(1)) expect(typeof value).toBe("number");
     return lines[0].slice(1) as number[];
   }
@@ -505,10 +506,10 @@ describe("the [chat-stages] line", () => {
     const res = await post("what's my balance?", 120);
     expect(res.status).toBe(200);
     expect(seen.saveCalls).toBe(1);
-    const [auth, body, profile, session, memory, plaidState, sharedList, sharedState, save] =
+    const [auth, body, profile, session, sharedMarks, memory, plaidState, sharedList, sharedState, save] =
       durations();
     expect(profile).toBe(120);
-    for (const value of [auth, body, session, memory, plaidState, save]) {
+    for (const value of [auth, body, session, sharedMarks, memory, plaidState, save]) {
       expect(value).toBeGreaterThanOrEqual(0);
     }
     // The shared-data switch is off: those two waits are not made.
@@ -521,7 +522,7 @@ describe("the [chat-stages] line", () => {
     const [auth, body, ...rest] = durations();
     expect(auth).toBeGreaterThanOrEqual(0);
     expect(body).toBeGreaterThanOrEqual(0);
-    expect(rest).toEqual([-1, -1, -1, -1, -1, -1, -1]);
+    expect(rest).toEqual([-1, -1, -1, -1, -1, -1, -1, -1]);
   });
 
   it("is written for a request refused at authentication", async () => {
@@ -530,14 +531,14 @@ describe("the [chat-stages] line", () => {
     expect(res.status).toBe(401);
     const [auth, ...rest] = durations();
     expect(auth).toBeGreaterThanOrEqual(0);
-    expect(rest).toEqual([-1, -1, -1, -1, -1, -1, -1, -1]);
+    expect(rest).toEqual([-1, -1, -1, -1, -1, -1, -1, -1, -1]);
   });
 
   it("reports the cut wait as having lasted until the deadline", async () => {
     vi.stubEnv("AI_PLAID_STATE", "connection");
     state.hang.plaidState = true;
     await post(GENERAL, DEADLINE_MS);
-    const [, , , , , plaidState, , , save] = durations();
+    const [, , , , , , plaidState, , , save] = durations();
     expect(plaidState).toBe(DEADLINE_MS);
     expect(save).toBe(-1);
   });

@@ -94,7 +94,9 @@ describe("householdSharedDecision", () => {
     expect(CHAT).toContain(
       "const sharedStateEnabled = resolveSharedStateEnabled() && plaidStateEnabled;"
     );
-    const guard = CHAT.indexOf("\n    if (sharedStateEnabled) {\n      const sessionForMark");
+    const guard = CHAT.indexOf(
+      '\n    if (sharedStateEnabled) {\n      try {\n        sharedList = await beforeLoop("shared_list", () => listSharedForChat(authUserId));'
+    );
     expect(guard).toBeGreaterThan(-1);
     expect(CHAT.indexOf("listSharedForChat(")).toBeGreaterThan(guard);
     expect(CHAT.indexOf("listSharedForChat(")).toBeLessThan(

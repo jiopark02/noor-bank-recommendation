@@ -22,12 +22,13 @@ import {
   findSavedTurn,
   isSessionClosedError,
   getSessionMessages,
-  getEarliestSharedSourceTime,
+  getSessionSharedSources,
   SharedSourceEndedError,
   SharedTurnBusyError,
   type DbChatMessage,
   type ChatSession,
   type SharedTurnSource,
+  type SharedTurnSources,
 } from "@/lib/aiMemory";
 import {
   resolvePlaidStateMode,
@@ -738,14 +739,18 @@ function toClientChatMessage(row: DbChatMessage): ClientChatMessage {
  * Apart from step 2, an insert is never sent twice. Callers should catch and
  * translate a throw to an HTTP error response.
  *
- * A TURN THAT CARRIED SHARED BANK DATA
- * When `sharedSources` is not empty, another household member's bank data was
- * in this turn's prompt, and every insert above is a call of saveSharedTurn
- * instead of saveMessages: it records those connections and stores the pair
- * together, under the locks the purge takes, and only while each connection
+ * A TURN THAT CARRIES SHARED BANK DATA
+ * When `sharedSources` names any connection, the turn carries another
+ * household member's bank data: the session was marked with it when the turn
+ * started, so its history holds the figures, or this turn's prompt held it.
+ * Every insert above is then a call of saveSharedTurn instead of
+ * saveMessages, whatever the message was: it records those connections and
+ * stores the pair together, under the locks the purge takes, and only while
+ * each marked connection keeps its mark and each connection added this turn
  * is still shared. Step 2 is the same, with the same sources for the new
- * session. Two of its errors say for certain that nothing was stored, so
- * they are thrown at once, without the lookup of step 3:
+ * session; the marked ones are still checked on the session they were read
+ * from. Two of its errors say for certain that nothing was stored, so they
+ * are thrown at once, without the lookup of step 3:
  * SharedSourceEndedError (a connection is no longer shared) and
  * SharedTurnBusyError (a lock the save needs was held elsewhere twice).
  *
@@ -763,8 +768,11 @@ async function persistTurnIfEnabled(params: {
   inputTokens?: number;
   outputTokens?: number;
   requestStartedAtMs: number;
-  /** Connections whose shared data was in this turn's prompt; may be empty. */
-  sharedSources: SharedTurnSource[];
+  /**
+   * Connections whose shared data this turn carries, marked on the session
+   * when the turn started or added by its prompt; both lists may be empty.
+   */
+  sharedSources: SharedTurnSources;
 }): Promise<string | null> {
   if (!isAiMemoryEnabled()) return null;
   if (!params.activeSession) return null;
@@ -806,8 +814,9 @@ async function persistTurnIfEnabled(params: {
   };
 
   const sources = params.sharedSources;
+  const carriesShared = sources.marked.length > 0 || sources.added.length > 0;
   const insert = (sessionId: string, signal: AbortSignal): Promise<unknown> =>
-    sources.length > 0
+    carriesShared
       ? saveSharedTurn(sessionId, userId, pair, sources, { ids, signal })
       : saveMessages(sessionId, userId, pair, { ids, signal });
 
@@ -1012,6 +1021,7 @@ type ChatStage =
   | "session"
   | "memory"
   | "plaid_state"
+  | "shared_marks"
   | "shared_list"
   | "shared_state"
   | "save";
@@ -1035,6 +1045,7 @@ export async function POST(request: NextRequest) {
     session: -1,
     memory: -1,
     plaid_state: -1,
+    shared_marks: -1,
     shared_list: -1,
     shared_state: -1,
     save: -1,
@@ -1228,6 +1239,8 @@ export async function POST(request: NextRequest) {
     let memoryBlock = "";
     let storedHistory: DbChatMessage[] = [];
     let historySource: "server" | "none" = "none";
+    // Marks of shared data on the session, read at the start of the turn.
+    let markedSources: SharedTurnSource[] = [];
 
     // With the profile read off there is nothing to wait for, so the request
     // makes no profile wait at all.
@@ -1249,6 +1262,37 @@ export async function POST(request: NextRequest) {
           }, "getOrCreateActiveSession")
         );
         activeSession = session;
+
+        // The connections another household member shares whose data has
+        // already entered this session, read before its history and whatever
+        // the shared-data switch says: that history goes back to the model
+        // and carries their figures, so every turn of a marked session is
+        // saved through saveSharedTurn, which refuses it once a mark is gone.
+        // A read that fails ends the request before any model call: going on
+        // could save a turn whose history held shared figures with nothing
+        // marking it.
+        try {
+          markedSources = await beforeLoop("shared_marks", (signal) =>
+            withRetry(() => {
+              notCut(signal, "shared_marks");
+              return getSessionSharedSources(session.id, authUserId);
+            }, "getSessionSharedSources")
+          );
+        } catch (error) {
+          if (error instanceof ChatDeadlineError) throw error;
+          console.error(
+            "[chat-shared] outcome=mark_read_failed name=%s code=%s",
+            errorName(error),
+            errorCodeForLog(error)
+          );
+          return respond(
+            {
+              error: "Memory system temporarily unavailable. Please try again.",
+              code: "MEMORY_LOAD_FAILED",
+            },
+            { status: 503 }
+          );
+        }
 
         // The model's history is this session's stored turns: the session
         // this turn is saved into, not a second lookup of the active session.
@@ -1371,33 +1415,15 @@ export async function POST(request: NextRequest) {
     // sharing member, or any non-greeting turn of a session already marked
     // with shared data, whose history carries it. A turn where something is
     // shared and none of it is in the prompt gets one line saying so. A failed
-    // read of what is shared adds nothing, not even that line.
+    // read of what is shared adds nothing, not even that line. Whether the
+    // turn is saved through saveSharedTurn does not depend on any of this: a
+    // marked session's every turn is (see markedSources above).
     const sharedStateEnabled = resolveSharedStateEnabled() && plaidStateEnabled;
     let sharedList: SharedChatList | null = null;
-    let sessionMarked = false;
+    const sessionMarked = markedSources.length > 0;
     if (sharedStateEnabled) {
-      const sessionForMark = activeSession;
       try {
-        const listed = await beforeLoop("shared_list", async () => {
-          const list = await listSharedForChat(authUserId);
-          let marked: boolean | "unknown" = false;
-          if (list.connections.length > 0 && sessionForMark) {
-            try {
-              marked =
-                (await getEarliestSharedSourceTime(sessionForMark.id, authUserId)) !== null;
-            } catch {
-              marked = "unknown";
-            }
-          }
-          return { list, marked };
-        });
-        sharedList = listed.list;
-        if (listed.marked === "unknown") {
-          // Not known to be marked: the turn decides by its words alone.
-          console.warn("[chat-shared] outcome=mark_read_failed");
-        } else {
-          sessionMarked = listed.marked;
-        }
+        sharedList = await beforeLoop("shared_list", () => listSharedForChat(authUserId));
       } catch (error) {
         if (error instanceof ChatDeadlineError) throw error;
         console.warn(
@@ -1423,9 +1449,9 @@ export async function POST(request: NextRequest) {
     if (sharedStateEnabled) {
       logPlaidEgressDecision(householdSharedDecision, { mode: plaidStateMode });
     }
-    // The connections whose data this turn's prompt carries: what the save
-    // records. Empty unless the shared block below is added.
-    let sharedSources: SharedTurnSource[] = [];
+    // The connections whose data this turn's prompt carries. Empty unless the
+    // shared block below is added.
+    let promptSources: SharedTurnSource[] = [];
     let sharedNotice = false;
 
     const capabilityScaffoldDecision = evaluatePlaidEgressDecision({
@@ -1534,7 +1560,7 @@ export async function POST(request: NextRequest) {
       const sharedBlock = sharedRead !== null ? buildSharedBankBlock(sharedRead.state) : "";
       if (sharedRead !== null && sharedBlock !== "") {
         systemPrompt += sharedBlock;
-        sharedSources = sharedRead.sources;
+        promptSources = sharedRead.sources;
       } else if (hasSharedConnections) {
         systemPrompt += SHARED_NOT_IN_TURN_BLOCK;
         sharedNotice = true;
@@ -1548,10 +1574,24 @@ export async function POST(request: NextRequest) {
         householdTurn,
         sessionMarked,
         householdSharedDecision.allowed,
-        sharedSources.length,
+        promptSources.length,
         sharedNotice ? 1 : 0
       );
     }
+    // What the save checks and records: every connection marked on the
+    // session when the turn started, checked by its mark on that session, and
+    // every connection this turn's prompt added that was not marked, checked
+    // against what is shared now. Either list non-empty saves the turn through
+    // saveSharedTurn, a greeting or a turn whose shared reads failed included.
+    const markedKeys: Record<string, true> = {};
+    for (const s of markedSources) markedKeys[`${s.ownerUserId}:${s.connectionId}`] = true;
+    const sharedSources: SharedTurnSources = {
+      markedSessionId: markedSources.length > 0 && activeSession ? activeSession.id : null,
+      marked: markedSources,
+      added: promptSources.filter(
+        (s) => markedKeys[`${s.ownerUserId}:${s.connectionId}`] !== true
+      ),
+    };
 
     if (isGreeting) {
       systemPrompt +=
@@ -1747,11 +1787,12 @@ export async function POST(request: NextRequest) {
     // One line per request. Durations only. No user, session, or content
     // fields.
     console.info(
-      "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d memory_ms=%d plaid_state_ms=%d shared_list_ms=%d shared_state_ms=%d save_ms=%d",
+      "[chat-stages] auth_ms=%d body_ms=%d profile_ms=%d session_ms=%d shared_marks_ms=%d memory_ms=%d plaid_state_ms=%d shared_list_ms=%d shared_state_ms=%d save_ms=%d",
       stageMs.auth,
       stageMs.body,
       stageMs.profile,
       stageMs.session,
+      stageMs.shared_marks,
       stageMs.memory,
       stageMs.plaid_state,
       stageMs.shared_list,

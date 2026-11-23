@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
+import {
+  CHAT_REQUEST_BUDGET_MS,
+  CHAT_SAVE_DEADLINE_MS,
+  CHAT_SAVE_READBACK_RESERVE_MS,
+} from "../llmTimeouts";
+import { SHARED_TURN_BUSY_RETRY_MS } from "../aiMemory";
 
 /**
  * Source probe of the migration that defines chat_shared_turn_save, the one
@@ -33,6 +39,13 @@ import path from "path";
  *   the recording function this file replaces no longer dropped           -> S4
  *   a DO block check or its raise removed                                 -> S5
  *   a precondition removed, or moved after the function is created        -> S6
+ *   the function's own lock_timeout removed, or raised past what lets the
+ *     chat route's two calls and the wait between them fit the time it
+ *     keeps for the save after its last model attempt                     -> N15
+ *   the wait for the first advisory lock not answered 'busy' when that
+ *     lock_timeout runs out                                               -> N15
+ *   a marked pair checked through household_shared_connections, or on the
+ *     session the turn is saved in, or before the locks, or not at all    -> N16
  */
 
 const MIGRATIONS = path.resolve(__dirname, "../../../supabase/migrations");
@@ -46,6 +59,8 @@ const sql = strip(readFileSync(path.join(MIGRATIONS, FILE), "utf8"));
 const purgeSql = strip(readFileSync(path.join(MIGRATIONS, PURGE_FILE), "utf8"));
 
 const ARGS =
+  "uuid, uuid, uuid, uuid[], bigint[], uuid[], bigint[], uuid, uuid, text, text, text, integer, integer";
+const EARLIER_ARGS =
   "uuid, uuid, uuid[], bigint[], uuid, uuid, text, text, text, integer, integer";
 const KEY = "'chat_shared_source:plaid_connection:' || v_owners[i]::text || ':' || v_resources[i]::text, 0";
 
@@ -90,7 +105,7 @@ describe("chat shared turn save migration", () => {
     expect(occurrences(body, KEY)).toBe(2);
     expect(occurrences(body, "pg_catalog.hashtextextended(")).toBe(2);
     expect(body).toMatch(
-      /if i = 1 then\n\s+perform pg_catalog\.pg_advisory_xact_lock\(\n\s+pg_catalog\.hashtextextended\(/
+      /if i = 1 then\n\s+begin\n\s+perform pg_catalog\.pg_advisory_xact_lock\(\n\s+pg_catalog\.hashtextextended\(/
     );
     expect(body).toMatch(
       /elsif not pg_catalog\.pg_try_advisory_xact_lock\(\n\s+pg_catalog\.hashtextextended\([^;]*\)\) then\n\s+return 'busy';/
@@ -109,7 +124,9 @@ describe("chat shared turn save migration", () => {
     const lastLock = body.indexOf("end loop;");
     const session = body.indexOf("from public.chat_sessions c");
     const users = body.indexOf("from public.users u");
-    const busy = body.indexOf("exception when sqlstate '55P03' then");
+    // The row locks' handler; the first one in the body is the first
+    // advisory lock's (N15).
+    const busy = body.lastIndexOf("exception when sqlstate '55P03' then");
     const closed = body.indexOf("return 'session_closed';");
     const shared = body.indexOf("from public.household_shared_connections(p_user_id) s");
     expect(lastLock).toBeGreaterThan(body.indexOf("pg_try_advisory_xact_lock("));
@@ -133,7 +150,9 @@ describe("chat shared turn save migration", () => {
       "for no key update nowait;",
       "for key share nowait;",
     ]);
-    expect(occurrences(body, "return 'busy';")).toBe(2);
+    // The first advisory lock's timeout, a later advisory lock held, a row
+    // lock held.
+    expect(occurrences(body, "return 'busy';")).toBe(3);
     expect(body).toContain(
       "where s.owner_user_id = k.owner_user_id\n          and s.connection_id = k.resource_id\n     )\n  ) then\n    return 'not_shared';"
     );
@@ -179,11 +198,14 @@ describe("chat shared turn save migration", () => {
     expect(sql.trimEnd().endsWith("commit;")).toBe(true);
     expect(functionHeader()).toBe(
       "create or replace function public.chat_shared_turn_save(\n" +
-        "  p_session_id uuid,\n  p_user_id uuid,\n  p_owner_user_ids uuid[],\n" +
+        "  p_session_id uuid,\n  p_user_id uuid,\n  p_marked_session_id uuid,\n" +
+        "  p_marked_owner_user_ids uuid[],\n  p_marked_resource_ids bigint[],\n" +
+        "  p_owner_user_ids uuid[],\n" +
         "  p_resource_ids bigint[],\n  p_user_message_id uuid,\n  p_assistant_message_id uuid,\n" +
         "  p_user_content text,\n  p_assistant_content text,\n  p_model text,\n" +
         "  p_input_tokens integer,\n  p_output_tokens integer\n)\n" +
-        "returns text\nlanguage plpgsql\nvolatile\nsecurity invoker\nset search_path = ''\n"
+        "returns text\nlanguage plpgsql\nvolatile\nsecurity invoker\nset search_path = ''\n" +
+        "set lock_timeout = '1s'\n"
     );
     expect(sql).not.toMatch(/security definer/i);
     expect(sql.match(/create or replace function/gi)?.length).toBe(1);
@@ -194,8 +216,13 @@ describe("chat shared turn save migration", () => {
       `grant execute on function public.chat_shared_turn_save(\n  ${ARGS})\n  to service_role;`,
     ]);
     expect(sql.match(/\bdrop\b[^;]*;/gi) ?? []).toEqual([
+      `drop function if exists public.chat_shared_turn_save(\n  ${EARLIER_ARGS});`,
       "drop function if exists public.chat_shared_source_record(uuid, uuid, uuid, bigint, timestamptz);",
     ]);
+    // The earlier signature is dropped before the function is created.
+    expect(sql.indexOf("drop function if exists public.chat_shared_turn_save(")).toBeLessThan(
+      sql.indexOf("create or replace function public.chat_shared_turn_save(")
+    );
     expect(sql).not.toMatch(
       /\b(truncate|create table|alter table|create policy|create (or replace )?trigger|create (unique )?index|lock table)\b/i
     );
@@ -228,6 +255,11 @@ describe("chat shared turn save migration", () => {
       ["no rows written", /where s\.session_id = v_session\n\s+\) then\n\s+raise exception '%: wrote rows for a refused call'/],
       ["owner is the person", /array\[v_user\], array\[1::bigint\],[\s\S]*?raise exception '%: accepted a pair owned by the person', v_fn;\n\s+exception when sqlstate '22023' then/],
       ["arrays of different lengths", /array\[v_owner\], array\[1::bigint, 2::bigint\],[\s\S]*?raise exception '%: accepted pair arrays of different lengths', v_fn;\n\s+exception when sqlstate '22023' then/],
+      ["own lock_timeout", /if not \('lock_timeout=1s' = any\(v_proconfig\)\) then\n\s+raise exception/],
+      ["first lock answered busy", /\/ length\('exception when sqlstate ''55P03'' then'\) <> 2 then\n\s+raise exception/],
+      ["marked pair by its mark", /position\('where m\.session_id = p_marked_session_id' in v_prosrc\) = 0 then\n\s+raise exception/],
+      ["earlier signature gone", new RegExp(`to_regprocedure\\('public\\.chat_shared_turn_save\\(${EARLIER_ARGS.replace(/[[\]]/g, "\\$&")}\\)'\\) is not null then\\n\\s+raise exception`)],
+      ["marked pair without its session", /v_session, v_user, null, array\[v_owner\], array\[1::bigint\], '\{\}'::uuid\[\], '\{\}'::bigint\[\],[\s\S]*?raise exception '%: accepted a marked pair without its session', v_fn;\n\s+exception when sqlstate '22023' then/],
     ];
     for (const [label, pattern] of checks) {
       expect(block, label).toMatch(pattern);
@@ -246,5 +278,63 @@ describe("chat shared turn save migration", () => {
     expect(block).toMatch(/t\.tgname = 'trg_share_grants_purge_chat'\n\s+and t\.tgenabled = 'O'\n\s+and t\.tgtype = 9\n\s+\) then\n\s+raise exception/);
     expect(block).toMatch(/to_regprocedure\('public\.household_shared_connections\(uuid\)'\) is null then\n\s+raise exception/);
     expect(block).toMatch(/p\.prosrc like '%NR001%'\n\s+\) then\n\s+raise exception/);
+  });
+
+  it("N15 its own lock_timeout lets the route's two calls and the wait between them fit the time kept for the save, and its expiry on the first lock is 'busy'", () => {
+    const header = functionHeader();
+    const match = /\nset lock_timeout = '(\d+)(ms|s)'\n/.exec(header);
+    expect(match, "the function sets its own lock_timeout").not.toBeNull();
+    const lockTimeoutMs = Number(match![1]) * (match![2] === "s" ? 1000 : 1);
+    // What is left for the save when the last model attempt ends at the
+    // request budget: the insert stops at the save deadline less the read-back
+    // reserve.
+    const window = CHAT_SAVE_DEADLINE_MS - CHAT_SAVE_READBACK_RESERVE_MS - CHAT_REQUEST_BUDGET_MS;
+    expect(window).toBeGreaterThan(0);
+    expect(lockTimeoutMs).toBeGreaterThan(0);
+    expect(2 * lockTimeoutMs + SHARED_TURN_BUSY_RETRY_MS).toBeLessThan(window);
+
+    // The wait for the first advisory lock sits in its own block, and its
+    // timeout is answered 'busy' before any other lock is taken.
+    const body = functionBody();
+    expect(body).toMatch(
+      /if i = 1 then\n\s+begin\n\s+perform pg_catalog\.pg_advisory_xact_lock\(\n\s+pg_catalog\.hashtextextended\(\n[^;]*\)\);\n\s+exception when sqlstate '55P03' then\n\s+return 'busy';\n\s+end;\n\s+elsif not pg_catalog\.pg_try_advisory_xact_lock\(/
+    );
+    expect(occurrences(body, "exception when sqlstate '55P03' then")).toBe(2);
+  });
+
+  it("N16 a marked pair is checked by its mark on the marked session, under the locks, and only a pair added this turn by the shared-connections function", () => {
+    const body = functionBody();
+    const rowLocks = body.indexOf("return 'session_closed';");
+    const marked = body.indexOf(
+      "from unnest(p_marked_owner_user_ids, p_marked_resource_ids) as k(owner_user_id, resource_id)\n     where not exists ("
+    );
+    const added = body.indexOf(
+      "from unnest(p_owner_user_ids, p_resource_ids) as k(owner_user_id, resource_id)\n     where not exists ("
+    );
+    expect(marked).toBeGreaterThan(rowLocks);
+    expect(added).toBeGreaterThan(marked);
+    expect(body).toContain(
+      "         from public.chat_shared_sources m\n" +
+        "        where m.session_id = p_marked_session_id\n" +
+        "          and m.user_id = p_user_id\n" +
+        "          and m.resource_type = 'plaid_connection'\n" +
+        "          and m.owner_user_id = k.owner_user_id\n" +
+        "          and m.resource_id = k.resource_id\n" +
+        "     )\n  ) then\n    return 'not_shared';"
+    );
+    // The marked pairs' check reads no shared-connections function; the
+    // added pairs' check is the only call of it.
+    const markedCheck = body.slice(marked, added);
+    expect(markedCheck).not.toContain("household_shared_connections");
+    expect(occurrences(body, "household_shared_connections(")).toBe(1);
+    expect(body.indexOf("household_shared_connections(")).toBeGreaterThan(added);
+    expect(occurrences(body, "return 'not_shared';")).toBe(2);
+    // Every pair of both kinds is locked and recorded on the session the turn
+    // is saved in.
+    expect(body).toContain(
+      "select p_session_id, p_user_id, k.owner_user_id, 'plaid_connection', k.resource_id, v_now\n    from unnest(v_owners, v_resources)"
+    );
+    // A marked pair needs the session it was read from.
+    expect(body).toContain("or (v_marked > 0 and p_marked_session_id is null) then");
   });
 });

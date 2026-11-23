@@ -763,6 +763,24 @@ export interface SharedTurnSource {
   connectionId: number;
 }
 
+/**
+ * The connections whose shared data a turn being saved carries, in the two
+ * kinds chat_shared_turn_save checks differently:
+ *   marked  already marked on `markedSessionId` when the turn started: the
+ *           session's history carries their figures. Each must still have its
+ *           mark there, which the purge deletes under the same lock when
+ *           sharing ends.
+ *   added   put into this turn's prompt and not already marked: each must
+ *           still be returned by the shared-connections function.
+ * Every one of them is recorded on the session the turn is saved in.
+ */
+export interface SharedTurnSources {
+  /** The session the marked pairs were read from; null when there are none. */
+  markedSessionId: string | null;
+  marked: SharedTurnSource[];
+  added: SharedTurnSource[];
+}
+
 export interface SaveSharedTurnOptions {
   ids: SavedTurnIds;
   signal?: AbortSignal;
@@ -771,8 +789,9 @@ export interface SaveSharedTurnOptions {
 }
 
 /**
- * Stores a turn whose prompt carried bank data another household member shares
- * with the user, and records each connection it came from, in one call of
+ * Stores a turn that carries bank data another household member shares with
+ * the user, through its prompt or through a session history already marked
+ * with it, and records each connection it came from, in one call of
  * chat_shared_turn_save. The function decides under the purge's locks; the
  * moment it records and the user message's created_at are one database time.
  *
@@ -797,7 +816,7 @@ export async function saveSharedTurn(
   sessionId: string,
   userId: string,
   pair: MessagePairToSave,
-  sources: SharedTurnSource[],
+  sources: SharedTurnSources,
   options: SaveSharedTurnOptions
 ): Promise<void> {
   if (!pair.userContent || pair.userContent.trim() === "") {
@@ -806,8 +825,11 @@ export async function saveSharedTurn(
   if (!pair.assistantContent || pair.assistantContent.trim() === "") {
     throw new Error("saveSharedTurn: assistantContent must be a non-empty string");
   }
-  if (sources.length === 0) {
+  if (sources.marked.length === 0 && sources.added.length === 0) {
     throw new Error("saveSharedTurn: at least one source is required");
+  }
+  if (sources.marked.length > 0 && !sources.markedSessionId) {
+    throw new Error("saveSharedTurn: marked sources need the session they were read from");
   }
 
   const call = async (): Promise<unknown> => {
@@ -815,8 +837,11 @@ export async function saveSharedTurn(
     const request = supabase.rpc("chat_shared_turn_save", {
       p_session_id: sessionId,
       p_user_id: userId,
-      p_owner_user_ids: sources.map((s) => s.ownerUserId),
-      p_resource_ids: sources.map((s) => s.connectionId),
+      p_marked_session_id: sources.marked.length > 0 ? sources.markedSessionId : null,
+      p_marked_owner_user_ids: sources.marked.map((s) => s.ownerUserId),
+      p_marked_resource_ids: sources.marked.map((s) => s.connectionId),
+      p_owner_user_ids: sources.added.map((s) => s.ownerUserId),
+      p_resource_ids: sources.added.map((s) => s.connectionId),
       p_user_message_id: options.ids.user,
       p_assistant_message_id: options.ids.assistant,
       p_user_content: pair.userContent,
@@ -954,6 +979,61 @@ export async function getEarliestSharedSourceTime(
     throw new Error("Failed to fetch shared sources of a session: no moment in the row");
   }
   return moment;
+}
+
+/**
+ * The connections another household member shares whose data has entered
+ * this session: one (owner, connection) pair per mark, or an empty list when
+ * none has. The chat route reads this at the start of a turn, before the
+ * session's history, and saves every turn of a marked session through
+ * saveSharedTurn with these pairs, since that history carries their figures
+ * whatever the latest message says.
+ *
+ * SECURITY: Filters by both session_id AND user_id, like getSessionMessages.
+ *
+ * @throws Error when the query fails or a row is not a usable pair. A caller
+ *   must not take that as "not marked".
+ */
+export async function getSessionSharedSources(
+  sessionId: string,
+  userId: string
+): Promise<SharedTurnSource[]> {
+  const supabase = getAdmin();
+  const { data, error } = await supabase
+    .from("chat_shared_sources")
+    .select("owner_user_id, resource_id")
+    .eq("session_id", sessionId)
+    .eq("user_id", userId)
+    .eq("resource_type", "plaid_connection");
+
+  if (error) {
+    throw wrapDbError(
+      `Failed to fetch the marked sources of a session: ${error.message}`,
+      error
+    );
+  }
+  const rows = (data ?? []) as Array<{ owner_user_id?: unknown; resource_id?: unknown }>;
+  return rows.map((row) => {
+    const owner = row.owner_user_id;
+    const resource = toConnectionId(row.resource_id);
+    if (typeof owner !== "string" || owner === "" || resource === null) {
+      throw new Error("Failed to fetch the marked sources of a session: a row is not a pair");
+    }
+    return { ownerUserId: owner, connectionId: resource };
+  });
+}
+
+/**
+ * A bigint column as PostgREST returns it: a number, or a string of digits
+ * for a value outside the safe integer range, which no connection id reaches.
+ */
+function toConnectionId(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === "string" && /^[1-9][0-9]{0,15}$/.test(value)) {
+    const n = Number(value);
+    return Number.isSafeInteger(n) ? n : null;
+  }
+  return null;
 }
 
 // -----------------------------------------------------------------------------

@@ -27,6 +27,16 @@ import type { NextRequest } from "next/server";
  *   the shared list read under AI_PLAID_STATE=off                       -> T23
  *   a greeting reading the shared data                                  -> T24
  *   a session already marked not treated as a household turn            -> T25
+ *   the save's choice of saveSharedTurn made without the session's marks
+ *     (on the prompt's connections, on a successful list or read, or
+ *     only for a turn that is not a greeting)                           -> N1, N4, N6, N7
+ *   sharing that ended answered 200 with the reply                      -> N2
+ *   the marks narrowed to the connections the block still names        -> N3
+ *   an unreadable mark read taken as "not marked"                       -> N5
+ *   the marks read only while the shared-data switch is on              -> N8
+ *   the marks read after, or alongside, the history                     -> N9
+ *   the marked session's id replaced by the session the save goes to    -> N10
+ *   a marked connection also sent as added, or added ones dropped       -> N11
  *
  * WHAT THIS FILE DOES NOT PROVE
  * What the database function decides (chatSharedTurnSaveMigrationProbe and
@@ -83,12 +93,42 @@ const READ = {
 };
 
 type SaveStep = "ok" | "closed" | "ended" | "busy";
+type Pair = { ownerUserId: string; connectionId: number };
+
+const X: Pair = { ownerUserId: OWNER, connectionId: 7001 };
+const Y: Pair = { ownerUserId: OWNER, connectionId: 7002 };
+const Z: Pair = { ownerUserId: OWNER, connectionId: 7003 };
+
+/** A stored turn whose reply carried a figure from the shared bank. */
+const HISTORY_WITH_FIGURES = [
+  {
+    id: "m2",
+    session_id: SESSION_A,
+    user_id: USER_ID,
+    role: "assistant",
+    content: "Alex has $1,500.00 in Joint Checking at Heron Bank.",
+    created_at: "2026-11-20T10:00:00.100Z",
+    model: "m",
+  },
+  {
+    id: "m1",
+    session_id: SESSION_A,
+    user_id: USER_ID,
+    role: "user",
+    content: "How much does my partner have?",
+    created_at: "2026-11-20T10:00:00.000Z",
+    model: null,
+  },
+];
 
 const state = {
   memory: true,
   list: LIST as typeof LIST | "fail",
   read: READ as typeof READ | "fail",
-  marked: null as string | null | "fail",
+  /** The session's marks, as getSessionSharedSources answers them. */
+  marked: [] as Pair[] | "fail",
+  /** The session's stored turns, newest first. */
+  history: [] as unknown[],
   sharedSaves: [] as SaveStep[],
 };
 
@@ -97,6 +137,8 @@ const seen = {
   lists: [] as string[],
   reads: [] as Array<{ userId: string; list: unknown }>,
   marks: [] as Array<[string, string]>,
+  /** The order of the marks read and the history read. */
+  order: [] as string[],
   saveMessages: [] as Array<{ sessionId: string; ids?: { user: string; assistant: string } }>,
   sharedSaves: [] as Array<{
     sessionId: string;
@@ -163,10 +205,16 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => {
     getActiveSession: async () => ({ id: SESSION_A }),
     buildMemoryContext: async () => ({ facts: [], recentSummaries: [], activeSessionId: SESSION_A }),
     formatMemoryForPrompt: () => "",
-    getSessionMessages: async () => [],
-    getEarliestSharedSourceTime: async (sessionId: string, userId: string) => {
+    getSessionMessages: async () => {
+      seen.order.push("history");
+      return state.history;
+    },
+    getSessionSharedSources: async (sessionId: string, userId: string) => {
+      seen.order.push("marks");
       seen.marks.push([sessionId, userId]);
-      if (state.marked === "fail") throw new Error("mark read failed");
+      if (state.marked === "fail") {
+        throw new Error("mark read failed", { cause: { code: "PGRST301" } });
+      }
       return state.marked;
     },
     saveMessages: async (
@@ -234,6 +282,7 @@ vi.mock("@/lib/plaidChatState", async (importOriginal) => {
 let bodies: string[] = [];
 let infoLines: unknown[][] = [];
 let warnLines: unknown[][] = [];
+let errorLines: unknown[][] = [];
 let POST: typeof import("../../app/api/chat/route").POST;
 
 beforeAll(async () => {
@@ -244,12 +293,14 @@ beforeEach(() => {
   state.memory = true;
   state.list = LIST;
   state.read = READ;
-  state.marked = null;
+  state.marked = [];
+  state.history = [];
   state.sharedSaves = [];
   seen.own = [];
   seen.lists = [];
   seen.reads = [];
   seen.marks = [];
+  seen.order = [];
   seen.saveMessages = [];
   seen.sharedSaves = [];
   seen.lookups = 0;
@@ -257,6 +308,7 @@ beforeEach(() => {
   bodies = [];
   infoLines = [];
   warnLines = [];
+  errorLines = [];
   vi.stubEnv("OPENROUTER_API_KEY", "sk-test-fake");
   vi.stubEnv("OPENROUTER_MODEL", "");
   vi.stubEnv("OPENROUTER_FALLBACK_MODEL", "");
@@ -288,7 +340,10 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
     warnLines.push(args);
   });
-  for (const method of ["log", "error", "debug"] as const) {
+  vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    errorLines.push(args);
+  });
+  for (const method of ["log", "debug"] as const) {
     vi.spyOn(console, method).mockImplementation(() => undefined);
   }
 });
@@ -340,7 +395,12 @@ describe("the switch (T14)", () => {
       expect(other).toBe(unset);
       expect(seen.lists).toEqual([]);
       expect(seen.reads).toEqual([]);
-      expect(seen.marks).toEqual([]);
+      // The session's marks are read whatever the switch says: once per
+      // request, with that request's session.
+      expect(seen.marks).toEqual([
+        [SESSION_A, USER_ID],
+        [SESSION_B, USER_ID],
+      ]);
       expect(seen.sharedSaves).toEqual([]);
       expect(seen.saveMessages).toHaveLength(2);
       expect(systemMessage(other)).not.toContain(SHARED_HEADING);
@@ -364,7 +424,12 @@ describe("nothing shared (T15)", () => {
       expect(on).not.toContain("## What a household member shares");
       expect(seen.lists).toEqual([USER_ID]);
       expect(seen.reads).toEqual([]);
-      expect(seen.marks).toEqual([]);
+      // The session's marks are read whatever the switch says: once per
+      // request, with that request's session.
+      expect(seen.marks).toEqual([
+        [SESSION_A, USER_ID],
+        [SESSION_B, USER_ID],
+      ]);
       expect(seen.sharedSaves).toEqual([]);
     }
   );
@@ -400,7 +465,11 @@ describe("a household turn (T16, T18, T19)", () => {
 
   it("T19 records every connection the block names, a bank not read included", async () => {
     await post(HOUSEHOLD);
-    expect(seen.sharedSaves[0].sources).toEqual(READ.sources);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: null,
+      marked: [],
+      added: READ.sources,
+    });
   });
 
   it("the sharing member's first name alone makes a household turn", async () => {
@@ -518,19 +587,25 @@ describe("what closes the shared data (T23, T24)", () => {
     expect(sharedLines()).toEqual([]);
   });
 
-  it("T24 a greeting reads nothing shared, even in a marked session, and gets the notice", async () => {
-    state.marked = "2026-11-20 10:00:00.123456+00";
+  it("T24 a greeting reads nothing shared, even in a marked session, gets the notice, and is saved through saveSharedTurn", async () => {
+    state.marked = [X];
     await post("hi");
     expect(seen.reads).toEqual([]);
     expect(seen.own).toEqual([{ depth: "connection" }]);
     expect(systemMessage(bodies[0])).toContain(NOTICE_HEADING);
-    expect(seen.sharedSaves).toEqual([]);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X],
+      added: [],
+    });
   });
 });
 
 describe("a session already marked (T25)", () => {
   it("is a household turn whatever the message says, and is saved through saveSharedTurn", async () => {
-    state.marked = "2026-11-20 10:00:00.123456+00";
+    state.marked = [X];
     await post(GENERAL);
     expect(seen.marks).toEqual([[SESSION_A, USER_ID]]);
     expect(seen.reads).toHaveLength(1);
@@ -538,17 +613,31 @@ describe("a session already marked (T25)", () => {
     expect(seen.sharedSaves).toHaveLength(1);
   });
 
-  it("a mark that cannot be read counts as unmarked: the words decide", async () => {
+  it("N5 a mark that cannot be read ends the request before the model: 503, nothing saved", async () => {
     state.marked = "fail";
-    await post(GENERAL);
-    expect(seen.reads).toEqual([]);
-    expect(systemMessage(bodies[0])).toContain(NOTICE_HEADING);
-    expect(warnLines).toContainEqual(["[chat-shared] outcome=mark_read_failed"]);
+    state.history = HISTORY_WITH_FIGURES;
+    const res = await post(GENERAL);
+    expect(res.status).toBe(503);
+    expect(res.json).toEqual({
+      error: "Memory system temporarily unavailable. Please try again.",
+      code: "MEMORY_LOAD_FAILED",
+    });
+    expect(bodies).toEqual([]);
+    expect(seen.order).toEqual(["marks"]);
+    expect(seen.lists).toEqual([]);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toEqual([]);
+    expect(errorLines).toContainEqual([
+      "[chat-shared] outcome=mark_read_failed name=%s code=%s",
+      "Error",
+      "PGRST301",
+    ]);
   });
 });
 
 describe("failed reads of what is shared", () => {
-  it("a failed list adds nothing, not even the notice, and saves as before", async () => {
+  it("in a session not marked, a failed list adds nothing, not even the notice, and saves as before", async () => {
+    state.marked = [];
     state.list = "fail";
     const res = await post(HOUSEHOLD);
     expect(res.status).toBe(200);
@@ -572,5 +661,150 @@ describe("failed reads of what is shared", () => {
     expect(seen.sharedSaves).toEqual([]);
     expect(seen.saveMessages).toHaveLength(1);
     expect(warnLines).toContainEqual(["[chat-shared] outcome=read_failed code=%s", "recheck:57014"]);
+  });
+});
+
+describe("every turn of a marked session is saved through saveSharedTurn (N1-N11)", () => {
+  const NOTHING_SHARED = { connections: [], firstNames: {} };
+
+  it("N1 all sharing ended before the list: the history's figures still went to the model, and the save checks the marks", async () => {
+    state.marked = [X];
+    state.history = HISTORY_WITH_FIGURES;
+    state.list = NOTHING_SHARED;
+    const res = await post(HOUSEHOLD);
+    expect(res.status).toBe(200);
+    // The model was sent the stored figures.
+    expect(bodies[0]).toContain("$1,500.00 in Joint Checking");
+    expect(seen.reads).toEqual([]);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X],
+      added: [],
+    });
+  });
+
+  it("N2 the save answering that a mark is gone: 409 SHARED_DATA_ENDED, no reply, no lookup by id", async () => {
+    state.marked = [X];
+    state.history = HISTORY_WITH_FIGURES;
+    state.list = NOTHING_SHARED;
+    state.sharedSaves = ["ended"];
+    const res = await post(HOUSEHOLD);
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("SHARED_DATA_ENDED");
+    expect(res.json).not.toHaveProperty("message");
+    expect(seen.lookups).toBe(0);
+    expect(seen.saveMessages).toEqual([]);
+  });
+
+  it("N3 part of the sharing ended: every mark is checked, not only the connections the block still names", async () => {
+    state.marked = [X, Y];
+    state.history = HISTORY_WITH_FIGURES;
+    state.read = { ...READ, sources: [Y] };
+    await post(HOUSEHOLD);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X, Y],
+      added: [],
+    });
+  });
+
+  it("N4 a greeting in a marked session reads nothing shared and is still saved through saveSharedTurn", async () => {
+    state.marked = [X];
+    state.history = HISTORY_WITH_FIGURES;
+    await post("thanks");
+    expect(seen.reads).toEqual([]);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X],
+      added: [],
+    });
+  });
+
+  it("N6 a failed list in a marked session is still saved through saveSharedTurn", async () => {
+    state.marked = [X];
+    state.history = HISTORY_WITH_FIGURES;
+    state.list = "fail";
+    const res = await post(HOUSEHOLD);
+    expect(res.status).toBe(200);
+    expect(seen.reads).toEqual([]);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X],
+      added: [],
+    });
+  });
+
+  it("N7 a failed read in a marked session adds the notice and is still saved through saveSharedTurn", async () => {
+    state.marked = [X];
+    state.history = HISTORY_WITH_FIGURES;
+    state.read = "fail";
+    const res = await post(HOUSEHOLD);
+    expect(res.status).toBe(200);
+    expect(systemMessage(bodies[0])).toContain(NOTICE_HEADING);
+    expect(systemMessage(bodies[0])).not.toContain(SHARED_HEADING);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X],
+      added: [],
+    });
+  });
+
+  it("N8 with the switch off, a marked session's marks are still read and its turn saved through saveSharedTurn", async () => {
+    vi.stubEnv("AI_HOUSEHOLD_SHARED_STATE", "off");
+    state.marked = [X];
+    state.history = HISTORY_WITH_FIGURES;
+    const res = await post(HOUSEHOLD);
+    expect(res.status).toBe(200);
+    expect(seen.marks).toEqual([[SESSION_A, USER_ID]]);
+    expect(seen.lists).toEqual([]);
+    expect(seen.reads).toEqual([]);
+    expect(systemMessage(bodies[0])).not.toContain(NOTICE_HEADING);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X],
+      added: [],
+    });
+  });
+
+  it("N9 the marks are read before the session's history", async () => {
+    state.marked = [X];
+    await post(GENERAL);
+    expect(seen.order).toEqual(["marks", "history"]);
+  });
+
+  it("N10 a session closed meanwhile: the second save checks the marks on the session they were read from", async () => {
+    state.marked = [X];
+    state.history = HISTORY_WITH_FIGURES;
+    state.sharedSaves = ["closed", "ok"];
+    const res = await post(GENERAL);
+    expect(res.status).toBe(200);
+    expect(res.json.sessionId).toBe(SESSION_B);
+    expect(seen.sharedSaves.map((s) => s.sessionId)).toEqual([SESSION_A, SESSION_B]);
+    for (const save of seen.sharedSaves) {
+      expect((save.sources as { markedSessionId: string }).markedSessionId).toBe(SESSION_A);
+    }
+    expect(seen.sharedSaves[1].ids).toEqual(seen.sharedSaves[0].ids);
+  });
+
+  it("N11 a connection the prompt adds is checked as added only when it was not already marked", async () => {
+    state.marked = [X];
+    state.read = { ...READ, sources: [X, Z] };
+    await post(HOUSEHOLD);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: SESSION_A,
+      marked: [X],
+      added: [Z],
+    });
   });
 });

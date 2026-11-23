@@ -38,6 +38,9 @@ const state = {
   reconnect: false,
 };
 
+/** Calls of the memory module's save and mark reads, per request. */
+const calls = { saveMessages: 0, saveSharedTurn: 0, marks: 0 };
+
 const PROFILE_ROWS: Record<string, Record<string, unknown>> = {
   users: { first_name: "Ada", last_name: "Lovelace" },
   survey_responses: {
@@ -119,7 +122,17 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
     activeSessionId: "session-1",
   }),
   formatMemoryForPrompt: () => MEMORY_BLOCK,
-  saveMessages: async () => ({}),
+  saveMessages: async () => {
+    calls.saveMessages += 1;
+    return {};
+  },
+  saveSharedTurn: async () => {
+    calls.saveSharedTurn += 1;
+  },
+  getSessionSharedSources: async () => {
+    calls.marks += 1;
+    return [];
+  },
   // Newest first, as the route asks for.
   getSessionMessages: async () =>
     STORED_TURNS.map((row, i) => ({
@@ -194,6 +207,9 @@ beforeEach(() => {
   state.full = false;
   state.plaidStateFails = false;
   state.reconnect = false;
+  calls.saveMessages = 0;
+  calls.saveSharedTurn = 0;
+  calls.marks = 0;
   bodies = [];
   vi.stubEnv("OPENROUTER_API_KEY", "sk-test-fake");
   vi.stubEnv("OPENROUTER_MODEL", "");
@@ -601,6 +617,27 @@ describe("the cases carry the blocks their names say", () => {
     expect(system).toContain("Everyday Checking");
     expect(system).toContain("Rainy Day");
   });
+});
+
+describe("with the shared-data switch off and no mark on the session (N12)", () => {
+  // Every case with memory on: the turn's only new call is the read of the
+  // session's marks, the request body is the recorded one, and the turn is
+  // saved as before.
+  it.each(CASES.filter((c) => c.full).map((c) => [c.name, c] as const))(
+    "%s: the recorded body, one mark read, saved through saveMessages",
+    async (_name, c) => {
+      state.full = true;
+      state.plaidStateFails = c.plaidStateFails === true;
+      state.reconnect = c.reconnect === true;
+      vi.stubEnv("AI_PLAID_STATE", c.mode);
+      vi.stubEnv("AI_SUPABASE_READ_ENABLED", "true");
+      vi.stubEnv("AI_HOUSEHOLD_SHARED_STATE", "");
+
+      expect(await post(c.text)).toBe(200);
+      expect(digest(bodies[0])).toEqual(EXPECTED[c.name]);
+      expect(calls).toEqual({ saveMessages: 1, saveSharedTurn: 0, marks: 1 });
+    }
+  );
 });
 
 describe("a system message never says a bank is connected and that one is required", () => {

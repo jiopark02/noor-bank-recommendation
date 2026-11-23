@@ -124,6 +124,7 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => {
       activeSessionId: SESSION_A,
     }),
     formatMemoryForPrompt: () => "",
+    getSessionSharedSources: async () => [],
     getSessionMessages: async () => [],
     saveMessages: (
       sessionId: string,

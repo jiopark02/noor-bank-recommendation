@@ -11,10 +11,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *   'session_closed' or NR001 not turned into SessionClosedError        -> T13
  *   'busy' retried more than once, not at all, or without the wait      -> T13
  *   a retry sent after the request was cancelled                        -> T13
+ *   the marked pairs or their session not sent, sent as added pairs, or
+ *     marked pairs accepted without their session                       -> N13
  */
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const SESSION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const MARKED_SESSION = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const OWNER = "00000000-0000-4000-8000-000000000002";
 const IDS = {
   user: "11111111-1111-4111-8111-111111111111",
@@ -62,10 +65,14 @@ const PAIR = {
   outputTokens: 34,
 };
 
-const SOURCES = [
-  { ownerUserId: OWNER, connectionId: 7002 },
-  { ownerUserId: OWNER, connectionId: 7001 },
-];
+const SOURCES = {
+  markedSessionId: null,
+  marked: [],
+  added: [
+    { ownerUserId: OWNER, connectionId: 7002 },
+    { ownerUserId: OWNER, connectionId: 7001 },
+  ],
+};
 
 let sleeps: number[] = [];
 const sleep = async (ms: number) => {
@@ -88,6 +95,9 @@ describe("saveSharedTurn — what it sends (T12)", () => {
     expect(fake.calls[0].args).toEqual({
       p_session_id: SESSION,
       p_user_id: USER_ID,
+      p_marked_session_id: null,
+      p_marked_owner_user_ids: [],
+      p_marked_resource_ids: [],
       p_owner_user_ids: [OWNER, OWNER],
       p_resource_ids: [7002, 7001],
       p_user_message_id: IDS.user,
@@ -120,7 +130,79 @@ describe("saveSharedTurn — what it sends (T12)", () => {
     await expect(
       saveSharedTurn(SESSION, USER_ID, { ...PAIR, assistantContent: "" }, SOURCES, { ids: IDS, sleep })
     ).rejects.toThrow();
-    await expect(saveSharedTurn(SESSION, USER_ID, PAIR, [], { ids: IDS, sleep })).rejects.toThrow();
+    await expect(
+      saveSharedTurn(
+        SESSION,
+        USER_ID,
+        PAIR,
+        { markedSessionId: null, marked: [], added: [] },
+        { ids: IDS, sleep }
+      )
+    ).rejects.toThrow();
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it("N13 sends the marked pairs with the session they were read from, apart from the pairs added this turn", async () => {
+    fake.answers = [{ data: "saved", error: null }];
+    await saveSharedTurn(
+      SESSION,
+      USER_ID,
+      PAIR,
+      {
+        markedSessionId: MARKED_SESSION,
+        marked: [{ ownerUserId: OWNER, connectionId: 7001 }],
+        added: [{ ownerUserId: OWNER, connectionId: 7003 }],
+      },
+      { ids: IDS, sleep }
+    );
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].args).toMatchObject({
+      p_session_id: SESSION,
+      p_user_id: USER_ID,
+      p_marked_session_id: MARKED_SESSION,
+      p_marked_owner_user_ids: [OWNER],
+      p_marked_resource_ids: [7001],
+      p_owner_user_ids: [OWNER],
+      p_resource_ids: [7003],
+    });
+  });
+
+  it("N13 marked pairs alone are a turn to save, with no pair added", async () => {
+    fake.answers = [{ data: "saved", error: null }];
+    await saveSharedTurn(
+      SESSION,
+      USER_ID,
+      PAIR,
+      {
+        markedSessionId: SESSION,
+        marked: [{ ownerUserId: OWNER, connectionId: 7001 }],
+        added: [],
+      },
+      { ids: IDS, sleep }
+    );
+    expect(fake.calls[0].args).toMatchObject({
+      p_marked_session_id: SESSION,
+      p_marked_owner_user_ids: [OWNER],
+      p_marked_resource_ids: [7001],
+      p_owner_user_ids: [],
+      p_resource_ids: [],
+    });
+  });
+
+  it("N13 marked pairs without the session they were read from are refused before calling", async () => {
+    await expect(
+      saveSharedTurn(
+        SESSION,
+        USER_ID,
+        PAIR,
+        {
+          markedSessionId: null,
+          marked: [{ ownerUserId: OWNER, connectionId: 7001 }],
+          added: [],
+        },
+        { ids: IDS, sleep }
+      )
+    ).rejects.toThrow("saveSharedTurn: marked sources need the session they were read from");
     expect(fake.calls).toHaveLength(0);
   });
 });

@@ -74,6 +74,7 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
   getActiveSession: async () => ({ id: "session-from-a-second-lookup" }),
   buildMemoryContext: async () => ({ facts: [], recentSummaries: [], activeSessionId: SESSION_ID }),
   formatMemoryForPrompt: () => "",
+  getSessionSharedSources: async () => [],
   getSessionMessages: async (...args: unknown[]) => {
     memory.historyCalls.push(args);
     memory.reserveCallsAtHistoryRead.push(usage.reserveCalls);

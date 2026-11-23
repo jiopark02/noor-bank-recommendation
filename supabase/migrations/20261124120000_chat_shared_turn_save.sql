@@ -1,4 +1,4 @@
--- Migration: store a chat turn that carried another member's shared bank data
+-- Migration: store every chat turn of a session that carries another member's shared bank data
 -- Date: 2026-11-24
 --
 -- Why. When the chat puts bank data another household member shares into a
@@ -6,41 +6,65 @@
 -- later message of the session, whose history returns to the model. Such a
 -- turn must be marked in chat_shared_sources so that the memory jobs leave it
 -- out and the purge on public.share_grants deletes it when sharing ends. The
--- mark and the turn have to be written together, while the grant is checked
+-- mark and the turn have to be written together, while the sharing is checked
 -- under the same lock the purge takes: written apart, a turn answered while
 -- the grant is being deleted could be saved after the purge with nothing
--- marking it. This file adds the one function that does all of it in one
--- transaction, and drops the recording function that wrote the mark alone.
+-- marking it. That holds for every turn of a session already marked, not only
+-- for a turn whose prompt read the shared data again: its history carries the
+-- figures whatever the latest message says. This file adds the one function
+-- that does all of it in one transaction, and drops the recording function
+-- that wrote the mark alone.
 --
 -- What this file does:
---   - Creates public.chat_shared_turn_save(...). Given the person's session,
---     the (owner, connection) pairs whose data entered the prompt, and the
---     two messages with ids the caller chose, it:
---       1. refuses with SQLSTATE 22023 when an argument is null, the pair
---          arrays differ in length or hold more than 20 pairs or a null, a
---          pair names the person as its owner, or either message is empty;
---       2. takes the advisory lock of each pair, keyed exactly as the purge
---          on share_grants keys it, in ascending (owner, connection) order:
---          it waits for the first and only tries the others, answering
---          'busy' with nothing written when one is held elsewhere;
+--   - Creates public.chat_shared_turn_save(...). It is given the person's
+--     session, the two messages with ids the caller chose, and two kinds of
+--     (owner, connection) pairs:
+--       (a) pairs already marked on a session when the turn started, with the
+--           id of that session (p_marked_session_id), which is the session
+--           the turn is saved in unless that session was closed meanwhile;
+--       (b) pairs whose data the caller put into this turn's prompt.
+--     It:
+--       1. refuses with SQLSTATE 22023 when an argument is null, a pair array
+--          and its partner differ in length, there is no pair or more than 20
+--          pairs in all, a pair holds a null or names the person as its
+--          owner, a marked pair comes without its session, or either message
+--          is empty;
+--       2. takes the advisory lock of each pair of both kinds, keyed exactly
+--          as the purge on share_grants keys it, in ascending (owner,
+--          connection) order: it waits for the first, up to the function's
+--          own lock_timeout, and answers 'busy' with nothing written when
+--          that runs out, and only tries the others, answering 'busy' with
+--          nothing written when one is held elsewhere;
 --       3. locks the session row (for no key update) and the person's users
 --          row (for key share) without waiting, answering 'busy' with
 --          nothing written when either is held elsewhere, and
 --          'session_closed' with nothing written unless the session is the
 --          person's and open;
---       4. answers 'not_shared' with nothing written unless every pair is
---          returned by public.household_shared_connections for the person,
---          which decides the grant, its scope, both people's active
---          membership and the connection's status in one statement;
---       5. reads the clock once, records each pair in chat_shared_sources
---          with that moment (keeping an earlier moment already recorded),
---          inserts both messages in one statement with the user's at that
---          moment and the assistant's 100 ms later, and answers 'saved'.
+--       4. answers 'not_shared' with nothing written unless every pair of
+--          kind (a) still has its mark on the marked session, and every pair
+--          of kind (b) is returned by public.household_shared_connections for
+--          the person, which decides the grant, its scope, both people's
+--          active membership and the connection's status in one statement;
+--       5. reads the clock once, records every pair in chat_shared_sources on
+--          the session the turn is saved in, with that moment (keeping an
+--          earlier moment already recorded), inserts both messages in one
+--          statement with the user's at that moment and the assistant's
+--          100 ms later, and answers 'saved'.
 --     Steps 3 to 5 decide only on what is read after every advisory lock is
 --     held, and steps 4 and 5 only after both row locks are held too.
 --   - Drops public.chat_shared_source_record, which recorded a pair without
 --     storing the turn, without checking the grant's scope or the
 --     connection's status, and with a moment the caller gave.
+--
+-- Why a marked pair is checked by its mark. The purge on share_grants
+-- deletes a grant's marks, and the messages they mark, under the same
+-- advisory lock this function takes for that pair. So with the lock held, a
+-- mark that is still there means the grant has not been deleted, and a mark
+-- that is gone means the purge has run and this turn, whose history held the
+-- shared figures, must not be saved. The shared-connections function is not
+-- asked for these pairs: it also requires the owner's connection to be
+-- active, and a session marked by a connection that stopped being active
+-- would then refuse every turn while the sharing itself still stands.
 --
 -- Why the database clock. The moment recorded and the user message's
 -- created_at are the same value, read under the lock, so the purge
@@ -66,12 +90,28 @@
 -- answers 'busy' with nothing written, and the caller may call again with
 -- the same arguments.
 --
+-- Why the function sets its own lock_timeout. The wait for the first
+-- advisory lock is bounded by it, and its expiry (SQLSTATE 55P03) is answered
+-- 'busy'. It has to end that wait before the statement_timeout of the role
+-- the caller connects through does, or the statement is cancelled with
+-- another SQLSTATE and the caller cannot tell whether anything was stored;
+-- that role's settings are live state. It also has to let the chat route call
+-- twice, with its wait between the calls, inside the time the route keeps for
+-- the save after its last model attempt: the save deadline less the read-back
+-- reserve, less the request budget (llmTimeouts.ts), less the retry wait
+-- (SHARED_TURN_BUSY_RETRY_MS, aiMemory.ts), halved; a test of this file
+-- holds that relation. The same limit bounds every other lock
+-- wait inside the call; by the order above there is none, and one that ran
+-- out would surface as an error rather than an answer.
+--
 -- Locking order: the advisory locks, then the session row, then the users
 -- row. The purge takes its advisory lock before the session rows too. With
 -- the session row held from step 3, the trigger that updates it after each
 -- message insert, and the foreign key checks of both inserts, wait for
 -- nothing, and no other transaction can close the session before this one
--- ends; a session already closed is refused at step 3.
+-- ends; a session already closed is refused at step 3. The marked session,
+-- when it is not the session the turn is saved in, is not locked: only its
+-- marks are read, under the advisory locks that guard them.
 --
 -- Access: SECURITY INVOKER with an empty search_path. EXECUTE is revoked
 -- from PUBLIC, anon and authenticated and granted to service_role only, so
@@ -91,23 +131,25 @@
 -- back, unless every property holds.
 --
 -- Order of deployment: apply this file to a database before deploying code
--- that calls the function against it with the chat's shared data switch on.
--- Whether this file is applied is live state.
+-- that calls the function against it. Whether this file is applied is live
+-- state.
 --
--- Running it again: create or replace keeps the same signature, the drop is
--- a no-op, and the DO block passes again. Running
+-- Running it again: the drops are no-ops, create or replace keeps the same
+-- signature, and the DO block passes again. Running
 -- 20261122120000_chat_shared_sources.sql again after this file creates
--- chat_shared_source_record again; apply this file again to drop it.
+-- chat_shared_source_record again; apply this file again to drop it. An
+-- earlier version of this file defined the function with eleven arguments;
+-- this file drops that signature too.
 --
 -- 20261122120000_chat_shared_sources.sql and
 -- 20261123120000_household_shared_connections.sql should not be reversed
--- while this file is applied: this function writes the first's table and
--- calls the second's function. Reverse this file first.
+-- while this file is applied: this function writes and reads the first's
+-- table and calls the second's function. Reverse this file first.
 --
 -- To reverse it (after the application code that calls the function is
 -- reverted and deployed):
 --   drop function if exists public.chat_shared_turn_save(
---     uuid, uuid, uuid[], bigint[], uuid, uuid, text, text, text, integer, integer);
+--     uuid, uuid, uuid, uuid[], bigint[], uuid[], bigint[], uuid, uuid, text, text, text, integer, integer);
 -- and apply 20261122120000_chat_shared_sources.sql again to restore the
 -- recording function.
 
@@ -154,9 +196,15 @@ begin
 end
 $$;
 
+drop function if exists public.chat_shared_turn_save(
+  uuid, uuid, uuid[], bigint[], uuid, uuid, text, text, text, integer, integer);
+
 create or replace function public.chat_shared_turn_save(
   p_session_id uuid,
   p_user_id uuid,
+  p_marked_session_id uuid,
+  p_marked_owner_user_ids uuid[],
+  p_marked_resource_ids bigint[],
   p_owner_user_ids uuid[],
   p_resource_ids bigint[],
   p_user_message_id uuid,
@@ -172,15 +220,19 @@ language plpgsql
 volatile
 security invoker
 set search_path = ''
+set lock_timeout = '1s'
 as $$
 declare
   v_owners uuid[];
   v_resources bigint[];
+  v_marked integer;
+  v_added integer;
   v_now timestamptz;
   v_open boolean;
   i integer;
 begin
   if p_session_id is null or p_user_id is null
+     or p_marked_owner_user_ids is null or p_marked_resource_ids is null
      or p_owner_user_ids is null or p_resource_ids is null
      or p_user_message_id is null or p_assistant_message_id is null
      or p_user_content is null or p_assistant_content is null
@@ -189,15 +241,25 @@ begin
     raise exception 'chat_shared_turn_save: invalid arguments'
       using errcode = '22023';
   end if;
-  if coalesce(pg_catalog.cardinality(p_owner_user_ids), 0) = 0
-     or pg_catalog.cardinality(p_owner_user_ids) <> pg_catalog.cardinality(p_resource_ids)
-     or pg_catalog.cardinality(p_owner_user_ids) > 20 then
+  v_marked := coalesce(pg_catalog.cardinality(p_marked_owner_user_ids), 0);
+  v_added := coalesce(pg_catalog.cardinality(p_owner_user_ids), 0);
+  if v_marked <> coalesce(pg_catalog.cardinality(p_marked_resource_ids), 0)
+     or v_added <> coalesce(pg_catalog.cardinality(p_resource_ids), 0)
+     or v_marked + v_added = 0
+     or v_marked + v_added > 20
+     or (v_marked > 0 and p_marked_session_id is null) then
     raise exception 'chat_shared_turn_save: invalid sources'
       using errcode = '22023';
   end if;
   if exists (
     select 1
-      from unnest(p_owner_user_ids, p_resource_ids) as k(owner_user_id, resource_id)
+      from (
+        select m.owner_user_id, m.resource_id
+          from unnest(p_marked_owner_user_ids, p_marked_resource_ids) as m(owner_user_id, resource_id)
+        union all
+        select a.owner_user_id, a.resource_id
+          from unnest(p_owner_user_ids, p_resource_ids) as a(owner_user_id, resource_id)
+      ) k
      where k.owner_user_id is null
         or k.resource_id is null
         or k.owner_user_id = p_user_id
@@ -211,14 +273,26 @@ begin
     into v_owners, v_resources
     from (
       select distinct u.owner_user_id, u.resource_id
-        from unnest(p_owner_user_ids, p_resource_ids) as u(owner_user_id, resource_id)
+        from (
+          select m.owner_user_id, m.resource_id
+            from unnest(p_marked_owner_user_ids, p_marked_resource_ids) as m(owner_user_id, resource_id)
+          union all
+          select a.owner_user_id, a.resource_id
+            from unnest(p_owner_user_ids, p_resource_ids) as a(owner_user_id, resource_id)
+        ) u
     ) k;
 
   for i in 1 .. pg_catalog.cardinality(v_owners) loop
     if i = 1 then
-      perform pg_catalog.pg_advisory_xact_lock(
-        pg_catalog.hashtextextended(
-          'chat_shared_source:plaid_connection:' || v_owners[i]::text || ':' || v_resources[i]::text, 0));
+      -- The only wait, while nothing is held; bounded by the function's
+      -- lock_timeout.
+      begin
+        perform pg_catalog.pg_advisory_xact_lock(
+          pg_catalog.hashtextextended(
+            'chat_shared_source:plaid_connection:' || v_owners[i]::text || ':' || v_resources[i]::text, 0));
+      exception when sqlstate '55P03' then
+        return 'busy';
+      end;
     elsif not pg_catalog.pg_try_advisory_xact_lock(
         pg_catalog.hashtextextended(
           'chat_shared_source:plaid_connection:' || v_owners[i]::text || ':' || v_resources[i]::text, 0)) then
@@ -250,9 +324,27 @@ begin
     return 'session_closed';
   end if;
 
+  -- (a) A pair marked when the turn started: its mark must still be there.
   if exists (
     select 1
-      from unnest(v_owners, v_resources) as k(owner_user_id, resource_id)
+      from unnest(p_marked_owner_user_ids, p_marked_resource_ids) as k(owner_user_id, resource_id)
+     where not exists (
+       select 1
+         from public.chat_shared_sources m
+        where m.session_id = p_marked_session_id
+          and m.user_id = p_user_id
+          and m.resource_type = 'plaid_connection'
+          and m.owner_user_id = k.owner_user_id
+          and m.resource_id = k.resource_id
+     )
+  ) then
+    return 'not_shared';
+  end if;
+
+  -- (b) A pair put into this turn's prompt: it must still be shared.
+  if exists (
+    select 1
+      from unnest(p_owner_user_ids, p_resource_ids) as k(owner_user_id, resource_id)
      where not exists (
        select 1
          from public.household_shared_connections(p_user_id) s
@@ -286,17 +378,17 @@ end;
 $$;
 
 revoke all on function public.chat_shared_turn_save(
-  uuid, uuid, uuid[], bigint[], uuid, uuid, text, text, text, integer, integer)
+  uuid, uuid, uuid, uuid[], bigint[], uuid[], bigint[], uuid, uuid, text, text, text, integer, integer)
   from public, anon, authenticated;
 grant execute on function public.chat_shared_turn_save(
-  uuid, uuid, uuid[], bigint[], uuid, uuid, text, text, text, integer, integer)
+  uuid, uuid, uuid, uuid[], bigint[], uuid[], bigint[], uuid, uuid, text, text, text, integer, integer)
   to service_role;
 
 drop function if exists public.chat_shared_source_record(uuid, uuid, uuid, bigint, timestamptz);
 
 do $$
 declare
-  v_fn regprocedure := 'public.chat_shared_turn_save(uuid, uuid, uuid[], bigint[], uuid, uuid, text, text, text, integer, integer)'::regprocedure;
+  v_fn regprocedure := 'public.chat_shared_turn_save(uuid, uuid, uuid, uuid[], bigint[], uuid[], bigint[], uuid, uuid, text, text, text, integer, integer)'::regprocedure;
   v_purge regprocedure := 'public.chat_shared_sources_purge_on_grant_delete()'::regprocedure;
   v_proacl aclitem[];
   v_prosecdef boolean;
@@ -409,14 +501,34 @@ begin
     raise exception '%: a row lock may be waited for', v_fn;
   end if;
 
-  -- 10. The recording function this file replaces is gone.
+  -- 10. The wait for the first advisory lock is bounded by the function's own
+  --     lock_timeout, and its expiry is answered 'busy': the handler appears
+  --     once for that lock and once for the row locks.
+  if not ('lock_timeout=1s' = any(v_proconfig)) then
+    raise exception '%: expected its own lock_timeout of 1s, found %', v_fn, v_proconfig;
+  end if;
+  if (length(v_prosrc) - length(replace(v_prosrc, 'exception when sqlstate ''55P03'' then', '')))
+     / length('exception when sqlstate ''55P03'' then') <> 2 then
+    raise exception '%: the wait for the first advisory lock is not answered busy', v_fn;
+  end if;
+
+  -- 11. A marked pair is checked by its mark on the marked session.
+  if position('where m.session_id = p_marked_session_id' in v_prosrc) = 0 then
+    raise exception '%: does not check a marked pair by its mark', v_fn;
+  end if;
+
+  -- 12. The recording function this file replaces, and the earlier
+  --     signature of this one, are gone.
   if to_regprocedure('public.chat_shared_source_record(uuid, uuid, uuid, bigint, timestamptz)') is not null then
     raise exception 'public.chat_shared_source_record still exists';
   end if;
+  if to_regprocedure('public.chat_shared_turn_save(uuid, uuid, uuid[], bigint[], uuid, uuid, text, text, text, integer, integer)') is not null then
+    raise exception 'the earlier signature of public.chat_shared_turn_save still exists';
+  end if;
 
-  -- 11. A session that is not the person's open session stores nothing.
+  -- 13. A session that is not the person's open session stores nothing.
   v_answer := public.chat_shared_turn_save(
-    v_session, v_user, array[v_owner], array[1::bigint],
+    v_session, v_user, null, '{}'::uuid[], '{}'::bigint[], array[v_owner], array[1::bigint],
     v_user_message, v_assistant_message, 'probe', 'probe', null, null, null);
   if v_answer is distinct from 'session_closed' then
     raise exception '%: expected session_closed for an unknown session, got %', v_fn, v_answer;
@@ -431,22 +543,32 @@ begin
     raise exception '%: wrote rows for a refused call', v_fn;
   end if;
 
-  -- 12. A pair whose owner is the person is refused.
+  -- 14. A pair whose owner is the person is refused.
   begin
     perform public.chat_shared_turn_save(
-      v_session, v_user, array[v_user], array[1::bigint],
+      v_session, v_user, null, '{}'::uuid[], '{}'::bigint[], array[v_user], array[1::bigint],
       v_user_message, v_assistant_message, 'probe', 'probe', null, null, null);
     raise exception '%: accepted a pair owned by the person', v_fn;
   exception when sqlstate '22023' then
     null;
   end;
 
-  -- 13. Pair arrays of different lengths are refused.
+  -- 15. Pair arrays of different lengths are refused.
   begin
     perform public.chat_shared_turn_save(
-      v_session, v_user, array[v_owner], array[1::bigint, 2::bigint],
+      v_session, v_user, null, '{}'::uuid[], '{}'::bigint[], array[v_owner], array[1::bigint, 2::bigint],
       v_user_message, v_assistant_message, 'probe', 'probe', null, null, null);
     raise exception '%: accepted pair arrays of different lengths', v_fn;
+  exception when sqlstate '22023' then
+    null;
+  end;
+
+  -- 16. A marked pair without the session it is marked on is refused.
+  begin
+    perform public.chat_shared_turn_save(
+      v_session, v_user, null, array[v_owner], array[1::bigint], '{}'::uuid[], '{}'::bigint[],
+      v_user_message, v_assistant_message, 'probe', 'probe', null, null, null);
+    raise exception '%: accepted a marked pair without its session', v_fn;
   exception when sqlstate '22023' then
     null;
   end;

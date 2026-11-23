@@ -93,6 +93,7 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
   buildMemoryContext: async () => ({ facts: [], recentSummaries: [], activeSessionId: "session-1" }),
   formatMemoryForPrompt: () => memory.block,
   saveMessages: async () => ({}),
+  getSessionSharedSources: async () => [],
   getSessionMessages: async () => [],
 }));
 

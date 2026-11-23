@@ -92,6 +92,7 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => ({
     memory.saved += 1;
     return {};
   },
+  getSessionSharedSources: async () => [],
   getSessionMessages: async () => [],
 }));
 
