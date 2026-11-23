@@ -17,6 +17,15 @@
  *             The stage survives a failed action (a deletion that stopped
  *             part-way, say), so the retry goes straight to the action, and
  *             ends when the server answers that it needs a new verification.
+ *   unconfirmed
+ *             a verify request ended without a readable answer (the request
+ *             failed, or its body could not be read), so the code may or may
+ *             not have been accepted. The screen looks like the code stage. A
+ *             press does not send the code again (a second verify of an
+ *             accepted code is refused) but runs the action, and the action's
+ *             own check on the server decides: it goes ahead, or it answers
+ *             that a verification is required and the step returns to the
+ *             code stage. Nothing is sent until the user presses.
  *
  * Closing the modal returns to idle from any stage (afterClose), and an
  * answer to a request sent before the close changes nothing
@@ -29,7 +38,9 @@ export type ReauthStep =
   | { kind: "verified" }
   /** The code can no longer be used: the next press sends a new one. */
   | { kind: "restart"; message: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** No readable answer: the request failed, or its body could not be read. */
+  | { kind: "unknown" };
 
 export const REAUTH_UI = {
   codeSent: "We emailed you a 6-digit code. Enter it below to continue.",
@@ -53,12 +64,22 @@ export const REAUTH_UI = {
   // once the request was sent: the export check may already have used the
   // verification up, so the next try starts with a new code.
   exportFailed: "Your data couldn't be exported. Request a new code and try again.",
+  // A verify request ended without a readable answer.
+  verifyUnknown: "Connection lost while checking your code. Press again to continue.",
+  // After that, the action's check answered that a verification is required.
+  codeUnconfirmed: "We couldn't confirm your code. Enter it again or request a new one.",
 } as const;
 
 /** Answers after which the code step starts over from idle. */
 const RESTART_CODES = ["REAUTH_LOCKED", "REAUTH_REQUIRED", "REAUTH_SESSION_UNAVAILABLE"];
 
+/**
+ * An answer read as a step. `body` is undefined only when the body could not
+ * be read (the page passes undefined for that and nothing else), which makes
+ * the step unknown whatever the status.
+ */
 export function readReauthAnswer(status: number, body: unknown): ReauthStep {
+  if (body === undefined) return { kind: "unknown" };
   const record =
     typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
   if (status === 200) {
@@ -81,7 +102,7 @@ export function isReauthRequiredAnswer(status: number, body: unknown): boolean {
   return code === "REAUTH_REQUIRED" || code === "REAUTH_SESSION_UNAVAILABLE";
 }
 
-export type ReauthStage = "idle" | "code" | "verified";
+export type ReauthStage = "idle" | "code" | "verified" | "unconfirmed";
 
 /** What one press of the action button does in a stage. */
 export type ReauthPress = "start" | "verify" | "act";
@@ -89,7 +110,13 @@ export type ReauthPress = "start" | "verify" | "act";
 export function pressAction(stage: ReauthStage): ReauthPress {
   if (stage === "idle") return "start";
   if (stage === "code") return "verify";
+  // verified and unconfirmed: the action itself, with no verify.
   return "act";
+}
+
+/** Whether the screen shows the code field and "Get a new code". */
+export function showsCodeEntry(stage: ReauthStage): boolean {
+  return stage === "code" || stage === "unconfirmed";
 }
 
 /**
@@ -116,10 +143,15 @@ function outcome(
 }
 
 /**
- * After a start answer. From idle it is the press itself; from code it is
- * "Get a new code", which never runs the action.
+ * After a start answer. From idle it is the press itself; from code or
+ * unconfirmed it is "Get a new code", which never runs the action. A new code
+ * sent moves either to the code stage; a refused one keeps the stage it was
+ * asked from, so an unconfirmed code is not verified again.
  */
-export function afterStart(from: "idle" | "code", step: ReauthStep): ReauthOutcome {
+export function afterStart(
+  from: "idle" | "code" | "unconfirmed",
+  step: ReauthStep
+): ReauthOutcome {
   if (from === "idle") {
     switch (step.kind) {
       case "sent":
@@ -143,14 +175,18 @@ export function afterStart(from: "idle" | "code", step: ReauthStep): ReauthOutco
     case "restart":
     case "error":
       // A refused new code (the issue limit, a failed email) leaves the
-      // earlier code usable: stay in code and say why.
-      return outcome("code", false, step.message);
+      // earlier code usable: stay where the step was and say why.
+      return outcome(from, false, step.message);
     default:
-      return outcome("code", false, REAUTH_UI.fallback);
+      return outcome(from, false, REAUTH_UI.fallback);
   }
 }
 
-/** After a verify answer, made from the code stage. */
+/**
+ * After a verify answer, made from the code stage. An unknown answer never
+ * runs the action: it waits in unconfirmed for the user's next press, and the
+ * typed code is kept.
+ */
 export function afterVerify(step: ReauthStep): ReauthOutcome {
   switch (step.kind) {
     case "verified":
@@ -160,22 +196,51 @@ export function afterVerify(step: ReauthStep): ReauthOutcome {
       return outcome("idle", false, step.message, null, true);
     case "error":
       return outcome("code", false, step.message);
+    case "unknown":
+      return outcome("unconfirmed", false, REAUTH_UI.verifyUnknown);
     default:
       return outcome("code", false, REAUTH_UI.fallback);
   }
 }
 
+function reauthRequiredCode(status: number, body: unknown): boolean {
+  return (
+    status === 403 &&
+    typeof body === "object" &&
+    body !== null &&
+    (body as Record<string, unknown>).code === "REAUTH_REQUIRED"
+  );
+}
+
 /**
  * The stage after the action's own answer failed. A refusal that asks for a
- * new verification starts over; anything else keeps the stage, so a retry
- * of a deletion that stopped part-way goes straight to the action.
+ * new verification starts over, except from unconfirmed, where REAUTH_REQUIRED
+ * means the unconfirmed code was not accepted and the step goes back to the
+ * code stage; anything else keeps the stage, so a retry of a deletion that
+ * stopped part-way goes straight to the action.
  */
 export function stageAfterFailedAction(
   stage: ReauthStage,
   status: number,
   body: unknown
 ): ReauthStage {
+  if (stage === "unconfirmed" && reauthRequiredCode(status, body)) return "code";
   return isReauthRequiredAnswer(status, body) ? "idle" : stage;
+}
+
+/**
+ * The whole screen after a failed action answer, for the one case that has
+ * its own words: from unconfirmed, REAUTH_REQUIRED returns to the code stage
+ * with REAUTH_UI.codeUnconfirmed and clears the typed code. Null otherwise;
+ * the page then handles the answer as before.
+ */
+export function afterFailedAction(
+  stage: ReauthStage,
+  status: number,
+  body: unknown
+): ReauthOutcome | null {
+  if (stage !== "unconfirmed" || !reauthRequiredCode(status, body)) return null;
+  return outcome(stageAfterFailedAction(stage, status, body), false, REAUTH_UI.codeUnconfirmed, null, true);
 }
 
 /**
