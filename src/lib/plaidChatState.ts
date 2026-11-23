@@ -284,14 +284,18 @@ export interface SharedChatRead {
 /**
  * The shared-connections function failed, on the first call ("list") or on
  * the call after the reads ("recheck"), or the reads and that second call did
- * not finish inside their time limit ("timeout"). `code` is the database's
- * error code, or a fixed word; never a message.
+ * not finish inside their time limit ("timeout"), or the reads were cancelled,
+ * by that limit or by the caller, so the second call was not made
+ * ("cancelled"). `code` is the database's error code, or a fixed word; never
+ * a message.
  */
+export type SharedChatReadStage = "list" | "recheck" | "timeout" | "cancelled";
+
 export class SharedChatReadError extends Error {
-  readonly stage: "list" | "recheck" | "timeout";
+  readonly stage: SharedChatReadStage;
   readonly code: string;
 
-  constructor(stage: "list" | "recheck" | "timeout", code: string) {
+  constructor(stage: SharedChatReadStage, code: string) {
     super(`shared connections could not be read (${stage})`);
     this.name = "SharedChatReadError";
     this.stage = stage;
@@ -436,6 +440,11 @@ async function readOwnerForChat(
  * turn goes on without the other member's data instead of waiting for a slow
  * bank until the request's own deadline.
  *
+ * Once the reads are cancelled, by that limit or by `opts.signal`, the
+ * function is not called again: the reads end, a line says the second call
+ * was skipped, and the work ends with SharedChatReadError "cancelled", which
+ * no caller sees after the limit has already answered.
+ *
  * @param opts.signal  Passed to every bank call; a caller that cancels must
  *   not use the result.
  */
@@ -479,9 +488,18 @@ async function readAndRecheck(
 ): Promise<SharedChatRead> {
   const canRead = isPlaidConfigured() && isPlaidTokenCryptoConfigured();
   const groups = groupSharedByOwner(list.connections);
+  // Every owner read starts here, before any wait, so no read begins after a
+  // cancellation.
   const reads = await Promise.all(
     groups.map((g) => readOwnerForChat(g, canRead, signal, deps.log))
   );
+
+  // Cancelled by the time limit or by the caller: nothing read is used, so
+  // the function is not asked again.
+  if (signal.aborted) {
+    deps.log("[chat-shared] outcome=recheck_skipped reason=cancelled");
+    throw new SharedChatReadError("cancelled", "cancelled");
+  }
 
   const again = await deps.store.readSharedConnections(userId);
   if (!again.ok) throw new SharedChatReadError("recheck", again.code);

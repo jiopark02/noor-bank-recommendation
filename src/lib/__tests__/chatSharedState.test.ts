@@ -18,6 +18,8 @@ import type { SharedAccountsStore, SharedConnection, StoreRead } from "../househ
  *   a failed owner read not caught, or its connections dropped         -> owner
  *   the read's own time limit removed, or its timer not aborting the
  *     bank calls, or another limit used by default                     -> N18
+ *   the function called again after the reads were cancelled, by the
+ *     limit or by the caller                                           -> N18
  *   a name, bank, account, amount or id put in a log line              -> logs
  */
 
@@ -357,7 +359,32 @@ describe("readSharedForChat", () => {
     expect((error as SharedChatReadError).stage).toBe("timeout");
     // The bank call saw its signal aborted.
     await vi.waitFor(() => expect(state.hangAborted).toEqual([true]));
-    // The second call of the function was not reached.
+    // The work reached the point of the second call and skipped it: the line
+    // is written there and nothing follows it, so no call can come later.
+    await vi.waitFor(() =>
+      expect(state.logs).toContain("[chat-shared] outcome=recheck_skipped reason=cancelled")
+    );
+    expect(state.rowCalls).toEqual([USER_ID]);
+  });
+
+  it("N18 a read the caller cancels makes no second call and ends as cancelled", async () => {
+    state.rows = [{ ok: true, value: [shared(A1)] }];
+    state.hang.add(A1.item);
+    const list = await listSharedForChat(USER_ID, deps);
+    const caller = new AbortController();
+    const pending = readSharedForChat(
+      USER_ID,
+      list,
+      { signal: caller.signal, timeoutMs: 60_000 },
+      deps
+    ).catch((e: unknown) => e);
+    await vi.waitFor(() => expect(state.accountsGetCalls).toBe(1));
+    caller.abort();
+    const error = await pending;
+    expect(error).toBeInstanceOf(SharedChatReadError);
+    expect((error as SharedChatReadError).stage).toBe("cancelled");
+    expect(state.hangAborted).toEqual([true]);
+    expect(state.logs).toContain("[chat-shared] outcome=recheck_skipped reason=cancelled");
     expect(state.rowCalls).toEqual([USER_ID]);
   });
 
