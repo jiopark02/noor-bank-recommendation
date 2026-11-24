@@ -2,16 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase';
 import { sendWaitlistConfirmationEmail } from '@/lib/email';
 import { toLogSafeError } from '@/lib/logSafeError';
+import { readRequestJsonWithByteLimit } from '@/lib/boundedRequestJson';
+import { validateEmail } from '@/lib/validation';
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// The body is one email address. Its largest valid form is a few hundred
+// bytes; anything over this is refused before it is parsed.
+const WAITLIST_MAX_BODY_BYTES = 4096;
 
 export async function POST(request: NextRequest) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
+  const read = await readRequestJsonWithByteLimit(request, WAITLIST_MAX_BODY_BYTES);
+  if (read.kind === 'too_large') {
+    return NextResponse.json({ message: 'Request is too large' }, { status: 413 });
+  }
+  // A body that is absent, unreadable or not JSON comes back as undefined.
+  if (read.value === undefined) {
     return NextResponse.json({ message: 'Invalid request body' }, { status: 400 });
   }
+  const body: unknown = read.value;
 
   // Only `email` is read. A `name` in the body is ignored: it is neither stored
   // nor put into the confirmation email, because this route is unauthenticated
@@ -33,7 +40,7 @@ export async function POST(request: NextRequest) {
 
   const email = rawEmail.toLowerCase();
 
-  if (!EMAIL_REGEX.test(email)) {
+  if (!validateEmail(email).isValid) {
     return NextResponse.json({ message: 'Please enter a valid email address' }, { status: 400 });
   }
 

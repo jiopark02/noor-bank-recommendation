@@ -385,14 +385,41 @@ export function cookieOptionsForPersistence(
   return sessionOnly;
 }
 
+/**
+ * The options every auth cookie in a write gets: the lifetime the user chose
+ * (above), and, when `secure` is true, the Secure attribute, so the browser
+ * never sends the session over plain HTTP. @supabase/ssr sets no Secure
+ * attribute of its own. Removals get it too, so a removal matches the cookie
+ * it replaces. `secure` is required so that a writer cannot leave it out by
+ * accident: each writer passes whether its page or request is HTTPS, which
+ * leaves local development over plain HTTP working.
+ */
 export function applySessionPersistence(
   cookies: CookieToSet[],
-  persistent: boolean
+  persistent: boolean,
+  secure: boolean
 ): CookieToSet[] {
-  return cookies.map((cookie) => ({
-    ...cookie,
-    options: cookieOptionsForPersistence(cookie, persistent),
-  }));
+  return cookies.map((cookie) => {
+    const options = cookieOptionsForPersistence(cookie, persistent);
+    return {
+      ...cookie,
+      options: secure ? { ...options, secure: true } : options,
+    };
+  });
+}
+
+/**
+ * Whether a request reached the deployment over HTTPS: the request URL's
+ * protocol, or the protocol the platform's proxy reports in
+ * x-forwarded-proto (its first entry when there are several).
+ */
+export function isHttpsRequest(
+  urlProtocol: string,
+  forwardedProto: string | null
+): boolean {
+  if (urlProtocol === "https:") return true;
+  if (forwardedProto === null) return false;
+  return forwardedProto.split(",")[0].trim().toLowerCase() === "https";
 }
 
 /**

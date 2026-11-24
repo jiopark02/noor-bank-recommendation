@@ -47,10 +47,17 @@ function hasSessionOnlyMarker(): boolean {
   return readDocumentCookies().some(({ name }) => name === SESSION_ONLY_COOKIE);
 }
 
+// On an HTTPS page the auth cookies are written Secure. Over plain HTTP
+// (local development) they are not, since a browser may drop a Secure cookie
+// set from a page that is not HTTPS.
+function isSecurePage(): boolean {
+  return typeof window !== "undefined" && window.location.protocol === "https:";
+}
+
 function writeDocumentCookies(cookies: CookieToSet[]): void {
   if (typeof document === "undefined") return;
   const persistent = !hasSessionOnlyMarker();
-  applySessionPersistence(cookies, persistent).forEach(
+  applySessionPersistence(cookies, persistent, isSecurePage()).forEach(
     ({ name, value, options }) => {
       document.cookie = serializeCookieHeader(name, value, options);
     }

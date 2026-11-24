@@ -11,6 +11,7 @@ import { decideNameUpdate } from "@/lib/surveyNameUpdate";
 import { DEFAULT_FIRST_NAME, firstNameForClient } from "@/lib/defaultFirstName";
 import { checkSurveyMoney } from "@/lib/surveyMoney";
 import { INVALID_MONTHLY_AMOUNT } from "@/lib/signupCodes";
+import { readRequestJsonWithByteLimit } from "@/lib/boundedRequestJson";
 
 // Temporary signup pause (fail-open). Gates ONLY the unauthenticated
 // email/password signup path below; the authenticated OAuth
@@ -24,18 +25,23 @@ function isSignupDisabled(): boolean {
 
 const INVALID_BODY_MESSAGE = "Request body must be a JSON object.";
 
-// The request body as a plain JSON object, or null for anything else: a body
-// that does not parse, JSON null, an array, or any other JSON value. Nothing
-// about the failure is logged — a parse error's message can quote the input.
+// The form sends a name, an email address, a password and three short
+// answers, well under this; the margin leaves room for a long password. A
+// larger body is refused before it is parsed.
+const SURVEY_MAX_BODY_BYTES = 8192;
+
+// The request body as a plain JSON object; "too_large" for a body over the
+// byte limit; or null for anything else: a body that does not parse, JSON
+// null, an array, or any other JSON value. Nothing about the failure is
+// logged — a parse error's message can quote the input.
 async function readJsonObjectBody(
   request: NextRequest
-): Promise<Record<string, unknown> | null> {
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    return null;
+): Promise<Record<string, unknown> | "too_large" | null> {
+  const read = await readRequestJsonWithByteLimit(request, SURVEY_MAX_BODY_BYTES);
+  if (read.kind === "too_large") {
+    return "too_large";
   }
+  const parsed = read.value;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return null;
   }
@@ -148,9 +154,16 @@ export async function POST(request: NextRequest) {
     // Header-only read; does not consume the JSON body.
     const authUserId = await getAuthenticatedUserIdFromRequest(request);
 
-    // Before every other check, on both paths: a body that is not a plain
-    // JSON object is 400, with no database read or write and nothing logged.
+    // Before every other check, on both paths: a body over the byte limit is
+    // 413 and a body that is not a plain JSON object is 400, each with no
+    // database read or write and nothing logged.
     const surveyData = await readJsonObjectBody(request);
+    if (surveyData === "too_large") {
+      return NextResponse.json(
+        { success: false, message: "Request is too large" },
+        { status: 413 }
+      );
+    }
     if (!surveyData) {
       return NextResponse.json(
         { success: false, message: INVALID_BODY_MESSAGE },

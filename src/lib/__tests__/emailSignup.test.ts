@@ -311,6 +311,20 @@ describe("input checks after the gates", () => {
     }
   );
 
+  it("V4b an email over the length limit is 400 with fixed text and reads nothing", async () => {
+    const d = deps();
+    const email = "a".repeat(64) + "@" + "b".repeat(252) + ".com";
+    expect(email.length).toBe(321);
+    const result = await createEmailAccount(input({ email }), d);
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({
+      success: false,
+      message: "Please enter a valid email address",
+    });
+    expect(d.findProfileByEmail).not.toHaveBeenCalled();
+    expect(d.generateSignupLink).not.toHaveBeenCalled();
+  });
+
   it.each([null, "", "   ", "\u0001"])(
     "V5 an empty first name (%j) is 400 with fixed text and writes nothing",
     async (firstName) => {
