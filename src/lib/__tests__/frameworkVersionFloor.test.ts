@@ -9,7 +9,9 @@ import { describe, it, expect } from "vitest";
  * the version is pinned exactly, held at or above a floor, and kept the same
  * in package.json, the lockfile and the installed tree. CI installs with
  * `npm ci` before running this file, so a downgrade turns a pull request red.
- * There is no ceiling: moving to a later major version must not be blocked.
+ * next has no ceiling. eslint-config-next moves with next to the same version;
+ * its version 16 requires eslint 9, so moving to 16 also moves eslint and the
+ * lint configuration.
  *
  * Mutations that turn this file red:
  *   - a range ("^", "~", ">=") instead of an exact version for next
