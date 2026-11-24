@@ -304,7 +304,9 @@ const STATUS_AFTER_FETCH = `      })
 const JSON_PARSED_AFTER_PARSE = `  try {
     data = await response.json();
   } catch {
-    throw new Error("OpenRouter response was not valid JSON");
+    throw Object.assign(new Error("OpenRouter response was not valid JSON"), {
+      code: "provider_json_invalid",
+    });
   }
   observed.jsonParsed = true;
 `;

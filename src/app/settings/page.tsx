@@ -19,6 +19,7 @@ import { HOUSEHOLD_UI } from '@/lib/householdCopy';
 import {
   REAUTH_UI,
   afterClose,
+  afterFailedAction,
   afterStart,
   afterVerify,
   answerStillCurrent,
@@ -26,6 +27,7 @@ import {
   exportButtonLabel,
   pressAction,
   readReauthAnswer,
+  showsCodeEntry,
   stageAfterFailedAction,
   type ReauthOutcome,
   type ReauthPress,
@@ -367,12 +369,22 @@ export default function SettingsPage() {
     if (!rawAuth.Authorization) {
       return { kind: 'error', message: REAUTH_UI.sessionExpired };
     }
-    const res = await fetch(`/api/account/reauth/${path}`, {
-      method: 'POST',
-      headers: buildJsonAuthorizedHeaders(rawAuth),
-      body: JSON.stringify(body),
-    });
-    const json = await res.json().catch(() => ({}));
+    let res: Response;
+    try {
+      res = await fetch(`/api/account/reauth/${path}`, {
+        method: 'POST',
+        headers: buildJsonAuthorizedHeaders(rawAuth),
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      // A verify that may have reached the server is not sent again: its
+      // outcome is unknown, and the next press goes to the action instead
+      // (afterVerify). A failed start is thrown as before.
+      if (path === 'verify') return { kind: 'unknown' };
+      throw err;
+    }
+    // undefined marks a body that could not be read (readReauthAnswer).
+    const json = await res.json().catch(() => undefined);
     return readReauthAnswer(res.status, json);
   };
 
@@ -397,14 +409,16 @@ export default function SettingsPage() {
     return { proceed: next.proceed, stage: next.stage };
   };
 
-  // "Get a new code", offered in the code stage only. Never runs the action.
+  // "Get a new code", offered in the code and unconfirmed stages
+  // (showsCodeEntry). Never runs the action.
   const handleNewReauthCode = async (purpose: ReauthPurpose) => {
     const sentAt = modalCloses.current;
     setIsLoading(true);
     setError(null);
     setReauthBusy('start');
     try {
-      const next = afterStart('code', await postReauth('start', { purpose }));
+      const from = reauthStage === 'unconfirmed' ? 'unconfirmed' : 'code';
+      const next = afterStart(from, await postReauth('start', { purpose }));
       if (answerStillCurrent(sentAt, modalCloses.current)) applyReauthOutcome(next);
     } catch {
       setError(REAUTH_UI.fallback);
@@ -454,10 +468,17 @@ export default function SettingsPage() {
         // A modal closed while the request was out has already started over.
         const errBody = (await res.json().catch(() => ({}))) as { error?: string };
         if (answerStillCurrent(sentAt, modalCloses.current)) {
-          const nextStage = stageAfterFailedAction(ready.stage, res.status, errBody);
-          if (nextStage === 'idle') resetReauth();
-          else setReauthStage(nextStage);
-          setError(errBody.error || 'Failed to delete account. Please try again.');
+          // An unconfirmed code the check did not accept: back to the code
+          // stage with its own words.
+          const unconfirmed = afterFailedAction(ready.stage, res.status, errBody);
+          if (unconfirmed) {
+            applyReauthOutcome(unconfirmed);
+          } else {
+            const nextStage = stageAfterFailedAction(ready.stage, res.status, errBody);
+            if (nextStage === 'idle') resetReauth();
+            else setReauthStage(nextStage);
+            setError(errBody.error || 'Failed to delete account. Please try again.');
+          }
         }
         setReauthBusy(null);
         setIsLoading(false);
@@ -496,29 +517,70 @@ export default function SettingsPage() {
     // The email-code step runs inside the export modal, so its failures use
     // the modal's `error`. Once it passes the modal closes, and failures of
     // the download itself use the page-level toast (showError).
+    // Set right before the export request: a throw before it (the code step,
+    // the session read) did not try the export and is not reported as a
+    // failed export.
+    let exportRequested = false;
+    // From the unconfirmed stage the modal stays open until the export's
+    // answer: a check that asks for a verification returns to the code stage
+    // in the modal (afterFailedAction). Every other answer closes it. Set
+    // back to false once this function has closed the modal itself, since
+    // that close also advances the counter.
+    let openUntilAnswer = false;
+    const sentAt = modalCloses.current;
+    // While the modal stays open, the user can close it before the answer.
+    // That close cancels the export: nothing after it closes a modal, shows
+    // a message or downloads, so a modal opened since is left as it is.
+    const closedByUser = () => openUntilAnswer && !answerStillCurrent(sentAt, modalCloses.current);
     try {
       const ready = await advanceReauth('export_data');
       if (!ready.proceed) {
         return;
       }
-      // The export check uses the verification up, so the modal closes and the
-      // stage starts over whatever the download's answer.
-      closeModal();
+      openUntilAnswer = ready.stage === 'unconfirmed';
+      // Otherwise the export check uses the verification up, so the modal
+      // closes and the stage starts over whatever the download's answer.
+      if (!openUntilAnswer) closeModal();
       const rawAuth = await getSupabaseBearerHeaders();
       if (!rawAuth.Authorization) {
+        if (closedByUser()) return;
+        if (openUntilAnswer) {
+          closeModal();
+          openUntilAnswer = false;
+        }
         showError('Your session has expired. Please sign in again to export your data.');
         return;
       }
 
+      exportRequested = true;
       const res = await fetch('/api/account/export', {
         method: 'GET',
         headers: buildBearerOnlyHeaders(rawAuth),
       });
 
+      if (openUntilAnswer) {
+        const errBody = res.ok ? null : await res.json().catch(() => ({}));
+        // Checked after the body read too, which can outlast a close. A
+        // successful answer's body is then dropped unread.
+        if (closedByUser()) {
+          if (res.ok) await res.body?.cancel().catch(() => undefined);
+          return;
+        }
+        const unconfirmed = errBody === null ? null : afterFailedAction(ready.stage, res.status, errBody);
+        if (unconfirmed) {
+          applyReauthOutcome(unconfirmed);
+          return;
+        }
+        closeModal();
+        openUntilAnswer = false;
+      }
+
       if (!res.ok) {
-        // Surface the server's explicit error — never a silent no-op.
-        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        showError(errBody.error || 'Failed to export your data. Please try again.');
+        // Never a silent no-op. One sentence for every failed answer: the
+        // screen cannot tell whether the server's check used the
+        // verification up before the failure, so the next try asks for a
+        // new code.
+        showError(REAUTH_UI.exportFailed);
         return;
       }
 
@@ -536,7 +598,9 @@ export default function SettingsPage() {
 
       showSuccess('Data export downloaded');
     } catch {
-      showError('Failed to export your data. Please try again.');
+      if (closedByUser()) return;
+      if (openUntilAnswer) closeModal();
+      showError(exportRequested ? REAUTH_UI.exportFailed : REAUTH_UI.fallback);
     } finally {
       setReauthBusy(null);
       setIsLoading(false);
@@ -832,7 +896,7 @@ export default function SettingsPage() {
               {reauthStage === 'verified' && reauthNotice && (
                 <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}>{reauthNotice}</p>
               )}
-              {reauthStage === 'code' && (
+              {showsCodeEntry(reauthStage) && (
                 <>
                   {reauthNotice && <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}>{reauthNotice}</p>}
                   <ModalInput label={REAUTH_UI.codeLabel} value={reauthCode} onChange={setReauthCode} placeholder="123456" />
@@ -910,7 +974,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-4">
-              {reauthStage === 'code' && (
+              {showsCodeEntry(reauthStage) && (
                 <>
                   {reauthNotice && <p className="text-[13px]" style={{ color: 'rgba(0,0,0,0.55)', fontFamily: FONT }}>{reauthNotice}</p>}
                   <ModalInput label={REAUTH_UI.codeLabel} value={reauthCode} onChange={setReauthCode} placeholder="123456" autoFocus />

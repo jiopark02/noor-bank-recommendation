@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
 import {
   afterClose,
+  afterFailedAction,
   afterStart,
   afterVerify,
   answerStillCurrent,
@@ -12,6 +13,7 @@ import {
   pressAction,
   readReauthAnswer,
   REAUTH_UI,
+  showsCodeEntry,
   stageAfterFailedAction,
   type ReauthStage,
 } from "../accountReauthClient";
@@ -35,6 +37,18 @@ import {
  *   a close that keeps any stage, or a late answer accepted        -> C8
  *   a modal exit that skips closeModal, or a late answer applied
  *   without the close check                                        -> C9
+ *   a failed export showing the server's text or another sentence,
+ *   or a throw before the export request reported as a failed
+ *   export (the flag removed, or set after the request)           -> C10
+ *   a verify with no readable answer running the action at once    -> C11
+ *   a press after it sending the verify again                      -> C11
+ *   a required verification after it starting over from idle,
+ *   showing the server's words, or clearing the typed code          -> C12
+ *   a refused new code from it falling back to code                -> C13
+ *   a throwing verify thrown on, an unreadable body read as {}, or
+ *   either action not handling the unconfirmed answer              -> C14
+ *   an export kept open from unconfirmed that, after the user closed
+ *   the modal, still closes a modal, shows a message or downloads  -> C15
  */
 
 /** Runs one press the way the page does and returns the stage it leaves. */
@@ -162,6 +176,93 @@ describe("stage transitions", () => {
     }
   });
 
+  it("C11 a verify with no readable answer waits for a press, then sends the action and never the verify again", () => {
+    // No readable answer, whatever the status.
+    expect(readReauthAnswer(200, undefined)).toEqual({ kind: "unknown" });
+    expect(readReauthAnswer(502, undefined)).toEqual({ kind: "unknown" });
+    // It does not run the action by itself, keeps the typed code and says so.
+    expect(afterVerify({ kind: "unknown" })).toEqual({
+      stage: "unconfirmed",
+      proceed: false,
+      error: REAUTH_UI.verifyUnknown,
+      notice: null,
+      clearCode: false,
+    });
+    expect(REAUTH_UI.verifyUnknown).toBe(
+      "Connection lost while checking your code. Press again to continue."
+    );
+    // The next press is the action itself.
+    expect(pressAction("unconfirmed")).toBe("act");
+
+    // The page's sequence, request by request.
+    for (const [label, action, stage] of [
+      ["the check passes", undefined, "unconfirmed"],
+      ["the check asks for a verification", { status: 403, body: { code: "REAUTH_REQUIRED" } }, "code"],
+    ] as const) {
+      const requests: string[] = [];
+      let r = press("code", [503, undefined]);
+      requests.push(r.request);
+      expect(r, label).toEqual({ request: "verify", stage: "unconfirmed", acted: false });
+      r = press(r.stage, [200, {}], action);
+      requests.push(r.request);
+      expect(requests, label).toEqual(["verify", "act"]);
+      expect(r.stage, label).toBe(stage);
+    }
+  });
+
+  it("C12 after an unconfirmed code, a required verification returns to the code stage with its own words and keeps the code", () => {
+    expect(REAUTH_UI.codeUnconfirmed).toBe(
+      "We couldn't confirm your code. Check it and press again, or request a new one."
+    );
+    const required = { code: "REAUTH_REQUIRED", error: "Server words." };
+    expect(stageAfterFailedAction("unconfirmed", 403, required)).toBe("code");
+    const back = afterFailedAction("unconfirmed", 403, required);
+    expect(back).toEqual({
+      stage: "code",
+      proceed: false,
+      error: REAUTH_UI.codeUnconfirmed,
+      notice: null,
+      clearCode: false,
+    });
+    // The kept code is what the next press sends: the code stage verifies.
+    expect(pressAction(back!.stage)).toBe("verify");
+    // A session the server cannot use starts over, as from any stage.
+    expect(stageAfterFailedAction("unconfirmed", 403, { code: "REAUTH_SESSION_UNAVAILABLE" })).toBe("idle");
+    expect(afterFailedAction("unconfirmed", 403, { code: "REAUTH_SESSION_UNAVAILABLE" })).toBeNull();
+    // Any other failure keeps unconfirmed, so a retry goes to the action again.
+    for (const [status, body] of [
+      [409, { code: "REVOKE_INCOMPLETE" }],
+      [503, { code: "REAUTH_CHECK_UNAVAILABLE" }],
+      [500, {}],
+      [503, { code: "REAUTH_REQUIRED" }],
+    ] as const) {
+      expect(stageAfterFailedAction("unconfirmed", status, body), String(status)).toBe("unconfirmed");
+      expect(afterFailedAction("unconfirmed", status, body), String(status)).toBeNull();
+    }
+    // The other stages keep their answers.
+    expect(afterFailedAction("verified", 403, required)).toBeNull();
+    expect(stageAfterFailedAction("verified", 403, required)).toBe("idle");
+  });
+
+  it("C13 unconfirmed shows the code field; a new code moves to code, a refused one stays", () => {
+    expect(showsCodeEntry("code")).toBe(true);
+    expect(showsCodeEntry("unconfirmed")).toBe(true);
+    expect(showsCodeEntry("idle")).toBe(false);
+    expect(showsCodeEntry("verified")).toBe(false);
+    expect(afterStart("unconfirmed", { kind: "sent" }).stage).toBe("code");
+    expect(afterStart("unconfirmed", { kind: "error", message: "Limit." })).toEqual({
+      stage: "unconfirmed",
+      proceed: false,
+      error: "Limit.",
+      notice: null,
+      clearCode: false,
+    });
+    expect(afterStart("unconfirmed", { kind: "unknown" }).stage).toBe("unconfirmed");
+    expect(afterStart("unconfirmed", { kind: "not_required" }).proceed).toBe(false);
+    expect(deleteButtonLabel("unconfirmed", null)).toBe(REAUTH_UI.deleteConfirm);
+    expect(exportButtonLabel("unconfirmed", null)).toBe(REAUTH_UI.exportConfirm);
+  });
+
   it("C6 the delete button says Deleting only while the delete request itself is out", () => {
     expect(deleteButtonLabel("idle", "start")).toBe(REAUTH_UI.working);
     expect(deleteButtonLabel("code", "verify")).toBe(REAUTH_UI.working);
@@ -259,7 +360,8 @@ describe("settings page wiring", () => {
     expect(helpers).toContain("if (press === 'act') return { proceed: true, stage: reauthStage };");
     expect(helpers).toContain("afterStart('idle', await postReauth('start', { purpose }))");
     expect(helpers).toContain("afterVerify(await postReauth('verify', { purpose, code: reauthCode }))");
-    expect(helpers).toContain("const next = afterStart('code', await postReauth('start', { purpose }));");
+    expect(helpers).toContain("const from = reauthStage === 'unconfirmed' ? 'unconfirmed' : 'code';");
+    expect(helpers).toContain("const next = afterStart(from, await postReauth('start', { purpose }));");
     expect(helpers).toContain("if (answerStillCurrent(sentAt, modalCloses.current)) applyReauthOutcome(next);");
     const deletion = between("const handleDeleteAccount = async", "const handleExportData");
     expect(deletion).toContain("stageAfterFailedAction(ready.stage, res.status, errBody)");
@@ -268,6 +370,95 @@ describe("settings page wiring", () => {
     expect(PAGE.split("setReauthStage(").length - 1).toBe(3);
     expect(PAGE).toContain("onClick={() => handleNewReauthCode('delete_account')}");
     expect(PAGE).toContain("onClick={() => handleNewReauthCode('export_data')}");
+  });
+
+  it("C14 a verify that throws or whose body cannot be read becomes unknown; both actions handle the unconfirmed answer", () => {
+    const post = between("const postReauth = async", "const advanceReauth = async");
+    // A verify request that throws is not thrown on; a start still is.
+    expect(post).toContain("if (path === 'verify') return { kind: 'unknown' };");
+    expect(post).toContain("throw err;");
+    // An unreadable body is passed on as undefined, the unknown marker.
+    expect(post).toContain("await res.json().catch(() => undefined);");
+    expect(post).not.toContain("res.json().catch(() => ({}))");
+
+    // Delete: the unconfirmed answer is handled before the other refusals.
+    const deletion = between("const handleDeleteAccount = async", "const handleExportData");
+    const unconfirmedAt = deletion.indexOf("afterFailedAction(ready.stage, res.status, errBody)");
+    expect(unconfirmedAt).toBeGreaterThan(-1);
+    expect(unconfirmedAt).toBeLessThan(deletion.indexOf("stageAfterFailedAction(ready.stage, res.status, errBody)"));
+    expect(deletion).toContain("if (unconfirmed) { applyReauthOutcome(unconfirmed); }");
+
+    // Export: from unconfirmed the modal stays open until the answer, and the
+    // unconfirmed answer is read after the export request.
+    const exporting = between("const handleExportData = async", "const handleLogout");
+    const fetchAt = exporting.indexOf("fetch('/api/account/export'");
+    const keepOpen = exporting.indexOf("openUntilAnswer = ready.stage === 'unconfirmed';");
+    expect(keepOpen).toBeGreaterThan(-1);
+    expect(keepOpen).toBeLessThan(fetchAt);
+    expect(exporting.indexOf("if (!openUntilAnswer) closeModal();")).toBeLessThan(fetchAt);
+    expect(exporting.indexOf("afterFailedAction(ready.stage, res.status, errBody)")).toBeGreaterThan(fetchAt);
+
+    // Both modals show the code field in code and unconfirmed alike.
+    expect(PAGE.split("{showsCodeEntry(reauthStage) && (").length - 1).toBe(2);
+    expect(PAGE).not.toContain("reauthStage === 'code'");
+  });
+
+  it("C15 an export kept open from unconfirmed and closed by the user before its answer is cancelled: no close, message or download", () => {
+    const exporting = between("const handleExportData = async", "const handleLogout");
+    // The user's close is told from this function's own close.
+    expect(exporting).toContain(
+      "const closedByUser = () => openUntilAnswer && !answerStillCurrent(sentAt, modalCloses.current);"
+    );
+    // Every closeModal after the modal was kept open goes through the check:
+    // the session branch, the answer, and the catch.
+    expect(exporting).toContain(
+      "if (!rawAuth.Authorization) { if (closedByUser()) return; if (openUntilAnswer) { closeModal(); openUntilAnswer = false; }"
+    );
+    expect(exporting).toContain("} catch { if (closedByUser()) return; if (openUntilAnswer) closeModal();");
+    // The answer: checked after the error body read, and a successful body is
+    // cancelled, never downloaded.
+    const CANCEL = "if (closedByUser()) { if (res.ok) await res.body?.cancel().catch(() => undefined); return; }";
+    const cancelAt = exporting.indexOf(CANCEL);
+    expect(cancelAt).toBeGreaterThan(exporting.indexOf("const errBody = res.ok ? null : await res.json()"));
+    expect(cancelAt).toBeLessThan(exporting.indexOf("const blob = await res.blob();"));
+    expect(cancelAt).toBeLessThan(exporting.indexOf("afterFailedAction(ready.stage, res.status, errBody)"));
+    expect(exporting).toContain("closeModal(); openUntilAnswer = false; } if (!res.ok) {");
+    // No closeModal in the function goes around the check: one before the
+    // session read for the other stages, and the three above.
+    expect(exporting.split("closeModal();").length - 1).toBe(4);
+    expect(exporting.split("closedByUser()").length - 1).toBe(3);
+    expect(exporting).not.toContain("answerStillCurrent(sentAt, modalCloses.current)) closeModal()");
+  });
+
+  it("C10 a failed export request shows the new-code sentence; a throw before the request does not", () => {
+    expect(REAUTH_UI.exportFailed).toBe(
+      "Your data couldn't be exported. Request a new code and try again."
+    );
+    const exporting = between("const handleExportData = async", "const handleLogout");
+    const FLAG_SET = "exportRequested = true; const res = await fetch('/api/account/export'";
+    // The flag starts false, before the try, and is set right before the
+    // export request and nowhere else.
+    expect(exporting.indexOf("let exportRequested = false;")).toBeGreaterThan(-1);
+    expect(exporting.indexOf("let exportRequested = false;")).toBeLessThan(exporting.indexOf("try {"));
+    expect(exporting).toContain(FLAG_SET);
+    expect(exporting.split("exportRequested = true").length - 1).toBe(1);
+    // A failed answer: always the new-code sentence.
+    const afterFetch = exporting.slice(exporting.indexOf(FLAG_SET));
+    const notOk = afterFetch.indexOf("if (!res.ok) {");
+    expect(notOk).toBeGreaterThan(-1);
+    expect(afterFetch.indexOf("showError(REAUTH_UI.exportFailed);")).toBeGreaterThan(notOk);
+    expect(afterFetch.indexOf("showError(REAUTH_UI.exportFailed);")).toBeLessThan(
+      afterFetch.indexOf("} catch {")
+    );
+    // A throw: the flag decides between the two sentences.
+    const catchBody = afterFetch.slice(afterFetch.indexOf("} catch {"), afterFetch.indexOf("} finally {"));
+    expect(catchBody).toContain(
+      "showError(exportRequested ? REAUTH_UI.exportFailed : REAUTH_UI.fallback);"
+    );
+    expect(exporting.split("REAUTH_UI.exportFailed").length - 1).toBe(2);
+    // The server's own error text no longer reaches the export toast.
+    expect(exporting).not.toContain("errBody.error");
+    expect(PAGE).not.toContain("Failed to export your data");
   });
 
   it("C2 each action runs the code step for its own purpose before its request, and stores nothing", () => {

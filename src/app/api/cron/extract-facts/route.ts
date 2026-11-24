@@ -21,6 +21,7 @@ import {
   type NewUserFact,
 } from "@/lib/aiMemory";
 import { asPlainObject } from "@/lib/requestJson";
+import { errorCodeForLog } from "@/lib/errorCodeForLog";
 import {
   validateExtraction,
   type RawExtractionOutput,
@@ -167,20 +168,32 @@ async function requestExtraction(
   observed.httpStatus = response.status;
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
-    throw new Error(
-      `OpenRouter request failed: ${response.status} ${response.statusText}` +
-        (errorBody ? ` — ${errorBody.slice(0, 300)}` : "")
+    // The error body is never read: it can echo the request, which carries the
+    // conversation and the user's facts. It is cancelled, so the connection
+    // is released now rather than whenever the runtime collects the response.
+    // The thrown error carries the status only, as its message and as a
+    // log-safe code.
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Nothing more to release.
+    }
+    throw Object.assign(
+      new Error(`OpenRouter request failed: ${response.status} ${response.statusText}`),
+      { code: `http_${response.status}` }
     );
   }
 
   // A 200 response can still carry a body that is not JSON (a gateway error
-  // page, for example).
+  // page, for example). Each error thrown in this route carries a fixed
+  // log-safe code (errorCodeForLog), since the log line holds no message.
   let data: unknown;
   try {
     data = await response.json();
   } catch {
-    throw new Error("OpenRouter response was not valid JSON");
+    throw Object.assign(new Error("OpenRouter response was not valid JSON"), {
+      code: "provider_json_invalid",
+    });
   }
   observed.jsonParsed = true;
   observed.data = asPlainObject(data);
@@ -190,7 +203,9 @@ async function requestExtraction(
       ?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string") {
-    throw new Error("OpenRouter response missing message content");
+    throw Object.assign(new Error("OpenRouter response missing message content"), {
+      code: "provider_content_missing",
+    });
   }
 
   return content;
@@ -295,10 +310,14 @@ function parseExtractionJson(raw: string): RawExtractionOutput {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error("Extraction output was not valid JSON");
+    throw Object.assign(new Error("Extraction output was not valid JSON"), {
+      code: "extraction_json_invalid",
+    });
   }
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("Extraction output is not a JSON object");
+    throw Object.assign(new Error("Extraction output is not a JSON object"), {
+      code: "extraction_not_object",
+    });
   }
   return parsed as RawExtractionOutput;
 }
@@ -409,8 +428,9 @@ async function extractOneSession(
   );
   tracker.stage = "interpret";
   if (!rawOutput.trim()) {
-    throw new Error(
-      `Extraction model returned empty output for session ${session.id}`
+    throw Object.assign(
+      new Error(`Extraction model returned empty output for session ${session.id}`),
+      { code: "model_output_empty" }
     );
   }
 
@@ -464,11 +484,11 @@ async function extractOneSession(
         }
         stats.failed++;
         console.error(
-          `Extract cron: supersede failed for session ${session.id}, ` +
-            `fact #${item.oldNumber} (${oldFact.id}); recovery saveUserFact ` +
-            `also failed.`,
-          supersedeError,
-          recoveryError
+          "[memory-cron] route=cron_extract_facts step=supersede session=%s fact=%s code=%s recovery_code=%s",
+          session.id,
+          oldFact.id,
+          errorCodeForLog(supersedeError),
+          errorCodeForLog(recoveryError)
         );
       }
     }
@@ -483,9 +503,10 @@ async function extractOneSession(
     } catch (expireError) {
       stats.failed++;
       console.error(
-        `Extract cron: expire failed for session ${session.id}, ` +
-          `fact #${item.oldNumber} (${oldFact.id}).`,
-        expireError
+        "[memory-cron] route=cron_extract_facts step=expire session=%s fact=%s code=%s",
+        session.id,
+        oldFact.id,
+        errorCodeForLog(expireError)
       );
     }
   }
@@ -515,8 +536,9 @@ async function extractOneSession(
       } else {
         stats.failed++;
         console.error(
-          `Extract cron: saveUserFact failed for session ${session.id}.`,
-          saveError
+          "[memory-cron] route=cron_extract_facts step=save_fact session=%s code=%s",
+          session.id,
+          errorCodeForLog(saveError)
         );
       }
     }
@@ -529,8 +551,9 @@ async function extractOneSession(
   //    repeats its text ignoring case (the unique index covers lower(fact));
   //    a fact worded differently is stored as another row.
   if (stats.failed > 0) {
-    throw new Error(
-      `Extract cron: ${stats.failed} fact write(s) failed for session ${session.id}`
+    throw Object.assign(
+      new Error(`Extract cron: ${stats.failed} fact write(s) failed for session ${session.id}`),
+      { code: "fact_writes_failed" }
     );
   }
   await markFactsExtracted(session.id, session.user_id);
@@ -597,6 +620,12 @@ export async function GET(request: NextRequest) {
     stopped: false,
   };
 
+  // Every error line and cron_runs.error carry identifiers and an error code
+  // only (errorCodeForLog): an error's message, details or cause can carry a
+  // row or the provider's answer.
+  // Set once the candidate read has returned, so a rejection of the batch is
+  // labelled by where it happened.
+  let candidatesRead = false;
   try {
     const batch = await runMemoryCronBatch<ChatSession>({
       route: "cron_extract_facts",
@@ -605,8 +634,11 @@ export async function GET(request: NextRequest) {
       candidateLimit: SESSION_CANDIDATE_LIMIT,
       batchLimit: EXTRACT_BATCH_LIMIT,
       hasBudget: cronRunHasBudgetForAnotherCall,
-      fetchCandidates: (limit, nowIso) =>
-        getSessionsNeedingFactsExtraction(limit, nowIso),
+      fetchCandidates: async (limit, nowIso) => {
+        const candidates = await getSessionsNeedingFactsExtraction(limit, nowIso);
+        candidatesRead = true;
+        return candidates;
+      },
       failuresOf: (s) => s.facts_failures,
       processSession: async (s, tracker) => {
         const sessionStats: SessionFactStats = {
@@ -634,9 +666,9 @@ export async function GET(request: NextRequest) {
         // Facts may be partially applied; the session is not marked done and
         // is extracted again on a later run.
         console.error(
-          `Extract cron: session ${s.id} failed during extraction ` +
-            `(facts may be partially applied):`,
-          error
+          "[memory-cron] route=cron_extract_facts step=session session=%s code=%s",
+          s.id,
+          errorCodeForLog(error)
         );
       },
       writeBackoff: (s, next) =>
@@ -657,13 +689,10 @@ export async function GET(request: NextRequest) {
     stats.stoppedSkipped = batch.stoppedSkipped;
     stats.stopped = batch.stopped;
   } catch (error) {
-    console.error(
-      "Extract cron: getSessionsNeedingFactsExtraction failed:",
-      error
-    );
-    infraError =
-      `getSessionsNeedingFactsExtraction failed: ` +
-      `${error instanceof Error ? error.message : String(error)}`;
+    const step = candidatesRead ? "batch" : "candidates";
+    const code = errorCodeForLog(error);
+    console.error("[memory-cron] route=cron_extract_facts step=%s code=%s", step, code);
+    infraError = `${step} code=${code}`;
   }
 
   console.info("Extract cron complete:", stats);
@@ -683,7 +712,10 @@ export async function GET(request: NextRequest) {
       forceFailed: infraError !== null,
     });
   } catch (recordError) {
-    console.error("Extract cron: failed to record cron_runs row:", recordError);
+    console.error(
+      "[memory-cron] route=cron_extract_facts step=record code=%s",
+      errorCodeForLog(recordError)
+    );
   }
 
   // cron_runs retention cleanup (isolated and best-effort; a failure is cleaned
@@ -694,9 +726,10 @@ export async function GET(request: NextRequest) {
       console.info(`Extract cron: cleaned up ${deleted} old cron_runs row(s).`);
     }
   } catch (cleanupError) {
+    // A later run cleans up what this one could not.
     console.warn(
-      "Extract cron: cron_runs cleanup failed (will retry next run):",
-      cleanupError
+      "[memory-cron] route=cron_extract_facts step=cleanup code=%s",
+      errorCodeForLog(cleanupError)
     );
   }
 

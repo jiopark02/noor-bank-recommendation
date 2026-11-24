@@ -328,7 +328,11 @@ function formatAmount(amount: number, currency: string): string {
 
 const CONNECTED = "A bank account is connected via Plaid";
 
-const READ_LABELS: Record<PlaidChatConnectionRead, string> = {
+/**
+ * Exported for tests only: CONNECTION_STATE_RE repeats each label, and
+ * plaidChatContext.test.ts holds the two together.
+ */
+export const READ_LABELS: Record<PlaidChatConnectionRead, string> = {
   read: "balances read",
   needs_reconnect: "needs reconnecting in Noor",
   not_read: "not read this turn",
@@ -641,13 +645,14 @@ const CONNECTIONS_PREFIX = "Connections: ";
  * One entry's state on the Connections line, as renderBankData writes it:
  * "(active)", "(error)", or either with this turn's read label. It counts only
  * where an entry ends: before ", " or at the end of the line.
+ *
+ * A literal, not built from READ_LABELS, so no escape depends on a string
+ * surviving the build: each label is written out here, and a label changed in
+ * READ_LABELS must be changed here too (plaidChatContext.test.ts fails until
+ * it is).
  */
-const CONNECTION_STATE_RE = new RegExp(
-  "\\((?:active|error)(?:, (?:" +
-    [READ_LABELS.read, READ_LABELS.needs_reconnect, READ_LABELS.not_read].join("|") +
-    "))?\\)(?=, |$)",
-  "g"
-);
+const CONNECTION_STATE_RE =
+  /\((?:active|error)(?:, (?:balances read|needs reconnecting in Noor|not read this turn))?\)(?=, |$)/g;
 
 /**
  * "Connections: Chase (active, balances read), Wells Fargo, N.A. (error)"

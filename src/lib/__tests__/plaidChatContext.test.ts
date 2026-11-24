@@ -12,6 +12,7 @@ import {
   maskPlaidBlockForLog,
   resolvePlaidStateMode,
   INCLUDE_INSTITUTION_NAMES,
+  READ_LABELS,
   type PlaidChatState,
 } from "../plaidChatContext";
 
@@ -599,6 +600,32 @@ describe("maskPlaidBlockForLog with commas and parentheses in names", () => {
     });
     expect(inner.indexOf("Connections: *** (active)")).toBe(0);
     for (const fragment of FRAGMENTS) expect(inner).not.toContain(fragment);
+  });
+});
+
+describe("maskPlaidBlockForLog keeps every read label", () => {
+  // The masking pattern writes each label out; a label changed in READ_LABELS
+  // and not there fails here.
+  it("each status with each read label survives the Connections line masking", () => {
+    const reads = Object.keys(READ_LABELS) as Array<keyof typeof READ_LABELS>;
+    expect(reads.length).toBeGreaterThan(0);
+    for (const status of ["active", "error"]) {
+      for (const read of reads) {
+        const masked = maskPlaidBlockForLog(
+          buildPlaidCapabilityBlock({
+            depth: "balances",
+            connected: true,
+            connections: [
+              { institution: "Heron Bank", status, read },
+              { institution: "Quokka CU", status, read },
+            ],
+          })
+        );
+        const line = bankDataInner(masked).split("\n")[0];
+        const state = `(${status}, ${READ_LABELS[read]})`;
+        expect(line, state).toBe(`Connections: *** ${state}, *** ${state}`);
+      }
+    }
   });
 });
 

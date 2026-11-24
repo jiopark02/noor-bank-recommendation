@@ -158,8 +158,13 @@ function isFailureCount(value: unknown): value is number {
 }
 
 /**
- * Runs one batch. A failing candidate read rejects, and the caller records it
- * as the run's infrastructure error; nothing else here rejects.
+ * Runs one batch. A failing candidate read rejects. So does a throw from a
+ * dependency the loop calls outside its per-session catch (the clock,
+ * hasBudget, failuresOf, onSessionError); a failed state write does not. The
+ * caller records either as the run's infrastructure error and tells them
+ * apart by whether its candidate read returned. The clock is also read once
+ * to compute the candidate read's arguments, before that read starts; a
+ * throw there is recorded as a failed candidate read, like the read's own.
  */
 export async function runMemoryCronBatch<S extends CronBatchSession>(
   deps: MemoryCronBatchDeps<S>

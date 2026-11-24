@@ -17,6 +17,7 @@ import {
   type DbChatMessage,
 } from "@/lib/aiMemory";
 import { asPlainObject } from "@/lib/requestJson";
+import { errorCodeForLog } from "@/lib/errorCodeForLog";
 import {
   buildCronLlmCallRow,
   type ObservedLlmCall,
@@ -158,21 +159,32 @@ async function requestSummary(
   observed.httpStatus = response.status;
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
-    throw new Error(
-      `OpenRouter request failed: ${response.status} ${response.statusText}` +
-        (errorBody ? ` — ${errorBody.slice(0, 300)}` : "")
+    // The error body is never read: it can echo the request, which carries the
+    // conversation. It is cancelled, so the connection is released now rather
+    // than whenever the runtime collects the response. The thrown error
+    // carries the status only, as its message and as a log-safe code.
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Nothing more to release.
+    }
+    throw Object.assign(
+      new Error(`OpenRouter request failed: ${response.status} ${response.statusText}`),
+      { code: `http_${response.status}` }
     );
   }
 
   // A 200 response can still carry a body that is not JSON (a gateway error
   // page, for example). A parse failure gets its own error message, distinct
-  // from a missing-content one.
+  // from a missing-content one. Each error thrown here carries a fixed
+  // log-safe code (errorCodeForLog), since the log line holds no message.
   let data: unknown;
   try {
     data = await response.json();
   } catch {
-    throw new Error("OpenRouter response was not valid JSON");
+    throw Object.assign(new Error("OpenRouter response was not valid JSON"), {
+      code: "provider_json_invalid",
+    });
   }
   observed.jsonParsed = true;
   observed.data = asPlainObject(data);
@@ -182,7 +194,9 @@ async function requestSummary(
       ?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string") {
-    throw new Error("OpenRouter response missing message content");
+    throw Object.assign(new Error("OpenRouter response missing message content"), {
+      code: "provider_content_missing",
+    });
   }
 
   return content;
@@ -313,8 +327,9 @@ async function summarizeOneSession(
 
   tracker.stage = "interpret";
   if (!rawOutput.trim()) {
-    throw new Error(
-      `Summarization model returned empty output for session ${session.id}`
+    throw Object.assign(
+      new Error(`Summarization model returned empty output for session ${session.id}`),
+      { code: "model_output_empty" }
     );
   }
 
@@ -383,6 +398,9 @@ export async function GET(request: NextRequest) {
     stopped: false,
   };
 
+  // Every error line and cron_runs.error carry identifiers and an error code
+  // only (errorCodeForLog): an error's message, details or cause can carry a
+  // row or the provider's answer.
   try {
     const toClose = await getSessionsToClose(CLOSE_BATCH_LIMIT);
     for (const session of toClose) {
@@ -392,18 +410,21 @@ export async function GET(request: NextRequest) {
       } catch (error) {
         stats.closeFailed++;
         console.error(
-          `Summarize cron: failed to close session ${session.id}:`,
-          error
+          "[memory-cron] route=cron_summarize step=close session=%s code=%s",
+          session.id,
+          errorCodeForLog(error)
         );
       }
     }
   } catch (error) {
-    console.error("Summarize cron: getSessionsToClose failed:", error);
-    infraError =
-      `getSessionsToClose failed: ` +
-      `${error instanceof Error ? error.message : String(error)}`;
+    const code = errorCodeForLog(error);
+    console.error("[memory-cron] route=cron_summarize step=close_read code=%s", code);
+    infraError = `close_read code=${code}`;
   }
 
+  // Set once the candidate read has returned, so a rejection of the batch is
+  // labelled by where it happened.
+  let candidatesRead = false;
   try {
     const batch = await runMemoryCronBatch<ChatSession>({
       route: "cron_summarize",
@@ -412,14 +433,18 @@ export async function GET(request: NextRequest) {
       candidateLimit: SESSION_CANDIDATE_LIMIT,
       batchLimit: SUMMARIZE_BATCH_LIMIT,
       hasBudget: cronRunHasBudgetForAnotherCall,
-      fetchCandidates: (limit, nowIso) =>
-        getSessionsNeedingSummary(limit, nowIso),
+      fetchCandidates: async (limit, nowIso) => {
+        const candidates = await getSessionsNeedingSummary(limit, nowIso);
+        candidatesRead = true;
+        return candidates;
+      },
       failuresOf: (s) => s.summary_failures,
       processSession: (s, tracker) => summarizeOneSession(apiKey, s, tracker),
       onSessionError: (s, error) => {
         console.error(
-          `Summarize cron: failed to summarize session ${s.id}:`,
-          error
+          "[memory-cron] route=cron_summarize step=session session=%s code=%s",
+          s.id,
+          errorCodeForLog(error)
         );
       },
       writeBackoff: (s, next) =>
@@ -440,14 +465,10 @@ export async function GET(request: NextRequest) {
     stats.stoppedSkipped = batch.stoppedSkipped;
     stats.stopped = batch.stopped;
   } catch (error) {
-    console.error(
-      "Summarize cron: getSessionsNeedingSummary failed:",
-      error
-    );
-    infraError =
-      (infraError ? infraError + "; " : "") +
-      `getSessionsNeedingSummary failed: ` +
-      `${error instanceof Error ? error.message : String(error)}`;
+    const step = candidatesRead ? "batch" : "candidates";
+    const code = errorCodeForLog(error);
+    console.error("[memory-cron] route=cron_summarize step=%s code=%s", step, code);
+    infraError = (infraError ? infraError + "; " : "") + `${step} code=${code}`;
   }
 
   console.info("Summarize cron complete:", stats);
@@ -467,7 +488,10 @@ export async function GET(request: NextRequest) {
       forceFailed: infraError !== null,
     });
   } catch (recordError) {
-    console.error("Summarize cron: failed to record cron_runs row:", recordError);
+    console.error(
+      "[memory-cron] route=cron_summarize step=record code=%s",
+      errorCodeForLog(recordError)
+    );
   }
 
   return NextResponse.json({

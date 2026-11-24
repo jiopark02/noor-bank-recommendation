@@ -227,7 +227,7 @@ describe("extractOneSession stages and completion", () => {
   });
 
   it("throws instead of marking done when any fact write failed", () => {
-    const throwAt = body.indexOf("  if (stats.failed > 0) {\n    throw new Error(");
+    const throwAt = body.indexOf("  if (stats.failed > 0) {\n    throw Object.assign(");
     const markAt = body.lastIndexOf(
       "  await markFactsExtracted(session.id, session.user_id);"
     );
