@@ -115,12 +115,42 @@ const EMAIL_TYPO_CORRECTIONS: Record<string, string> = {
   'icoud.com': 'icloud.com',
 };
 
+/**
+ * The longest address validateEmail accepts, counted after trimming and
+ * lowercasing: 64
+ * characters of local part, the "@", and 255 of domain. The household invite
+ * path applies the same limit.
+ */
+export const EMAIL_MAX_LENGTH = 320;
+
+/**
+ * Something, "@", then a domain holding at least one dot that is neither its
+ * first nor its last character. The domain is split at its first such dot:
+ * one character, any run without a dot, the dot, then the rest. There is only
+ * one way to split a given domain, so matching takes time linear in the input,
+ * where a domain written as two overlapping runs of the same class backtracks
+ * quadratically. It accepts exactly the addresses that the overlapping form
+ * accepted.
+ */
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@][^\s@.]*\.[^\s@]+$/;
+
 export function validateEmail(email: string): EmailValidation {
   const trimmedEmail = email.trim().toLowerCase();
 
+  // The length is checked on the exact string the pattern would see, before
+  // the pattern runs, so no caller hands the pattern an input longer than the
+  // limit. Lowercasing can lengthen a string, so it is measured after that.
+  if (trimmedEmail.length > EMAIL_MAX_LENGTH) {
+    return {
+      isValid: false,
+      error: 'Please enter a valid email address',
+      suggestion: null,
+      isEdu: false,
+    };
+  }
+
   // Basic format check
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(trimmedEmail)) {
+  if (!EMAIL_PATTERN.test(trimmedEmail)) {
     return {
       isValid: false,
       error: 'Please enter a valid email address',

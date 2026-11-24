@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
@@ -39,16 +41,20 @@ let fetchCalls: FetchCall[] = [];
 const HOSTILE_NAME = '<a href="https://evil.example">x</a> & "q" <script>1</script>';
 const NAME_FRAGMENTS = ["evil.example", "<script", "&lt;script", "&quot;q&quot;"];
 
+function rawRequest(raw: string): NextRequest {
+  return new Request("https://noor.test/api/waitlist", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: raw,
+  }) as unknown as NextRequest;
+}
+
 function request(body: unknown): NextRequest {
-  return { json: async () => body } as unknown as NextRequest;
+  return rawRequest(JSON.stringify(body));
 }
 
 function unparsable(): NextRequest {
-  return {
-    json: async () => {
-      throw new SyntaxError("Unexpected token");
-    },
-  } as unknown as NextRequest;
+  return rawRequest("{not json");
 }
 
 async function post(req: NextRequest): Promise<{ status: number; body: unknown }> {
@@ -172,5 +178,68 @@ describe("invalid input is a 400", () => {
   it("unparsable body: 400 Invalid request body", async () => {
     const res = await post(unparsable());
     expect(res).toEqual({ status: 400, body: { message: "Invalid request body" } });
+  });
+});
+
+// The route's body limit. It is a private constant of the route file, so the
+// test holds the behaviour at the boundary rather than importing the value.
+const WAITLIST_LIMIT = 4096;
+
+function bodyOfLength(length: number): string {
+  const head = '{"email":"probe@example.com","pad":"';
+  const tail = '"}';
+  return head + "x".repeat(length - head.length - tail.length) + tail;
+}
+
+describe("W1 the body is read under a byte limit", () => {
+  it("a body of exactly the limit is read", async () => {
+    const raw = bodyOfLength(WAITLIST_LIMIT);
+    expect(raw.length).toBe(WAITLIST_LIMIT);
+    const res = await post(rawRequest(raw));
+    expect(res).toEqual({ status: 200, body: { success: true } });
+  });
+
+  it("a body one byte over is 413, with nothing stored and no mail", async () => {
+    const raw = bodyOfLength(WAITLIST_LIMIT + 1);
+    const res = await post(rawRequest(raw));
+    expect(res).toEqual({ status: 413, body: { message: "Request is too large" } });
+    expect(inserts).toHaveLength(0);
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("a million-dot email is 413 before any parsing", async () => {
+    const res = await post(request({ email: "a@" + ".".repeat(1_000_000) + "@" }));
+    expect(res.status).toBe(413);
+    expect(inserts).toHaveLength(0);
+  });
+});
+
+describe("W2 the address goes through validateEmail", () => {
+  it("an attack-shaped email inside the body limit is 400, nothing stored", async () => {
+    const res = await post(request({ email: "a@" + ".".repeat(3000) + "@" }));
+    expect(res).toEqual({
+      status: 400,
+      body: { message: "Please enter a valid email address" },
+    });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("an address over the length limit is 400, nothing stored", async () => {
+    const res = await post(
+      request({ email: "a".repeat(64) + "@" + "b".repeat(252) + ".com" })
+    );
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("the route holds no pattern of its own and calls validateEmail", () => {
+    const route = readFileSync(
+      fileURLToPath(new URL("../../app/api/waitlist/route.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(route).toContain("import { validateEmail } from '@/lib/validation';");
+    expect(route).toContain("if (!validateEmail(email).isValid) {");
+    expect(route).not.toMatch(/\/\^/);
+    expect(route).not.toMatch(/new RegExp\(/);
   });
 });

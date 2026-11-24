@@ -14,6 +14,7 @@ import type { NextRequest } from "next/server";
  * Mutations of route.ts and the tests each one turns red:
  *   the body check removed, moved after another check, or its failure
  *   logged                                                  -> SW9
+ *   the body read without a byte limit                      -> SW10
  *   a column fed from any other body key put back into the insert row,
  *   or the body spread into it                              -> SW1, SW2
  *   a column put back into the update map                   -> SW3
@@ -237,6 +238,59 @@ describe("SW9 a body that is not a JSON object", () => {
     const result = await postRaw("{}");
     expect(result.status).toBe(401);
     expect(result.json.code).toBe("AUTH_REQUIRED");
+  });
+});
+
+// The route's body limit. It is a private constant of the route file, so the
+// test holds the behaviour at the boundary rather than importing the value.
+const SURVEY_LIMIT = 8192;
+
+function objectBodyOfLength(length: number): string {
+  const head = '{"first_name":"Ann","pad":"';
+  const tail = '"}';
+  return head + "x".repeat(length - head.length - tail.length) + tail;
+}
+
+describe("SW10 the body is read under a byte limit", () => {
+  it("SW10a a body of exactly the limit reaches the existing checks (401 with no password)", async () => {
+    const raw = objectBodyOfLength(SURVEY_LIMIT);
+    expect(raw.length).toBe(SURVEY_LIMIT);
+    const result = await postRaw(raw);
+    expect(result.status).toBe(401);
+    expect(result.json.code).toBe("AUTH_REQUIRED");
+  });
+
+  it("SW10b signed out — one byte over is 413, nothing read, written or logged", async () => {
+    const result = await postRaw(objectBodyOfLength(SURVEY_LIMIT + 1));
+    expect(result.status).toBe(413);
+    expect(result.json).toEqual({ success: false, message: "Request is too large" });
+    expect(state.adminClients).toBe(0);
+    expect(state.calls).toEqual([]);
+    expect(state.generateLinkCalls).toBe(0);
+    consoleSpies.forEach((s) => expect(s).not.toHaveBeenCalled());
+  });
+
+  it("SW10c signed in — one byte over is 413, nothing read, written or logged", async () => {
+    state.authUserId = SIGNED_IN_ID;
+    const result = await postRaw(objectBodyOfLength(SURVEY_LIMIT + 1));
+    expect(result.status).toBe(413);
+    expect(result.json).toEqual({ success: false, message: "Request is too large" });
+    expect(state.adminClients).toBe(0);
+    expect(state.calls).toEqual([]);
+    consoleSpies.forEach((s) => expect(s).not.toHaveBeenCalled());
+  });
+
+  it("SW10d a signup carrying a million-dot email is 413 before any account step", async () => {
+    const result = await postRaw(
+      JSON.stringify({
+        first_name: "Ann",
+        email: "a@" + ".".repeat(1_000_000) + "@",
+        password: "Abcdefg1_",
+      })
+    );
+    expect(result.status).toBe(413);
+    expect(state.generateLinkCalls).toBe(0);
+    expect(state.calls).toEqual([]);
   });
 });
 
