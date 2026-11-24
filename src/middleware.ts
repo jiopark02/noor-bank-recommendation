@@ -1,6 +1,10 @@
 import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_ONLY_COOKIE, applySessionPersistence } from "@/lib/sessionFlow";
+import {
+  SESSION_ONLY_COOKIE,
+  applySessionPersistence,
+  isHttpsRequest,
+} from "@/lib/sessionFlow";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
@@ -96,7 +100,13 @@ export async function middleware(request: NextRequest) {
         // refresh never turns a browser-session cookie back into a 400-day
         // one. See SESSION_ONLY_COOKIE in sessionFlow.ts.
         const persistent = !request.cookies.has(SESSION_ONLY_COOKIE);
-        applySessionPersistence(cookiesToSet, persistent).forEach(
+        // Written Secure when the request came over HTTPS, so a refresh does
+        // not replace the browser's Secure cookie with one that is not.
+        const secure = isHttpsRequest(
+          request.nextUrl.protocol,
+          request.headers.get("x-forwarded-proto")
+        );
+        applySessionPersistence(cookiesToSet, persistent, secure).forEach(
           ({ name, value, options }) => {
             response.cookies.set({ name, value, ...options });
           }

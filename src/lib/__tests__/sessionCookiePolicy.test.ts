@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { serializeCookieHeader } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,6 +8,7 @@ import {
   applySessionPersistence,
   cookieOptionsForPersistence,
   defaultSupabaseStorageKey,
+  isHttpsRequest,
   isSupabaseAuthCookieName,
 } from "../sessionFlow";
 
@@ -61,10 +63,74 @@ describe("cookieOptionsForPersistence", () => {
         { name: "sb-x-auth-token.1", value: "p1", options: LIFETIME },
         { name: "sb-x-auth-token.2", value: "", options: { ...LIFETIME, maxAge: 0 } },
       ],
+      false,
       false
     );
     expect(out.map((c) => c.options.maxAge)).toEqual([undefined, undefined, 0]);
   });
+});
+
+describe("C1 the Secure attribute", () => {
+  const WRITE = [
+    { name: "sb-x-auth-token.0", value: "p0", options: LIFETIME },
+    { name: "sb-x-auth-token.1", value: "", options: { ...LIFETIME, maxAge: 0 } },
+  ];
+
+  it.each([true, false])(
+    "secure=true marks every cookie, removals included (persistent=%s)",
+    (persistent) => {
+      const out = applySessionPersistence(WRITE, persistent, true);
+      expect(out.map((c) => c.options.secure)).toEqual([true, true]);
+    }
+  );
+
+  it.each([true, false])(
+    "secure=false adds no secure key (persistent=%s)",
+    (persistent) => {
+      const out = applySessionPersistence(WRITE, persistent, false);
+      out.forEach((c) => expect("secure" in c.options).toBe(false));
+    }
+  );
+
+  it("does not change the lifetime handling or the input", () => {
+    const input = [{ name: "a", value: "v", options: { ...LIFETIME } }];
+    const out = applySessionPersistence(input, false, true);
+    expect(out[0].options).toEqual({ path: "/", sameSite: "lax", secure: true });
+    expect(input[0].options).toEqual(LIFETIME);
+  });
+});
+
+describe("C2 the written cookie carries Secure", () => {
+  it("serializes with '; Secure' on https and without it otherwise", () => {
+    const write = [{ name: "sb-x-auth-token", value: "v", options: LIFETIME }];
+    const [secure] = applySessionPersistence(write, true, true);
+    const [plain] = applySessionPersistence(write, true, false);
+    expect(serializeCookieHeader(secure.name, secure.value, secure.options)).toMatch(
+      /; Secure(;|$)/
+    );
+    expect(serializeCookieHeader(plain.name, plain.value, plain.options)).not.toMatch(
+      /Secure/
+    );
+  });
+});
+
+describe("C4 isHttpsRequest", () => {
+  it.each([
+    ["https:", null, true],
+    ["http:", "https", true],
+    ["http:", "HTTPS", true],
+    ["http:", "https, http", true],
+    ["http:", " https ", true],
+    ["http:", null, false],
+    ["http:", "http", false],
+    ["http:", "http, https", false],
+    ["http:", "", false],
+  ] as Array<[string, string | null, boolean]>)(
+    "protocol %j, x-forwarded-proto %j -> %s",
+    (protocol, forwarded, expected) => {
+      expect(isHttpsRequest(protocol, forwarded)).toBe(expected);
+    }
+  );
 });
 
 describe("auth cookie names", () => {
@@ -125,7 +191,9 @@ describe("cookie writers", () => {
       "cookies: { getAll: readDocumentCookies, setAll: writeDocumentCookies, },"
     );
     expect(browser).toContain("const persistent = !hasSessionOnlyMarker();");
-    expect(browser).toContain("applySessionPersistence(cookies, persistent).forEach(");
+    expect(browser).toContain(
+      "applySessionPersistence(cookies, persistent, isSecurePage()).forEach("
+    );
     expect(browser).toContain("name === SESSION_ONLY_COOKIE");
   });
 
@@ -135,10 +203,21 @@ describe("cookie writers", () => {
       "const persistent = !request.cookies.has(SESSION_ONLY_COOKIE);"
     );
     expect(middleware).toContain(
-      "applySessionPersistence(cookiesToSet, persistent).forEach( ({ name, value, options }) => { response.cookies.set({ name, value, ...options }); } );"
+      "applySessionPersistence(cookiesToSet, persistent, secure).forEach( ({ name, value, options }) => { response.cookies.set({ name, value, ...options }); } );"
     );
     // The response cookies are written only through the policy.
     expect(middleware.split("response.cookies.set(").length - 1).toBe(1);
+  });
+
+  it("C3 both writers pass whether the page or request is HTTPS", () => {
+    const browser = source("../supabase-browser.ts");
+    expect(browser).toContain(
+      'function isSecurePage(): boolean { return typeof window !== "undefined" && window.location.protocol === "https:"; }'
+    );
+    const middleware = source("../../middleware.ts");
+    expect(middleware).toContain(
+      'const secure = isHttpsRequest( request.nextUrl.protocol, request.headers.get("x-forwarded-proto") );'
+    );
   });
 
   it("the login page records the choice before both sign-in calls", () => {
