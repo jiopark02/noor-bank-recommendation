@@ -17,10 +17,13 @@ import { describe, it, expect } from "vitest";
  *   - the lockfile entry for next naming another version than package.json
  *   - package.json changed without reinstalling, so the installed next differs
  *   - eslint-config-next moved without next, or next without it
+ *   - react and react-dom pinned to different versions
+ *   - react set below major version 19
  */
 
 // Raise this when a new advisory moves the lowest safe release up.
 const NEXT_FLOOR = "15.5.29";
+const REACT_MAJOR_FLOOR = 19;
 
 const ROOT = new URL("../../../", import.meta.url);
 
@@ -77,5 +80,20 @@ describe("the next version", () => {
 
   it("matches eslint-config-next exactly", () => {
     expect(pkg.devDependencies["eslint-config-next"]).toBe(nextPinned);
+  });
+});
+
+describe("the react version", () => {
+  const reactPinned = pkg.dependencies.react;
+
+  it("is an exact version, the same for react and react-dom", () => {
+    expect(parseExact(reactPinned)).not.toBeNull();
+    expect(pkg.dependencies["react-dom"]).toBe(reactPinned);
+  });
+
+  it("is at or above the major version floor", () => {
+    const pinned = parseExact(reactPinned);
+    expect(pinned).not.toBeNull();
+    expect((pinned as Triple)[0]).toBeGreaterThanOrEqual(REACT_MAJOR_FLOOR);
   });
 });
