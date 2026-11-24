@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // PreToolUse guard for the Bash tool. Reads the hook input JSON from stdin and
 // exits 2 (blocking, stderr is the reason Claude sees) when the command:
-//   - stages the whole tree (git add -A / --all / -u / --update / . / :/)
-//   - commits every tracked change (git commit -a / --all)
+//   - stages the whole tree (git add -A / -u, --all / --update /
+//     --no-ignore-removal or any prefix git accepts for them, or a pathspec
+//     that names the whole tree: . / ./ / :/ / :(top) / .. and the like)
+//   - commits every tracked change (git commit -a, --all or a prefix of it)
 //   - carries a Co-Authored-By trailer into a commit (message, heredoc or -F file)
 //   - skips the git hooks on a commit (--no-verify, an abbreviation of it down
 //     to --no-veri, or -n), overrides core.hooksPath with git -c /
@@ -19,6 +21,10 @@
 // This is a guardrail, not a security boundary. Not followed or not checked:
 //   - shell-expanded globs (git add *), eval, variables, xargs, and env with
 //     options (env -i git add -A)
+//   - git add pathspecs that reach the whole tree in other ways: a quoted
+//     glob git expands itself ('*', ':(glob)**'), an absolute path to the
+//     repository, only exclude pathspecs (git add ':!x' adds everything else),
+//     or a list read with --pathspec-from-file
 //   - git aliases, including ones defined on the spot with -c alias.*=...
 //   - config pulled in by -c include.path=... or includeIf
 //   - a GIT_COMMON_DIR assignment
@@ -400,11 +406,52 @@ function parseArgs(args, valueLetters, longWithValue, attachedOnly = []) {
 
 const GIT_GLOBAL_WITH_VALUE = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env", "--attr-source"];
 
+// Git accepts any unambiguous prefix of a long option, so --al is --all and
+// --upd is --update. A long option counts as one of the given names when it
+// is "--" plus at least one letter and a prefix of that name. A prefix git
+// would reject as ambiguous is blocked too, which costs nothing.
+function abbreviates(longName, fullNames) {
+  return longName.length >= 3 && fullNames.some((f) => f.startsWith(longName));
+}
+
+// Options of git add that stage every change in the tree when no narrower
+// pathspec is given (--no-ignore-removal is a spelling of --all).
+const ADD_WHOLE_TREE_LONGS = ["--all", "--update", "--no-ignore-removal"];
+
+// True when a git add pathspec names the whole tree: ".", "./", ":/",
+// ":(top)", ":(top)." and the like, a path that normalizes to "." (src/..),
+// or one that climbs out of the current directory (..). The magic prefix is
+// read in its long form ":(top,icase)" and its short form ":/"; an exclude
+// pathspec (":!x", ":^x", ":(exclude)x") never counts.
+function isWholeTreePathspec(operand) {
+  let rest = operand;
+  if (rest.startsWith(":(")) {
+    const close = rest.indexOf(")");
+    if (close === -1) return false;
+    const magic = rest
+      .slice(2, close)
+      .split(",")
+      .map((m) => m.trim().toLowerCase());
+    if (magic.includes("exclude")) return false;
+    rest = rest.slice(close + 1);
+  } else if (rest.startsWith(":")) {
+    let k = 1;
+    while (k < rest.length && "/!^".includes(rest[k])) {
+      if (rest[k] !== "/") return false;
+      k++;
+    }
+    if (rest[k] === ":") k++;
+    rest = rest.slice(k);
+  }
+  const normalized = path.posix.normalize(rest === "" ? "." : rest).replace(/\/+$/, "");
+  return normalized === "." || /^\.\.(\/\.\.)*$/.test(normalized);
+}
+
 function checkGitAdd(args) {
   const p = parseArgs(args, [], ["--chmod", "--pathspec-from-file"]);
-  if (p.longs.includes("--all") || p.longs.includes("--update")) return MESSAGES.add;
+  if (p.longs.some((l) => abbreviates(l, ADD_WHOLE_TREE_LONGS))) return MESSAGES.add;
   if (p.shortLetters.includes("A") || p.shortLetters.includes("u")) return MESSAGES.add;
-  if (p.operands.some((o) => o === "." || o === ":/")) return MESSAGES.add;
+  if (p.operands.some(isWholeTreePathspec)) return MESSAGES.add;
   return null;
 }
 
@@ -480,7 +527,7 @@ function checkGitCommit(args, raw, cwd, repoDir) {
     ],
     ["u", "S"]
   );
-  if (p.longs.includes("--all") || p.shortLetters.includes("a")) return MESSAGES.commitAll;
+  if (p.longs.some((l) => abbreviates(l, ["--all"])) || p.shortLetters.includes("a")) return MESSAGES.commitAll;
   if (p.longs.some(isNoVerify) || p.shortLetters.includes("n")) return MESSAGES.noVerify;
   if (CO_AUTHOR.test(raw)) return MESSAGES.coAuthor;
   for (const v of p.values) {
