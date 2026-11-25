@@ -16,6 +16,11 @@
 //     that has no .githooks/pre-commit, or (off Windows) one that is not
 //     executable (anything unreadable also blocks); .githooks/pre-commit is
 //     what refuses a commit on main
+//   - commits whose repository directory (git -C or the hook cwd), whose
+//     repository top, or whose -F / --file value is a UNC or device path
+//     (two leading slashes or backslashes in any mix, or \??\); the guard
+//     never opens such a path or starts a process in one, since on Windows
+//     that alone can authenticate to a remote host
 //   - force-pushes (--force, -f, --force-with-lease, +refspec)
 //   - edits in place with sed (-i / --in-place), which rewrites CRLF files
 // Anything else exits 0 with no output, so the normal permission flow applies.
@@ -38,6 +43,13 @@
 //   - edits to .githooks/pre-commit itself, or to git config other than by -c
 //   - a relative -F path under git -C <dir>, which is resolved against the
 //     hook cwd, not <dir>
+//   - a network share mapped to a drive letter (Z:\...), which looks like a
+//     local path
+//
+// The guard runs git by an absolute path found once on PATH (absolute entries
+// only, never the current or the target directory), from git's own
+// directory, with the repository passed as git -C. A bare "git" would let
+// Windows pick a git.exe or git.com from the child's cwd before PATH.
 //   - commits on main that never run pre-commit (git merge, cherry-pick,
 //     rebase, plumbing such as commit-tree / update-ref); those stay behind
 //     the permission prompt
@@ -72,6 +84,10 @@ const MESSAGES = {
     "bash-guard: commit with --git-dir / --work-tree / GIT_DIR / GIT_WORK_TREE is blocked; run it from inside the repository instead.",
   gitConfigEnv:
     "bash-guard: GIT_CONFIG_* in front of git can override core.hooksPath; drop the assignment.",
+  networkRepoDir:
+    "bash-guard: commit is blocked because its repository directory (git -C, the hook cwd or the repository top) is a UNC or device path, which the guard does not open; commit from a local checkout.",
+  networkMessageFile:
+    "bash-guard: commit -F / --file names a UNC or device path, which the guard does not open; write the message to a local file and pass that.",
   push: "bash-guard: force push is blocked; push without force or ask the operator.",
   sed: "bash-guard: sed -i rewrites line endings on this CRLF tree; use the Edit tool or perl -i and check the CR count.",
 };
@@ -464,23 +480,73 @@ function checkGitAdd(args) {
   return null;
 }
 
-// The pre-commit hook in .githooks refuses commits on main, so a commit must
-// run where git will find it. Reads core.hooksPath in repoDir (the git -C
-// directory, or the hook cwd); anything other than ".githooks", including
-// unset or unreadable, blocks.
-function checkHooksPath(repoDir) {
+// True for a path that starts with two separators in any mix of / and \
+// (\\host\share, //host/share, \/host, \\.\device, \\?\C:\x) or with the NT
+// prefix \??\. On Windows, opening such a path, or starting a process with
+// it as cwd, can reach a remote host and send the user's credentials to it.
+// Off Windows a leading // is a local path, and blocking it costs nothing.
+function isNetworkOrDevicePath(p) {
+  return /^[\\/]{2}/.test(p) || /^[\\/]\?\?[\\/]/.test(p);
+}
+
+// The absolute path of git, looked up once on PATH. Only absolute entries
+// count (a drive-letter path on Windows, a /-rooted one elsewhere), so the
+// current directory and the target repository never supply the binary; a
+// UNC entry is skipped without being opened. On Windows the names tried in
+// each entry are git.com then git.exe, the order a bare "git" would use.
+// null when none is found, which blocks every commit.
+let resolvedGit;
+function resolveGit() {
+  if (resolvedGit !== undefined) return resolvedGit;
+  resolvedGit = null;
+  const win = process.platform === "win32";
+  const names = win ? ["git.com", "git.exe"] : ["git"];
+  const entries = (process.env.PATH || "").split(path.delimiter);
+  for (const entry of entries) {
+    const dir = win ? entry.replace(/^"(.*)"$/, "$1") : entry;
+    if (isNetworkOrDevicePath(dir)) continue;
+    if (win ? !/^[A-Za-z]:[\\/]/.test(dir) : !dir.startsWith("/")) continue;
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      try {
+        if (!fs.statSync(candidate).isFile()) continue;
+        if (!win) fs.accessSync(candidate, fs.constants.X_OK);
+      } catch (e) {
+        continue;
+      }
+      resolvedGit = candidate;
+      return resolvedGit;
+    }
+  }
+  return resolvedGit;
+}
+
+// Runs git in repoDir through git -C, from git's own directory, and returns
+// its trimmed stdout, or null when git is not found, fails or times out.
+function runGit(repoDir, args) {
+  const git = resolveGit();
+  if (!git) return null;
   let r;
   try {
-    r = spawnSync("git", ["config", "--get", "core.hooksPath"], {
-      cwd: repoDir,
+    r = spawnSync(git, ["-C", repoDir].concat(args), {
+      cwd: path.dirname(git),
       encoding: "utf8",
       timeout: 5000,
       windowsHide: true,
     });
   } catch (e) {
-    return MESSAGES.hooksPathUnset;
+    return null;
   }
-  if (r.error || r.status !== 0 || r.stdout.trim() !== ".githooks") return MESSAGES.hooksPathUnset;
+  if (r.error || r.status !== 0) return null;
+  return r.stdout.trim();
+}
+
+// The pre-commit hook in .githooks refuses commits on main, so a commit must
+// run where git will find it. Reads core.hooksPath in repoDir (the git -C
+// directory, or the hook cwd); anything other than ".githooks", including
+// unset or unreadable, blocks.
+function checkHooksPath(repoDir) {
+  if (runGit(repoDir, ["config", "--get", "core.hooksPath"]) !== ".githooks") return MESSAGES.hooksPathUnset;
   return null;
 }
 
@@ -488,19 +554,9 @@ function checkHooksPath(repoDir) {
 // .githooks/pre-commit: git then runs no hook at all. Reads the top of the
 // repository at repoDir; unreadable blocks.
 function checkHookFile(repoDir) {
-  let r;
-  try {
-    r = spawnSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd: repoDir,
-      encoding: "utf8",
-      timeout: 5000,
-      windowsHide: true,
-    });
-  } catch (e) {
-    return MESSAGES.hookFileMissing;
-  }
-  const top = r.error || r.status !== 0 ? "" : r.stdout.trim();
+  const top = runGit(repoDir, ["rev-parse", "--show-toplevel"]);
   if (!top) return MESSAGES.hookFileMissing;
+  if (isNetworkOrDevicePath(top)) return MESSAGES.networkRepoDir;
   const hook = path.join(top, ".githooks", "pre-commit");
   try {
     if (!fs.statSync(hook).isFile()) return MESSAGES.hookFileMissing;
@@ -525,7 +581,7 @@ function isNoVerify(longName) {
   return longName.length >= "--no-veri".length && "--no-verify".startsWith(longName);
 }
 
-function checkGitCommit(args, raw, cwd, repoDir) {
+function checkGitCommit(args, raw, cwd, repoDir, networkDirArg) {
   const p = parseArgs(
     args,
     ["m", "F", "c", "C", "t", "u", "S"],
@@ -545,6 +601,9 @@ function checkGitCommit(args, raw, cwd, repoDir) {
   for (const v of p.values) {
     if ((v.opt === "-F" || v.opt === "--file") && v.value !== "-") {
       const file = path.resolve(cwd, v.value);
+      // Decided before the read: the raw value covers //host on every
+      // platform, the resolved one a relative name under a UNC hook cwd.
+      if (isNetworkOrDevicePath(v.value) || isNetworkOrDevicePath(file)) return MESSAGES.networkMessageFile;
       let text = "";
       try {
         text = fs.readFileSync(file, "utf8");
@@ -554,6 +613,7 @@ function checkGitCommit(args, raw, cwd, repoDir) {
       if (CO_AUTHOR.test(text)) return MESSAGES.coAuthor;
     }
   }
+  if (networkDirArg || isNetworkOrDevicePath(repoDir)) return MESSAGES.networkRepoDir;
   return checkHooksPath(repoDir) || checkHookFile(repoDir);
 }
 
@@ -606,7 +666,11 @@ function checkCommand(cmd, cwd, depth) {
   if (name === "git") {
     if (gitConfigEnv) return MESSAGES.gitConfigEnv;
     let k = 0;
-    let repoDir = cwd;
+    // Absolute, because git runs from its own directory with this as -C.
+    let repoDir = path.resolve(cwd);
+    // A -C value that is a UNC or device path as written (path.resolve off
+    // Windows would turn //host into /host).
+    let networkDirArg = false;
     let gitDirOption = false;
     while (k < args.length && args[k].startsWith("-")) {
       const a = args[k];
@@ -621,7 +685,10 @@ function checkCommand(cmd, cwd, depth) {
           return MESSAGES.hooksPathOverride;
         }
         // Successive -C options resolve against each other, as git does.
-        if (a === "-C" && v !== undefined) repoDir = path.resolve(repoDir, v);
+        if (a === "-C" && v !== undefined) {
+          if (isNetworkOrDevicePath(v)) networkDirArg = true;
+          repoDir = path.resolve(repoDir, v);
+        }
         k += 2;
       } else {
         k += 1;
@@ -633,7 +700,7 @@ function checkCommand(cmd, cwd, depth) {
     if (sub === "add" || sub === "stage") return checkGitAdd(rest);
     if (sub === "commit") {
       if (gitDirEnv || gitDirOption) return MESSAGES.gitDirOverride;
-      return checkGitCommit(rest, cmd.raw, cwd, repoDir);
+      return checkGitCommit(rest, cmd.raw, cwd, repoDir, networkDirArg);
     }
     if (sub === "push") return checkGitPush(rest);
   }

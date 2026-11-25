@@ -360,3 +360,146 @@ describe("bash-guard: unreadable input fails closed", () => {
     expect(r.stderr).toContain("could not read its input");
   });
 });
+
+// Like run, with the guard's environment replaced.
+function runWithEnv(command: string, cwd: string, env: NodeJS.ProcessEnv) {
+  const input = JSON.stringify({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    cwd,
+    tool_input: { command },
+  });
+  const r = spawnSync(process.execPath, [SCRIPT], { input, encoding: "utf8", env });
+  return { status: r.status, stderr: r.stderr };
+}
+
+describe("bash-guard: the git it runs never comes from the current or target directory", () => {
+  let repo: string;
+  let marker: string;
+  beforeAll(() => {
+    repo = makeRepo(".githooks");
+    marker = path.join(repo, "PLANTED-GIT-RAN");
+  });
+  afterAll(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  // Windows looks for git.com / git.exe in the child's cwd before PATH unless
+  // NoDefaultCurrentDirectoryInExePath is set. The planted git.exe is a copy
+  // of node, so "git config ..." and "git rev-parse ..." run the scripts named
+  // config and rev-parse in that directory, which leave a marker and give the
+  // answers that would let the commit through.
+  it.skipIf(process.platform !== "win32")("ignores a git.exe planted in the repository (Windows)", () => {
+    fs.copyFileSync(process.execPath, path.join(repo, "git.exe"));
+    const leave = `require("fs").writeFileSync(${JSON.stringify(marker)}, "ran");`;
+    fs.writeFileSync(path.join(repo, "config"), `${leave} process.stdout.write(".githooks\\n");`);
+    fs.writeFileSync(path.join(repo, "rev-parse"), `${leave} process.stdout.write(${JSON.stringify(repo + "\n")});`);
+    const env: NodeJS.ProcessEnv = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (!/^NoDefaultCurrentDirectoryInExePath$/i.test(k)) env[k] = v;
+    }
+    for (const [command, cwd] of [
+      ['git commit -m "x"', repo],
+      [`git -C ${slash(repo)} commit -m "x"`, os.tmpdir()],
+    ]) {
+      const r = runWithEnv(command, cwd, env);
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+    }
+  });
+
+  // Elsewhere the same happens through a relative PATH entry such as ".".
+  it.skipIf(process.platform === "win32")("ignores a relative PATH entry that points at the repository", () => {
+    const planted = path.join(repo, "git");
+    fs.writeFileSync(planted, `#!/bin/sh\ntouch '${marker}'\necho .githooks\n`);
+    fs.chmodSync(planted, 0o755);
+    const env = { ...process.env, PATH: "." + path.delimiter + (process.env.PATH ?? "") };
+    const r = runWithEnv('git commit -m "x"', repo, env);
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+
+  it("still passes a commit through git -C <local repository> from another cwd", () => {
+    const r = run(`git -C ${slash(repo)} commit -m "x"`, os.tmpdir());
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+});
+
+describe("bash-guard: UNC and device paths are blocked before they are opened", () => {
+  let hooked: string;
+  beforeAll(() => {
+    hooked = makeRepo(".githooks");
+    fs.writeFileSync(path.join(hooked, "with.txt"), "Fix\n\nCo-Authored-By: A <a@example.com>\n");
+  });
+  afterAll(() => {
+    fs.rmSync(hooked, { recursive: true, force: true });
+  });
+
+  // In the source, '\\' is one backslash in the command.
+  const messageFiles = [
+    "git commit -F //host.invalid/share/msg.txt",
+    "git commit --file=//host.invalid/share/msg.txt",
+    "git commit --file //host.invalid/share/msg.txt",
+    "git commit -F//host.invalid/share/msg.txt",
+    "git commit -F '\\\\host.invalid\\share\\msg.txt'",
+    "git commit -F '\\/host.invalid/share/msg.txt'",
+    "git commit -F '/\\host.invalid\\share\\msg.txt'",
+    "git commit -F '\\\\.\\pipe\\msg'",
+    "git commit -F '//?/C:/msg.txt'",
+    "git commit -F '\\??\\C:\\msg.txt'",
+  ];
+  for (const command of messageFiles) {
+    it(`blocks a -F value that is a UNC or device path: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("-F / --file names a UNC or device path");
+    });
+  }
+
+  // A spelling that reaches a real local file holding the trailer: had the
+  // guard read it, the answer would be the Co-Authored-By block.
+  it("decides on the path without reading the file", () => {
+    const abs = slash(path.join(hooked, "with.txt"));
+    const spelled = process.platform === "win32" ? `//?/${abs}` : `/${abs}`;
+    const r = run(`git commit -F ${spelled}`, hooked);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("-F / --file names a UNC or device path");
+    expect(r.stderr).not.toContain("Co-Authored-By");
+  });
+
+  // Off Windows path.resolve turns a //host cwd into /host, so this is a
+  // Windows case.
+  it.skipIf(process.platform !== "win32")("blocks a relative -F under a UNC hook cwd (Windows)", () => {
+    const r = run(`git -C ${slash(hooked)} commit -F msg.txt`, "//host.invalid/share");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("-F / --file names a UNC or device path");
+  });
+
+  const repoDirs = [
+    'git -C //host.invalid/share commit -m "x"',
+    "git -C '\\\\host.invalid\\share' commit -m x",
+    "git -C '\\\\?\\UNC\\host.invalid\\share' commit -m x",
+  ];
+  for (const command of repoDirs) {
+    it(`blocks a commit whose git -C directory is a UNC or device path: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("repository directory");
+    });
+  }
+
+  it.skipIf(process.platform !== "win32")("blocks a commit whose hook cwd is a UNC path (Windows)", () => {
+    const r = run('git commit -m "x"', "//host.invalid/share");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("repository directory");
+  });
+
+  it("still passes git add of a named file under a UNC -C (git add runs no git)", () => {
+    const r = run("git -C //host.invalid/share add src/x.ts", hooked);
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+});
