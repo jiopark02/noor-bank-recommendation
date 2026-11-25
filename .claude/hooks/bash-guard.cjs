@@ -17,10 +17,12 @@
 //     executable (anything unreadable also blocks); .githooks/pre-commit is
 //     what refuses a commit on main
 //   - commits whose repository directory (git -C or the hook cwd), whose
-//     repository top, or whose -F / --file value is a UNC or device path
-//     (two leading slashes or backslashes in any mix, or \??\); the guard
-//     never opens such a path or starts a process in one, since on Windows
-//     that alone can authenticate to a remote host
+//     repository top, or whose -F / --file value (or a prefix of --file git
+//     accepts) is a UNC or device path, as written: two leading slashes or
+//     backslashes in any mix, or \??\; the guard itself never opens such a
+//     path or starts a process in one, since on Windows that alone can
+//     authenticate to a remote host
+//   - commits when git is not found on PATH (absolute entries only)
 //   - force-pushes (--force, -f, --force-with-lease, +refspec)
 //   - edits in place with sed (-i / --in-place), which rewrites CRLF files
 // Anything else exits 0 with no output, so the normal permission flow applies.
@@ -43,18 +45,23 @@
 //   - edits to .githooks/pre-commit itself, or to git config other than by -c
 //   - a relative -F path under git -C <dir>, which is resolved against the
 //     hook cwd, not <dir>
-//   - a network share mapped to a drive letter (Z:\...), which looks like a
-//     local path
-//
-// The guard runs git by an absolute path found once on PATH (absolute entries
-// only, never the current or the target directory), from git's own
-// directory, with the repository passed as git -C. A bare "git" would let
-// Windows pick a git.exe or git.com from the child's cwd before PATH.
+//   - a network share reached indirectly: the UNC and device check reads only
+//     how a path is spelled, so a share mapped to a drive letter (Z:\...), a
+//     junction or symbolic link to one, a .git file whose gitdir (or a
+//     commondir) points at one, or an include.path that names one looks
+//     local; the git the guard runs can still open it
+//   - $'...' quoting, whose escapes are not decoded
 //   - commits on main that never run pre-commit (git merge, cherry-pick,
 //     rebase, plumbing such as commit-tree / update-ref); those stay behind
 //     the permission prompt
 //   - commands run through the PowerShell tool, which this Bash matcher never
 //     sees (the git hook still applies to them)
+//
+// The guard runs git by an absolute path found once on PATH, from git's own
+// directory, with the repository passed as git -C. Empty, relative, UNC and
+// device PATH entries are skipped; an absolute entry is trusted as the
+// user's choice. A bare "git" would let Windows pick a git.exe or git.com
+// from the child's cwd before PATH.
 
 "use strict";
 
@@ -84,6 +91,8 @@ const MESSAGES = {
     "bash-guard: commit with --git-dir / --work-tree / GIT_DIR / GIT_WORK_TREE is blocked; run it from inside the repository instead.",
   gitConfigEnv:
     "bash-guard: GIT_CONFIG_* in front of git can override core.hooksPath; drop the assignment.",
+  gitNotFound:
+    "bash-guard: commit is blocked because git was not found on PATH (only absolute PATH entries are searched), so core.hooksPath could not be read; put git's directory on PATH as an absolute path.",
   networkRepoDir:
     "bash-guard: commit is blocked because its repository directory (git -C, the hook cwd or the repository top) is a UNC or device path, which the guard does not open; commit from a local checkout.",
   networkMessageFile:
@@ -256,9 +265,22 @@ function tokenize(s) {
       inWord = true;
       let j = i + 1;
       while (j < s.length && s[j] !== '"') {
+        // As in bash: inside double quotes a backslash escapes only $ ` " \
+        // and a newline (which it removes with itself); before anything else
+        // it stays, so "\\\host\share" is \\host\share, as git receives it.
         if (s[j] === "\\" && j + 1 < s.length) {
-          word += s[j + 1];
-          j += 2;
+          const next = s[j + 1];
+          if (next === "\n") {
+            j += 2;
+            continue;
+          }
+          if (next === "$" || next === "`" || next === '"' || next === "\\") {
+            word += next;
+            j += 2;
+            continue;
+          }
+          word += "\\";
+          j += 1;
           continue;
         }
         if (s[j] === "$" && s[j + 1] === "(") {
@@ -382,7 +404,9 @@ function scanCluster(token, valueLetters) {
 // lists long options that take a separate value when written without "=".
 // attachedOnly lists value letters whose value is optional and only ever
 // attached (-uno, -S<key>), so they never consume the next argument.
-function parseArgs(args, valueLetters, longWithValue, attachedOnly = []) {
+// abbreviatedWithValue lists long options that also take a separate value
+// when written as a prefix git accepts (--fil for --file; see abbreviates).
+function parseArgs(args, valueLetters, longWithValue, attachedOnly = [], abbreviatedWithValue = []) {
   const longs = [];
   const shortLetters = [];
   const operands = [];
@@ -401,7 +425,10 @@ function parseArgs(args, valueLetters, longWithValue, attachedOnly = []) {
       longs.push(name);
       if (eq !== -1) {
         values.push({ opt: name, value: a.slice(eq + 1) });
-      } else if (longWithValue.includes(name) && k + 1 < args.length) {
+      } else if (
+        (longWithValue.includes(name) || abbreviates(name, abbreviatedWithValue)) &&
+        k + 1 < args.length
+      ) {
         values.push({ opt: name, value: args[k + 1] });
         k++;
       }
@@ -489,12 +516,16 @@ function isNetworkOrDevicePath(p) {
   return /^[\\/]{2}/.test(p) || /^[\\/]\?\?[\\/]/.test(p);
 }
 
-// The absolute path of git, looked up once on PATH. Only absolute entries
-// count (a drive-letter path on Windows, a /-rooted one elsewhere), so the
-// current directory and the target repository never supply the binary; a
-// UNC entry is skipped without being opened. On Windows the names tried in
-// each entry are git.com then git.exe, the order a bare "git" would use.
-// null when none is found, which blocks every commit.
+// The absolute path of git, looked up once on PATH. Empty and relative
+// entries ("." included) are skipped, so the current directory never
+// supplies the binary, and so are UNC and device entries, without being
+// opened. Every absolute entry (a drive-letter path on Windows, a /-rooted
+// one elsewhere; surrounding double quotes are removed on Windows) is
+// trusted as the user's choice: one that names a directory inside the
+// repository still supplies git from there, and one on a mapped network
+// drive is opened. On Windows the names tried in each entry are git.com then
+// git.exe, the order a bare "git" uses. null when none is found, which
+// blocks every commit.
 let resolvedGit;
 function resolveGit() {
   if (resolvedGit !== undefined) return resolvedGit;
@@ -590,7 +621,8 @@ function checkGitCommit(args, raw, cwd, repoDir, networkDirArg) {
       "--reedit-message", "--fixup", "--squash", "--cleanup", "--trailer",
       "--pathspec-from-file",
     ],
-    ["u", "S"]
+    ["u", "S"],
+    ["--file"]
   );
   if (p.longs.some((l) => abbreviates(l, ["--all"])) || p.shortLetters.includes("a")) return MESSAGES.commitAll;
   // git commit <pathspec> commits every tracked change the pathspec reaches,
@@ -599,7 +631,8 @@ function checkGitCommit(args, raw, cwd, repoDir, networkDirArg) {
   if (p.longs.some(isNoVerify) || p.shortLetters.includes("n")) return MESSAGES.noVerify;
   if (CO_AUTHOR.test(raw)) return MESSAGES.coAuthor;
   for (const v of p.values) {
-    if ((v.opt === "-F" || v.opt === "--file") && v.value !== "-") {
+    // --fil, --fil=x and the like are --file to git, so they are read alike.
+    if ((v.opt === "-F" || abbreviates(v.opt, ["--file"])) && v.value !== "-") {
       const file = path.resolve(cwd, v.value);
       // Decided before the read: the raw value covers //host on every
       // platform, the resolved one a relative name under a UNC hook cwd.
@@ -614,6 +647,7 @@ function checkGitCommit(args, raw, cwd, repoDir, networkDirArg) {
     }
   }
   if (networkDirArg || isNetworkOrDevicePath(repoDir)) return MESSAGES.networkRepoDir;
+  if (!resolveGit()) return MESSAGES.gitNotFound;
   return checkHooksPath(repoDir) || checkHookFile(repoDir);
 }
 

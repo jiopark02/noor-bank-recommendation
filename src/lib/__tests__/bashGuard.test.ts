@@ -503,3 +503,223 @@ describe("bash-guard: UNC and device paths are blocked before they are opened", 
     expect(r.status).toBe(0);
   });
 });
+
+describe("bash-guard: backslashes inside double quotes follow bash", () => {
+  let hooked: string;
+  beforeAll(() => {
+    hooked = makeRepo(".githooks");
+    fs.writeFileSync(path.join(hooked, "with.txt"), "Fix\n\nCo-Authored-By: A <a@example.com>\n");
+  });
+  afterAll(() => {
+    fs.rmSync(hooked, { recursive: true, force: true });
+  });
+
+  // String.raw: each command is exactly what bash reads. Inside double quotes
+  // bash keeps a backslash unless it precedes $ ` " \ or a newline, so each of
+  // these hands git a value that starts with \\.
+  const messageFiles = [
+    String.raw`git commit -F "\\\host.invalid\share\m.txt"`,
+    String.raw`git commit -F "\\\\host.invalid\\share\\m.txt"`,
+    String.raw`git commit --file="\\\host.invalid\share\m.txt"`,
+    String.raw`git commit -F "\\\?\C:\m.txt"`,
+  ];
+  for (const command of messageFiles) {
+    it(`blocks a double-quoted UNC -F value: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("-F / --file names a UNC or device path");
+    });
+  }
+
+  it("blocks a double-quoted UNC git -C directory", () => {
+    const r = run(String.raw`git -C "\\\host.invalid\share" commit -m x`, hooked);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("repository directory");
+  });
+
+  // A Windows path in double quotes keeps its backslashes, so the guard reads
+  // the file git will read and sees its trailer.
+  it.skipIf(process.platform !== "win32")("reads a double-quoted Windows -F path as written (Windows)", () => {
+    const r = run(`git commit -F "${path.join(hooked, "with.txt")}"`, hooked);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("Co-Authored-By");
+  });
+
+  const passed = [
+    String.raw`git commit -m "say \"hi\" and cost \$5"`,
+    String.raw`git commit -m "a\tb and c\\d"`,
+    String.raw`git add "src\x.ts"`,
+  ];
+  for (const command of passed) {
+    it(`still passes: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+    });
+  }
+});
+
+describe("bash-guard: prefixes of --file are read as --file", () => {
+  let hooked: string;
+  beforeAll(() => {
+    hooked = makeRepo(".githooks");
+    fs.writeFileSync(path.join(hooked, "with.txt"), "Fix\n\nCo-Authored-By: A <a@example.com>\n");
+    fs.writeFileSync(path.join(hooked, "without.txt"), "Fix the thing\n");
+  });
+  afterAll(() => {
+    fs.rmSync(hooked, { recursive: true, force: true });
+  });
+
+  const blockedUnc = [
+    "git commit --fil=//host.invalid/share/m.txt",
+    "git commit --fil //host.invalid/share/m.txt",
+    "git commit --fi=//host.invalid/share/m.txt",
+  ];
+  for (const command of blockedUnc) {
+    it(`blocks a UNC value: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("-F / --file names a UNC or device path");
+    });
+  }
+
+  for (const command of ["git commit --fil=with.txt", "git commit --fil with.txt"]) {
+    it(`blocks a trailer in the file: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("Co-Authored-By");
+    });
+  }
+
+  for (const command of ["git commit --fil=without.txt", "git commit --fil without.txt", "git commit --fixup HEAD"]) {
+    it(`passes: ${JSON.stringify(command)}`, () => {
+      const r = run(command, hooked);
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+    });
+  }
+});
+
+// The guard's environment with PATH replaced (every spelling of the name
+// removed first, since Windows treats Path and PATH as one).
+function envWithPath(value: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!/^path$/i.test(k)) env[k] = v;
+  }
+  env.PATH = value;
+  return env;
+}
+
+// The directory of the real git on this machine's PATH.
+function realGitDir(): string {
+  const names = process.platform === "win32" ? ["git.exe", "git.com"] : ["git"];
+  for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
+    const dir = entry.replace(/^"(.*)"$/, "$1");
+    if (!path.isAbsolute(dir)) continue;
+    for (const name of names) {
+      if (fs.existsSync(path.join(dir, name))) return dir;
+    }
+  }
+  throw new Error("git not found on PATH");
+}
+
+describe("bash-guard: how git is found on PATH", () => {
+  const win = process.platform === "win32";
+  let hooked: string;
+  let work: string;
+  let nodeCopy: string;
+  beforeAll(() => {
+    hooked = makeRepo(".githooks");
+    work = fs.mkdtempSync(path.join(os.tmpdir(), "bash-guard-path-"));
+    if (win) {
+      nodeCopy = path.join(work, "node-copy.exe");
+      fs.copyFileSync(process.execPath, nodeCopy);
+    }
+  });
+  afterAll(() => {
+    fs.rmSync(hooked, { recursive: true, force: true });
+    fs.rmSync(work, { recursive: true, force: true });
+  });
+
+  // A directory holding a stand-in git that appends the path it ran as to
+  // <dir>/RAN, answers ".githooks" for config and `top` for rev-parse. On
+  // Windows each name is a link to a copy of node, which reads "-C <repo>" as
+  // its own --conditions option and runs the script named config or
+  // rev-parse from its cwd, git's directory, where the guard starts it.
+  function fakeGit(name: string, top: string, exeNames: string[] = ["git.exe"]) {
+    const dir = path.join(work, name);
+    fs.mkdirSync(dir);
+    const ran = path.join(dir, "RAN");
+    if (win) {
+      for (const exe of exeNames) {
+        try {
+          fs.linkSync(nodeCopy, path.join(dir, exe));
+        } catch {
+          fs.copyFileSync(nodeCopy, path.join(dir, exe));
+        }
+      }
+      const leave = `require("fs").appendFileSync(${JSON.stringify(ran)}, process.execPath + "\\n");`;
+      fs.writeFileSync(path.join(dir, "config"), `${leave} process.stdout.write(".githooks\\n");`);
+      fs.writeFileSync(path.join(dir, "rev-parse"), `${leave} process.stdout.write(${JSON.stringify(top + "\n")});`);
+    } else {
+      const script = [
+        "#!/bin/sh",
+        `echo "$0" >> '${ran}'`,
+        'case "$3" in',
+        "  config) echo .githooks ;;",
+        `  rev-parse) echo '${top}' ;;`,
+        "esac",
+      ].join("\n");
+      fs.writeFileSync(path.join(dir, "git"), script + "\n");
+      fs.chmodSync(path.join(dir, "git"), 0o755);
+    }
+    return { dir, ran };
+  }
+
+  it("blocks a commit, naming the cause, when git is not on PATH", () => {
+    const empty = path.join(work, "empty");
+    fs.mkdirSync(empty);
+    for (const value of [empty, "", "."]) {
+      const r = runWithEnv('git commit -m "x"', hooked, envWithPath(value));
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("git was not found on PATH");
+    }
+  });
+
+  it.skipIf(!win)("uses a PATH entry wrapped in double quotes (Windows)", () => {
+    const r = runWithEnv('git commit -m "x"', hooked, envWithPath(`"${realGitDir()}"`));
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+
+  // The stand-in sits behind a UNC or device spelling that reaches the same
+  // local directory (\\?\C:\... on Windows, //tmp/... elsewhere); the real git
+  // comes after it.
+  it("skips a UNC or device PATH entry", () => {
+    const fake = fakeGit("behind-unc", hooked);
+    const spelled = win ? `\\\\?\\${fake.dir}` : `/${fake.dir}`;
+    const r = runWithEnv('git commit -m "x"', hooked, envWithPath(spelled + path.delimiter + realGitDir()));
+    expect(fs.existsSync(fake.ran)).toBe(false);
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+
+  it("blocks a commit whose repository top, as git reports it, is a UNC path", () => {
+    const fake = fakeGit("unc-top", "//host.invalid/share");
+    const r = runWithEnv('git commit -m "x"', hooked, envWithPath(fake.dir));
+    expect(fs.readFileSync(fake.ran, "utf8")).not.toBe("");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("repository directory");
+  });
+
+  it.skipIf(!win)("picks git.com over git.exe in the same directory (Windows)", () => {
+    const fake = fakeGit("com-and-exe", hooked, ["git.com", "git.exe"]);
+    const r = runWithEnv('git commit -m "x"', hooked, envWithPath(fake.dir));
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+    const ran = fs.readFileSync(fake.ran, "utf8").trim().split("\n");
+    expect(ran.length).toBeGreaterThan(0);
+    for (const line of ran) expect(path.basename(line.trim())).toBe("git.com");
+  });
+});
