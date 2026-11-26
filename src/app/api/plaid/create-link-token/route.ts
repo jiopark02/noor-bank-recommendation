@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   plaidClient,
   PLAID_PRODUCTS,
+  PLAID_OPTIONAL_PRODUCTS,
   PLAID_COUNTRY_CODES,
   PLAID_TRANSACTIONS_DAYS_REQUESTED,
   isPlaidConfigured,
@@ -113,6 +114,7 @@ export async function POST(request: NextRequest) {
       },
       client_name: "Noor",
       products: PLAID_PRODUCTS,
+      optional_products: PLAID_OPTIONAL_PRODUCTS,
       country_codes: PLAID_COUNTRY_CODES,
       language: "en",
       // Fixed at Item creation; a server constant, never taken from the request.
