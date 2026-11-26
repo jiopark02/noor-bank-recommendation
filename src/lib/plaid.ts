@@ -185,15 +185,28 @@ plaidHttp.interceptors.response.use(
  */
 export const plaidClient = new PlaidApi(configuration, undefined, plaidHttp);
 
-// Products we want to access
+// Products a new Item must support. An institution without one of these is
+// left out of the Link list.
 // Note: Auth is commented out for sandbox testing - it triggers the "Save with Plaid" flow
 // Once configured in Plaid dashboard, uncomment Auth and Identity
 export const PLAID_PRODUCTS: Products[] = [
   Products.Transactions,
   // Products.Auth,    // Requires additional Plaid dashboard configuration
   // Products.Identity, // Requires additional Plaid dashboard configuration
-  //Products.Liabilities,
 ];
+
+/**
+ * Products requested on a new Item where the institution supports them.
+ *
+ * Liabilities stays here, not in PLAID_PRODUCTS, so institutions without it
+ * remain in the Link list. Think before adding to or moving between the two
+ * lists: a product cannot be removed from an Item once it is initialized, and
+ * adding one later needs re-consent on every existing Item.
+ *
+ * Sent on the new-connection link token only. Update mode (relink) sends no
+ * product fields.
+ */
+export const PLAID_OPTIONAL_PRODUCTS: Products[] = [Products.Liabilities];
 
 /**
  * Days of transaction history requested when a new Item is created. Plaid fixes

@@ -16,6 +16,11 @@ import { PLAID_TRANSACTIONS_DAYS_REQUESTED } from "../plaid";
  *   - the transactions field sent only when no webhook is set   -> "with a webhook set"
  *   - the history-days constant changed                         -> "is 730"
  *   - any history-days value read from the request body         -> "cannot be set by the body"
+ *   - the optional_products field removed, emptied or widened   -> "Liabilities as optional"
+ *   - Liabilities moved into products, or into
+ *     required_if_supported_products                            -> "Liabilities as optional"
+ *   - optional_products sent only on some path                  -> "Liabilities as optional"
+ *   - products or optional_products read from the request body  -> "products cannot be set by the body"
  *   - the issue claim moved after linkTokenCreate, or removed   -> "claims before Plaid"
  *   - a failed claim lets the request through (fail-open)       -> "a claim that cannot be made"
  *   - a held claim lets the request through                     -> "over the limit"
@@ -185,6 +190,30 @@ describe("create-link-token request", () => {
     expect(status).toBe(200);
     expect(state.linkTokenCalls).toHaveLength(1);
     expect(state.linkTokenCalls[0].transactions).toEqual({ days_requested: 730 });
+  });
+
+  it("requires Transactions only, and asks for Liabilities as optional", async () => {
+    // Literal values, not the constants, so a change to a constant turns this red.
+    const { status } = await post();
+    expect(status).toBe(200);
+    expect(state.linkTokenCalls).toHaveLength(1);
+    const request = state.linkTokenCalls[0];
+    expect(request.products).toEqual(["transactions"]);
+    expect(request.optional_products).toEqual(["liabilities"]);
+    expect("additional_consented_products" in request).toBe(false);
+    expect("required_if_supported_products" in request).toBe(false);
+  });
+
+  it("the products cannot be set by the body", async () => {
+    // Red if: any product value from the body reaches the request.
+    const { status } = await post({
+      products: ["auth"],
+      optional_products: [],
+    });
+    expect(status).toBe(200);
+    expect(state.linkTokenCalls).toHaveLength(1);
+    expect(state.linkTokenCalls[0].products).toEqual(["transactions"]);
+    expect(state.linkTokenCalls[0].optional_products).toEqual(["liabilities"]);
   });
 });
 
