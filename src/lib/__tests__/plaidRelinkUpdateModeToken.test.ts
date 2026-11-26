@@ -11,6 +11,9 @@ import type { NextRequest } from "next/server";
  *
  * Mutations that turn this file red:
  *   - `products` sent again on the update-mode request             -> "no products"
+ *   - `optional_products`, `required_if_supported_products` or
+ *     `additional_consented_products` on the update-mode request,
+ *     empty arrays included                                        -> "no optional, required-if-supported"
  *   - the stored (encrypted) value sent instead of the decrypted one -> "decrypted token"
  *   - client_user_id taken from anything but the verified user      -> "verified user"
  *   - a redirect_uri field on the update-mode request again         -> "no redirect_uri"
@@ -87,6 +90,15 @@ describe("relink — the update-mode link token request", () => {
     expect(res.status).toBe(200);
     expect(state.linkTokenCalls).toHaveLength(1);
     expect("products" in state.linkTokenCalls[0]).toBe(false);
+  });
+
+  it("sends no optional, required-if-supported or additionally consented products", async () => {
+    const res = await post({ itemId: "item-1" });
+    expect(res.status).toBe(200);
+    expect(state.linkTokenCalls).toHaveLength(1);
+    expect("optional_products" in state.linkTokenCalls[0]).toBe(false);
+    expect("required_if_supported_products" in state.linkTokenCalls[0]).toBe(false);
+    expect("additional_consented_products" in state.linkTokenCalls[0]).toBe(false);
   });
 
   it("sends the decrypted token, never the stored value", async () => {
