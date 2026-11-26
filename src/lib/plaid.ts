@@ -188,7 +188,7 @@ export const plaidClient = new PlaidApi(configuration, undefined, plaidHttp);
 // Products a new Item must support. An institution without one of these is
 // left out of the Link list.
 // Note: Auth is commented out for sandbox testing - it triggers the "Save with Plaid" flow
-// Once configured in Plaid dashboard, uncomment Auth and Identity
+// If Auth or Identity is needed, weigh PLAID_OPTIONAL_PRODUCTS below before this list.
 export const PLAID_PRODUCTS: Products[] = [
   Products.Transactions,
   // Products.Auth,    // Requires additional Plaid dashboard configuration
@@ -201,7 +201,7 @@ export const PLAID_PRODUCTS: Products[] = [
  * Liabilities stays here, not in PLAID_PRODUCTS, so institutions without it
  * remain in the Link list. Think before adding to or moving between the two
  * lists: a product cannot be removed from an Item once it is initialized, and
- * adding one later needs re-consent on every existing Item.
+ * adding one to an existing Item later may require the user to consent again.
  *
  * Sent on the new-connection link token only. Update mode (relink) sends no
  * product fields.

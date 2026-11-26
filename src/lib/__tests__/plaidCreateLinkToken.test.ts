@@ -19,8 +19,11 @@ import { PLAID_TRANSACTIONS_DAYS_REQUESTED } from "../plaid";
  *   - the optional_products field removed, emptied or widened   -> "Liabilities as optional"
  *   - Liabilities moved into products, or into
  *     required_if_supported_products                            -> "Liabilities as optional"
- *   - optional_products sent only on some path                  -> "Liabilities as optional"
+ *   - optional_products sent only when no webhook is set        -> "with a webhook set"
+ *   - optional_products sent only when a webhook is set         -> "Liabilities as optional"
  *   - products or optional_products read from the request body  -> "products cannot be set by the body"
+ *   - required_if_supported_products or
+ *     additional_consented_products taken from the request body -> "products cannot be set by the body"
  *   - the issue claim moved after linkTokenCreate, or removed   -> "claims before Plaid"
  *   - a failed claim lets the request through (fail-open)       -> "a claim that cannot be made"
  *   - a held claim lets the request through                     -> "over the limit"
@@ -170,6 +173,10 @@ describe("create-link-token request", () => {
       expect(state.linkTokenCalls[0].webhook).toBe(
         "https://noor.test/api/plaid/webhook"
       );
+      // The products on this path too, as literals: the test below runs with
+      // no webhook set, so a field sent only on that path passes there.
+      expect(state.linkTokenCalls[0].products).toEqual(["transactions"]);
+      expect(state.linkTokenCalls[0].optional_products).toEqual(["liabilities"]);
     } finally {
       if (previous === undefined) delete process.env.PLAID_WEBHOOK_URL;
       else process.env.PLAID_WEBHOOK_URL = previous;
@@ -209,11 +216,16 @@ describe("create-link-token request", () => {
     const { status } = await post({
       products: ["auth"],
       optional_products: [],
+      required_if_supported_products: ["liabilities"],
+      additional_consented_products: ["liabilities"],
     });
     expect(status).toBe(200);
     expect(state.linkTokenCalls).toHaveLength(1);
-    expect(state.linkTokenCalls[0].products).toEqual(["transactions"]);
-    expect(state.linkTokenCalls[0].optional_products).toEqual(["liabilities"]);
+    const request = state.linkTokenCalls[0];
+    expect(request.products).toEqual(["transactions"]);
+    expect(request.optional_products).toEqual(["liabilities"]);
+    expect("required_if_supported_products" in request).toBe(false);
+    expect("additional_consented_products" in request).toBe(false);
   });
 });
 
