@@ -338,7 +338,10 @@ async function summarizeOneSession(
   await storeSummaryUnlessCrisis({ createSummary, markSessionSummarized }, session, {
     summary,
     topics,
-    messageCount: session.message_count,
+    // The number of messages the summary was made from: the session can hold
+    // more than were read (the read is limited, and stops where shared bank
+    // data entered).
+    messageCount: messages.length,
     generatedByModel: SUMMARY_MODEL,
   });
 }
