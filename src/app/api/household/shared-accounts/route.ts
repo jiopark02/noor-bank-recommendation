@@ -41,6 +41,8 @@ export async function GET(request: NextRequest) {
       store: makeSharedAccountsStore(createAdminClient()),
       readOwner: isPlaidConfigured() && isPlaidTokenCryptoConfigured() ? readOwner : null,
       log,
+      // A successful read is routine; failures stay on the gate's warn line.
+      info: (line) => console.info(line),
     })
   );
 }

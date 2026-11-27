@@ -69,7 +69,10 @@ export type SharedAccountsDeps = {
   store: SharedAccountsStore;
   /** null when the bank read cannot be made here: every connection is then unreadable. */
   readOwner: OwnerRead | null;
+  /** Every failure line. */
   log: HouseholdLog;
+  /** The one line of a successful answer; `log` when not given. */
+  info?: HouseholdLog;
   /** When the reads are cancelled; a read not finished by then is unreadable. */
   timeoutMs?: number;
 };
@@ -313,7 +316,7 @@ export async function viewSharedAccounts(
     }
   }
   logLine(
-    log,
+    deps.info ?? log,
     "read",
     ` owners=${owners.length} connections=${connectionCount} unreadable=${unreadableCount} dropped=${dropped}`
   );
