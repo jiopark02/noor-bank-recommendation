@@ -986,7 +986,9 @@ export async function getSessionMessages(
  * Every message of the session created at or after that moment counts as
  * carrying the shared figures, since the session's history returns to the
  * model on each later turn. A reader that must not take those figures along
- * (the summary and fact jobs) reads this first and then passes it to
+ * (the fact job, and the summarize job for chat_summaries; its separate
+ * summary of the part from this moment on reads getSessionSharedSpan
+ * instead) reads this first and then passes it to
  * getSessionMessages as `before`. Read it before the messages, never after:
  * when sharing ends the rows this reads are deleted together with the
  * messages they mark, so the other order could read the messages and then

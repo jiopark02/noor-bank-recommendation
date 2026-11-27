@@ -37,9 +37,9 @@ export const dynamic = "force-dynamic";
  *     top-level user_id already carries it.
  *   - grantee_user_id in share_grants and share_prompt_answers — the other
  *     member's identifier is their personal data.
- *   - owner_user_id and resource_id in chat_shared_sources — the person
- *     who shared a bank connection and that connection's row id identify
- *     another person's data.
+ *   - owner_user_id and resource_id in chat_shared_sources and in
+ *     chat_shared_summary_sources — the person who shared a bank connection
+ *     and that connection's row id identify another person's data.
  *   - account_reauth_codes.code_hash — the keyed hash of a one-time code,
  *     nothing the user entered or can use.
  *   - account_reauth_codes.verified_session_id — an internal session

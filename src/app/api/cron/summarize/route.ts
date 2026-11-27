@@ -298,7 +298,8 @@ async function summarizeOneSession(
   }
 
   // Where another household member's shared bank data entered the session,
-  // if it did. Only what was said before that moment is summarized. It is
+  // if it did. Only what was said before that moment is summarized here;
+  // the rest is summarizeSharedSpan's, while its switch is on. It is
   // read before the messages, never after (see getEarliestSharedSourceTime),
   // and a failed read throws here, before the model is called.
   const sharedFrom = await getEarliestSharedSourceTime(session.id, session.user_id);
@@ -313,7 +314,7 @@ async function summarizeOneSession(
   if (messages.length === 0) {
     if (sharedFrom !== null) {
       // Nothing was said before the shared data entered: the session ends
-      // without a summary.
+      // without a summary in chat_summaries.
       console.log(
         `Summarize cron: session ${session.id} has no message from before ` +
           "shared bank data entered it — marking summarized."

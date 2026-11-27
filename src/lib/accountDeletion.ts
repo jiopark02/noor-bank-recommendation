@@ -361,12 +361,17 @@ export async function deleteAccountForUser(
   // purge trigger on share_grants: for each chat session of the grantee
   // marked with that owner and connection, it deletes the messages created
   // at or after the mark's moment and the mark (chat_shared_sources) itself,
-  // and lowers the session's message_count. So step 2's row deletes also
-  // remove, from the other household member's chat, what this user's shared
-  // banks put there, while their sessions and earlier messages stay. A
+  // and lowers the session's message_count. Where migration
+  // 20261128120000_chat_shared_summaries.sql is applied as well (live
+  // state), it also deletes every summary of the grantee that was made from
+  // that connection (chat_shared_summaries, with its source rows). So step
+  // 2's row deletes also remove, from the other household member's chat and
+  // from those summaries, what this user's shared banks put there, while
+  // their sessions and earlier messages stay. A
   // failure there fails that row's delete, which keeps the row and leaves
   // the connection to the gate in step 3. In this step the user's own
-  // sessions, messages and marks go by their own cascade from public.users.
+  // sessions, messages, marks and summaries of both kinds go by their own
+  // cascade from public.users.
   //
   // A query error is fatal. Deleting 0 rows is NOT: on a retry after step 5
   // failed, the row is already gone and this retry must still reach step 5 to
