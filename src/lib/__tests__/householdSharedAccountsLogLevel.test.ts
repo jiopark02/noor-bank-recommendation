@@ -5,8 +5,9 @@ import { viewSharedAccounts, type SharedAccountsDeps } from "../householdSharedA
 
 /**
  * Which logger each line of GET /api/household/shared-accounts goes to: the
- * line of a successful answer goes to `info`, every failure line to `log`
- * (the route's warn level), and the line's text is the same either way.
+ * answer's own line goes to `info` when every connection was read and to
+ * `log` (the route's warn level) when any was not; every failure line goes to
+ * `log`; the line's text is the same either way.
  */
 
 const USER = "11111111-1111-4111-8111-111111111111";
@@ -69,7 +70,7 @@ describe("shared-accounts log levels", () => {
     expect(info).toEqual([]);
   });
 
-  it("an owner's failed read stays on warn; the answer's own line still goes to info", async () => {
+  it("an owner's failed read stays on warn, and so does the answer's own line, which counts it unreadable", async () => {
     const warn: string[] = [];
     const info: string[] = [];
     const result = await viewSharedAccounts(
@@ -85,10 +86,32 @@ describe("shared-accounts log levels", () => {
       )
     );
     expect(result.status).toBe(200);
-    expect(warn).toEqual(["[household] route=shared-accounts outcome=owner_read_failed reason=unknown"]);
-    expect(info).toEqual([
+    expect(warn).toEqual([
+      "[household] route=shared-accounts outcome=owner_read_failed reason=unknown",
       "[household] route=shared-accounts outcome=read owners=1 connections=1 unreadable=1 dropped=0",
     ]);
+    expect(info).toEqual([]);
+  });
+
+  it("with no bank read available, every connection is unreadable and the answer's line is the warn line", async () => {
+    const warn: string[] = [];
+    const info: string[] = [];
+    const result = await viewSharedAccounts(USER, deps({ readOwner: null }, warn, info));
+    expect(result.status).toBe(200);
+    expect(warn).toEqual([
+      "[household] route=shared-accounts outcome=read owners=1 connections=1 unreadable=1 dropped=0",
+    ]);
+    expect(info).toEqual([]);
+  });
+
+  it("with every connection read (unreadable=0), the answer's line is the info line", async () => {
+    const warn: string[] = [];
+    const info: string[] = [];
+    await viewSharedAccounts(USER, deps({}, warn, info));
+    expect(info).toEqual([
+      "[household] route=shared-accounts outcome=read owners=1 connections=1 unreadable=0 dropped=0",
+    ]);
+    expect(warn).toEqual([]);
   });
 
   it("without info, the successful line goes to log as before", async () => {

@@ -69,9 +69,12 @@ export type SharedAccountsDeps = {
   store: SharedAccountsStore;
   /** null when the bank read cannot be made here: every connection is then unreadable. */
   readOwner: OwnerRead | null;
-  /** Every failure line. */
+  /**
+   * Every failure line, and the answer's own line when any connection in it
+   * could not be read (a missing bank-read configuration shows only there).
+   */
   log: HouseholdLog;
-  /** The one line of a successful answer; `log` when not given. */
+  /** The answer's own line when every connection in it was read; `log` when not given. */
   info?: HouseholdLog;
   /** When the reads are cancelled; a read not finished by then is unreadable. */
   timeoutMs?: number;
@@ -315,8 +318,10 @@ export async function viewSharedAccounts(
       if (!owners[i].connections[k].readable) unreadableCount += 1;
     }
   }
+  // An answer that holds an unreadable connection is a partial failure, so its
+  // line keeps the failure level; a fully read answer is routine.
   logLine(
-    deps.info ?? log,
+    unreadableCount > 0 ? log : deps.info ?? log,
     "read",
     ` owners=${owners.length} connections=${connectionCount} unreadable=${unreadableCount} dropped=${dropped}`
   );
