@@ -67,9 +67,9 @@ export type ExportSection = {
  * read by the caller's address keeps that column: it is the address the
  * invite was made for. A column that names another person by id is left out
  * as well (grantee_user_id on the share sections, owner_user_id on
- * chat_shared_sources), together with the id of a row that belongs to that
- * person (resource_id on chat_shared_sources), and so is a stored hash
- * (code_hash on account_reauth_codes).
+ * chat_shared_sources and chat_shared_summary_sources), together with the id
+ * of a row that belongs to that person (resource_id on the same two), and so
+ * is a stored hash (code_hash on account_reauth_codes).
  */
 export const EXPORT_SECTIONS: readonly ExportSection[] = [
   {
@@ -85,7 +85,7 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     key: "chat_sessions",
     table: "chat_sessions",
     columns:
-      "id, title, started_at, ended_at, last_message_at, message_count, summarized, facts_extracted, summary_failures, summary_next_attempt_at, summary_outcome, summary_given_up_reason, summary_given_up_at, facts_failures, facts_next_attempt_at, facts_outcome, facts_given_up_reason, facts_given_up_at, created_at, updated_at",
+      "id, title, started_at, ended_at, last_message_at, message_count, summarized, facts_extracted, summary_failures, summary_next_attempt_at, summary_outcome, summary_given_up_reason, summary_given_up_at, facts_failures, facts_next_attempt_at, facts_outcome, facts_given_up_reason, facts_given_up_at, created_at, updated_at, shared_summarized, shared_summary_failures, shared_summary_next_attempt_at, shared_summary_outcome, shared_summary_given_up_reason, shared_summary_given_up_at",
     filterColumn: "user_id",
     orderColumn: "id",
     orderKeyType: "uuid",
@@ -173,6 +173,27 @@ export const EXPORT_SECTIONS: readonly ExportSection[] = [
     key: "chat_shared_sources",
     table: "chat_shared_sources",
     columns: "id, session_id, resource_type, first_shared_at, created_at",
+    filterColumn: "user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // The summaries kept of the part of the user's chat sessions that carried
+  // another household member's shared bank data, read by user_id.
+  {
+    key: "chat_shared_summaries",
+    table: "chat_shared_summaries",
+    columns: "id, session_id, summary, topics, message_count, generated_by_model, created_at",
+    filterColumn: "user_id",
+    orderColumn: "id",
+    orderKeyType: "uuid",
+  },
+  // Which of those summaries was made from a shared connection, one row per
+  // summary and connection, read by user_id. owner_user_id and resource_id
+  // are not exported, for the reason given at chat_shared_sources.
+  {
+    key: "chat_shared_summary_sources",
+    table: "chat_shared_summary_sources",
+    columns: "id, summary_id, resource_type, created_at",
     filterColumn: "user_id",
     orderColumn: "id",
     orderKeyType: "uuid",
