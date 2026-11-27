@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Archivo } from 'next/font/google';
+import localFont from 'next/font/local';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
@@ -12,9 +12,19 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 // puts Helvetica Neue ahead of it and only falls through to Archivo where
 // Helvetica Neue is absent (Windows/Android). --archivo is spliced into that
 // exact position in --font below.
-const archivo = Archivo({
-  subsets: ['latin'],
-  weight: ['400', '500', '700'],
+//
+// The file is the Latin subset Google Fonts serves for Archivo (a variable
+// font), kept in the repository so the build fetches nothing. Each weight the
+// page asked Google for is declared as its own face on that one file, as
+// Google's stylesheet declares it. Licence: src/fonts/Archivo-OFL.txt.
+// next/font takes literal arguments only, so the path is repeated.
+const archivo = localFont({
+  src: [
+    { path: '../../fonts/archivo-latin.woff2', weight: '400', style: 'normal' },
+    { path: '../../fonts/archivo-latin.woff2', weight: '500', style: 'normal' },
+    { path: '../../fonts/archivo-latin.woff2', weight: '700', style: 'normal' },
+  ],
+  declarations: [{ prop: 'font-stretch', value: '100%' }],
   display: 'swap',
   variable: '--archivo',
 });

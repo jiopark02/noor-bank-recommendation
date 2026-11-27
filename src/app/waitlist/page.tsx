@@ -2,11 +2,25 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Manrope } from 'next/font/google';
+import localFont from 'next/font/local';
 import { motion, AnimatePresence } from 'framer-motion';
 import { validateEmail } from '@/lib/validation';
 
-const manrope = Manrope({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'] });
+// The Latin subset Google Fonts serves for Manrope (a variable font), kept in
+// the repository so the build fetches nothing. Each weight the page asked
+// Google for is declared as its own face on that one file, as Google's
+// stylesheet declares it. Licence: src/fonts/Manrope-OFL.txt.
+// next/font takes literal arguments only, so the path is repeated.
+const manrope = localFont({
+  src: [
+    { path: '../../fonts/manrope-latin.woff2', weight: '400', style: 'normal' },
+    { path: '../../fonts/manrope-latin.woff2', weight: '500', style: 'normal' },
+    { path: '../../fonts/manrope-latin.woff2', weight: '600', style: 'normal' },
+    { path: '../../fonts/manrope-latin.woff2', weight: '700', style: 'normal' },
+    { path: '../../fonts/manrope-latin.woff2', weight: '800', style: 'normal' },
+  ],
+  display: 'swap',
+});
 
 type Status = 'idle' | 'loading' | 'success' | 'error' | 'duplicate';
 
