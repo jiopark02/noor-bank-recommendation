@@ -30,17 +30,6 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* The rule assumes a Pages Router page, where a font link loads for that
-            one page only. This is the App Router root layout, which wraps every
-            page, so the stylesheet loads everywhere. The browser fetches it; the
-            build does not. */}
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
       </head>
       <body className="antialiased">
         <LanguageProvider>

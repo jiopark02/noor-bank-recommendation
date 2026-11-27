@@ -4,16 +4,17 @@ import { describe, expect, it } from "vitest";
 import { SRC, codeBySourceFile } from "./sourceProbe";
 
 /**
- * The build fetches no font. `next/font/google` downloads its stylesheet and
- * files from Google while building and fails the build when that fails, so no
- * application file imports it. Fonts loaded with `next/font/local` name files
- * that exist in the repository, each with its licence beside it.
+ * The build fetches no font. Next's Google font loader downloads its
+ * stylesheet and files from Google while building and fails the build when
+ * that fails, so no application file imports it. Fonts loaded with
+ * `next/font/local` name files that exist in the repository, each with its
+ * licence beside it.
  */
 
 const FONT_PATH = /path:\s*'([^']+\.woff2)'/g;
 
 describe("fonts are local to the repository", () => {
-  it("no application file imports next/font/google", () => {
+  it("no application file imports Next's Google font loader", () => {
     const offenders: string[] = [];
     codeBySourceFile().forEach((code, file) => {
       if (/["']next\/font\/google["']/.test(code)) offenders.push(file);
