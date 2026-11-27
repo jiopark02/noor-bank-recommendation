@@ -9,6 +9,12 @@ import {
   getSummaryBySessionId,
   createSummary,
   markSessionSummarized,
+  isSharedSummaryEnabled,
+  getSessionsNeedingSharedSummary,
+  getSessionSharedSpan,
+  hasSharedSummary,
+  saveSharedSummary,
+  markSharedSummaryDone,
   writeCronBackoff,
   writeCronCountedFailure,
   writeCronGiveUp,
@@ -33,6 +39,7 @@ import { SESSION_CANDIDATE_LIMIT } from "@/lib/cronRetryBound";
 import {
   cronRunItems,
   runMemoryCronBatch,
+  type MemoryCronBatchStats,
   type StageTracker,
 } from "@/lib/memoryCronBatch";
 import {
@@ -224,6 +231,15 @@ Where tags are 2-5 short lowercase topic tags (e.g. "TOPICS: budgeting, chase_ba
 
 Output only the summary paragraph followed by the single TOPICS line. Nothing else.`;
 
+// The one paragraph the summary of a session's shared-data part adds to the
+// prompt above: that part of the conversation was held with bank data another
+// household member shares in front of the model.
+const SHARED_SUMMARY_PARAGRAPH = `Do not copy the other household member's account balances or amounts into the summary. Keep what the two of them decided, their plans and goals, and what the user said about themselves.`;
+
+// The prompt for that summary only. summarizeOneSession keeps
+// SUMMARY_SYSTEM_PROMPT as it is.
+const SHARED_SUMMARY_SYSTEM_PROMPT = `${SUMMARY_SYSTEM_PROMPT}\n\n${SHARED_SUMMARY_PARAGRAPH}`;
+
 // Serialized under the length budget in cronInputBudget.ts: a long message
 // loses its middle, and the oldest messages are left out first.
 function buildConversationText(messages: DbChatMessage[]): CronConversation {
@@ -343,6 +359,149 @@ async function summarizeOneSession(
     // data entered).
     messageCount: messages.length,
     generatedByModel: SUMMARY_MODEL,
+  });
+}
+
+/**
+ * Summarizes the part of one session from the moment another household
+ * member's shared bank data entered it, and marks the session done for that
+ * summary. It is the part summarizeOneSession leaves out, kept apart from
+ * chat_summaries and stored with the connections it was made from, so it is
+ * deleted when the sharing of any of them ends. Stages are recorded on
+ * `tracker` as in summarizeOneSession.
+ *
+ * The marks are read before the messages, never after: when sharing ends the
+ * marks are deleted together with the messages they mark. The pairs read
+ * here go to the save, which stores nothing unless each is still marked. A
+ * summary refused that way is not a failure: the messages it was made from
+ * are gone, and the session is marked done.
+ */
+async function summarizeSharedSpan(
+  apiKey: string,
+  session: ChatSession,
+  tracker: StageTracker
+): Promise<void> {
+  // Already stored when an earlier run's completion write failed after
+  // storing it: mark the session done without the model.
+  if (await hasSharedSummary(session.id, session.user_id)) {
+    await markSharedSummaryDone(session.id, session.user_id);
+    return;
+  }
+
+  const span = await getSessionSharedSpan(session.id, session.user_id);
+  if (span === null) {
+    // The marks were deleted since the session was selected.
+    await markSharedSummaryDone(session.id, session.user_id);
+    return;
+  }
+
+  const recentShared = await getSessionMessages(session.id, session.user_id, {
+    limit: MAX_MESSAGES_PER_SUMMARY,
+    order: "desc",
+    from: span.from,
+  });
+  const sharedMessages = recentShared.reverse();
+  if (sharedMessages.length === 0) {
+    await markSharedSummaryDone(session.id, session.user_id);
+    return;
+  }
+
+  const conversation = buildConversationText(sharedMessages);
+  logCronInputBudget("cron_summarize", conversation);
+  const conversationText = conversation.text;
+
+  tracker.stage = "call";
+  const rawOutput = await callOpenRouterForSummary(
+    apiKey,
+    SHARED_SUMMARY_SYSTEM_PROMPT,
+    conversationText,
+    { userId: session.user_id, sessionId: session.id },
+    tracker
+  );
+
+  tracker.stage = "interpret";
+  if (!rawOutput.trim()) {
+    throw Object.assign(
+      new Error(`Summarization model returned empty output for session ${session.id}`),
+      { code: "model_output_empty" }
+    );
+  }
+
+  const { summary, topics } = parseSummaryOutput(rawOutput);
+  const sources = span.sources;
+  tracker.stage = "store";
+  await storeSummaryUnlessCrisis(
+    {
+      createSummary: async (sessionId, userId, input) => {
+        const outcome = await saveSharedSummary(
+          sessionId,
+          userId,
+          {
+            summary: input.summary,
+            topics: input.topics,
+            messageCount: sharedMessages.length,
+            generatedByModel: input.generatedByModel,
+          },
+          sources
+        );
+        if (outcome === "source_gone") {
+          console.info(
+            "[memory-cron] route=cron_summarize step=shared_source_gone session=%s",
+            sessionId
+          );
+        }
+        await markSharedSummaryDone(sessionId, userId);
+      },
+      markSessionSummarized: markSharedSummaryDone,
+    },
+    session,
+    {
+      summary,
+      topics,
+      messageCount: sharedMessages.length,
+      generatedByModel: SUMMARY_MODEL,
+    }
+  );
+}
+
+/**
+ * The batch of summaries of shared-data parts: its own candidates and its
+ * own state columns, on the run's clock, so it only uses the time the batch
+ * before it left. `onCandidatesRead` is called once the candidate read has
+ * returned.
+ */
+async function runSharedSummaryBatch(
+  apiKey: string,
+  runStartedAtMs: number,
+  onCandidatesRead: () => void
+): Promise<MemoryCronBatchStats> {
+  return runMemoryCronBatch<ChatSession>({
+    route: "cron_summarize",
+    now: Date.now,
+    runStartedAtMs,
+    candidateLimit: SESSION_CANDIDATE_LIMIT,
+    batchLimit: SUMMARIZE_BATCH_LIMIT,
+    hasBudget: cronRunHasBudgetForAnotherCall,
+    fetchCandidates: async (limit, nowIso) => {
+      const candidates = await getSessionsNeedingSharedSummary(limit, nowIso);
+      onCandidatesRead();
+      return candidates;
+    },
+    failuresOf: (s) => s.shared_summary_failures,
+    processSession: (s, tracker) => summarizeSharedSpan(apiKey, s, tracker),
+    onSessionError: (s, error) => {
+      console.error(
+        "[memory-cron] route=cron_summarize step=shared_session session=%s code=%s",
+        s.id,
+        errorCodeForLog(error)
+      );
+    },
+    writeBackoff: (s, next) =>
+      writeCronBackoff("shared_summary", s.id, s.user_id, next),
+    writeCountedFailure: (s, before, next) =>
+      writeCronCountedFailure("shared_summary", s.id, s.user_id, before, next),
+    writeGiveUp: (s, before, reason, at) =>
+      writeCronGiveUp("shared_summary", s.id, s.user_id, before, reason, at),
   });
 }
 
@@ -474,7 +633,43 @@ export async function GET(request: NextRequest) {
     infraError = (infraError ? infraError + "; " : "") + `${step} code=${code}`;
   }
 
-  console.info("Summarize cron complete:", stats);
+  // The summaries of sessions' shared-data parts, only while the switch is
+  // on: off, nothing below runs, no candidate is read and the run's record
+  // carries no count for them. It runs after the batch above, on the same
+  // clock, and not at all when that batch stopped the run.
+  const sharedStats = isSharedSummaryEnabled()
+    ? {
+        sharedSummarized: 0,
+        sharedFailed: 0,
+        sharedGivenUp: 0,
+        sharedStateWriteFailed: 0,
+        sharedDeferred: 0,
+        sharedStopped: false,
+      }
+    : null;
+  if (sharedStats !== null && !stats.stopped) {
+    let sharedCandidatesRead = false;
+    try {
+      const shared = await runSharedSummaryBatch(apiKey, startedAt.getTime(), () => {
+        sharedCandidatesRead = true;
+      });
+      const sharedItems = cronRunItems(shared);
+      sharedStats.sharedSummarized = sharedItems.itemsProcessed;
+      sharedStats.sharedFailed = sharedItems.itemsFailed;
+      sharedStats.sharedGivenUp = shared.givenUp;
+      sharedStats.sharedStateWriteFailed = shared.stateWriteFailed;
+      sharedStats.sharedDeferred = shared.deferred;
+      sharedStats.sharedStopped = shared.stopped;
+    } catch (error) {
+      const step = sharedCandidatesRead ? "shared_batch" : "shared_candidates";
+      const code = errorCodeForLog(error);
+      console.error("[memory-cron] route=cron_summarize step=%s code=%s", step, code);
+      infraError = (infraError ? infraError + "; " : "") + `${step} code=${code}`;
+    }
+  }
+  const runStats = sharedStats === null ? stats : { ...stats, ...sharedStats };
+
+  console.info("Summarize cron complete:", runStats);
 
   // Record the run in cron_runs (isolated, so a failed record cannot break the
   // run's work or its response).
@@ -484,9 +679,11 @@ export async function GET(request: NextRequest) {
     await recordCronRun({
       jobName: "summarize",
       startedAt,
-      itemsProcessed: stats.closed + stats.summarized,
-      itemsFailed: stats.closeFailed + stats.summarizeFailed,
-      stats,
+      itemsProcessed:
+        stats.closed + stats.summarized + (sharedStats?.sharedSummarized ?? 0),
+      itemsFailed:
+        stats.closeFailed + stats.summarizeFailed + (sharedStats?.sharedFailed ?? 0),
+      stats: runStats,
       error: infraError,
       forceFailed: infraError !== null,
     });
@@ -499,6 +696,6 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    ...stats,
+    ...runStats,
   });
 }

@@ -207,6 +207,118 @@ describe("summarizeOneSession stages", () => {
   });
 });
 
+/**
+ * The summarize route also summarizes the part of a session from the moment
+ * shared bank data entered it, apart from the summary above: its own
+ * function, its own prompt, its own batch and state columns, and only while
+ * the switch is on. The extract-facts route has no such part: it still reads
+ * only what was said before that moment.
+ */
+describe("summarize route: the summary of a session's shared-data part", () => {
+  const body = functionBody(SUMMARIZE, "summarizeSharedSpan");
+  const batchBody = functionBody(SUMMARIZE, "runSharedSummaryBatch");
+  const getBody = functionBody(SUMMARIZE, "GET");
+  const ordinaryBody = functionBody(SUMMARIZE, "summarizeOneSession");
+
+  const SPAN_READ = "const span = await getSessionSharedSpan(session.id, session.user_id);";
+  const MESSAGE_READ =
+    "const recentShared = await getSessionMessages(session.id, session.user_id, {\n    limit: MAX_MESSAGES_PER_SUMMARY,\n    order: \"desc\",\n    from: span.from,\n  });\n  const sharedMessages = recentShared.reverse();";
+
+  it("reads the marks once, before the messages and before the model call, and hands their start to the message read unchanged, as its lower bound", () => {
+    expect(occurrences(body, "getSessionSharedSpan(")).toBe(1);
+    expect(occurrences(body, "await getSessionMessages(")).toBe(1);
+    const spanAt = body.indexOf(SPAN_READ);
+    const messagesAt = body.indexOf(MESSAGE_READ);
+    const callAt = body.indexOf('tracker.stage = "call";');
+    expect(spanAt).toBeGreaterThan(-1);
+    expect(messagesAt).toBeGreaterThan(spanAt);
+    expect(callAt).toBeGreaterThan(messagesAt);
+    expect(body).not.toContain("before:");
+    expect(body).not.toMatch(/new Date\(\s*span/);
+    expect(body).not.toContain("getEarliestSharedSourceTime(");
+  });
+
+  it("builds the model's input from those messages only, with its own prompt", () => {
+    expect(occurrences(body, "buildConversationText(sharedMessages)")).toBe(1);
+    expect(occurrences(body, "buildConversationText(")).toBe(1);
+    expect(body).toContain(
+      "callOpenRouterForSummary(\n    apiKey,\n    SHARED_SUMMARY_SYSTEM_PROMPT,\n    conversationText,"
+    );
+    expect(occurrences(body, "conversationText")).toBe(2);
+    expect(ordinaryBody).not.toContain("SHARED_SUMMARY_SYSTEM_PROMPT");
+    expect(SUMMARIZE).toContain(
+      "const SHARED_SUMMARY_SYSTEM_PROMPT = `${SUMMARY_SYSTEM_PROMPT}\\n\\n${SHARED_SUMMARY_PARAGRAPH}`;"
+    );
+  });
+
+  it("marks done without the model a session already holding the summary, with no mark, or with no message in that part", () => {
+    const storedAt = body.indexOf(
+      "if (await hasSharedSummary(session.id, session.user_id)) {\n    await markSharedSummaryDone(session.id, session.user_id);\n    return;\n  }"
+    );
+    const noMarkAt = body.indexOf("if (span === null) {");
+    const emptyAt = body.indexOf("if (sharedMessages.length === 0) {");
+    const callAt = body.indexOf('tracker.stage = "call";');
+    expect(storedAt).toBeGreaterThan(-1);
+    expect(body.indexOf(SPAN_READ)).toBeGreaterThan(storedAt);
+    expect(noMarkAt).toBeGreaterThan(storedAt);
+    expect(emptyAt).toBeGreaterThan(noMarkAt);
+    expect(callAt).toBeGreaterThan(emptyAt);
+  });
+
+  it("enters each stage once, and stores through the crisis gate with its own store and completion mark", () => {
+    for (const stage of ["call", "interpret", "store"]) {
+      expect(occurrences(body, `tracker.stage = "${stage}";`)).toBe(1);
+    }
+    expect(body).toContain('  tracker.stage = "store";\n  await storeSummaryUnlessCrisis(');
+    expect(occurrences(body, "await saveSharedSummary(")).toBe(1);
+    expect(body.indexOf("await saveSharedSummary(")).toBeGreaterThan(
+      body.indexOf("await storeSummaryUnlessCrisis(")
+    );
+    expect(body).toContain("markSessionSummarized: markSharedSummaryDone,");
+    expect(body).toContain("messageCount: sharedMessages.length,");
+    // It never writes chat_summaries or the ordinary completion flag.
+    expect(body).not.toContain("createSummary,");
+    expect(body).not.toContain("await createSummary(");
+    expect(body).not.toContain("markSessionSummarized(");
+  });
+
+  it("runs its own batch with its own candidates and state columns, on the run's clock", () => {
+    expect(occurrences(batchBody, "runMemoryCronBatch<ChatSession>({")).toBe(1);
+    expect(batchBody).toContain("getSessionsNeedingSharedSummary(limit, nowIso)");
+    expect(batchBody).toContain("    failuresOf: (s) => s.shared_summary_failures,\n");
+    expect(batchBody).toContain('writeCronBackoff("shared_summary", s.id, s.user_id, next)');
+    expect(batchBody).toContain(
+      'writeCronCountedFailure("shared_summary", s.id, s.user_id, before, next)'
+    );
+    expect(batchBody).toContain(
+      'writeCronGiveUp("shared_summary", s.id, s.user_id, before, reason, at)'
+    );
+    expect(batchBody).toContain("    runStartedAtMs,\n");
+    expect(batchBody).toContain("    hasBudget: cronRunHasBudgetForAnotherCall,\n");
+    expect(batchBody).not.toContain('("summary"');
+    expect(batchBody).not.toContain('("facts"');
+    expect(batchBody).not.toContain("s.summary_failures");
+  });
+
+  it("runs that batch only while the switch is on, after the ordinary batch", () => {
+    expect(occurrences(getBody, "isSharedSummaryEnabled()")).toBe(1);
+    expect(occurrences(getBody, "runSharedSummaryBatch(")).toBe(1);
+    const switchAt = getBody.indexOf("const sharedStats = isSharedSummaryEnabled()");
+    const guardAt = getBody.indexOf("if (sharedStats !== null && !stats.stopped) {");
+    const batchAt = getBody.indexOf("await runSharedSummaryBatch(");
+    const ordinaryAt = getBody.indexOf("await runMemoryCronBatch<ChatSession>({");
+    expect(switchAt).toBeGreaterThan(ordinaryAt);
+    expect(guardAt).toBeGreaterThan(switchAt);
+    expect(batchAt).toBeGreaterThan(guardAt);
+    expect(getBody).not.toContain('("shared_summary"');
+  });
+
+  it("extract-facts has no such part: no lower bound, none of these names", () => {
+    expect(EXTRACT).not.toContain("from:");
+    expect(EXTRACT).not.toMatch(/shared_summar|SharedSummar|getSessionSharedSpan|SharedSpan/);
+  });
+});
+
 describe("extractOneSession stages and completion", () => {
   const body = functionBody(EXTRACT, "extractOneSession");
 
