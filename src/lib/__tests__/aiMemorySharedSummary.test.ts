@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * save through the database function, the cron's candidate read and state
  * writes, the read of summaries a turn may carry, and the prompt block. The
  * database client is a fake that records every builder call and answers from
- * a queue; nothing here runs SQL.
+ * a queue, cutting an array answer to the query's .limit(n) as the database
+ * would; nothing here runs SQL.
  *
  * Mutations and the test each one turns red:
  *   the switch trimmed, case-folded, or on for a value other than "on"   -> W1
@@ -43,6 +44,10 @@ vi.mock("@/lib/supabase", () => ({
   isSupabaseAdminConfigured: () => true,
   createAdminClient: () => {
     const builder: Record<string, unknown> = {};
+    // The last .limit(n) of the query being built: an array answer is cut to
+    // its first n rows, as the database would. Cleared by .from() and when
+    // the query is awaited.
+    let pendingLimit: number | null = null;
     for (const method of [
       "from",
       "select",
@@ -58,12 +63,20 @@ vi.mock("@/lib/supabase", () => ({
     ]) {
       builder[method] = (...args: unknown[]) => {
         calls.push([method, args]);
+        if (method === "from") pendingLimit = null;
+        if (method === "limit") pendingLimit = args[0] as number;
         return builder;
       };
     }
     builder.then = (resolve: (value: { data: unknown; error: unknown }) => unknown) => {
       const next = results.shift() ?? { data: [], error: null };
-      return Promise.resolve(next).then(resolve);
+      const cut = pendingLimit;
+      pendingLimit = null;
+      const answer =
+        cut !== null && Array.isArray(next.data)
+          ? { ...next, data: next.data.slice(0, cut) }
+          : next;
+      return Promise.resolve(answer).then(resolve);
     };
     builder.rpc = (name: string, args: Record<string, unknown>) => {
       rpcCalls.push({ name, args });
@@ -468,7 +481,9 @@ describe("getSharedSummariesForSources", () => {
 
   it("F3 the limit counts summaries that passed the filter, not candidates read", async () => {
     // The two newest are left out by the filter; the limit of three is still
-    // filled from the ones after them.
+    // filled from the ones after them. Every row fits the candidate read, and
+    // the fake cuts the answer to the query's .limit(n), so a candidate read
+    // bounded by the turn's limit instead would see only the first three.
     const rows = [1, 2, 3, 4, 5, 6].map(summary);
     results = [
       { data: rows, error: null },
@@ -486,6 +501,8 @@ describe("getSharedSummariesForSources", () => {
     ];
     expect(SHARED_SUMMARIES_LIMIT).toBe(3);
     expect(SHARED_SUMMARY_CANDIDATE_LIMIT).toBeGreaterThan(SHARED_SUMMARIES_LIMIT);
+    expect(rows.length).toBeLessThanOrEqual(SHARED_SUMMARY_CANDIDATE_LIMIT);
+    expect(rows.length).toBeGreaterThan(SHARED_SUMMARIES_LIMIT);
     const kept = await getSharedSummariesForSources("u1", turn);
     expect(kept.map((s) => s.summary)).toEqual(["summary 3", "summary 4", "summary 5"]);
   });
