@@ -16,6 +16,7 @@ import {
   waitMs,
 } from "@/lib/sessionFlow";
 import { clearLocalAuthState } from "@/lib/validation";
+import { renderInlineBold } from "@/lib/inlineBold";
 
 const FONT = "'SF Pro Display', 'Helvetica Neue', -apple-system, Inter, sans-serif";
 
@@ -39,18 +40,13 @@ function formatContent(content: string): React.ReactNode {
   const lines = content.replace(/\\\$/g, "$").split("\n");
   return lines.map((line, i) => {
     if (line.startsWith("- ") || line.startsWith("• ")) {
-      return <span key={i} className="block ml-3 my-0.5">• {line.slice(2)}</span>;
+      return <span key={i} className="block ml-3 my-0.5">• {renderInlineBold(line.slice(2))}</span>;
     }
     if (/^(\d+)\.\s/.test(line)) {
-      return <span key={i} className="block ml-3 my-0.5">{line}</span>;
+      return <span key={i} className="block ml-3 my-0.5">{renderInlineBold(line)}</span>;
     }
     if (line.includes("**")) {
-      const parts = line.split(/\*\*(.*?)\*\*/g);
-      return (
-        <span key={i} className="block">
-          {parts.map((p, j) => j % 2 === 1 ? <strong key={j}>{p}</strong> : p)}
-        </span>
-      );
+      return <span key={i} className="block">{renderInlineBold(line)}</span>;
     }
     return <span key={i} className={i > 0 ? "block" : undefined}>{line}</span>;
   });
