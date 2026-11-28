@@ -47,11 +47,18 @@ function hasSessionOnlyMarker(): boolean {
   return readDocumentCookies().some(({ name }) => name === SESSION_ONLY_COOKIE);
 }
 
-// On an HTTPS page the auth cookies are written Secure. Over plain HTTP
+// On an HTTPS page every cookie this file writes is Secure: the auth cookies,
+// the SESSION_ONLY_COOKIE marker and the direct removals. Over plain HTTP
 // (local development) they are not, since a browser may drop a Secure cookie
 // set from a page that is not HTTPS.
 function isSecurePage(): boolean {
   return typeof window !== "undefined" && window.location.protocol === "https:";
+}
+
+// The marker and the manual removals follow the auth cookies' rule: Secure on
+// an HTTPS page, nothing added over plain HTTP.
+function withPageSecure(options: CookieToSet["options"]): CookieToSet["options"] {
+  return isSecurePage() ? { ...options, secure: true } : options;
 }
 
 function writeDocumentCookies(cookies: CookieToSet[]): void {
@@ -85,15 +92,23 @@ export const supabase =
 export function setSessionPersistence(keepSignedIn: boolean): void {
   if (typeof document === "undefined") return;
   document.cookie = keepSignedIn
-    ? serializeCookieHeader(SESSION_ONLY_COOKIE, "", {
-        path: "/",
-        sameSite: "lax",
-        maxAge: 0,
-      })
-    : serializeCookieHeader(SESSION_ONLY_COOKIE, "1", {
-        path: "/",
-        sameSite: "lax",
-      });
+    ? serializeCookieHeader(
+        SESSION_ONLY_COOKIE,
+        "",
+        withPageSecure({
+          path: "/",
+          sameSite: "lax",
+          maxAge: 0,
+        })
+      )
+    : serializeCookieHeader(
+        SESSION_ONLY_COOKIE,
+        "1",
+        withPageSecure({
+          path: "/",
+          sameSite: "lax",
+        })
+      );
 }
 
 /**
@@ -109,11 +124,15 @@ export function removeSupabaseAuthCookies(): void {
   readDocumentCookies()
     .filter(({ name }) => isSupabaseAuthCookieName(name, storageKey))
     .forEach(({ name }) => {
-      document.cookie = serializeCookieHeader(name, "", {
-        path: "/",
-        sameSite: "lax",
-        maxAge: 0,
-      });
+      document.cookie = serializeCookieHeader(
+        name,
+        "",
+        withPageSecure({
+          path: "/",
+          sameSite: "lax",
+          maxAge: 0,
+        })
+      );
     });
 }
 
