@@ -454,7 +454,7 @@ describe("summarize cron: the summary of a session's shared-data part", () => {
     expect(db.sharedSaved).toEqual([]);
   });
 
-  it("S7 a save that stays busy is retried on a later run: not marked done, not counted, only delayed", async () => {
+  it("S7 a save still busy on its second attempt fails at the store stage: not marked done, no counted failure, delayed to a later run, and the run starts no further shared session", async () => {
     process.env.AI_SHARED_SUMMARY_STATE = "on";
     db.sharedCandidates = [sharedSession()];
     db.saveAnswer = "busy";
