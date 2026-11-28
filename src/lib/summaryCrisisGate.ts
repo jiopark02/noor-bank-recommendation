@@ -9,22 +9,20 @@
  * session, so any line here could tie crisis content to a user.
  *
  * The dependencies are passed in, so the order is held by tests that execute
- * it rather than by reading the route.
+ * it rather than by reading the route. The cron passes a second pair for the
+ * summary of a session's shared-data part (its own store and its own
+ * completion mark), so that summary goes through the same check.
  */
 
 import { detectCrisisSignal } from "@/lib/crisisSignals";
-import type {
-  ChatSession,
-  ChatSummary,
-  NewChatSummary,
-} from "@/lib/aiMemory";
+import type { ChatSession, NewChatSummary } from "@/lib/aiMemory";
 
 export interface SummaryStoreDeps {
   createSummary: (
     sessionId: string,
     userId: string,
     input: NewChatSummary
-  ) => Promise<ChatSummary>;
+  ) => Promise<unknown>;
   markSessionSummarized: (sessionId: string, userId: string) => Promise<void>;
 }
 

@@ -24,6 +24,11 @@ import { stripComments } from "./sourceProbe";
  *   an error a route throws for an unusable answer, or for failed
  *   fact writes, left without its fixed code or given another one     -> L6, L3
  *   an aiMemory log line given an error's message or the error        -> L5
+ *   the shared summary's session line given an error's message        -> L7 session
+ *   the shared batch's catch logging an error's message as its code   -> L7 candidates, L7 batch
+ *   cron_runs.error written from an error's message for a rejection
+ *   of the shared batch                                               -> L7 batch
+ *   the shared candidates read while the switch is off                -> L7 off
  */
 
 const SENTINEL = "sentinel-row-4f2a balance $9,876.54 fact text";
@@ -41,9 +46,15 @@ type Session = {
   message_count: number;
   summary_failures?: number;
   facts_failures?: number;
+  shared_summary_failures?: number;
 };
 
 const db = {
+  // The summaries of sessions' shared-data parts: off unless a test turns
+  // the switch on.
+  sharedEnabled: false,
+  sharedCandidates: [] as Session[] | Error,
+  sharedSave: null as Error | null,
   toClose: [] as Session[] | Error,
   endSession: null as Error | null,
   summaryCandidates: [] as Session[] | Error,
@@ -82,6 +93,21 @@ vi.mock("@/lib/aiMemory", () => ({
   ],
   createSummary: async () => ({ id: "summary-1" }),
   markSessionSummarized: async () => undefined,
+  isSharedSummaryEnabled: () => db.sharedEnabled,
+  getSessionsNeedingSharedSummary: async () => {
+    if (db.sharedCandidates instanceof Error) throw db.sharedCandidates;
+    return db.sharedCandidates;
+  },
+  hasSharedSummary: async () => false,
+  getSessionSharedSpan: async () => ({
+    from: "2026-11-01T00:00:00Z",
+    sources: [{ ownerUserId: "owner-1", connectionId: 7001 }],
+  }),
+  saveSharedSummary: async () => {
+    if (db.sharedSave) throw db.sharedSave;
+    return "saved";
+  },
+  markSharedSummaryDone: async () => undefined,
   markFactsExtracted: async () => undefined,
   getUserFacts: async () => db.facts,
   saveUserFact: async () => {
@@ -146,6 +172,9 @@ const spies: Record<"error" | "warn" | "info" | "log", ReturnType<typeof vi.spyO
 const savedEnv = { secret: process.env.CRON_SECRET, key: process.env.OPENROUTER_API_KEY };
 
 beforeEach(() => {
+  db.sharedEnabled = false;
+  db.sharedCandidates = [];
+  db.sharedSave = null;
   db.toClose = [];
   db.endSession = null;
   db.summaryCandidates = [];
@@ -385,6 +414,83 @@ describe("memory cron error records", () => {
       expect(db.recorded[0].forceFailed).toBe(true);
       expectNothingLeaked();
     });
+  });
+});
+
+describe("memory cron error records: the summary of a session's shared-data part", () => {
+  it("L7 summarize: a provider error and a failed save of a shared summary log the session and a code", async () => {
+    db.sharedEnabled = true;
+    db.sharedCandidates = [
+      { id: "s-shr", user_id: "u-1", message_count: 2, shared_summary_failures: 0 },
+    ];
+    provider.answers = [{ status: 500, body: `{"error":{"message":"${SENTINEL}"}}` }];
+
+    expect(await run("summarize")).toBe(200);
+    expect(lines("error")).toEqual([
+      "[memory-cron] route=cron_summarize step=shared_session session=s-shr code=http_500",
+    ]);
+    expect(provider.cancelled).toEqual([true]);
+    expect(db.recorded).toHaveLength(1);
+    expect(db.recorded[0].error).toBeNull();
+    expectNothingLeaked();
+
+    // The save fails after the model answered: its error carries SENTINEL in
+    // its message, details and cause.
+    db.recorded = [];
+    spies.error.mockClear();
+    db.sharedSave = failing("40P01");
+    provider.answers = [
+      { status: 200, body: modelAnswer("The user is saving for a deposit.\nTOPICS: saving") },
+    ];
+    expect(await run("summarize")).toBe(200);
+    expect(lines("error")).toEqual([
+      "[memory-cron] route=cron_summarize step=shared_session session=s-shr code=40P01",
+    ]);
+    expect(db.recorded[0].error).toBeNull();
+    expectNothingLeaked();
+  });
+
+  it("L7 summarize: a failed read of the shared candidates gives step and code, in the log and in cron_runs.error", async () => {
+    db.sharedEnabled = true;
+    db.sharedCandidates = failing("57014");
+
+    expect(await run("summarize")).toBe(200);
+    expect(lines("error")).toEqual([
+      "[memory-cron] route=cron_summarize step=shared_candidates code=57014",
+    ]);
+    expect(db.recorded[0].error).toBe("shared_candidates code=57014");
+    expect(db.recorded[0].forceFailed).toBe(true);
+    expectNothingLeaked();
+  });
+
+  it("L7 summarize: a dependency that throws after the shared candidate read returned is labelled shared_batch", async () => {
+    // Reading the failure count throws, which the loop does outside its
+    // per-session catch, after the session failed at the provider.
+    db.sharedEnabled = true;
+    const session = { id: "s-shr", user_id: "u-1", message_count: 2 } as Session;
+    Object.defineProperty(session, "shared_summary_failures", {
+      get() {
+        throw failing("XX001");
+      },
+    });
+    db.sharedCandidates = [session];
+    provider.answers = [{ status: 500, body: SENTINEL }];
+
+    expect(await run("summarize")).toBe(200);
+    expect(lines("error")).toEqual([
+      "[memory-cron] route=cron_summarize step=shared_session session=s-shr code=http_500",
+      "[memory-cron] route=cron_summarize step=shared_batch code=XX001",
+    ]);
+    expect(db.recorded[0].error).toBe("shared_batch code=XX001");
+    expect(db.recorded[0].forceFailed).toBe(true);
+    expectNothingLeaked();
+  });
+
+  it("L7 summarize: with the switch off no shared candidate is read, whatever that read would answer", async () => {
+    db.sharedCandidates = failing("57014");
+    expect(await run("summarize")).toBe(200);
+    expect(lines("error")).toEqual([]);
+    expect(db.recorded[0].error).toBeNull();
   });
 });
 

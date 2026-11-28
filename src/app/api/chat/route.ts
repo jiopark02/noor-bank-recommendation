@@ -23,6 +23,9 @@ import {
   isSessionClosedError,
   getSessionMessages,
   getSessionSharedSources,
+  isSharedSummaryEnabled,
+  getSharedSummariesForSources,
+  formatSharedSummariesForPrompt,
   SharedSourceEndedError,
   SharedTurnBusyError,
   type DbChatMessage,
@@ -1595,6 +1598,40 @@ export async function POST(request: NextRequest) {
       if (sharedRead !== null && sharedBlock !== "") {
         systemPrompt += sharedBlock;
         promptSources = sharedRead.sources;
+        // Summaries of earlier conversations that carried a household
+        // member's shared bank data, only while AI_SHARED_SUMMARY_STATE is
+        // exactly "on" and memory is enabled, and only here: on a turn whose
+        // prompt has just been given that member's data. A summary is added
+        // only when every connection it was made from is among this turn's
+        // sources, so the turn is saved as carrying them (promptSources is
+        // not empty, which sends the save through saveSharedTurn) and is
+        // deleted with them when that sharing ends. They go in a block of
+        // their own, after the shared block and apart from the memory block.
+        // A failed read adds nothing and the turn goes on, as for a failed
+        // read of the shared data; a read still running at the deadline ends
+        // the request like every other wait before the model.
+        if (isSharedSummaryEnabled() && isAiMemoryEnabled()) {
+          const summarySources = promptSources;
+          try {
+            const sharedSummaries = await runUntilDeadline(
+              preLoopDeadlineAtMs,
+              "shared_summaries",
+              (signal) => {
+                notCut(signal, "shared_summaries");
+                return getSharedSummariesForSources(authUserId, summarySources);
+              }
+            );
+            systemPrompt += formatSharedSummariesForPrompt(sharedSummaries);
+            // A count only: no summary text, name, bank, amount or id.
+            console.info("[chat-shared] summaries=%d", sharedSummaries.length);
+          } catch (error) {
+            if (error instanceof ChatDeadlineError) throw error;
+            console.warn(
+              "[chat-shared] outcome=summary_read_failed code=%s",
+              errorCodeForLog(error)
+            );
+          }
+        }
       } else if (hasSharedConnections) {
         systemPrompt += SHARED_NOT_IN_TURN_BLOCK;
         sharedNotice = true;

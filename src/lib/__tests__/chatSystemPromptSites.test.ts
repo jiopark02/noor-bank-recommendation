@@ -78,6 +78,16 @@ const TARGETS: ProbeTarget[] = [
     },
   },
   {
+    name: "formatSharedSummariesForPrompt",
+    pattern: word("formatSharedSummariesForPrompt"),
+    allowed: {
+      // Wraps summaries of shared-data parts in <household_shared_memory>.
+      "lib/aiMemory.ts": "definition: the block of summaries of conversations that carried shared bank data",
+      // Appends it after the shared block, on a turn that carries that data.
+      "app/api/chat/route.ts": "appends those summaries on a household turn whose prompt carries the shared data",
+    },
+  },
+  {
     name: "SHARED_NOT_IN_TURN_BLOCK",
     pattern: word("SHARED_NOT_IN_TURN_BLOCK"),
     allowed: {

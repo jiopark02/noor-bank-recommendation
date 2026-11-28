@@ -6,8 +6,9 @@ import { codeBySourceFile, expectAllowlistHolds, word, type ProbeTarget } from "
  * that creates grants, in code.
  *
  * These names reach another person's data: a grant, the record that the owner
- * was asked, the mark that shared bank data entered a chat session,
- * household_share_set, the only function that inserts grants, and
+ * was asked, the mark that shared bank data entered a chat session, the
+ * summaries kept of that part of a session with the function that stores
+ * them, household_share_set, the only function that inserts grants, and
  * household_shared_connections, the function that returns the connections
  * another member shares with a person, stored tokens included. household_leave
  * also deletes grants but is not listed: this probe guards the names that can
@@ -73,6 +74,34 @@ const TARGETS: ProbeTarget[] = [
     allowed: {
       // saveSharedTurn: the only save of a turn whose prompt carried another member's bank data.
       "lib/aiMemory.ts": "the only call of the function that records the shared sources and stores the turn together",
+    },
+  },
+  {
+    name: "chat_shared_summaries",
+    pattern: word("chat_shared_summaries"),
+    allowed: {
+      // Exports the summaries kept of the shared-data part of the user's chats.
+      "lib/accountExport.ts": "export section of the user's own shared summaries",
+      // hasSharedSummary and getSharedSummariesForSources: the caller's own rows.
+      "lib/aiMemory.ts": "whether a session already has one, read by the summarize cron, and the user's own summaries a turn may carry, read for the chat prompt",
+    },
+  },
+  {
+    name: "chat_shared_summary_sources",
+    pattern: word("chat_shared_summary_sources"),
+    allowed: {
+      // Exports which summary was made from a shared connection, without naming it.
+      "lib/accountExport.ts": "export section of the user's own summary-source rows",
+      // getSharedSummariesForSources: a summary is kept only when every link is in the turn.
+      "lib/aiMemory.ts": "the connections each of the user's shared summaries was made from, read to decide which a turn may carry",
+    },
+  },
+  {
+    name: "chat_shared_summary_save",
+    pattern: word("chat_shared_summary_save"),
+    allowed: {
+      // saveSharedSummary: the only write of a shared summary and its links.
+      "lib/aiMemory.ts": "the only call of the function that stores a shared summary with the connections it was made from",
     },
   },
   {

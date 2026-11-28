@@ -43,6 +43,15 @@ import type { NextRequest } from "next/server";
  *   a failed second read taken as "not marked"                          -> TR3
  *   the two reads concatenated without removing repeats                 -> TR4
  *   the household turn decided by the second read's marks               -> TR5
+ *   the summary switch not checked, or read with trimming or case
+ *     folding, or anything appended to the prompt while it is unset     -> U1
+ *   the summaries merged into the memory block, or put before the
+ *     shared block, or read for connections other than this turn's      -> U2
+ *   a turn that carried a summary saved through saveMessages            -> U3
+ *   the summaries read outside the branch that adds the shared block
+ *     (another kind of turn, a failed shared read, memory off)          -> U4
+ *   an empty block appended when nothing is stored                      -> U5
+ *   a failed summary read ending the turn, or logging its message       -> U6
  *   an error's message written by the retry helper's lines              -> retry-log
  *   a fake handing the route its fixture instead of a copy              -> fixture-copy
  *
@@ -148,9 +157,13 @@ const state = {
   /** The session's stored turns, newest first. */
   history: [] as readonly unknown[],
   sharedSaves: [] as SaveStep[],
+  /** What the read of the user's shared summaries answers. */
+  summaries: [] as Array<{ summary: string; created_at: string }> | "fail",
 };
 
 const seen = {
+  /** The reads of shared summaries: the user and the connections asked for. */
+  summaryReads: [] as Array<{ userId: string; sources: unknown }>,
   own: [] as Array<{ depth: string }>,
   lists: [] as string[],
   reads: [] as Array<{ userId: string; list: unknown }>,
@@ -265,6 +278,16 @@ vi.mock("@/lib/aiMemory", async (importOriginal) => {
       seen.lookups += 1;
       return null;
     },
+    // The switch and the block builder are the real ones; the read is faked.
+    isSharedSummaryEnabled: actual.isSharedSummaryEnabled,
+    formatSharedSummariesForPrompt: actual.formatSharedSummariesForPrompt,
+    getSharedSummariesForSources: async (userId: string, sources: unknown) => {
+      seen.summaryReads.push({ userId, sources });
+      if (state.summaries === "fail") {
+        throw new Error("summary read failed: Alex has $1,500.00", { cause: { code: "42501" } });
+      }
+      return state.summaries.slice();
+    },
   };
 });
 
@@ -319,6 +342,8 @@ beforeEach(() => {
   state.markSteps = [];
   state.history = [];
   state.sharedSaves = [];
+  state.summaries = [];
+  seen.summaryReads = [];
   seen.own = [];
   seen.lists = [];
   seen.reads = [];
@@ -341,6 +366,9 @@ beforeEach(() => {
   vi.stubEnv("AI_SUPABASE_READ_ENABLED", "");
   vi.stubEnv("CHAT_USAGE_LIMIT_MODE", "");
   vi.stubEnv("AI_HOUSEHOLD_SHARED_STATE", "on");
+  // Unset unless a test turns it on: the tests above the shared-summary
+  // ones run as they did before that switch existed.
+  vi.stubEnv("AI_SHARED_SUMMARY_STATE", undefined as unknown as string);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: unknown, init?: RequestInit) => {
@@ -532,6 +560,141 @@ describe("a household turn (T16, T18, T19)", () => {
     expect(seen.marks).toEqual([]);
     expect(seen.sharedSaves).toEqual([]);
     expect(seen.saveMessages).toEqual([]);
+  });
+});
+
+describe("summaries of earlier conversations that carried shared data (U1 to U6)", () => {
+  const SUMMARY_TAG = "<household_shared_memory>";
+  const SUMMARIES = [
+    { summary: "They agreed to save for a deposit.", created_at: "2026-11-27T10:00:00+00:00" },
+    { summary: "They planned the rent split.", created_at: "2026-11-20T08:30:00+00:00" },
+  ];
+
+  async function bodyWithSummarySwitch(value: string | undefined, text: string): Promise<string> {
+    vi.stubEnv("AI_SHARED_SUMMARY_STATE", value as unknown as string);
+    bodies = [];
+    expect((await post(text)).status).toBe(200);
+    expect(bodies).toHaveLength(1);
+    return bodies[0];
+  }
+
+  it("U1 with the switch unset, a household turn's system message ends with the shared block and no summary is read", async () => {
+    state.summaries = SUMMARIES;
+    const { buildSharedBankBlock } = await import("../plaidChatContext");
+    const body = await bodyWithSummarySwitch(undefined, HOUSEHOLD);
+    const system = systemMessage(body);
+    // Nothing follows the shared block: the message ends with its bytes.
+    const sharedBlock = buildSharedBankBlock(READ.state as never);
+    expect(sharedBlock).toContain(SHARED_HEADING);
+    expect(system.endsWith(sharedBlock)).toBe(true);
+    expect(system).not.toContain(SUMMARY_TAG);
+    expect(seen.summaryReads).toEqual([]);
+    expect(sharedLines()).toHaveLength(1);
+  });
+
+  it.each(["", "off", "ON", " on", "on ", "true", "1"])(
+    "U1 AI_SHARED_SUMMARY_STATE=%j sends, byte for byte, the request it sends unset, and reads no summary",
+    async (value) => {
+      state.summaries = SUMMARIES;
+      const unset = await bodyWithSummarySwitch(undefined, HOUSEHOLD);
+      const other = await bodyWithSummarySwitch(value, HOUSEHOLD);
+      expect(other).toBe(unset);
+      expect(seen.summaryReads).toEqual([]);
+    }
+  );
+
+  it("U2 on, on a household turn: reads the user's summaries for this turn's connections and adds them in their own block after the shared block", async () => {
+    state.summaries = SUMMARIES;
+    const unset = systemMessage(await bodyWithSummarySwitch(undefined, HOUSEHOLD));
+    const on = systemMessage(await bodyWithSummarySwitch("on", HOUSEHOLD));
+    // Asked with the verified user and exactly the connections the shared
+    // block names, the ones this turn is saved with.
+    expect(seen.summaryReads).toEqual([{ userId: USER_ID, sources: READ.sources }]);
+    // The message is the unset message with the block appended, nothing else.
+    expect(on.startsWith(unset)).toBe(true);
+    const added = on.slice(unset.length);
+    expect(added).toContain(`${SUMMARY_TAG}\n## Summaries of earlier household conversations\n`);
+    expect(added).toContain("- (2026-11-27) They agreed to save for a deposit.\n");
+    expect(added).toContain("- (2026-11-20) They planned the rent split.\n");
+    expect(added.endsWith("</household_shared_memory>")).toBe(true);
+    expect(on.indexOf(SUMMARY_TAG)).toBeGreaterThan(on.indexOf(SHARED_HEADING));
+    // Apart from the memory block: not inside <user_memory>.
+    expect(added).not.toContain("<user_memory>");
+    expect(added).not.toContain("</user_memory>");
+  });
+
+  it("U3 on: the turn that carried a summary is saved through saveSharedTurn with the shared block's connections", async () => {
+    vi.stubEnv("AI_SHARED_SUMMARY_STATE", "on");
+    state.summaries = SUMMARIES;
+    const res = await post(HOUSEHOLD);
+    expect(res.status).toBe(200);
+    expect(seen.saveMessages).toEqual([]);
+    expect(seen.sharedSaves).toHaveLength(1);
+    expect(seen.sharedSaves[0].sources).toEqual({
+      markedSessionId: null,
+      marked: [],
+      added: READ.sources,
+    });
+    expect(seen.summaryReads[0].sources).toEqual(READ.sources);
+  });
+
+  it("U4 on: no summary is read on a turn that is not about the household, on a greeting, when the shared read failed, or with memory off", async () => {
+    vi.stubEnv("AI_SHARED_SUMMARY_STATE", "on");
+    state.summaries = SUMMARIES;
+
+    await post(GENERAL);
+    expect(systemMessage(bodies[0])).toContain(NOTICE_HEADING);
+
+    await post("hi");
+
+    state.read = "fail";
+    await post(HOUSEHOLD);
+    expect(systemMessage(bodies[2])).toContain(NOTICE_HEADING);
+    state.read = READ;
+
+    state.memory = false;
+    await post(HOUSEHOLD);
+    expect(systemMessage(bodies[3])).toContain(SHARED_HEADING);
+
+    expect(bodies).toHaveLength(4);
+    expect(seen.summaryReads).toEqual([]);
+    for (const body of bodies) expect(body).not.toContain(SUMMARY_TAG);
+  });
+
+  it("U5 on, nothing stored: the request is the one sent unset", async () => {
+    state.summaries = [];
+    const unset = await bodyWithSummarySwitch(undefined, HOUSEHOLD);
+    const on = await bodyWithSummarySwitch("on", HOUSEHOLD);
+    expect(on).toBe(unset);
+    expect(seen.summaryReads).toHaveLength(1);
+  });
+
+  it("U6 on: a failed read of the summaries adds nothing, the turn goes on and is saved, and the log carries a code only", async () => {
+    state.summaries = "fail";
+    const unset = await bodyWithSummarySwitch(undefined, HOUSEHOLD);
+    seen.sharedSaves = [];
+    const on = await bodyWithSummarySwitch("on", HOUSEHOLD);
+    expect(on).toBe(unset);
+    expect(seen.sharedSaves).toHaveLength(1);
+    const failed = warnLines.filter(
+      (args) => String(args[0]).indexOf("[chat-shared] outcome=summary_read_failed") === 0
+    );
+    expect(failed).toEqual([["[chat-shared] outcome=summary_read_failed code=%s", "42501"]]);
+    const text = JSON.stringify([...infoLines, ...warnLines, ...errorLines]);
+    expect(text).not.toContain("summary read failed");
+    expect(text).not.toContain("1,500");
+  });
+
+  it("U2 on: writes one line with the number of summaries added, and nothing of their text", async () => {
+    vi.stubEnv("AI_SHARED_SUMMARY_STATE", "on");
+    state.summaries = SUMMARIES;
+    await post(HOUSEHOLD);
+    expect(
+      infoLines.filter((args) => String(args[0]).indexOf("[chat-shared] summaries=") === 0)
+    ).toEqual([["[chat-shared] summaries=%d", 2]]);
+    const text = JSON.stringify([...infoLines, ...warnLines]);
+    expect(text).not.toContain("deposit");
+    expect(text).not.toContain("rent split");
   });
 });
 
