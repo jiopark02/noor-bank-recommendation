@@ -10,7 +10,7 @@ import { INVALID_MONTHLY_INCOME_MESSAGE } from "../surveyMoney";
  * signed-in insert of a new one.
  *
  * HOW
- * Authentication, the admin client and the welcome email are mocked. The
+ * Authentication, the admin client and the signup confirmation email are mocked. The
  * route, emailSignup.ts and surveyMoney.ts run for real. The fake admin
  * client records every table call and every auth.admin call.
  *

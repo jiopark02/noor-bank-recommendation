@@ -10,8 +10,9 @@ import { inspect } from "node:util";
  * Headers throws, and its message quotes the value:
  *   Headers.append: "Bearer re_...\n..." is an invalid header value.
  * sendEmail used to construct the client outside its try, so that error
- * would have escaped to the welcome and waitlist routes, which logged it
- * whole — the key beside the recipient's address.
+ * would have escaped to every route that sends mail through it, and a route
+ * that logged the error whole would have put the key beside the recipient's
+ * address.
  *
  * NO MOCKS of resend. The real constructor runs and the real global Headers
  * rejects the value; mocking either would prove nothing about the path that
